@@ -1,6 +1,6 @@
-# Oracle AI Database Memory System v0.4.1 Task Plan Integration Edition
+# Oracle AI Database Memory System - Multi-Agent Architecture Edition
 
-[![Version](https://img.shields.io/badge/version-0.4.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.2-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-green.svg)](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -10,28 +10,95 @@
 
 ## 🎯 Executive Summary
 
-This is the **v0.4.1 Task Plan Integration Edition** - an upgrade from v0.4.0 that introduces critical AI Agent capabilities:
+This is the **v0.4.2 Multi-Agent Architecture Edition** - building on v0.4.1's Task Plan Integration with new Multi-Agent capabilities.
 - ✅ **Task Plan Persistence** - Durable task tracking across sessions
 - ✅ **Breakpoint Recovery** - Resume exactly where interrupted after failures
 - ✅ **Historical Learning** - Learn from past task patterns and outcomes
 
 ---
 
-## 📊 v0.4.1 Feature Comparison
+## 📊 Version History & Comparison
 
-| Feature | v0.3.0 | v0.3.1 | v0.4.0 | **v0.4.1** |
+| Feature | v0.3.x | v0.4.0 | v0.4.1 | **v0.4.2** |
 |---------|--------|--------|--------|-----------|
-| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents |
-| **Task Plan Storage** | ❌ Not included | ❌ Not included | ❌ Not included | ✅ **Complete Task Plan System** |
-| **Breakpoint Recovery** | ❌ None | ❌ None | ❌ None | ✅ **Auto Snapshot + Resume API** |
-| **Historical Learning** | ❌ Limited | ❌ Limited | ❌ Limited | ✅ **Task Pattern Recognition** |
-| **Status Tracking** | ❌ Basic | ⚠️ Partial | ⚠️ Partial | ✅ **Detailed Step-by-Step Audit** |
-| **JRD Implementation** | ❌ Plan only | ⚠️ Plan documented | ✅ **Full implementation** | ✅ **Full implementation** |
-| **Property Graph** | ❌ Not tested | ✅ Integration verified | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** |
+| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Optimized | ✅ Production Ready |
+| **JRD Implementation** | ✅ Full | ✅ Full | ✅ Full | ✅ **Production Optimized** |
+| **Property Graph** | ✅ Verified | ✅ Native SQL/PGQ | ✅ SQL/PGQ | ✅ **SQL/PGQ + Multi-Agent Access** |
+| **Task Plan System** | ❌ None | ❌ None | ✅ Complete | ✅ **Enhanced with Agent Tracking** |
+| **Breakpoint Recovery** | ❌ None | ❌ None | ✅ Auto Snapshot | ✅ **Auto Snapshot + Resume API** |
+| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ❌ Not included | ✅ **Agent Registry + Session Mgmt** |
 
 ---
 
-## 🆕 v0.4.1 New: Task Plan Persistence System
+## 🆕 v0.4.2 New: Multi-Agent Architecture & Enhanced Task Plans
+
+### Overview
+
+The Multi-Agent Architecture provides a structured framework for managing multiple AI agents with centralized memory access control, session management, and collaboration capabilities.
+
+This edition introduces four new components:
+- **Agent Registry (AGENT_REGISTRY)** - Centralized agent lifecycle management
+- **Memory Access Control (AGENT_MEMORY_ACCESS)** - Fine-grained visibility policies  
+- **Collaboration Framework (AGENT_COLLABORATION)** - Agent-to-agent communication channels
+- **Session Management (AGENT_SESSION)** - Active session tracking and monitoring
+
+### Architecture Diagram (Multi-Agent System)
+
+```
+┌───────────────────────────────────────────────────┐
+│              Multi-Agent Memory System            │
+│                v0.4.2 Edition                     │
+├───────────────────────────────────────────────────┤
+│                                                   │
+│  ┌───────────┐    ┌───────────┐    ┌───────────┐  │
+│  │ Agent A   │    │ Agent B   │    │ Agent C   │  │
+│  │ (Analyzer)│    │(Writer)   │    │(Deployer) │  │
+│  └─────┬─────┘    └─────┬─────┘    └─────┬─────┘  │
+│        │                │                │        │
+│        ▼                ▼                ▼        │
+│  ┌─────────────────────────────────────────────┐  │
+│  │    AGENT_REGISTRY (Central)                 │  │
+│  │  • Registration & Lifecycle                 │  │
+│  │  • Capability Discovery                     │  │
+│  │  • Health Monitoring                        │  │
+│  └───────────────┬─────────────────────────────┘  │
+│                  │                                │
+│  ┌───────────────▼───────────────┐                │
+│  │    AGENT_MEMORY_ACCESS        │                │
+│  │  • Visibility Policies        │                │
+│  │  • Data Access Control        │                │
+│  └───────────────────────────────┘                │
+│                  │                                │
+│  ┌───────────────▼───────────────┐                │
+│  │    AGENT_COLLABORATION        │                │
+│  │  • Communication Channels     │                │
+│  │  • Cross-Agent Sharing        │                │
+│  └───────────────────────────────┘                │
+│                  │                                │
+│  ┌───────────────▼───────────────┐                │
+│  │    AGENT_SESSION              │                │
+│  │  • Session Tracking           │                │
+│  │  • State Management           │                │
+│  └───────────────────────────────┘                │
+│                  │                                │
+│  ┌───────────────▼───────────────┐                │
+│  │       MEMORIES TABLE          │                │
+│  │    (Memory Storage Layer)     │                │
+│  └───────────────────────────────┘                │
+│                                                   │
+│    Benefits:                                      │
+│    ✅ Centralized Agent Management	            │
+│    ✅ Fine-Grained Memory Access Control	        │
+│    ✅ Built-in Collaboration Framework	        │
+│    ✅ Session State Persistence	                │
+│    ✅ Multi-Agent Scalability	                    │
+│                                                   │
+└───────────────────────────────────────────────────┘
+```
+
+---
+
+## 🆕 v0.4.2 New: Enhanced Task Plans
 
 ### Overview
 
@@ -77,6 +144,62 @@ The Task Plan system provides AI Agents with durable task execution tracking, en
 
 ---
 
+## 🔧 API Functions (Python Integration)
+
+### create_task_plan() - Create task plan and automatically save initial context snapshot
+
+```python
+def create_task_plan(plan_name, plan_type, description, steps):
+    \"\"\"
+    Create a new task plan and automatically save initial context
+    
+    Args:
+        plan_name (str): Task name
+        plan_type (str): task/deployment/research/analysis
+        description (str): Task description
+        steps (list[dict]): Step list [{order, name, action}, ...]
+    
+    Returns:
+        dict: Created plan information
+    \"\"\"
+```
+
+### resume_task() - Resume task execution from breakpoint (core feature)
+
+```python
+def resume_task(plan_id):
+    \"\"\"
+    Resume task execution from breakpoint
+    
+    Args:
+        plan_id (str): Plan ID
+    
+    Returns:
+        dict: Restored context information including next_action, incomplete_steps
+    \"\"\"
+    # 1. Get latest snapshot (IS_LATEST = 'Y')
+    # 2. Restore agent_state and conversation_history from CONTEXT_DATA
+    # 3. Identify incomplete steps by checking STEP status
+    # 4. Resume execution with NEXT_ACTION as starting point
+```
+
+### search_completed_tasks() - Search completed tasks for learning and pattern reuse
+
+```python
+def search_completed_tasks(query_params):
+    \"\"\"
+    Search completed tasks for learning and pattern reuse
+    
+    Args:
+        query_params (dict): {type, status, tags, keywords, date_range}
+    
+    Returns:
+        list[dict]: Matching task list with success metrics and statistics
+    \"\"\"
+```
+
+---
+
 ## 📋 Quick Start
 
 ### Prerequisites
@@ -96,16 +219,13 @@ The Task Plan system provides AI Agents with durable task execution tracking, en
    - Extract to `/root/sqlcl/`
    - **Important**: Path is `/root/sqlcl/sqlcl/bin/sql` (double `sqlcl` directory!)
 
----
-
-## 🚀 Installation
 
 ### Step 1: Clone or Download Skill Files
 
-The skill files are located in `/root/.hermes/skills/oracle-memory-by-yhw-v0.4.1/`
+The skill files are located in `/root/.hermes/skills/oracle-memory-by-yhw/`
 
 ```bash
-ls -la /root/.hermes/skills/oracle-memory-by-yhw-v0.4.1/
+ls -la /root/.hermes/skills/oracle-memory-by-yhw/
 ```
 
 ### Step 2: Configure Database Connection
@@ -140,12 +260,12 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │                     Oracle AI Database Memory System               │
-│                        (v0.4.1 Task Plan Integration)              │
+│                    (Multi-Agent Architecture Edition)              │
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                    │
 │  ┌──────────────────┐                                              │
-│  │   All AI Agents  │                                              │
-│  │ (via MCP Server) │                                              │
+│  │   All AI Agents   │                                             │
+│  │ (via MCP Server)  │                                             │
 │  └────────┬─────────┘                                              │
 │           │                                                        │
 │           ▼                                                        │
@@ -169,7 +289,7 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 │  │  memory_nodes / memory_edges / memories                     │   │
 │  │  memories_vectors / memory_relationships                    │   │
 │  ├─────────────────────────────────────────────────────────────┤   │
-│  │              Task Plan System (v0.4.1 New)                  │   │
+│  │              Enhanced Task Plans                            │   │
 │  │  TASK_PLANS / TASK_STEPS / CONTEXT_SNAPSHOTS                │   │
 │  │  TASK_TOOL_CALLS / TASK_DEPENDENCIES                        │   │
 │  ├─────────────────────────────────────────────────────────────┤   │
@@ -178,7 +298,7 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                    │
 │    Benefits:                                                       │
-│    ✅ Zero Data Loss Protection (RPO ≈ 0)							 │
+│    ✅ Zero Data Loss Protection (RPO ≈ 0)	                         │
 │    ✅ Read-Write Separation (3-5x query performance improvement)	 │
 │    ✅ JRD views for JSON format output	                         │
 │    ✅ Property Graph for SQL/PGQ graph queries	                 │
@@ -192,7 +312,7 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 
 ## 🗄️ Database Schema
 
-### v0.4.1 New: Task Plan Tables
+### Enhanced Task Plan Tables
 
 ```sql
 -- ============================================
@@ -303,7 +423,7 @@ CREATE TABLE TASK_DEPENDENCIES (
 );
 ```
 
-### Task Plan Indexes (v0.4.1)
+### Task Plan Indexes
 
 ```sql
 -- TASK_PLANS indexes
@@ -391,8 +511,9 @@ def search_completed_tasks(query_params):
 
 ## 📚 Documentation
 
-- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.4.1)
-- [RELEASE_NOTES_v0.4.1.md](../RELEASE_NOTES_v0.4.1.md) - Detailed release notes for v0.4.1
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.4.2)
+- [RELEASE_NOTES_v0.4.2.md](./RELEASE_NOTES_v0.4.2.md) - Detailed release notes for v0.4.2
+- [references/multi-agent-design.md](./references/multi-agent-design.md) - Multi-Agent Architecture design document
 
 ---
 
@@ -410,4 +531,4 @@ Oracle/PostgreSQL/MySQL ACE Database Expert
 
 This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
-**Last Updated**: 2026-05-04 v0.4.1
+**Last Updated**: 2026-05-07 v0.4.2 (Multi-Agent Architecture Edition)
