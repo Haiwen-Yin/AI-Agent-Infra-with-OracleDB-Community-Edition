@@ -60,7 +60,7 @@ The Task Plan system provides AI Agents with durable task execution tracking, en
               [Executing...] ──► [update_task_progress()]
                               │
                        ┌──────▼──────────┐
-                       │ CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
+                       │CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
                        └──────┬──────────┘
                               │
                     ┌─────────▼─────────┐
@@ -138,54 +138,54 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 ### High-Level Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Oracle AI Database Memory System                │
-│                        (v0.4.1 Task Plan Integration)               │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────────┐                                               │
-│  │   All AI Agents  │                                               │
-│  │ (via MCP Server) │                                               │
-│  └────────┬─────────┘                                               │
-│           │                                                         │
-│           ▼                                                         │
-│  ┌──────────────────┐         ┌──────────────────┐                  │
-│  │   SQLcl MCP      │◄────────│  Memory System   │                  │
-│  │   (Primary       │         │  Interface Layer │                  │
-│  │    Interface)    │         └────────┬─────────┘                  │
-│  └──────────────────┘                  │                            │
-│                                        ▼                            │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                    JRD View Layer                           │    │
-│  │  memory_nodes_jdv / memory_edges_jdv / memories_jdv         │    │
-│  │  memory_graph_v / memory_graph_json_v                       │    │
-│  ├─────────────────────────────────────────────────────────────┤    │
-│  │               Relationship Tables (Structured)              │    │
-│  │  memory_node_properties / memory_edge_properties            │    │
-│  │  memory_content_fields / memory_tag_items                   │    │
-│  │  memory_metadata_fields / memory_node_tags                  │    │
-│  ├─────────────────────────────────────────────────────────────┤    │
-│  │                    Core Tables                              │    │
-│  │  memory_nodes / memory_edges / memories                     │    │
-│  │  memories_vectors / memory_relationships                    │    │
-│  ├─────────────────────────────────────────────────────────────┤    │
-│  │              Task Plan System (v0.4.1 New)                  │    │
-│  │  TASK_PLANS / TASK_STEPS / CONTEXT_SNAPSHOTS                │    │
-│  │  TASK_TOOL_CALLS / TASK_DEPENDENCIES                        │    │
-│  ├─────────────────────────────────────────────────────────────┤    │
-│  │              Property Graph (SQL/PGQ)                       │    │
-│  │  MEMORY_PROPERTY_GRAPH (26ai native)                        │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                     │
-│    Benefits:                                                        │
-│    ✅ Zero Data Loss Protection (RPO ≈ 0)							  │
-│    ✅ Read-Write Separation (3-5x query performance improvement)	  │
-│    ✅ JRD views for JSON format output							  │
-│    ✅ Property Graph for SQL/PGQ graph queries					  │
-│    ✅ Structured storage (no JSON redundancy)						  │
-│    ✅ Task Plan persistence with breakpoint recovery				  │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                     Oracle AI Database Memory System               │
+│                        (v0.4.1 Task Plan Integration)              │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  ┌──────────────────┐                                              │
+│  │   All AI Agents  │                                              │
+│  │ (via MCP Server) │                                              │
+│  └────────┬─────────┘                                              │
+│           │                                                        │
+│           ▼                                                        │
+│  ┌──────────────────┐         ┌──────────────────┐                 │
+│  │   SQLcl MCP      │◄────────│  Memory System   │                 │
+│  │   (Primary       │         │  Interface Layer │                 │
+│  │    Interface)    │         └────────┬─────────┘                 │
+│  └──────────────────┘                  │                           │
+│                                        ▼                           │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                    JRD View Layer                           │   │
+│  │  memory_nodes_jdv / memory_edges_jdv / memories_jdv         │   │
+│  │  memory_graph_v / memory_graph_json_v                       │   │
+│  ├─────────────────────────────────────────────────────────────┤   │
+│  │               Relationship Tables (Structured)              │   │
+│  │  memory_node_properties / memory_edge_properties            │   │
+│  │  memory_content_fields / memory_tag_items                   │   │
+│  │  memory_metadata_fields / memory_node_tags                  │   │
+│  ├─────────────────────────────────────────────────────────────┤   │
+│  │                    Core Tables                              │   │
+│  │  memory_nodes / memory_edges / memories                     │   │
+│  │  memories_vectors / memory_relationships                    │   │
+│  ├─────────────────────────────────────────────────────────────┤   │
+│  │              Task Plan System (v0.4.1 New)                  │   │
+│  │  TASK_PLANS / TASK_STEPS / CONTEXT_SNAPSHOTS                │   │
+│  │  TASK_TOOL_CALLS / TASK_DEPENDENCIES                        │   │
+│  ├─────────────────────────────────────────────────────────────┤   │
+│  │              Property Graph (SQL/PGQ)                       │   │
+│  │  MEMORY_PROPERTY_GRAPH (26ai native)                        │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                    │
+│    Benefits:                                                       │
+│    ✅ Zero Data Loss Protection (RPO ≈ 0)							 │
+│    ✅ Read-Write Separation (3-5x query performance improvement)	 │
+│    ✅ JRD views for JSON format output	                         │
+│    ✅ Property Graph for SQL/PGQ graph queries	                 │
+│    ✅ Structured storage (no JSON redundancy)	                     │
+│    ✅ Task Plan persistence with breakpoint recovery	             │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---

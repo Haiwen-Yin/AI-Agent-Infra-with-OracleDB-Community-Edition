@@ -1,6 +1,6 @@
 ---
-name: oracle-memory-by-yhw-v0.4.1
-version: v0.4.1 (Task Plan Integration Edition)
+name: oracle-memory-by-yhw
+version: v0.4.2 (Directory Consolidation Update)
 author: Haiwen Yin (胖头鱼 🐟)
 category: mlops
 description: Oracle AI Database Memory System v0.4.1 - Universal memory system with JRD, Property Graph, Task Plan management, and optimized indexing
@@ -9,7 +9,7 @@ description: Oracle AI Database Memory System v0.4.1 - Universal memory system w
 # Oracle AI Database Memory System v0.4.1 Task Plan Integration Edition
 
 **Author**: Haiwen Yin (胖头鱼 🐟)  
-**Version**: v0.4.1 (Task Plan Integration Edition) - 2026-05-04  
+**Version**: v0.4.2 (Multi-Agent Architecture Update) - 2026-05-07  
 **Status**: Production Ready ✅  
 **License**: Apache License 2.0
 
@@ -350,7 +350,7 @@ def search_completed_tasks(query_params):
               [Executing...] ──► [update_task_progress()]
                               │
                        ┌──────▼──────────┐
-                       │CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
+                       │ CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
                        └──────┬──────────┘
                               │
                     ┌─────────▼─────────┐
@@ -402,7 +402,84 @@ CREATE SEQUENCE SEQ_TASK_DEPS START WITH 1 INCREMENT BY 1;
 ## 📚 Documentation
 
 - [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.4.1)
-- [RELEASE_NOTES_v0.4.1.md](../RELEASE_NOTES_v0.4.1.md) - Detailed release notes for v0.4.1
+- [RELEASE_NOTES_v0.4.2.md](./RELEASE_NOTES_v0.4.2.md) - Detailed release notes for v0.4.2
+
+---
+
+## 🏗️ Multi-Agent Architecture (NEW in v0.4.2)
+
+Oracle Memory System now supports **multi-agent deployment** with shared and private memory isolation. This enables multiple AI agents to collaborate while maintaining appropriate access boundaries.
+
+### Core Features
+- **Agent Registry**: Centralized registration and discovery of all agents
+- **Memory Visibility Control**: Three visibility levels (SHARED/PRIVATE/COLLABORATIVE)  
+- **Session Management**: Track active sessions with working context preservation
+- **Access Audit Trail**: Complete logging of all memory access operations
+- **Collaboration Workflow**: Request/approve mechanism for agent-to-agent knowledge sharing
+
+### Quick Start
+
+#### 1. Execute Schema Extensions
+```bash
+echo "SQL" | sql openclaw/hermes@//10.10.10.130:1521/openclaw << 'EOF'
+@scripts/agent_schema.sql
+EXIT;
+EOF
+```
+
+#### 2. Register an Agent
+```python
+from scripts.agent_api import AgentRegistryAPI
+
+AgentRegistryAPI.register_agent(
+    agent_id="my-agent-01",
+    agent_name="My Analysis Agent", 
+    agent_type="analysis",
+    capabilities=["data-analysis", "pattern-recognition"],
+    description="AI agent for data analysis"
+)
+```
+
+#### 3. Create Memory with Visibility Control
+```python
+from scripts.agent_api import MemoryVisibilityAPI
+
+# SHARED - accessible to all agents
+MemoryVisibilityAPI.create_memory(
+    memory_data={'content': 'System Documentation', 'category': 'doc'},
+    visibility="SHARED"
+)
+
+# PRIVATE - only this agent can access  
+MemoryVisibilityAPI.create_memory(
+    memory_data={'content': 'My Private Config', 'category': 'config'},
+    agent_id="my-agent-01",
+    visibility="PRIVATE"
+)
+
+# COLLABORATIVE - specific agents only
+MemoryVisibilityAPI.create_memory(
+    memory_data={'content': 'Team Notes', 'category': 'team'},
+    visibility="COLLABORATIVE",
+    accessible_to=["agent-1", "agent-2"]
+)
+```
+
+### Memory Visibility Matrix
+
+| Visibility | Description | Who Can Access |
+|------------|-------------|----------------|
+| **SHARED** | Global knowledge (API docs, schemas) | All registered agents ✅ |
+| **PRIVATE** | Agent-specific context and preferences | Only the owner agent ✅ |
+| **COLLABORATIVE** | Team/project shared space | Agents in ACCESSIBLE_TO list ✅ |
+
+### Schema Files
+- `scripts/agent_schema.sql` - Complete DDL for all new tables, views, and indexes
+- `scripts/agent_api.py` - High-level Python API for multi-agent operations
+- `scripts/test_agent_architecture.py` - Integration test suite (run to verify setup)
+
+### Design Document
+See [references/multi-agent-design.md](./references/multi-agent-design.md) for detailed architecture explanation.
 
 ---
 

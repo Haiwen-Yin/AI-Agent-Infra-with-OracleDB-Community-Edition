@@ -146,8 +146,8 @@ CREATE TABLE memory_relationships_partitioned (
 |-------|---------|--------------|---------------|-------|
 | **MEMORIES** | PRIORITY (1=hot,2=warm,3=cold) | CREATED_AT (by quarter) | PRIORITY + CREATED_AT | Main table, partition reference standard |
 | **MEMORY_NODES** | NODE_TYPE | None (no time column) | NODE_TYPE | Single-layer LIST partition |
-| **MEMORY_EDGES** | EDGE_TYPE | 无 | EDGE_TYPE | Single-layer LIST partition |
-| **MEMORY_RELATIONSHIPS** | RELATIONSHIP_TYPE | 无 | RELATIONSHIP_TYPE | Single-layer LIST partition |
+| **MEMORY_EDGES** | EDGE_TYPE | None | EDGE_TYPE | Single-layer LIST partition |
+| **MEMORY_RELATIONSHIPS** | RELATIONSHIP_TYPE | None | RELATIONSHIP_TYPE | Single-layer LIST partition |
 
 ---
 
@@ -180,7 +180,7 @@ Low risk:
 - No subpartitions, simple migration
 
 Medium risk:
-- 双层LIST+RANGE分区 (MEMORIES)
+- Two-layer LIST + RANGE subpartitioning (MEMORIES)
 - Requires handling time-based subpartitions
 - Requires rebuilding all foreign key constraints
 ```
