@@ -1,16 +1,16 @@
-# Oracle AI Database Memory System - Multi-Agent Architecture Edition
+# Oracle AI Database Memory System v0.5.1 (Official Release)
 
-[![Version](https://img.shields.io/badge/version-0.4.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.5.1-green.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-green.svg)](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Universal memory system for all AI Agents with JRD, Property Graph, Oracle Text full-text search, Task Plan persistence with breakpoint recovery, and optimized indexing strategy.**
+**Universal memory system for all AI Agents with JRD, Property Graph, Multi-Agent Architecture, Task Plan management, enterprise-grade security, Memory Fusion Engine, and optimized indexing strategy.**
 
 ---
 
 ## 🎯 Executive Summary
 
-This is the **v0.4.2 Multi-Agent Architecture Edition** - building on v0.4.1's Task Plan Integration with new Multi-Agent capabilities.
+This is the **v0.5.1 Core Functionality Enhancement Edition (Official Release)** - production-ready version with Agent Permission Management, Memory Fusion Engine, and enhanced cleanup framework.
 - ✅ **Task Plan Persistence** - Durable task tracking across sessions
 - ✅ **Breakpoint Recovery** - Resume exactly where interrupted after failures
 - ✅ **Historical Learning** - Learn from past task patterns and outcomes
@@ -19,14 +19,14 @@ This is the **v0.4.2 Multi-Agent Architecture Edition** - building on v0.4.1's T
 
 ## 📊 Version History & Comparison
 
-| Feature | v0.3.x | v0.4.0 | v0.4.1 | **v0.4.2** |
+| Feature | v0.3.x | v0.4.0 | v0.4.1 | v0.5.0 | **v0.5.1** |
 |---------|--------|--------|--------|-----------|
-| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Optimized | ✅ Production Ready |
+| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Optimized | ✅ Production Ready | ✅ **Production Ready + Memory Fusion** |
 | **JRD Implementation** | ✅ Full | ✅ Full | ✅ Full | ✅ **Production Optimized** |
 | **Property Graph** | ✅ Verified | ✅ Native SQL/PGQ | ✅ SQL/PGQ | ✅ **SQL/PGQ + Multi-Agent Access** |
-| **Task Plan System** | ❌ None | ❌ None | ✅ Complete | ✅ **Enhanced with Agent Tracking** |
+| **Task Plan System** | ❌ None | ❌ None | ✅ Complete | ✅ **Enhanced with Agent Tracking** | ✅ **Enhanced with Permission Management** |
 | **Breakpoint Recovery** | ❌ None | ❌ None | ✅ Auto Snapshot | ✅ **Auto Snapshot + Resume API** |
-| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ❌ Not included | ✅ **Agent Registry + Session Mgmt** |
+| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ❌ Not included | ✅ **Agent Registry + Session Mgmt** | ✅ **Full Collaboration Framework** |
 
 ---
 
@@ -253,6 +253,66 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 
 ---
 
+## 🆕 v0.5.1 Official Release - Core Functionality Enhancement
+
+### ✨ Features in Official Release v0.5.1
+
+This official release focuses on **core operational functionality** to make the system production-ready:
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **Agent Permission Downgrade** | Automatic COLLABORATIVE data access recovery when agents are disabled | ✅ Implemented |
+| **Enhanced Snapshot Cleanup** | Centralized config table with dual-tier cleanup (daily archival + weekly full cycle) | ✅ Enhanced |
+| **Session Expiry Management** | Intelligent session classification with TTL, warning threshold, and grace period | ✅ Enhanced |
+| **Memory Fusion Engine** | Semantic deduplication and merging using vector similarity detection | ✅ New Feature |
+
+### 🏗️ Agent Permission Downgrade Details
+
+When an agent is disabled in the system, this feature ensures that:
+1. The `PENDING_RECOVERY` flag is set to track recovery operations
+2. All COLLABORATIVE memories accessible to the disabled agent are identified
+3. The agent ID is removed from JSON ACCESSIBLE_TO arrays
+4. Changes are logged in `agent_permission_log` for audit purposes
+5. An hourly scheduled job checks and processes any pending recoveries
+
+**API Functions:**
+- `disable_agent_and_recover(agent_id, reason)` - Disable agent with automatic data recovery
+- `enable_agent(agent_id)` - Re-enable agent and restore access
+- `scheduled_permission_check()` - Cron-triggered pending recovery check
+
+### ⚡ Enhanced Cleanup Framework
+
+The cleanup framework has been enhanced from basic SQL scripts to a production-ready system:
+
+**Centralized Configuration:**
+- `cleanup_config` table with configurable retention policies
+- `session_config` table for TTL management (24h default, 18h warning threshold)
+
+**Improved Scheduling:**
+- Daily snapshot cleanup at 2 AM
+- Weekly full cycle cleanup on Sundays at 3 AM  
+- Session expiry monitoring every 30 minutes
+- Monthly archive statistics reports
+
+### 🧠 Memory Fusion Engine
+
+The new Memory Fusion Engine provides semantic deduplication and content merging:
+
+**Core Capabilities:**
+- Vector similarity detection using Oracle's VECTOR_DISTANCE function
+- Intelligent merge strategies (PREFER_NEWEST, PREFER_LONGER)
+- Content enrichment by combining related memories
+- Comprehensive fusion operation history tracking
+
+**API Functions:**
+- `find_similar_memories(memory_id, threshold)` - Find semantically similar memories
+- `deduplicate_batch(batch_size)` - Process a batch for deduplication
+- `merge_similar_memories(memory_ids, strategy)` - Merge similar memories
+- `enrich_memory(target_id)` - Combine related content into target memory
+
+
+---
+
 ## 📊 System Architecture Overview
 
 ### High-Level Architecture Diagram
@@ -264,8 +324,8 @@ export LMSTUDIO_ENDPOINT="http://10.10.10.1/v1/embeddings"
 ├────────────────────────────────────────────────────────────────────┤
 │                                                                    │
 │  ┌──────────────────┐                                              │
-│  │   All AI Agents   │                                             │
-│  │ (via MCP Server)  │                                             │
+│  │   All AI Agents  │                                              │
+│  │ (via MCP Server) │                                              │
 │  └────────┬─────────┘                                              │
 │           │                                                        │
 │           ▼                                                        │
@@ -511,8 +571,9 @@ def search_completed_tasks(query_params):
 
 ## 📚 Documentation
 
-- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.4.2)
-- [RELEASE_NOTES_v0.4.2.md](./RELEASE_NOTES_v0.4.2.md) - Detailed release notes for v0.4.2
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.5.1)
+- [RELEASE_NOTES_v0.4.2.md](./RELEASE_NOTES_v0.4.2.md) - Detailed release notes
+- [RELEASE_NOTES_v0.5.1.md](./RELEASE_NOTES_v0.5.1.md) - Official Release documentation
 - [references/multi-agent-design.md](./references/multi-agent-design.md) - Multi-Agent Architecture design document
 
 ---
@@ -531,4 +592,4 @@ Oracle/PostgreSQL/MySQL ACE Database Expert
 
 This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
-**Last Updated**: 2026-05-07 v0.4.2 (Multi-Agent Architecture Edition)
+**Last Updated**: 2026-05-09 v0.5.1

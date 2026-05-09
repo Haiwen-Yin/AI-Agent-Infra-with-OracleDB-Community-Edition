@@ -1,15 +1,14 @@
 ---
 name: oracle-memory-by-yhw
-version: v0.4.2 (Directory Consolidation Update)
+version: v0.5.1 (Core Functionality Enhancement Edition)
 author: Haiwen Yin (胖头鱼 🐟)
-category: mlops
-description: Oracle AI Database Memory System v0.4.1 - Universal memory system with JRD, Property Graph, Task Plan management, and optimized indexing
+description: Oracle AI Database Memory System v0.5.1 (Official Release) with JRD, Property Graph, Multi-Agent Architecture, Task Plan management, enterprise-grade security and Memory Fusion Engine
 ---
 
-# Oracle AI Database Memory System v0.4.1 Task Plan Integration Edition
+# Oracle AI Database Memory System v0.5.1 (Core Functionality Enhancement Edition) - Official Release
 
 **Author**: Haiwen Yin (胖头鱼 🐟)  
-**Version**: v0.4.2 (Multi-Agent Architecture Update) - 2026-05-07  
+**Version**: v0.5.1 (Core Functionality Enhancement Edition) - 2026-05-09  
 **Status**: Production Ready ✅  
 **License**: Apache License 2.0
 
@@ -19,24 +18,26 @@ description: Oracle AI Database Memory System v0.4.1 - Universal memory system w
 
 This is a **universal memory system for all AI Agents**, built on Oracle AI Database 26ai. Provides complete semantic search, knowledge graph relationship management, vector similarity retrieval, JRD (JSON Relational Duality) views, native Property Graph capabilities, and **Task Plan persistence** with breakpoint recovery using the `oracle-sqlcl` MCP Server as the primary interface.
 
-### ✨ Core Features (v0.4.1)
+### ✨ Core Features (v0.5.1)
 
-| Feature | v0.3.0 | v0.3.1 | v0.4.0 | **v0.4.1** |
-|---------|--------|--------|--------|-----------|
-| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents |
-| **Task Plan Storage** | ❌ Not included | ❌ Not included | ❌ Not included | ✅ **Complete Task Plan System** |
-| **Breakpoint Recovery** | ❌ None | ❌ None | ❌ None | ✅ **Auto Snapshot + Resume API** |
-| **Historical Learning** | ❌ Limited | ❌ Limited | ❌ Limited | ✅ **Task Pattern Recognition** |
-| **Status Tracking** | ❌ Basic | ⚠️ Partial | ⚠️ Partial | ✅ **Detailed Step-by-Step Audit** |
-| **Embedding Models** | Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ Multi-model |
-| **Production Deployment** | ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA |
-| **Vector Import** | CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() |
-| **Property Graph** | ❌ Not tested | ✅ Integration verified | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** |
-| **JRD Implementation** | ❌ Plan only | ⚠️ Plan documented | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** |
-| **JSON Decomposition** | ❌ CLOB storage | ⚠️ Design documented | ✅ **6 relationship tables** | ✅ **6 relationship tables** |
-| **Graph Traversal Views** | ❌ | ❌ | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** |
-| **Auxiliary Indexes** | ❌ | ⚠️ Partial | ✅ **Complete index coverage** | ✅ **Complete index coverage** |
-| **Partition Strategy** | ❌ | ✅ Tested & verified | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** |
+| Feature | v0.3.0 | v0.3.1 | v0.4.0 | **v0.4.1** | **v0.4.2** | **v0.5.0** | **v0.5.1** |
+| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents |
+| **Task Plan Storage** | ❌ Not included | ❌ Not included | ❌ Not included | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** |
+| **Breakpoint Recovery** | ❌ None | ❌ None | ❌ None | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** |
+| **Historical Learning** | ❌ Limited | ❌ Limited | ❌ Limited | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** |
+| **Status Tracking** | ❌ Basic | ⚠️ Partial | ⚠️ Partial | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** |
+| **Embedding Models** | Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ **Multi-model (BGE-M3/OpenAI/Cohere)** | ✅ **Multi-model (BGE-M3/OpenAI/Cohere)** |
+| **Production Deployment** | ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA with Partition Strategy | ✅ ADG HA with Partition Strategy |
+| **Vector Import** | CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) |
+| **Property Graph** | ❌ Not tested | ✅ Integration verified | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** |
+| **JRD Implementation** | ❌ Plan only | ⚠️ Plan documented | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** |
+| **JSON Decomposition** | ❌ CLOB storage | ⚠️ Design documented | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** |
+| **Graph Traversal Views** | ❌ | ❌ | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** |
+| **Auxiliary Indexes** | ❌ | ⚠️ Partial | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** |
+| **Partition Strategy** | ❌ | ✅ Tested & verified | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** |
+| **Security Module** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Enterprise-grade data masking, encryption, audit trails** | ✅ **Enterprise-grade data masking, encryption, audit trails** |
+| **Performance Optimization** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Vector storage migration, aggregation analysis, automated cleanup** | ✅ **Enhanced cleanup framework + Memory Fusion Engine** |
+| **Performance Optimization** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Vector storage migration, aggregation analysis, automated cleanup** | | ✅ All AI Agents |
 
 ---
 
@@ -53,9 +54,99 @@ The Task Plan system provides AI Agents with durable task execution tracking, en
 
 ---
 
-## 🗄️ v0.4.1 Database Schema (Task Plan Tables)
+## 🛡️ v0.5.0 Security & Performance Enterprise Edition
 
-### Task Plan Core Tables (v0.4.1 New)
+### ✨ What's New in v0.5.0
+
+The v0.5.0 release focuses on **enterprise-grade security** and **performance optimization**:
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **Vector Storage Migration** | Oracle 26ai native VECTOR(1024) type replacing CLOB storage | ✅ Implemented |
+| **Automated Cleanup Jobs** | Scheduled cleanup of snapshots, sessions, and audit logs | ✅ Implemented |
+| **Enterprise Data Masking Service** | Automatic PII/sensitive data redaction before storage with 4-tier strategy | ✅ v0.5.0 Complete |
+| **Reversible Encryption** | Fernet AES-128-CBC encryption for internal debugging scenarios | ✅ v0.5.0 Complete |
+| **Context-Aware Masking Logic** | Automatic masking level selection based on usage scenario (LOGGING/DEBUGGING/ANALYTICS/SHARING) | ✅ v0.5.0 Complete |
+| **Desensitization Levels Table** | DESENSITIZE_LEVELS table with dynamic configuration support | ✅ v0.5.0 Complete |
+| **Aggregation Analysis Views** | Privacy-preserving analytics views replacing exact match queries | ✅ v0.5.0 Complete |
+| **Memory Fusion Algorithm** | Semantic deduplication of similar memories across conversations | 📋 Planned |
+
+### 🆕 Multi-Agent Architecture (Integrated)
+
+Oracle Memory System provides **multi-agent deployment** with shared and private memory isolation. This enables multiple AI agents to collaborate while maintaining appropriate access boundaries.
+
+#### Core Features
+- **Agent Registry**: Centralized registration and discovery of all agents
+- **Memory Visibility Control**: Three visibility levels (SHARED/PRIVATE/COLLABORATIVE)  
+- **Session Management**: Track active sessions with working context preservation
+- **Access Audit Trail**: Complete logging of all memory access operations
+- **Collaboration Workflow**: Request/approve mechanism for agent-to-agent knowledge sharing
+
+---
+
+## 🆕 v0.5.1 Core Functionality Enhancement Edition
+
+### ✨ What's New in v0.5.1
+
+The v0.5.1 release focuses on **core operational functionality** to make the system production-ready:
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **Agent Permission Downgrade** | Automatic COLLABORATIVE data access recovery when agents are disabled | ✅ Implemented |
+| **Enhanced Snapshot Cleanup** | Centralized config table with dual-tier cleanup (daily archival + weekly full cycle) | ✅ Enhanced |
+| **Session Expiry Management** | Intelligent session classification with TTL, warning threshold, and grace period | ✅ Enhanced |
+| **Memory Fusion Engine** | Semantic deduplication and merging using vector similarity detection | ✅ New Feature |
+
+### 🏗️ Agent Permission Downgrade Details
+
+When an agent is disabled in the system, this feature ensures that:
+1. The `PENDING_RECOVERY` flag is set to track recovery operations
+2. All COLLABORATIVE memories accessible to the disabled agent are identified
+3. The agent ID is removed from JSON ACCESSIBLE_TO arrays
+4. Changes are logged in `agent_permission_log` for audit purposes
+5. An hourly scheduled job checks and processes any pending recoveries
+
+**API Functions:**
+- `disable_agent_and_recover(agent_id, reason)` - Disable agent with automatic data recovery
+- `enable_agent(agent_id)` - Re-enable agent and restore access
+- `scheduled_permission_check()` - Cron-triggered pending recovery check
+
+### ⚡ Enhanced Cleanup Framework
+
+The cleanup framework has been enhanced from basic SQL scripts to a production-ready system:
+
+**Centralized Configuration:**
+- `cleanup_config` table with configurable retention policies
+- `session_config` table for TTL management (24h default, 18h warning threshold)
+
+**Improved Scheduling:**
+- Daily snapshot cleanup at 2 AM
+- Weekly full cycle cleanup on Sundays at 3 AM  
+- Session expiry monitoring every 30 minutes
+- Monthly archive statistics reports
+
+### 🧠 Memory Fusion Engine
+
+The new Memory Fusion Engine provides semantic deduplication and content merging:
+
+**Core Capabilities:**
+- Vector similarity detection using Oracle's VECTOR_DISTANCE function
+- Intelligent merge strategies (PREFER_NEWEST, PREFER_LONGER)
+- Content enrichment by combining related memories
+- Comprehensive fusion operation history tracking
+
+**API Functions:**
+- `find_similar_memories(memory_id, threshold)` - Find semantically similar memories
+- `deduplicate_batch(batch_size)` - Process a batch for deduplication
+- `merge_similar_memories(memory_ids, strategy)` - Merge similar memories
+- `enrich_memory(target_id)` - Combine related content into target memory
+
+
+---
+
+## 🗄️ Database Schema Overview
+
+### Task Plan Core Tables
 
 ```sql
 -- ============================================
@@ -168,7 +259,7 @@ CREATE TABLE TASK_DEPENDENCIES (
 
 ---
 
-## 🔧 v0.4.1 API Functions (Python Integration)
+## 🔧 API Functions (Python Integration)
 
 ### create_task_plan() - Create task plan and automatically save initial context snapshot
 
@@ -350,7 +441,7 @@ def search_completed_tasks(query_params):
               [Executing...] ──► [update_task_progress()]
                               │
                        ┌──────▼──────────┐
-                       │ CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
+                       │CONTEXT_SNAPSHOTS│ ← **Critical for breakpoint recovery**
                        └──────┬──────────┘
                               │
                     ┌─────────▼─────────┐
@@ -367,7 +458,7 @@ def search_completed_tasks(query_params):
 
 ---
 
-## 📊 v0.4.1 Indexing Strategy (Task Plan Tables)
+## 📊 Indexing Strategy (All Tables)
 
 ### Task Plan Specific Indexes
 
@@ -401,14 +492,14 @@ CREATE SEQUENCE SEQ_TASK_DEPS START WITH 1 INCREMENT BY 1;
 
 ## 📚 Documentation
 
-- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.4.1)
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history and changes (v0.2.0 through v0.5.0)
 - [RELEASE_NOTES_v0.4.2.md](./RELEASE_NOTES_v0.4.2.md) - Detailed release notes for v0.4.2
 
 ---
 
-## 🏗️ Multi-Agent Architecture (NEW in v0.4.2)
+## 🏗️ Multi-Agent Architecture (Integrated)
 
-Oracle Memory System now supports **multi-agent deployment** with shared and private memory isolation. This enables multiple AI agents to collaborate while maintaining appropriate access boundaries.
+Oracle Memory System provides **multi-agent deployment** with shared and private memory isolation. This enables multiple AI agents to collaborate while maintaining appropriate access boundaries.
 
 ### Core Features
 - **Agent Registry**: Centralized registration and discovery of all agents
@@ -497,4 +588,6 @@ Oracle/PostgreSQL/MySQL ACE Database Expert
 
 This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
 
-**Last Updated**: 2026-05-04 v0.4.1
+---
+
+**Last Updated**: 2026-05-09 v0.5.1
