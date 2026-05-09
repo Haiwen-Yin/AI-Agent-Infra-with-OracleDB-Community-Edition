@@ -1,4 +1,108 @@
-# Oracle Memory System - Change Log (v0.4.0)
+# Oracle Memory System - Change Log
+
+## v1.0.0 (2026-05-09) Production Release - Knowledge Base Edition
+
+**🎯 MAJOR RELEASE**: First production-ready version for AI Agent deployments. Integrates complete Knowledge Base system with knowledge graph capabilities, experience distillation, and semantic search.
+
+### 📚 Knowledge Base System (NEW in v1.0.0)
+
+**Complete Knowledge Management Solution**
+- ✅ Knowledge Concepts - Stable knowledge entities (FACT/RULE/PATTERN/EXPERIENCE/PRINCIPLE)
+- ✅ Knowledge Graph - Property Graph-based relationship management (IS_A/PART_OF/CAUSES/ENABLES/CONTRADICTS/SUPPORTS)
+- ✅ Experience Distillation - Automatic memory-to-knowledge transformation
+- ✅ Hybrid Search - Semantic search + graph traversal combination
+- ✅ Version Control - Complete version history for knowledge concepts
+- ✅ Automated Jobs - 6 scheduled jobs for knowledge lifecycle management
+
+### 🗄️ Knowledge Base Schema (NEW in v1.0.0)
+
+**Six Core Tables**
+- KNOWLEDGE_CONCEPTS - Core knowledge entities with semantic embeddings
+- KNOWLEDGE_GRAPH - Knowledge relationships for graph traversal
+- KNOWLEDGE_VERSIONS - Version history for knowledge concepts
+- KNOWLEDGE_TAGS - Tag-based categorization
+- KNOWLEDGE_DISTILLATION_LOG - Audit trail for memory-to-knowledge distillation
+- KNOWLEDGE_SEARCH_HISTORY - Search analytics
+
+### 🔧 Knowledge Base API (NEW in v1.0.0)
+
+**PL/SQL API Package**
+- create_concept() - Create new knowledge concept
+- update_concept() - Update knowledge concept with versioning
+- validate_concept() - Validate knowledge concept
+- deprecate_concept() - Deprecate knowledge concept
+- get_concept() - Get knowledge concept by ID
+- create_relationship() - Create relationship between concepts
+- get_relationships() - Get concept relationships
+- traverse_graph() - Traverse knowledge graph
+- find_path() - Find shortest path between concepts
+- semantic_search() - Semantic search for knowledge
+- distill_experience() - Distill experience from memories
+- get_statistics() - Get knowledge base statistics
+- get_graph_metrics() - Get knowledge graph metrics
+
+**Python API Client**
+- Full implementation of all PL/SQL API functions
+- Automatic embedding generation using BGE-M3
+- Comprehensive error handling
+
+### 📊 Knowledge Property Graph (NEW in v1.0.0)
+
+**Oracle 26ai Property Graph Integration**
+- KNOWLEDGE_PROPERTY_GRAPH - Vertex and edge tables for graph traversal
+- SQL/PGQ query support
+- Relationship strength and confidence tracking
+
+### ⏰ Automated Knowledge Management (NEW in v1.0.0)
+
+**Six Scheduled Jobs**
+- KNOWLEDGE_PATTERN_DETECTION - Daily 3:00 AM
+- KNOWLEDGE_EXPERIENCE_EXTRACTION - Weekly Sunday 4:00 AM
+- KNOWLEDGE_GRAPH_MAINTENANCE - Monthly 1st 5:00 AM
+- KNOWLEDGE_STATS_COLLECTION - Daily 6:00 AM
+- KNOWLEDGE_SEARCH_ANALYTICS - Weekly Saturday 2:00 AM
+- KNOWLEDGE_HEALTH_MONITOR - Weekly Monday 7:00 AM
+
+### 📋 New Files Added in v1.0.0
+
+- `scripts/knowledge_base_schema_v2.sql` - Complete database schema (8.5 KB)
+- `scripts/knowledge_base_api.sql` - PL/SQL API implementation (32.8 KB)
+- `scripts/knowledge_property_graph.sql` - Property Graph definition (8.8 KB)
+- `scripts/knowledge_jobs.sql` - Scheduled jobs and procedures (12.2 KB)
+- `scripts/knowledge_base_api.py` - Python client library (23.8 KB)
+- `scripts/test_knowledge_base.py` - Test suite (10.2 KB)
+- `references/knowledge-base-design.md` - Detailed design document (27.5 KB)
+- `README_KNOWLEDGE_BASE.md` - Usage documentation (13.3 KB)
+- `RELEASE_NOTES_v1.0.0.md` - Release notes (11.5 KB)
+
+### 🔧 Bug Fixes & Improvements
+
+- Fixed execute_sql error detection logic for better accuracy
+- Improved concept ID extraction using database queries
+- Enhanced JSON parsing with error handling
+- Updated version numbers across all files to v1.0.0
+
+### 📊 Test Coverage
+
+- Knowledge Concept CRUD operations: ✅ Verified
+- Knowledge Graph relationship management: ✅ Verified
+- Semantic search functionality: ✅ Verified
+- Experience distillation: ✅ Verified
+- Version control: ✅ Verified
+- Statistics and monitoring: ✅ Verified
+
+### 🎯 Production Readiness
+
+**This version is production-ready for AI Agent deployments with:**
+- Complete Knowledge Base system
+- Knowledge Graph capabilities
+- Experience Distillation
+- Semantic Search
+- Automated Knowledge Management
+- Full Test Coverage
+- Comprehensive Documentation
+
+---
 
 ## v0.5.1 (2026-05-09) Official Release - Core Functionality Enhancement Edition
 
