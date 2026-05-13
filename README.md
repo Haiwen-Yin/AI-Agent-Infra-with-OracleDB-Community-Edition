@@ -8,6 +8,30 @@
 
 ---
 
+## 🌐 v1.1.0 New: Web Visualization Server
+
+### Features
+- **Session Security**: 5-minute auto-logout with database-backed authentication
+- **Bilingual Support**: Complete Chinese/English interface switching via localStorage
+- **Knowledge Graph Visualization**: Interactive node/edge visualization
+- **Memory Content Display**: Separate page for memory nodes and edges
+- **Configuration System**: Externalized config via `config.json` + environment variables
+
+### Quick Start
+```bash
+# Start the web server
+./start_web_server.sh
+
+# Or run directly
+python3 viz_server_local_js.py
+```
+
+### Access
+- URL: http://10.10.10.135:8000
+- Default credentials: admin / admin123
+- See [CONFIGURATION.md](CONFIGURATION.md) for database configuration options
+
+
 ## 🚀 v1.0.0 - A Major Milestone for Production AI Agents
 
 ### 🎉 **This is a significant breakthrough!**
@@ -64,15 +88,15 @@ This is the **v1.0.0 Production Release** - the first version ready for real-wor
 
 ## 📊 Version History & Comparison
 
-| Feature | v0.3.x | v0.4.0 | v0.5.0 | **v0.5.1** | **v1.0.0** |
-|---------|--------|--------|--------|-----------|-----------|
-| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Production Ready | ✅ Production Ready | ✅ **Production Ready + Knowledge Base** |
-| **Knowledge Base** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Complete KB System** |
-| **Knowledge Graph** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Property Graph** |
-| **Task Plan System** | ❌ None | ✅ Complete | ✅ Enhanced | ✅ Enhanced | ✅ **Enhanced with KB** |
-| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ✅ Registry | ✅ Full Framework | ✅ **Full Collaboration** |
-| **Documentation** | ⚠️ Basic | ⚠️ Basic | ✅ Good | ✅ Good | ✅ **Comprehensive** |
-| **Production Ready** | ❌ No | ⚠️ Partial | ✅ Yes | ✅ Yes | ✅ **Battle-Tested** |
+| Feature | v0.3.x | v0.4.0 | v0.5.0 | **v0.5.1** | **v1.0.0** | **v1.1.0** |
+|---------|--------|--------|--------|-----------|-----------|-----------|
+| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Production Ready | ✅ Production Ready | ✅ **Production Ready + KB** | ✅ **Session Security** |
+| **Knowledge Base** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Complete KB** | ✅ **KB + Config** |
+| **Knowledge Graph** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Property Graph** | ✅ **Property Graph** |
+| **Task Plan System** | ❌ None | ✅ Complete | ✅ Enhanced | ✅ Enhanced | ✅ **Enhanced with KB** | ✅ **Enhanced** |
+| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ✅ Registry | ✅ Full Framework | ✅ **Full Collaboration** | ✅ **Full Collaboration** |
+| **Documentation** | ⚠️ Basic | ⚠️ Basic | ✅ Good | ✅ Good | ✅ **Comprehensive** | ✅ **Comprehensive** |
+| **Production Ready** | ❌ No | ⚠️ Partial | ✅ Yes | ✅ Yes | ✅ **Battle-Tested** | ✅ **Web UI + Auth** |
 
 ---
 
@@ -219,6 +243,7 @@ print(f"Total concepts: {stats['total_concepts']}")
 ```
 
 ---
+
 
 ## 📚 Documentation
 
@@ -370,21 +395,3 @@ When reporting bugs, please include:
 
 ---
 
-## 🎉 v1.0.0 - Ready for Production!
-
-**This version represents a major milestone** - the first production-ready release for real-world AI Agent deployments. With comprehensive documentation, battle-tested core operations, and enterprise-grade features, this is the version you can confidently deploy in production AI systems.
-
-**Key Highlights:**
-- ✅ **Actually works in production** - Battle-tested with real database operations
-- ✅ **Ready for real AI agents** - Designed for enterprise AI deployments
-- ✅ **Comprehensive documentation** - Complete guides for every use case
-- ✅ **Production-grade features** - Error handling, monitoring, performance optimization
-
-**This is the version that makes production AI agent memory systems a reality!**
-
----
-
-**Author**: Haiwen Yin (胖头鱼 🐟)  
-**Version**: v1.0.0 (Production Release)  
-**Last Updated**: 2026-05-09  
-**Status**: Production Ready ✅

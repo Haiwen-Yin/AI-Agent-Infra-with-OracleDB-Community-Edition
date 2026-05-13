@@ -81,25 +81,25 @@ Memory Created → Repeats Multiple Times → Pattern Recognized
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    System Overview                          │
+│                    System Overview                           │
 ├─────────────────────────────────────────────────────────────┤
-│                                                             │
+│                                                              │
 │  ┌─────────────────────┐      ┌─────────────────────┐       │
-│  │     MEMORY LAYER    │      │   KNOWLEDGE LAYER   │       │
-│  │   (Dynamic/Short)   │      │  (Stable/Long-term) │       │
+│  │     MEMORY LAYER    │      │   KNOWLEDGE LAYER    │       │
+│  │   (Dynamic/Short)   │      │  (Stable/Long-term)  │       │
 │  ├─────────────────────┤      ├─────────────────────┤       │
-│  │ • Conversation history│    │ • Facts & Concepts  │       │
-│  │ • Working context    │     │ • Relationships     │       │
-│  │ • Temporary notes    │     │ • Rules & Patterns  │       │
-│  │ • Session state      │     │ • Experiences       │       │
+│  │ • Conversation history│    │ • Facts & Concepts   │       │
+│  │ • Working context    │     │ • Relationships      │       │
+│  │ • Temporary notes    │     │ • Rules & Patterns   │       │
+│  │ • Session state      │     │ • Experiences        │       │
 │  └──────────┬──────────┘      └──────────┬──────────┘       │
-│             │                            │                  │
-│             │    ┌────────────────────┐  │                  │
-│             │    │   DISTILLATION     │  │                  │
-│             └───►│     PROCESS        │◄─┘                  │
-│                  │(Memory → Knowledge)│                     │
-│                  └────────────────────┘                     │
-│                                                             │
+│             │                             │                  │
+│             │    ┌─────────────────┐      │                  │
+│             │    │   DISTILLATION  │      │                  │
+│             └───►│     PROCESS     │◄─────┘                  │
+│                  │ (Memory → Knowledge)                      │
+│                  └─────────────────┘                         │
+│                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 

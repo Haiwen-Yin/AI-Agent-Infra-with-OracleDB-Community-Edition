@@ -1,20 +1,55 @@
 ---
 name: oracle-memory-by-yhw
-version: v1.0.0 (Production Release)
+version: v1.1.0 (Production Release)
 author: Haiwen Yin (胖头鱼 🐟)
-description: Oracle AI Database Memory System v1.0.0 (Production Release) with Knowledge Base, Property Graph, Multi-Agent Architecture, Task Plan management, enterprise-grade security, Performance Optimization, and comprehensive documentation
-tags: [oracle, memory-system, knowledge-base, vector-search, production]
+description: Oracle AI Database Memory System v1.1.0 with Session Security, Bilingual Support, Database-Backed Authentication, Knowledge Base, Property Graph, Multi-Agent Architecture, Task Plan management, and Performance Optimization
+tags: [oracle, memory-system, knowledge-base, vector-search, production, session-security, bilingual]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology, naming-convention-yhw-enforcement]
 ---
 
-# Oracle AI Database Memory System v1.0.0 (Production Release)
+# Oracle AI Database Memory System v1.1.0 (Production Release)
 
 **Author**: Haiwen Yin (胖头鱼 🐟)  
-**Version**: v1.0.0 (Production Release) - 2026-05-09  
+**Version**: v1.1.0 (Production Release) - 2026-05-12  
 **Status**: Production Ready ✅  
 **License**: Apache License 2.0
 
 ---
+
+## 🌐 Web Visualization Server — New in v1.1.0
+
+### Routes
+| Route | Method | Description | Auth |
+|-------|--------|-------------|------|
+| `/` | GET | Redirect to `/knowledge` | ✅ |
+| `/login` | GET | Login page (bilingual labels) | ❌ |
+| `/knowledge` | GET | Knowledge graph visualization | ✅ |
+| `/memory` | GET | Memory content visualization | ✅ |
+| `/api/login` | POST | Authenticate (admin/admin123) | ❌ |
+| `/api/knowledge` | GET | Knowledge graph JSON (KNOWLEDGE_CONCEPTS) | ✅ |
+| `/api/knowledge/refresh` | GET | Force knowledge cache refresh | ✅ |
+| `/api/memory` | GET | Memory graph JSON (MEMORY_NODES+EDGES) | ✅ |
+| `/api/memory/refresh` | GET | Force memory cache refresh | ✅ |
+| `/api/stats` | GET | Cache statistics | ✅ |
+| `/api/logout` | GET | Clear session cookie | ✅ |
+| `/vis-network.min.js` | GET | Local JS library (702KB) | ❌ |
+
+### Key Implementation Details
+- **Language Persistence**: Uses `localStorage` (not cookies) to persist language choice. Read via `getLang()` function (not const).
+- **Session Timeout**: 5 minutes (300 seconds). Configurable via `_SESSION_TIMEOUT` or `MEMORY_SESSION_TIMEOUT` env var.
+- **Node Filtering**: Knowledge and Memory are SEPARATE data sources with DIFFERENT data.
+- **Two Separate Caches**: `_knowledge_cache` and `_memory_cache` are independent.
+- **vis-network.min.js**: Downloaded locally. Must be served via explicit static file route.
+
+### Quick Start Script
+`start_web_server.sh` — one-command server startup with dependency check, port conflict detection, and config display.
+
+### Configuration System (v1.1.0)
+Database credentials and server settings are externalized via `config.json` + environment variable overrides:
+- Config file: `config.json` (in same directory as server)
+- Env vars: `MEMORY_DB_USER`, `MEMORY_DB_PASSWORD`, `MEMORY_DB_DSN`, `MEMORY_SERVER_PORT`, `MEMORY_SERVER_HOST`, `MEMORY_SESSION_TIMEOUT`
+- Priority: Environment Variables > config.json > Built-in defaults
+- See [CONFIGURATION.md](CONFIGURATION.md) for full details
 
 ## 🚀 v1.0.0 - Production-Grade AI Agent Memory System
 
@@ -72,26 +107,28 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology, naming-convent
 
 This is a **universal memory system for all AI Agents**, built on Oracle AI Database 26ai. Provides complete semantic search, knowledge graph relationship management, vector similarity retrieval, JRD (JSON Relational Duality) views, native Property Graph capabilities, and **Task Plan persistence** with breakpoint recovery using the `oracle-sqlcl` MCP Server as the primary interface.
 
-### ✨ Core Features (v0.5.1)
+### ✨ Core Features (v1.1.0)
 
-| Feature | v0.3.0 | v0.3.1 | v0.4.0 | **v0.4.1** | **v0.4.2** | **v0.5.0** | **v0.5.1** |
-| **Target Users** | All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents | ✅ All AI Agents |
-| **Task Plan Storage** | ❌ Not included | ❌ Not included | ❌ Not included | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** | ✅ **Complete Task Plan System** |
-| **Breakpoint Recovery** | ❌ None | ❌ None | ❌ None | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** | ✅ **Auto Snapshot + Resume API** |
-| **Historical Learning** | ❌ Limited | ❌ Limited | ❌ Limited | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** | ✅ **Task Pattern Recognition** |
-| **Status Tracking** | ❌ Basic | ⚠️ Partial | ⚠️ Partial | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** | ✅ **Detailed Step-by-Step Audit** |
-| **Embedding Models** | Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ Multi-model | ✅ **Multi-model (BGE-M3/OpenAI/Cohere)** | ✅ **Multi-model (BGE-M3/OpenAI/Cohere)** |
-| **Production Deployment** | ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA | ✅ ADG HA with Partition Strategy | ✅ ADG HA with Partition Strategy |
-| **Vector Import** | CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ CLOB + TO_VECTOR() | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) | ✅ Native VECTOR(1024) |
-| **Property Graph** | ❌ Not tested | ✅ Integration verified | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** | ✅ **CREATE PROPERTY GRAPH + SQL/PGQ** |
-| **JRD Implementation** | ❌ Plan only | ⚠️ Plan documented | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** | ✅ **Full implementation + nested views** |
-| **JSON Decomposition** | ❌ CLOB storage | ⚠️ Design documented | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** | ✅ **6 relationship tables** |
-| **Graph Traversal Views** | ❌ | ❌ | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** | ✅ **MEMORY_GRAPH_V + MEMORY_GRAPH_JSON_V** |
-| **Auxiliary Indexes** | ❌ | ⚠️ Partial | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** | ✅ **Complete index coverage** |
-| **Partition Strategy** | ❌ | ✅ Tested & verified | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** | ✅ **Multi-table unified strategy** |
-| **Security Module** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Enterprise-grade data masking, encryption, audit trails** | ✅ **Enterprise-grade data masking, encryption, audit trails** |
-| **Performance Optimization** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Vector storage migration, aggregation analysis, automated cleanup** | ✅ **Enhanced cleanup framework + Memory Fusion Engine** |
-| **Performance Optimization** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Vector storage migration, aggregation analysis, automated cleanup** | ✅ **Enhanced cleanup framework + Memory Fusion Engine** |
+| Feature | v0.3.0 | v0.3.1 | v0.4.0 | **v0.4.1** | **v0.4.2** | **v0.5.0** | **v0.5.1** | **v1.0.0** | **v1.1.0** |
+|---------|--------|--------|--------|-----------|-----------|-----------|-----------|-----------|-----------|
+| **Task Plan Storage** | ❌ | ❌ | ❌ | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
+| **Breakpoint Recovery** | ❌ | ❌ | ❌ | ✅ Auto Snapshot | ✅ Auto Snapshot | ✅ Auto Snapshot | ✅ Auto Snapshot | ✅ Auto Snapshot | ✅ Auto Snapshot |
+| **Historical Learning** | ❌ | ❌ | ❌ | ✅ Pattern Recognition | ✅ Pattern Recognition | ✅ Pattern Recognition | ✅ Pattern Recognition | ✅ Pattern Recognition | ✅ Pattern Recognition |
+| **Status Tracking** | ❌ | ⚠️ | ⚠️ | ✅ Step-by-Step | ✅ Step-by-Step | ✅ Step-by-Step | ✅ Step-by-Step | ✅ Step-by-Step | ✅ Step-by-Step |
+| **Embedding Models** | Multi | ✅ Multi | ✅ Multi | ✅ Multi | ✅ Multi | ✅ BGE-M3/OpenAI | ✅ BGE-M3/OpenAI | ✅ BGE-M3/OpenAI | ✅ BGE-M3/OpenAI |
+| **Production Deployment** | ADG | ✅ ADG | ✅ ADG | ✅ ADG | ✅ ADG | ✅ ADG+Partition | ✅ ADG+Partition | ✅ ADG+Partition | ✅ ADG+Partition |
+| **Vector Import** | CLOB | ✅ CLOB | ✅ CLOB | ✅ Native | ✅ Native | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
+| **Property Graph** | ❌ | ✅ Verified | ✅ CREATE PG | ✅ CREATE PG | ✅ CREATE PG | ✅ CREATE PG | ✅ CREATE PG | ✅ CREATE PG | ✅ CREATE PG |
+| **JRD Implementation** | ❌ | ⚠️ | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
+| **JSON Decomposition** | ❌ | ⚠️ | ✅ 6 tables | ✅ 6 tables | ✅ 6 tables | ✅ 6 tables | ✅ 6 tables | ✅ 6 tables | ✅ 6 tables |
+| **Graph Traversal Views** | ❌ | ❌ | ✅ GRAPH_V | ✅ GRAPH_V | ✅ GRAPH_V | ✅ GRAPH_V | ✅ GRAPH_V | ✅ GRAPH_V | ✅ GRAPH_V |
+| **Auxiliary Indexes** | ❌ | ⚠️ | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
+| **Partition Strategy** | ❌ | ✅ Verified | ✅ Multi-table | ✅ Multi-table | ✅ Multi-table | ✅ Multi-table | ✅ Multi-table | ✅ Multi-table | ✅ Multi-table |
+| **Security Module** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Enterprise | ✅ Enterprise | ✅ Enterprise | ✅ **DB Auth + PBKDF2** |
+| **Performance** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Vector+Cleanup | ✅ Enhanced | ✅ **4500x faster** | ✅ **4500x faster** |
+| **Knowledge Base** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **Complete KB** | ✅ **KB + Config** |
+| **Web Visualization** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ **New** |
+
 
 ---
 
@@ -546,9 +583,11 @@ CREATE SEQUENCE SEQ_TASK_DEPS START WITH 1 INCREMENT BY 1;
 
 ## 📚 Documentation
 
-- [CHANGELOG.md](./CHANGELOG.md) - Complete version history (v0.2.0 through v1.0.0)
-- [RELEASE_NOTES_v1.0.0.md](./RELEASE_NOTES_v1.0.0.md) - Detailed release notes for v1.0.0
-- [Oracle PL/SQL Vector Pitfalls](./references/oracle-plsql-vector-pitfalls.md) - TO_VECTOR/CASE WHEN/SEQUENCE 踩坑记录
+- [CHANGELOG.md](./CHANGELOG.md) - Complete version history (v0.2.0 through v1.1.0)
+- [RELEASE_NOTES_v1.1.0.md](./RELEASE_NOTES_v1.1.0.md) - Release notes for v1.1.0
+- [RELEASE_NOTES_v1.0.0.md](./RELEASE_NOTES_v1.0.0.md) - Release notes for v1.0.0
+- [CONFIGURATION.md](./CONFIGURATION.md) - Web server configuration guide (NEW in v1.1.0)
+- [Oracle PL/SQL Vector Pitfalls](./references/oracle-plsql-vector-pitfalls.md) - TO_VECTOR/CASE WHEN/SEQUENCE pitfalls
 - [Knowledge Base Design](./references/knowledge-base-design.md) - Knowledge Base system architecture and schema design
 
 ## 🧪 Test Suite
@@ -636,6 +675,17 @@ MemoryVisibilityAPI.create_memory(
 See [references/multi-agent-design.md](./references/multi-agent-design.md) for detailed architecture explanation.
 
 ---
+
+
+### Additional Pitfalls (Discovered 2026-05-12)
+
+10. **pkill kills the shell, not just the process** — `pkill -f "viz_server"` matches the bash wrapper command too, killing the terminal session. Always use PID-based killing.
+11. **Skill cleanup: compare against original zip** — ALWAYS extract the original release zip first and compare file lists. Never delete files that were part of the original release.
+12. **Route changes require updating ALL references** — Changing routes requires updating: (a) route handler, (b) login redirect, (c) HTML onclick handlers, (d) JS fetch() URLs, (e) login page redirects.
+13. **Dual data sources need separate caches** — Use TWO separate cache dicts with independent TTL for independent data sets.
+14. **i18n: localStorage, not const** — Use `function getLang()` to read dynamically, not a const defined at page load.
+15. **Configuration externalization** — Extract config to `config.json` with env var overrides.
+16. **Markdown numbered list blank-line trap** — Blank lines between numbered items break list continuity. Keep items on consecutive lines.
 
 ## 👨‍💻 Author & Maintainer
 
@@ -815,13 +865,13 @@ echo "DELETE FROM KNOWLEDGE_CONCEPTS WHERE CONCEPT_ID = 9999" | sql openclaw/her
 
 **Never claim code is "tested" without running these steps.**
 
-### ⚠️ Critical Pitfall: SQLcl is the ONLY Database Interface
+### ⚠️ Critical Pitfall: Database Interface (Updated in v1.1.0)
 
-**Problem**: Attempting to use Python Oracle drivers (`oracledb`, `cx_Oracle`) fails because they are not installed on this system.
+**v1.0.0**: SQLcl was the only database interface.
+**v1.1.0**: Web server now uses `oracledb` Python driver directly for 4500x speed improvement (0.020s vs 90s).
 
-**Root Cause**: This environment uses SQLcl command-line tool as the sole Oracle database interface. There are no Python Oracle client libraries available.
-
-**Solution**: All Python database operations MUST use `subprocess` to call SQLcl:
+**For Web Server**: Use `oracledb` with connection pooling (min=2, max=5).
+**For Scripts/Tests**: SQLcl may still be used via subprocess.
 
 ```python
 # ❌ BAD - Module not available
@@ -881,4 +931,4 @@ for i, line in enumerate(lines):
 
 ---
 
-**Last Updated**: 2026-05-09 v1.0.0
+**Last Updated**: 2026-05-12 v1.1.0

@@ -106,7 +106,6 @@ The Memory Fusion Engine provides semantic deduplication and content merging usi
    - `memory_fusion_engine.sql`
 
 2. No data migration required - all changes are additive only
-
 3. Verify scheduled jobs are running:
 ```sql
 SELECT JOB_NAME, STATE, REPEAT_INTERVAL 

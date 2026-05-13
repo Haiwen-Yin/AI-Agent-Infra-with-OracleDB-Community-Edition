@@ -1,0 +1,14 @@
+{
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8000
+    },
+    "database": {
+        "user": "openclaw",
+        "password": "hermes",
+        "dsn": "10.10.10.130:1521/openclaw"
+    },
+    "session": {
+        "timeout": 300
+    }
+}
