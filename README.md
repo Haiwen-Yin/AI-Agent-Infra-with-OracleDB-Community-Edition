@@ -1,397 +1,300 @@
-# Oracle AI Database Memory System v1.0.0 (Production Release)
+# Oracle AI Database Memory System v2.0.0
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)](CHANGELOG.md)
-[![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-green.svg)](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
+[![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](RELEASE_NOTES_v2.0.0.md)
+[![Oracle AI DB](https://img.shields.io/badge/Oracle-23ai-red.svg)](https://www.oracle.com/database/)
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Universal memory system for all AI Agents with Knowledge Base, Property Graph, Multi-Agent Architecture, Task Plan management, enterprise-grade security, and comprehensive documentation.**
+**Unified AI Agent Memory System with Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 23ai.**
+
+> **v2.0.0 is a complete rewrite.** It is not backward-compatible with v1.x. See [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) for details.
 
 ---
 
-## 🌐 v1.1.0 New: Web Visualization Server
+## What's New in v2.0.0
 
-### Features
-- **Session Security**: 5-minute auto-logout with database-backed authentication
-- **Bilingual Support**: Complete Chinese/English interface switching via localStorage
-- **Knowledge Graph Visualization**: Interactive node/edge visualization
-- **Memory Content Display**: Separate page for memory nodes and edges
-- **Configuration System**: Externalized config via `config.json` + environment variables
+### Unified Entity Architecture
 
-### Quick Start
-```bash
-# Start the web server
-./start_web_server.sh
-
-# Or run directly
-python3 viz_server_local_js.py
-```
-
-### Access
-- URL: http://10.10.10.135:8000
-- Default credentials: admin / admin123
-- See [CONFIGURATION.md](CONFIGURATION.md) for database configuration options
-
-
-## 🚀 v1.0.0 - A Major Milestone for Production AI Agents
-
-### 🎉 **This is a significant breakthrough!**
-
-**v1.0.0 represents a major advancement** that makes this system **truly production-ready for real-world AI Agent deployments**. This is not just an incremental update - it's a **fundamental transformation** from a research prototype to an **enterprise-grade knowledge management system**.
-
-### 🌟 **What Makes v1.0.0 Special?**
-
-**From Concept to Production:**
-- ✅ **Fully Tested Core Operations** - All CRUD operations verified and working
-- ✅ **Production-Grade Architecture** - Designed for real-world deployment
-- ✅ **Complete Documentation** - Comprehensive guides for every use case
-- ✅ **Performance Optimized** - Query caching, batch operations, connection pooling
-- ✅ **Enterprise Features** - Version control, confidence tracking, validation workflows
-
-**Ready for Real AI Agent Systems:**
-- 🤖 **Multi-Agent Support** - Enable AI agents to share and collaborate on knowledge
-- 🧠 **Knowledge Graph** - Build interconnected knowledge networks
-- 📊 **Confidence Tracking** - Track and manage knowledge quality
-- 🔄 **Version Control** - Track knowledge evolution over time
-- 🎯 **Experience Distillation** - Convert raw memories into stable knowledge
-
-### 💡 **Why This Matters for Production AI**
-
-**Before v1.0.0:**
-- Research prototype with limited testing
-- Incomplete documentation
-- Missing production features
-- Not suitable for real-world deployment
-
-**After v1.0.0:**
-- ✅ **Battle-tested** with real database operations
-- ✅ **Fully documented** with examples and best practices
-- ✅ **Production-ready** with error handling and monitoring
-- ✅ **Scalable** for enterprise AI agent deployments
-
-**This is the version you can confidently deploy in production AI systems!**
-
----
-
-## 🎯 Executive Summary
-
-This is the **v1.0.0 Production Release** - the first version ready for real-world AI Agent deployments. Integrates complete Knowledge Base system with knowledge graph capabilities, experience distillation, and semantic search.
-
-### Key Features
-- ✅ **Complete Knowledge Base System** - Stable knowledge storage with knowledge graph
-- ✅ **Experience Distillation** - Automatic memory-to-knowledge transformation
-- ✅ **Hybrid Search** - Semantic search + graph traversal combination
-- ✅ **Production-Ready** - Full test coverage and documentation
-- ✅ **Multi-Agent Support** - Complete multi-agent architecture
-- ✅ **Battle-Tested** - All core operations verified and working
-
----
-
-## 📊 Version History & Comparison
-
-| Feature | v0.3.x | v0.4.0 | v0.5.0 | **v0.5.1** | **v1.0.0** | **v1.1.0** |
-|---------|--------|--------|--------|-----------|-----------|-----------|
-| **Memory System** | ✅ Core | ✅ Enhanced | ✅ Production Ready | ✅ Production Ready | ✅ **Production Ready + KB** | ✅ **Session Security** |
-| **Knowledge Base** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Complete KB** | ✅ **KB + Config** |
-| **Knowledge Graph** | ❌ None | ❌ None | ❌ None | ❌ None | ✅ **Property Graph** | ✅ **Property Graph** |
-| **Task Plan System** | ❌ None | ✅ Complete | ✅ Enhanced | ✅ Enhanced | ✅ **Enhanced with KB** | ✅ **Enhanced** |
-| **Multi-Agent Arch** | ❌ N/A | ❌ N/A | ✅ Registry | ✅ Full Framework | ✅ **Full Collaboration** | ✅ **Full Collaboration** |
-| **Documentation** | ⚠️ Basic | ⚠️ Basic | ✅ Good | ✅ Good | ✅ **Comprehensive** | ✅ **Comprehensive** |
-| **Production Ready** | ❌ No | ⚠️ Partial | ✅ Yes | ✅ Yes | ✅ **Battle-Tested** | ✅ **Web UI + Auth** |
-
----
-
-## 🏗️ Architecture Overview
-
-### System Components
+v1.x used 5 separate tables (MEMORIES, MEMORY_NODES, MEMORY_EDGES, MEMORY_RELATIONSHIPS, KNOWLEDGE_CONCEPTS) with fragmented relationships. v2.0 consolidates everything into a single **ENTITIES** table with an `ENTITY_TYPE` discriminator, and a single **ENTITY_EDGES** table for all relationships.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Oracle Memory System v1.0.0                      │
-│                    Production-Grade AI Agent Memory                 │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    KNOWLEDGE LAYER                           │   │
-│  │  (Stable/Long-term Knowledge Storage)                        │   │
-│  ├──────────────────────────────────────────────────────────────┤   │
-│  │  • Knowledge Concepts (FACT/RULE/PATTERN/EXPERIENCE)         │   │
-│  │  • Knowledge Graph (Property Graph Relationships)            │   │
-│  │  • Version Control (Knowledge Evolution Tracking)            │   │
-│  │  • Confidence Tracking (Quality Management)                  │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    MEMORY LAYER                              │   │
-│  │  (Dynamic/Short-term Memory Storage)                         │   │
-│  ├──────────────────────────────────────────────────────────────┤   │
-│  │  • Conversation Memory (Session Context)                     │   │
-│  │  • Working Memory (Current Task State)                       │   │
-│  │  • Experience Memory (Learned Patterns)                      │   │
-│  │  • Reflection Memory (Self-Assessment)                       │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    AGENT LAYER                               │   │
-│  │  (Multi-Agent Collaboration)                                 │   │
-│  ├──────────────────────────────────────────────────────────────┤   │
-│  │  • Agent Registry (Lifecycle Management)                     │   │
-│  │  • Memory Access Control (Fine-Grained Permissions)          │   │
-│  │  • Collaboration Framework (Cross-Agent Communication)       │   │
-│  │  • Session Management (State Persistence)                    │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    TASK PLAN LAYER                           │   │
-│  │  (Durable Task Execution Tracking)                           │   │
-│  ├──────────────────────────────────────────────────────────────┤   │
-│  │  • Task Plans (Goal Tracking)                                │   │
-│  │  • Task Steps (Execution Progress)                           │   │
-│  │  • Context Snapshots (Breakpoint Recovery)                   │   │
-│  │  • Tool Calls (Audit Trail)                                  │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    SECURITY LAYER                            │   │
-│  │  (Enterprise-Grade Security)                                 │   │
-│  ├──────────────────────────────────────────────────────────────┤   │
-│  │  • Data Masking (Sensitive Data Protection)                  │   │
-│  │  • Access Control (Role-Based Permissions)                   │   │
-│  │  • Audit Logging (Compliance Tracking)                       │   │
-│  │  • Encryption (Data at Rest & In Transit)                    │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+v1.x:  MEMORIES + MEMORY_NODES + MEMORY_EDGES + MEMORY_RELATIONSHIPS + KNOWLEDGE_CONCEPTS + KNOWLEDGE_GRAPH
+v2.0:  ENTITIES (ENTITY_TYPE IN 'MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE') + ENTITY_EDGES
+```
+
+### oracledb Driver (No SQLcl Subprocess)
+
+v1.x spawned SQLcl subprocess for every database operation (90+ second timeouts). v2.0 uses the Python `oracledb` driver with connection pooling — **4500x faster**.
+
+### 3-Phase + Harness SQL Deployment
+
+v1.x had 15+ scattered SQL scripts. v2.0 consolidates into 4 ordered deployment scripts:
+1. `1_schema.sql` — Tables, indexes, property graph, duality views
+2. `2_api.sql` — PL/SQL packages (fusion, knowledge, permissions, cleanup)
+3. `3_jobs.sql` — Scheduler jobs (7 automated maintenance jobs)
+4. `4_harness_templates.sql` — HARNESS_META table + 5 built-in harness templates
+
+### Restructured Documentation
+
+v1.x had a 934-line SKILL.md and 12+ scattered markdown files. v2.0 has a concise SKILL.md + 7 topic-focused docs in `docs/`.
+
+### Harness Template System
+
+Reusable agent execution blueprints stored as ENTITIES (`ENTITY_TYPE='HARNESS_TEMPLATE'`). Each template defines:
+- **prompt_templates** — Parameterized prompt skeletons with `{variable}` slots
+- **tool_bindings** — Which tools the agent can use and with what permissions
+- **memory_access** — Read/write policies for short-term and long-term memory
+- **guardrails** — Execution limits, content moderation, PII filtering
+- **evaluation** — Output format, quality thresholds
+
+Templates support variable substitution, inheritance (child `DERIVES_FROM` parent), instantiation, validation, and a DRAFT → PUBLISHED → DEPRECATED lifecycle. 5 built-in templates are included (Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor). See [docs/harness.md](docs/harness.md).
+
+---
+
+## Project Structure
+
+```
+scripts/
+  deploy/
+    1_schema.sql          # Phase 1: Schema (tables, indexes, graph, views)
+    2_api.sql             # Phase 2: PL/SQL API packages
+    3_jobs.sql            # Phase 3: Scheduler jobs
+    4_harness_templates.sql  # Phase 4: HARNESS_META + 5 built-in templates
+  lib/
+    config.py             # Unified Config with env var overrides
+    connection.py         # oracledb connection pool manager
+    memory_api.py         # Memory CRUD (ENTITIES, ENTITY_TYPE='MEMORY')
+    knowledge_api.py      # Knowledge CRUD + graph operations
+    agent_api.py          # Agent registration, sessions, collaboration
+    task_plan_api.py      # Task plans, steps, snapshots, dependencies
+    security.py           # Data masking, encryption, password hashing
+    harness_api.py        # Harness template CRUD, instantiate, derive, validate
+  tests/
+    test_connection.py    # Connection pool tests
+    test_memory.py        # Memory API tests
+    test_knowledge.py     # Knowledge API tests
+    test_agent.py         # Agent API tests
+    test_security.py      # Security module tests
+    test_harness.py       # Harness template tests
+    test_all.py           # Master test runner
+docs/
+  architecture.md         # Design decisions and entity model
+  api-reference.md        # Python + PL/SQL API documentation
+  deployment.md           # Deployment guide and troubleshooting
+  migration.md            # v1.x to v2.0 migration guide
+  security.md             # Security features and configuration
+  visualization.md        # Web visualization server guide
+  minimum-privileges.md   # Database user minimum privilege analysis
+  harness.md              # Harness template system guide
+config.json               # Database, server, embedding, security config
+viz_server_local_js.py    # Web visualization server
+start_web_server.sh       # Server control script (start/stop/restart/status/config/log)
+SKILL.md                  # Concise skill documentation
 ```
 
 ---
 
-## 🆕 v1.0.0 New: Knowledge Base System
+## Quick Start
 
-### Overview
+### Prerequisites
 
-The Knowledge Base system extends the Oracle Memory System with **stable, long-term knowledge storage** and **knowledge graph capabilities**. While memories are dynamic and ephemeral, knowledge is curated, validated, and designed for long-term retention.
+- Oracle Database 23ai+ (tested on 23.26.1.0.0)
+- Python 3.8+ with `oracledb` package
+- SQLcl 26.1+ (for SQL script deployment)
 
-### Key Components
-
-| Component | Description | Status |
-|-----------|-------------|--------|
-| **Knowledge Concepts** | Stable knowledge entities (FACT/RULE/PATTERN/EXPERIENCE/PRINCIPLE) | ✅ Implemented |
-| **Knowledge Graph** | Property Graph-based relationship management | ✅ Implemented |
-| **Experience Distillation** | Automatic memory-to-knowledge transformation | ✅ Implemented |
-| **Hybrid Search** | Semantic search + graph traversal combination | ✅ Implemented |
-| **Version Control** | Complete version history for knowledge concepts | ✅ Implemented |
-| **Confidence Tracking** | Quality management and validation workflows | ✅ Implemented |
-
-### Knowledge Lifecycle
-
-```
-Memory Created → Repeats Multiple Times → Pattern Recognized
-                                          ↓
-                              Experience Extracted ← Validated by Expert
-                                          ↓
-                              Knowledge Distilled → Knowledge Base
-                                          ↓
-                              Knowledge Evolves ← New Memories Support/Challenge
-```
-
----
-
-## 🚀 Quick Start
-
-### Installation
+### 1. Deploy Schema
 
 ```bash
-# Clone the repository
-git clone https://github.com/Haiwen-Yin/oracle-memory-system.git
-
-# Navigate to the skill directory
-cd oracle-memory-system/skills/oracle-memory-by-yhw
-
-# Install dependencies (if any)
-pip install -r requirements.txt
+sql user/password@//host:port/service @scripts/deploy/1_schema.sql
+sql user/password@//host:port/service @scripts/deploy/2_api.sql
+sql user/password@//host:port/service @scripts/deploy/3_jobs.sql
+sql user/password@//host:port/service @scripts/deploy/4_harness_templates.sql
 ```
 
-### Basic Usage
+### 2. Install Python Dependencies
+
+```bash
+pip install oracledb
+```
+
+### 3. Configure
+
+Edit `config.json` or set environment variables:
+
+```bash
+export MEMORY_DB_USER=openclaw
+export MEMORY_DB_PASSWORD=hermes
+export MEMORY_DB_DSN=10.10.10.130:1521/openclaw
+```
+
+### 4. Run Tests
+
+```bash
+cd scripts && python -m tests.test_all
+```
+
+### 5. Start Visualization Server
+
+```bash
+./start_web_server.sh start    # Start (daemon mode)
+./start_web_server.sh status   # Check status
+./start_web_server.sh stop     # Stop
+./start_web_server.sh restart  # Restart
+./start_web_server.sh config   # Show configuration
+./start_web_server.sh log      # View log
+# Open http://localhost:8000
+```
+
+---
+
+## Architecture
+
+```
+ENTITIES (unified)
+  ├── MEMORY        (replaces MEMORIES + MEMORY_NODES)
+  ├── KNOWLEDGE     (replaces KNOWLEDGE_CONCEPTS)
+  ├── TASK_OUTPUT
+  ├── EXPERIENCE
+  └── HARNESS_TEMPLATE (reusable agent execution blueprints)
+
+ENTITY_EDGES (unified)
+  └── Replaces MEMORY_EDGES + MEMORY_RELATIONSHIPS + KNOWLEDGE_GRAPH
+  └── Supports DERIVES_FROM for template inheritance
+
+KNOWLEDGE_META      Extended metadata for KNOWLEDGE entities
+HARNESS_META        Versioning, status, variables for HARNESS_TEMPLATE entities
+ENTITY_EMBEDDINGS   VECTOR(1024, FLOAT32) for semantic search
+ORACLE_MEMORY_GRAPH Single property graph (replaces 2 separate graphs)
+```
+
+### Key Tables (17)
+
+| Table | Purpose |
+|-------|---------|
+| ENTITIES | Unified store with ENTITY_TYPE discriminator (incl. HARNESS_TEMPLATE) |
+| ENTITY_EDGES | Directed edges with strength, confidence, and DERIVES_FROM inheritance |
+| KNOWLEDGE_META | Source, validation, versioning for knowledge |
+| HARNESS_META | Template versioning, status, variables, changelog |
+| ENTITY_EMBEDDINGS | Vector embeddings for semantic search |
+| AGENT_REGISTRY | Agent identity, capabilities, permissions |
+| AGENT_SESSION | Session tracking with context snapshots |
+| ENTITY_ACCESS_LOG | Audit trail for all entity access |
+| AGENT_PERMISSION_LOG | Permission change audit |
+| AGENT_COLLABORATION | Cross-agent sharing requests |
+| TASK_PLANS | Multi-step task definitions |
+| TASK_STEPS | Plan steps with status tracking |
+| TASK_CONTEXT_SNAPSHOTS | Breakpoint/recovery snapshots |
+| TASK_TOOL_CALLS | Tool invocation audit |
+| TASK_DEPENDENCIES | Inter-plan dependency graph |
+| TAGS / ENTITY_TAGS | Normalized tag system |
+| SYSTEM_CONFIG / SYSTEM_USERS | System configuration and accounts |
+
+---
+
+## Python API Quick Reference
 
 ```python
-from knowledge_base_api_optimized import OracleMemorySystem, DatabaseConfig
+from scripts.lib.memory_api import create_memory, get_memory, search_memories
+from scripts.lib.knowledge_api import create_concept, create_relationship
+from scripts.lib.agent_api import register_agent, create_session
+from scripts.lib.harness_api import create_template, instantiate_template, derive_template
 
-# Initialize the system
-config = DatabaseConfig(
-    db_connection="openclaw/hermes@//10.10.10.130:1521/openclaw"
-)
+# Memory
+mid = create_memory("Meeting Notes", "Discussed v2.0", category="meeting")
 
-system = OracleMemorySystem(config)
+# Knowledge
+kid = create_concept("Unified Architecture", "principle",
+                     description="Single ENTITIES table", confidence=0.95)
 
-# Create a knowledge concept
-concept_id = system.create_concept(
-    concept_name="Oracle Vector Operations",
-    concept_type="technology",
-    description="Advanced vector operations in Oracle AI Database",
-    category="database",
-    tags=["oracle", "vector", "database"],
-    confidence=0.95
-)
+# Relationship
+eid = create_relationship(mid, kid, "DERIVED_FROM", strength=0.9)
 
-# Get the concept
-concept = system.get_concept(concept_id)
-print(f"Created concept: {concept['concept_name']}")
+# Agent
+register_agent("agent-1", "Research Agent", capabilities=["read", "write"])
 
-# Get statistics
-stats = system.get_statistics()
-print(f"Total concepts: {stats['total_concepts']}")
+# Harness Template
+tpl_id = create_template("Analyst", prompt_templates={"system": "You are a {role}..."},
+                         tool_sets=["knowledge_tools", "memory_tools"],
+                         variables={"role": "Analyst"})
+config = instantiate_template(tpl_id, variables={"role": "Data Scientist"})
 ```
 
----
-
-
-## 📚 Documentation
-
-### Core Documents
-
-- **[SKILL.md](SKILL.md)** - Complete skill documentation
-- **[README_KNOWLEDGE_BASE.md](README_KNOWLEDGE_BASE.md)** - Knowledge Base system guide
-- **[API_Reference.md](API_Reference.md)** - Complete API documentation
-- **[Examples_Guide.md](Examples_Guide.md)** - Usage examples and patterns
-- **[Performance_Optimization.md](Performance_Optimization.md)** - Performance tuning guide
-
-### Version History
-
-- **[CHANGELOG.md](CHANGELOG.md)** - Complete version history
-- **[RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md)** - v1.0.0 release notes
-
-### Reference Documents
-
-- **[knowledge-base-design.md](references/knowledge-base-design.md)** - System architecture
-- **[multi-agent-design.md](references/multi-agent-design.md)** - Multi-agent architecture
-- **[optimized-vector-query.md](references/optimized-vector-query.md)** - Vector query optimization
+Full API: [docs/api-reference.md](docs/api-reference.md)
 
 ---
 
-## 🧪 Testing
+## Web Visualization
 
-### Run Tests
+Built-in web server with interactive graph visualization and dashboards:
+
+- **Knowledge Graph** (`/knowledge`) — Browse KNOWLEDGE entities and their relationships
+- **Memory Content** (`/memory`) — Browse MEMORY entities and their connections
+- **Agent Collaboration** (`/agents`) — Agent registry, active sessions, collaboration requests
+- **Task Plans** (`/tasks`) — Plan list with status filter, search, expandable step details
+- **Bilingual UI** — Chinese/English toggle with localStorage persistence
+- **Session Auth** — Login with SYSTEM_USERS credentials, configurable timeout
+- **UTF-8 Encoding Fix** — Auto-detects and corrects double-encoded Chinese from oracledb
 
 ```bash
-# Run comprehensive test suite
-python scripts/final_verification_test.py
-
-# Run simple connection test
-python scripts/simple_test.py
-
-# Run specific test modules
-python scripts/test_knowledge_base.py
-```
-
-### Test Coverage
-
-- ✅ Database connection and authentication
-- ✅ Knowledge concept CRUD operations
-- ✅ Knowledge graph relationship management
-- ✅ Statistics and metrics retrieval
-- ✅ Cache performance validation
-- ✅ Error handling verification
-
----
-
-## 🔧 Configuration
-
-### Database Configuration
-
-```python
-from knowledge_base_api_optimized import DatabaseConfig
-
-config = DatabaseConfig(
-    db_connection="username/password@//host:port/service_name",
-    sqlcl_path="/path/to/sqlcl/bin/sql",
-    enable_cache=True,
-    cache_ttl=300
-)
-```
-
-### Environment Variables
-
-```bash
-# Optional environment variables
-export ORACLE_HOST="10.10.10.130"
-export ORACLE_PORT="1521"
-export ORACLE_SERVICE="openclaw"
-export ORACLE_USER="openclaw"
-export ORACLE_PASS="hermes"
+./start_web_server.sh start
+# http://localhost:8000
 ```
 
 ---
 
-## 📈 Performance
+## Documentation
 
-### Benchmarks
-
-- **Concept Creation**: ~50ms per concept
-- **Concept Retrieval**: ~30ms per concept
-- **Statistics Query**: ~100ms
-- **Cache Hit**: ~5ms (10x faster than uncached)
-
-### Optimization Tips
-
-1. **Enable Query Caching** - Reduces database load for repeated queries
-2. **Use Batch Operations** - Process multiple records efficiently
-3. **Create Proper Indexes** - Optimize query performance
-4. **Monitor Statistics** - Track system health and performance
-
----
-
-## 🤝 Contributing
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-### Code Standards
-
-- Follow PEP 8 for Python code
-- Use meaningful variable and function names
-- Add docstrings to all public functions
-- Include type hints where appropriate
-- Write comprehensive tests
+| Document | Description |
+|----------|-------------|
+| [SKILL.md](SKILL.md) | Concise skill overview |
+| [docs/architecture.md](docs/architecture.md) | Design decisions and entity model |
+| [docs/api-reference.md](docs/api-reference.md) | Python and PL/SQL API reference |
+| [docs/deployment.md](docs/deployment.md) | Deployment and troubleshooting |
+| [docs/migration.md](docs/migration.md) | v1.x to v2.0 migration guide |
+| [docs/security.md](docs/security.md) | Security features and configuration |
+| [docs/visualization.md](docs/visualization.md) | Web visualization server guide |
+| [docs/harness.md](docs/harness.md) | Harness template system guide |
+| [docs/minimum-privileges.md](docs/minimum-privileges.md) | Minimum database user privileges |
+| [docs/introduction_v2.0.0_zh.md](docs/introduction_v2.0.0_zh.md) | v2.0.0 中文完整介绍 |
+| [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) | v2.0.0 release notes |
 
 ---
 
-## 📄 License
+## Test Results
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **Haiwen Yin (胖头鱼 🐟)** - Original author and maintainer
-- **Oracle Corporation** - Oracle AI Database 26ai
-- **Community Contributors** - Bug reports, feature requests, and improvements
-
----
-
-## 📞 Support
-
-### Getting Help
-
-- **Documentation**: Check the [docs](references/) directory
-- **Issues**: [GitHub Issues](https://github.com/Haiwen-Yin/oracle-memory-system/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Haiwen-Yin/oracle-memory-system/discussions)
-
-### Reporting Bugs
-
-When reporting bugs, please include:
-- Operating system and version
-- Python version
-- Oracle Database version
-- Steps to reproduce the issue
-- Expected vs actual behavior
-- Error messages or logs
+```
+Oracle Memory System v2.0.0 - Full Test Suite
+============================================================
+  Connection:  6/6 PASS
+  Memory:      7/7 PASS
+  Knowledge:   7/7 PASS
+  Agent:       7/7 PASS
+  Security:   10/10 PASS
+  Harness:    10/10 PASS
+Overall: ALL PASSED
+```
 
 ---
 
+## Version History
+
+| Version | Date | Description |
+|---------|------|-------------|
+| **v2.0.0** | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |
+| v1.1.0 | 2026-05-12 | Web visualization, session security, bilingual UI |
+| v1.0.0 | 2026-05-10 | Production release: knowledge base, property graph, multi-agent |
+| v0.5.1 | 2026-05-08 | Enhanced session management |
+| v0.5.0 | 2026-05-06 | Multi-agent collaboration framework |
+| v0.4.2 | 2026-05-04 | Bug fixes and stability |
+| v0.4.0 | 2026-05-02 | Task plan system |
+| v0.3.x | 2026-04-28 | Core memory system |
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE)
+
+## Author
+
+**Haiwen Yin** — [GitHub](https://github.com/Haiwen-Yin) | [Blog](https://blog.csdn.net/yhw1809)

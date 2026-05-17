@@ -4,7 +4,7 @@
 # Usage: bash verify_schema.sh
 # Purpose: Verify actual database schema before writing Python API code
 
-SQLCL="/root/sqlcl/sqlcl/bin/sql"
+SQLCL="/root/sqlcl/bin/sql"
 DB="openclaw/hermes@//10.10.10.130:1521/openclaw"
 
 echo "=========================================="

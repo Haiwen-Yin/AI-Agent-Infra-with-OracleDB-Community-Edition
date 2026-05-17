@@ -263,7 +263,7 @@ python3 auth_db_working.py change-password admin <old> <new>
 
 **Diagnosis**:
 ```bash
-/root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw << 'EOF'
+/root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw << 'EOF'
 SELECT COUNT(*) as concepts FROM KNOWLEDGE_CONCEPTS;
 SELECT COUNT(*) as relationships FROM KNOWLEDGE_GRAPH;
 EXIT;

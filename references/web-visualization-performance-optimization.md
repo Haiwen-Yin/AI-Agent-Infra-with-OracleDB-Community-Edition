@@ -16,7 +16,7 @@ Initial implementation using SQLcl subprocess calls caused severe performance is
 # ❌ BAD - Slow and unreliable
 import subprocess
 sql = "SELECT NODE_ID, NODE_TYPE, LABEL FROM MEMORY_NODES"
-cmd = f"echo '{sql}' | /root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw"
+cmd = f"echo '{sql}' | /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw"
 result = subprocess.run(['bash', '-c', cmd], capture_output=True, timeout=90)
 ```
 

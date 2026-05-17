@@ -190,7 +190,7 @@ SELECT NODE_ID, NODE_TYPE, LABEL FROM MEMORY_NODES
 **Solution**: Always verify schema with `DESCRIBE` before coding:
 
 ```bash
-echo "DESCRIBE MEMORY_NODES" | /root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
+echo "DESCRIBE MEMORY_NODES" | /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
 ```
 
 ### Issue 3: Background Server Management
@@ -394,7 +394,7 @@ python3 viz_server_simple.py
 
 **Check database**:
 ```bash
-echo "SELECT COUNT(*) FROM MEMORY_NODES" | /root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
+echo "SELECT COUNT(*) FROM MEMORY_NODES" | /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
 ```
 
 **Solutions**:

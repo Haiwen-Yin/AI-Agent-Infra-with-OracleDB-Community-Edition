@@ -74,11 +74,11 @@ END;
 
 ## 陷阱 4: SQLcl 执行 SQL 文件的正确方式
 
-SQLcl 路径: `/root/sqlcl/sqlcl/bin/sql` (双层目录!)
+SQLcl 路径: `/root/sqlcl/bin/sql`
 
 ```bash
 # 正确方式
-echo "SQL" | /root/sqlcl/sqlcl/bin/sql user/pass@conn @/full/path/to/file.sql
+echo "SQL" | /root/sqlcl/bin/sql user/pass@conn @/full/path/to/file.sql
 ```
 
 **注意**: SQLcl 不能用 `-c` 参数执行 SQL，必须用 `echo "SQL" | sql` 格式

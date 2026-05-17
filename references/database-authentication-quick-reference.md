@@ -180,7 +180,7 @@ python3 auth_db_working.py change-password admin <old> <new>
 
 **Solution**: Deploy schema:
 ```bash
-/root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @security/auth_schema.sql
+/root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @security/auth_schema.sql
 ```
 
 ## Security Best Practices

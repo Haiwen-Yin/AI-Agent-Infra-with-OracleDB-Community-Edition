@@ -42,7 +42,7 @@ Knowledge graph visualization module implemented for oracle-memory-by-yhw skill 
 
 ### Database Connection
 
-- **SQLcl Path**: `/root/sqlcl/sqlcl/bin/sql`
+- **SQLcl Path**: `/root/sqlcl/bin/sql`
 - **Connection**: `openclaw/hermes@//10.10.10.130:1521/openclaw`
 - **Tables Used**: `KNOWLEDGE_CONCEPTS`, `KNOWLEDGE_GRAPH`
 
@@ -217,7 +217,7 @@ pip3 install networkx pyvis
 **Check**:
 ```bash
 echo "SELECT COUNT(*) FROM KNOWLEDGE_CONCEPTS" | \
-    /root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
+    /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw
 ```
 
 ---

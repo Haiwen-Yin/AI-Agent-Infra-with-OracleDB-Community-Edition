@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""
-Oracle Memory System - Complete Web Visualization Server
-Author: Haiwen (胖头鱼 🐟) | Version: v1.1.0
-Features: Login auth, bilingual, graph/memory pages, language toggle, node details
+"""Oracle Memory System v2.0.0 - Web Visualization Server
+Author: Haiwen Yin
+Features: Login auth, bilingual, entity graph, node/edge details, auto-logout, DB stats
 """
 
 import json
@@ -10,146 +9,84 @@ import http.server
 import socketserver
 import oracledb
 import threading
-import random
 import hashlib
 import time as time_module
 import os
-from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-# ============================================================================
-# Config - Load from config.json with environment variable overrides
-# ============================================================================
+oracledb.defaults.fetch_lobs = False
 
 def load_config():
-    """Load configuration from config.json with environment variable overrides"""
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
-    
-    # Default config
     config = {
-        "server": {"host": "0.0.0.0", "port": 8000},
-        "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/openclaw"},
-        "session": {"timeout": 300}
+        "server": {"host": "0.0.0.0", "port": 8000, "session_timeout": 300},
+        "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/openclaw",
+                     "pool_min": 2, "pool_max": 5, "pool_increment": 1},
     }
-    
-    # Load from file if exists
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r') as f:
-                file_config = json.load(f)
-                config.update(file_config)
+                fc = json.load(f)
+                for s in config:
+                    if s in fc:
+                        config[s].update(fc[s])
         except Exception as e:
-            print(f'Warning: Failed to load config.json: {e}')
-    
-    # Environment variable overrides
-    if os.environ.get('MEMORY_DB_USER'):
-        config['database']['user'] = os.environ['MEMORY_DB_USER']
-    if os.environ.get('MEMORY_DB_PASSWORD'):
-        config['database']['password'] = os.environ['MEMORY_DB_PASSWORD']
-    if os.environ.get('MEMORY_DB_DSN'):
-        config['database']['dsn'] = os.environ['MEMORY_DB_DSN']
-    if os.environ.get('MEMORY_SERVER_PORT'):
-        config['server']['port'] = int(os.environ['MEMORY_SERVER_PORT'])
-    if os.environ.get('MEMORY_SERVER_HOST'):
-        config['server']['host'] = os.environ['MEMORY_SERVER_HOST']
-    if os.environ.get('MEMORY_SESSION_TIMEOUT'):
-        config['session']['timeout'] = int(os.environ['MEMORY_SESSION_TIMEOUT'])
-    
+            print(f'Config load warning: {e}')
+    env_map = {
+        'MEMORY_DB_USER': ('database', 'user'), 'MEMORY_DB_PASSWORD': ('database', 'password'),
+        'MEMORY_DB_DSN': ('database', 'dsn'), 'MEMORY_SERVER_PORT': ('server', 'port'),
+        'MEMORY_SERVER_HOST': ('server', 'host'), 'MEMORY_SESSION_TIMEOUT': ('server', 'session_timeout'),
+    }
+    for ek, (sec, key) in env_map.items():
+        v = os.environ.get(ek)
+        if v:
+            config[sec][key] = int(v) if key in ('port', 'session_timeout') else v
     return config
 
-# Load configuration
-_config = load_config()
-
-# Extract values for easy access
-PORT = _config['server']['port']
-HOST = _config['server']['host']
-DB_USER = _config['database']['user']
-DB_PASSWORD = _config['database']['password']
-DB_DSN = _config['database']['dsn']
-_SESSION_TIMEOUT = _config['session']['timeout']
-
-# ============================================================================
-# Session Management & Authentication
-# ============================================================================
+_cfg = load_config()
+HOST = _cfg['server']['host']
+PORT = _cfg['server']['port']
+DB_USER = _cfg['database']['user']
+DB_PASS = _cfg['database']['password']
+DB_DSN = _cfg['database']['dsn']
+SESS_TTL = _cfg['server']['session_timeout']
 
 _sessions = {}
-
-def generate_session_token():
-    return hashlib.sha256(str(random.random()).encode()).hexdigest()[:32]
+_slock = threading.Lock()
 
 def create_session(username):
-    token = generate_session_token()
-    _sessions[token] = {'username': username, 'created': time_module.time()}
-    return token
+    tok = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
+    with _slock:
+        _sessions[tok] = {'username': username, 'created': time_module.time()}
+    return tok
 
-def validate_session(token):
-    if token not in _sessions:
-        return None
-    session = _sessions[token]
-    if time_module.time() - session['created'] > _SESSION_TIMEOUT:
-        del _sessions[token]
-        return None
-    return session['username']
+def validate_session(tok):
+    with _slock:
+        if tok not in _sessions:
+            return None
+        s = _sessions[tok]
+        if time_module.time() - s['created'] > SESS_TTL:
+            del _sessions[tok]
+            return None
+        return s['username']
 
 def authenticate(username, password):
-    """Authenticate user against database with PBKDF2 hashing"""
     conn = None
     try:
-        conn = oracledb.connect(user=DB_USER, password=DB_PASSWORD, dsn=DB_DSN)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT password_hash, salt, is_active, locked_until
-            FROM memory_system_users 
-            WHERE username = :1
-        ''', [username])
-        
-        row = cursor.fetchone()
-        if not row:
+        conn = oracledb.connect(user=DB_USER, password=DB_PASS, dsn=DB_DSN)
+        cur = conn.cursor()
+        cur.execute("SELECT password_hash, salt, status FROM SYSTEM_USERS WHERE username = :1", [username])
+        row = cur.fetchone()
+        if not row or row[2] != 'ACTIVE':
             return False
-        
-        stored_hash, salt_hex, is_active, locked_until = row
-        
-        # Check if account is locked
-        if locked_until:
-            from datetime import datetime
-            if datetime.now() < locked_until:
-                return False
-        
-        # Check if account is active
-        if not is_active:
-            return False
-        
-        # Verify password with PBKDF2
+        stored_hash, salt_hex = row[0], row[1]
         salt = bytes.fromhex(salt_hex)
-        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
-        
-        if password_hash.hex() == stored_hash:
-            # Reset login attempts and update last login
-            cursor.execute('''
-                UPDATE memory_system_users 
-                SET login_attempts = 0, last_login = SYSTIMESTAMP, locked_until = NULL
-                WHERE username = :1
-            ''', [username])
+        pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        if pw_hash.hex() == stored_hash:
+            cur.execute("UPDATE SYSTEM_USERS SET last_login = SYSTIMESTAMP WHERE username = :1", [username])
             conn.commit()
             return True
-        else:
-            # Increment login attempts
-            cursor.execute('''
-                UPDATE memory_system_users 
-                SET login_attempts = login_attempts + 1
-                WHERE username = :1
-            ''', [username])
-            
-            # Lock account after 5 failed attempts
-            cursor.execute('''
-                UPDATE memory_system_users 
-                SET locked_until = SYSTIMESTAMP + INTERVAL '15' MINUTE
-                WHERE username = :1 AND login_attempts >= 5
-            ''', [username])
-            conn.commit()
-            return False
-            
+        return False
     except Exception as e:
         print(f'Auth error: {e}')
         return False
@@ -157,751 +94,654 @@ def authenticate(username, password):
         if conn:
             conn.close()
 
-# ============================================================================
-# Login Page HTML (Bilingual)
-# ============================================================================
-
-LOGIN_HTML = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - Login</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .login-container {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
-            padding: 40px; border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            width: 100%; max-width: 400px;
-        }
-        h1 { color: white; text-align: center; margin-bottom: 30px; font-size: 24px; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; color: white; margin-bottom: 8px; font-weight: bold; }
-        input {
-            width: 100%; padding: 12px; border: none; border-radius: 8px;
-            font-size: 16px; background: rgba(255,255,255,0.9);
-        }
-        input:focus { outline: 2px solid #667eea; }
-        button {
-            width: 100%; padding: 14px; background: #667eea; color: white;
-            border: none; border-radius: 8px; font-size: 16px; font-weight: bold;
-            cursor: pointer; transition: background 0.3s;
-        }
-        button:hover { background: #5568d3; }
-        .error { color: #ff6b6b; text-align: center; margin-top: 15px; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <h1>🧠 Oracle Memory System</h1>
-        <form id="loginForm">
-            <div class="form-group">
-                <label>用户名 / Username</label>
-                <input type="text" name="username" required placeholder="admin">
-            </div>
-            <div class="form-group">
-                <label>密码 / Password</label>
-                <input type="password" name="password" required placeholder="••••••••">
-            </div>
-            <button type="submit">登录 / Login</button>
-        </form>
-        <div id="error" class="error"></div>
-    </div>
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const errorDiv = document.getElementById('error');
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: new URLSearchParams(formData)
-                });
-                if (response.ok) {
-                    window.location.href = '/knowledge';
-                } else {
-                    const data = await response.json();
-                    errorDiv.textContent = data.error || '登录失败 / Login failed';
-                }
-            } catch (error) {
-                errorDiv.textContent = '网络错误 / Network error';
-            }
-        });
-    </script>
-</body>
-</html>"""
-
-# ============================================================================
-# Graph/Memory Page HTML Template
-# ============================================================================
-
-def build_page_html(mode='graph'):
-    """Build the graph or memory page with all features"""
-    is_knowledge = mode in ('graph', 'knowledge')
-    mode_title = 'Knowledge Graph' if is_knowledge else 'Memory Content'
-    mode_chinese = '知识图谱' if is_knowledge else '记忆内容'
-    btn_graph_active = 'active' if mode == 'graph' else ''
-    btn_memory_active = 'active' if mode == 'memory' else ''
-
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oracle Memory System - {mode_title}</title>
-    <script src="vis-network.min.js"></script>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-        }}
-        .container {{ display: flex; height: 100vh; }}
-        .sidebar {{
-            width: 300px;
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            color: white;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-        }}
-        .sidebar h2 {{
-            margin-bottom: 20px;
-            font-size: 22px;
-            border-bottom: 2px solid rgba(255,255,255,0.3);
-            padding-bottom: 10px;
-        }}
-        .sidebar p {{ margin-bottom: 8px; font-size: 13px; line-height: 1.6; }}
-        .main-content {{ flex: 1; padding: 15px; }}
-        #graph-container {{
-            width: 100%; height: 100%;
-            background: rgba(255,255,255,0.95);
-            border-radius: 15px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        }}
-        .loading {{
-            display: flex; flex-direction: column; align-items: center;
-            justify-content: center; height: 100%; color: white;
-        }}
-        .spinner {{
-            width: 50px; height: 50px; border: 5px solid rgba(255,255,255,0.3);
-            border-top-color: white; border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-        .section-title {{
-            font-weight: bold; font-size: 14px; margin-top: 15px; margin-bottom: 8px;
-            border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px;
-        }}
-        .nav-buttons {{ display: flex; gap: 8px; margin-bottom: 10px; }}
-        .nav-btn {{
-            flex: 1; padding: 8px; background: rgba(255,255,255,0.2);
-            color: white; border: none; border-radius: 5px; cursor: pointer;
-            font-size: 13px; text-align: center; transition: background 0.2s;
-        }}
-        .nav-btn:hover {{ background: rgba(255,255,255,0.35); }}
-        .nav-btn.active {{ background: rgba(255,255,255,0.5); font-weight: bold; }}
-        .lang-buttons {{ display: flex; gap: 8px; }}
-        .lang-btn {{
-            flex: 1; padding: 6px; background: rgba(255,255,255,0.2);
-            color: white; border: none; border-radius: 5px; cursor: pointer;
-            font-size: 12px; text-align: center;
-        }}
-        .lang-btn.active {{ background: rgba(255,255,255,0.5); font-weight: bold; }}
-        .node-info {{
-            margin-top: 15px; padding: 12px;
-            background: rgba(255,255,255,0.15);
-            border-radius: 8px; display: none;
-        }}
-        .node-info.active {{ display: block; }}
-        .node-info h3 {{ margin-bottom: 8px; font-size: 14px; }}
-        .node-info p {{ font-size: 13px; margin-bottom: 4px; }}
-        .node-info label {{ font-weight: bold; }}
-        .logout-btn {{
-            margin-top: auto; padding: 10px;
-            background: rgba(255,0,0,0.3);
-            color: white; border: none; border-radius: 5px;
-            cursor: pointer; font-size: 13px;
-        }}
-        .logout-btn:hover {{ background: rgba(255,0,0,0.5); }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="sidebar">
-            <h2 id="sidebar-title"></h2>
-            <p><strong>Oracle Memory System</strong></p>
-
-            <div class="section-title" id="lbl-instructions"></div>
-            <p id="p-drag"></p>
-            <p id="p-scroll"></p>
-            <p id="p-click"></p>
-
-            <div class="section-title" id="lbl-pages"></div>
-            <div class="nav-buttons">
-                <button class="nav-btn" id="btn-graph"></button>
-                <button class="nav-btn" id="btn-memory"></button>
-            </div>
-
-            <div class="section-title" id="lbl-lang"></div>
-            <div class="lang-buttons">
-                <button class="lang-btn" id="btn-zh" onclick="toggleLang('zh')">中文</button>
-                <button class="lang-btn" id="btn-en" onclick="toggleLang('en')">English</button>
-            </div>
-
-            <div class="node-info" id="node-info">
-                <h3 id="lbl-details"></h3>
-                <p><label>ID:</label> <span id="node-id">-</span></p>
-                <p id="p-type"><label></label> <span id="node-type">-</span></p>
-                <p id="p-label"><label></label> <span id="node-label">-</span></p>
-            </div>
-
-            <button class="logout-btn" id="btn-logout"></button>
-        </div>
-        <div class="main-content">
-            <div id="loading" class="loading">
-                <div class="spinner"></div>
-                <p id="loading-text"></p>
-            </div>
-            <div id="graph-container" style="display:none;"></div>
-        </div>
-    </div>
-    <script>
-        // Pure Chinese / Pure English — no bilingual mixing
-        const i18n = {{
-            zh: {{
-                title_zh: '知识图谱', title_en: '记忆内容',
-                instructions: '操作指南',
-                drag: '拖拽：移动节点', scroll: '滚轮：缩放视图', click: '点击：查看详情',
-                graphBtn: '知识图谱', memoryBtn: '记忆内容',
-                pages: '页面切换',
-                details: '节点详情', type: '类型:', label: '名称:',
-                logout: '退出登录', loading: '正在加载数据...',
-                lang: '语言'
-            }},
-            en: {{
-                title_zh: 'Knowledge Graph', title_en: 'Memory Content',
-                instructions: 'Instructions',
-                drag: 'Drag: Move nodes', scroll: 'Scroll: Zoom', click: 'Click: View details',
-                graphBtn: 'Knowledge', memoryBtn: 'Memory',
-                pages: 'Pages',
-                details: 'Node Details', type: 'Type:', label: 'Label:',
-                logout: 'Logout', loading: 'Loading data...',
-                lang: 'Language'
-            }}
-        }};
-
-        const mode = '{mode}';
-        function getLang() {{ return localStorage.getItem('lang') || 'zh'; }}
-
-        function toggleLang(lang) {{
-            localStorage.setItem('lang', lang);
-            applyLang(lang);
-        }}
-
-        function applyLang(lang) {{
-            const t = i18n[lang];
-            document.getElementById('sidebar-title').textContent = '🧠 ' + (mode !== 'memory' ? t.title_zh : t.title_en);
-            document.getElementById('lbl-instructions').textContent = t.instructions;
-            document.getElementById('p-drag').textContent = t.drag;
-            document.getElementById('p-scroll').textContent = t.scroll;
-            document.getElementById('p-click').textContent = t.click;
-            document.getElementById('btn-graph').textContent = t.graphBtn;
-            document.getElementById('btn-memory').textContent = t.memoryBtn;
-            document.getElementById('lbl-pages').textContent = t.pages;
-            document.getElementById('lbl-details').textContent = t.details;
-            document.getElementById('p-type').querySelector('label').textContent = t.type;
-            document.getElementById('p-label').querySelector('label').textContent = t.label;
-            document.getElementById('btn-logout').textContent = t.logout;
-            document.getElementById('loading-text').textContent = t.loading;
-            document.getElementById('lbl-lang').textContent = t.lang;
-            // Highlight active language button
-            document.getElementById('btn-zh').className = 'lang-btn' + (lang === 'zh' ? ' active' : '');
-            document.getElementById('btn-en').className = 'lang-btn' + (lang === 'en' ? ' active' : '');
-            // Highlight active page button
-            document.getElementById('btn-graph').className = 'nav-btn' + (mode !== 'memory' ? ' active' : '');
-            document.getElementById('btn-memory').className = 'nav-btn' + (mode === 'memory' ? ' active' : '');
-            document.title = 'Oracle Memory System - ' + (mode !== 'memory' ? t.title_zh : t.title_en);
-        }}
-
-        // Set up nav button click handlers (preserve current language)
-        document.getElementById('btn-graph').onclick = function() {{ window.location.href = '/knowledge'; }};
-        document.getElementById('btn-memory').onclick = function() {{ window.location.href = '/memory'; }};
-        document.getElementById('btn-logout').onclick = function() {{ window.location.href = '/api/logout'; }};
-
-        // Apply saved language on page load
-        applyLang(getLang());
-
-        // Load data based on page type
-        const apiUrl = mode === 'memory' ? '/api/memory' : '/api/knowledge';
-        fetch(apiUrl)
-            .then(r => r.json())
-            .then(data => {{
-                const container = document.getElementById('graph-container');
-                const loading = document.getElementById('loading');
-
-                // Both pages show all nodes — no filtering
-
-                // Create vis-network
-                const nodes = new vis.DataSet(data.nodes);
-                const edges = new vis.DataSet(data.edges);
-
-                const network = new vis.Network(container, {{ nodes: nodes, edges: edges }}, {{
-                    physics: {{ enabled: true, stabilization: {{ iterations: 100 }} }},
-                    interaction: {{ hover: true }},
-                    nodes: {{ shape: 'dot', font: {{ color: '#000000', size: 12 }}, borderWidth: 2 }},
-                    edges: {{ width: 1.5, smooth: true, arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }} }}
-                }});
-
-                loading.style.display = 'none';
-                container.style.display = 'block';
-
-                // Click handler for node details
-                network.on('click', function(params) {{
-                    if (params.nodes.length > 0) {{
-                        const nodeId = params.nodes[0];
-                        const node = nodes.get(nodeId);
-                        document.getElementById('node-id').textContent = node.id;
-                        document.getElementById('node-type').textContent = node.group || 'unknown';
-                        document.getElementById('node-label').textContent = node.label;
-                        document.getElementById('node-info').classList.add('active');
-                    }}
-                }});
-            }})
-            .catch(error => {{
-                console.error('Error:', error);
-                document.getElementById('loading').innerHTML = '<p style="color:white">加载失败 / Load failed</p>';
-            }});
-    </script>
-</body>
-</html>"""
-
-# ============================================================================
-# Database Connection Pool
-# ============================================================================
-
 _pool = None
-_connection_lock = threading.Lock()
+_plock = threading.Lock()
 
-def init_connection_pool():
+def get_pool():
     global _pool
     if _pool is None:
-        with _connection_lock:
+        with _plock:
             if _pool is None:
-                print("🔌 Initializing database connection pool...")
                 _pool = oracledb.create_pool(
-                    user=DB_USER, password=DB_PASSWORD, dsn=DB_DSN,
-                    min=2, max=5, increment=1,
-                    getmode=oracledb.SPOOL_ATTRVAL_NOWAIT
-                )
-                print("✅ Connection pool created (min=2, max=5)")
+                    user=DB_USER, password=DB_PASS, dsn=DB_DSN,
+                    min=_cfg['database']['pool_min'], max=_cfg['database']['pool_max'],
+                    increment=_cfg['database']['pool_increment'],
+                    getmode=oracledb.SPOOL_ATTRVAL_NOWAIT)
+    return _pool
 
-def get_connection():
-    if _pool is None:
-        init_connection_pool()
-    return _pool.acquire()
+COLORS = {
+    'MEMORY': '#1abc9c', 'KNOWLEDGE': '#e74c3c', 'TASK_OUTPUT': '#9b59b6',
+    'EXPERIENCE': '#f39c12', 'FACT': '#3498db', 'RULE': '#2ecc71',
+    'PATTERN': '#9b59b6', 'PRINCIPLE': '#e67e22', 'ARCHITECTURE': '#8e44ad',
+    'TECHNOLOGY': '#27ae60', 'MEETING': '#16a085', 'SYSTEM': '#e67e22',
+    'TESTING': '#d35400', 'GENERAL': '#95a5a6',
+}
 
-def release_connection(conn):
-    if _pool:
-        _pool.release(conn)
+def ncolor(cat):
+    return COLORS.get((cat or '').upper(), '#95a5a6')
 
-# ============================================================================
-# Graph Data Cache (Knowledge & Memory separately)
-# ============================================================================
+_cache = {'knowledge': {'data': None, 'ts': 0}, 'memory': {'data': None, 'ts': 0}}
+_clock = threading.Lock()
+CACHE_TTL = 300
 
-_knowledge_cache = {'data': None, 'timestamp': None, 'ttl': 300}
-_memory_cache = {'data': None, 'timestamp': None, 'ttl': 300}
-_cache_lock = threading.Lock()
+def load_entity_data(entity_type):
+    ck = entity_type.lower()
+    with _clock:
+        now = time_module.time()
+        if _cache[ck]['data'] and now - _cache[ck]['ts'] < CACHE_TTL:
+            return _cache[ck]['data']
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT ENTITY_ID, NAME, CATEGORY, VISIBILITY, OWNED_BY_AGENT
+                       FROM ENTITIES WHERE ENTITY_TYPE = :t AND STATUS = 'ACTIVE' ORDER BY ENTITY_ID""", {'t': entity_type})
+        nodes = []
+        for r in cur.fetchall():
+            eid, name, cat, vis, owner = r
+            name, cat, owner = _fix_encoding(name), _fix_encoding(cat), _fix_encoding(owner)
+            nodes.append({'id': str(eid), 'label': (name or '')[:50], 'group': cat or entity_type,
+                          'color': ncolor(cat),
+                          'title': f"{cat or entity_type}: {name}\nOwner: {owner or 'SYSTEM'} | Vis: {vis}",
+                          'visibility': vis or 'SHARED', 'owner': owner or 'SYSTEM'})
+        cur.execute("""SELECT SOURCE_ID, TARGET_ID, EDGE_TYPE, STRENGTH, CONFIDENCE
+                       FROM ENTITY_EDGES WHERE SOURCE_ID IN (SELECT ENTITY_ID FROM ENTITIES WHERE ENTITY_TYPE=:t)
+                          OR TARGET_ID IN (SELECT ENTITY_ID FROM ENTITIES WHERE ENTITY_TYPE=:t) ORDER BY EDGE_ID""", {'t': entity_type})
+        edges = []
+        for r in cur.fetchall():
+            src, tgt, et, st, cf = r
+            et = _fix_encoding(et)
+            edges.append({'from': str(src), 'to': str(tgt), 'label': str(et) if et else '',
+                          'title': f"{et} (strength={st}, confidence={cf})",
+                          'arrows': 'to', 'width': max(1, min(5, (st or 1) * 2))})
+        data = {'nodes': nodes, 'edges': edges}
+        with _clock:
+            _cache[ck] = {'data': data, 'ts': now}
+        print(f"  Loaded {len(nodes)} {entity_type} nodes, {len(edges)} edges")
+        return data
+    except Exception as e:
+        print(f"  Error loading {entity_type}: {e}")
+        return {'nodes': [], 'edges': []}
+    finally:
+        pool.release(conn)
 
-def get_node_color(node_type):
-    if not node_type:
-        return '#95a5a6'
-    colors = {
-        'CONCEPT': '#e74c3c', 'ENTITY': '#3498db', 'RELATION': '#2ecc71',
-        'ATTRIBUTE': '#f39c12', 'TASK': '#9b59b6', 'MEMORY': '#1abc9c',
-        'QUERY': '#34495e', 'SYSTEM': '#e67e22', 'FEATURE': '#27aeae',
-        'KNOWLEDGEAREA': '#8e44ad',
-    }
-    return colors.get(node_type.upper(), '#95a5a6')
+def load_db_stats():
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT ENTITY_TYPE, COUNT(*) FROM ENTITIES WHERE STATUS='ACTIVE' GROUP BY ENTITY_TYPE")
+        stats = {_fix_encoding(r[0]): r[1] for r in cur.fetchall()}
+        cur.execute("SELECT COUNT(*) FROM ENTITY_EDGES")
+        stats['edges'] = cur.fetchone()[0]
+        return stats
+    except Exception:
+        return {}
+    finally:
+        pool.release(conn)
 
-def load_knowledge_data():
-    """Load knowledge graph from KNOWLEDGE_CONCEPTS table"""
-    with _cache_lock:
-        now = datetime.now().timestamp()
-        if (_knowledge_cache['data'] is not None and
-            _knowledge_cache['timestamp'] is not None and
-            now - _knowledge_cache['timestamp'] < _knowledge_cache['ttl']):
-            print("📦 Using cached knowledge data")
-            return _knowledge_cache['data']
+def _fix_encoding(v):
+    if not isinstance(v, str) or not v:
+        return v
+    has_latin1_range = any(0x80 <= ord(c) <= 0xFF for c in v)
+    has_cjk = any(ord(c) >= 0x4E00 for c in v)
+    if has_cjk or not has_latin1_range:
+        return v
+    try:
+        raw = bytes([ord(c) for c in v])
+        fixed = raw.decode('utf-8')
+        return fixed
+    except (UnicodeDecodeError, ValueError):
+        pass
+    try:
+        return v.encode('latin-1', errors='replace').decode('utf-8', errors='replace')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    return v
 
-        print("📊 Loading knowledge graph from KNOWLEDGE_CONCEPTS...")
-        conn = None
-        try:
-            conn = get_connection()
-            cursor = conn.cursor()
+def _sanitize_val(v):
+    from decimal import Decimal
+    from datetime import datetime, date
+    if isinstance(v, Decimal):
+        return int(v) if v == int(v) else float(v)
+    if isinstance(v, datetime):
+        return v.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(v, date):
+        return v.strftime('%Y-%m-%d')
+    return _fix_encoding(v)
 
-            # Load knowledge concepts
-            cursor.execute("""
-                SELECT CONCEPT_ID, CONCEPT_NAME, CONCEPT_TYPE 
-                FROM KNOWLEDGE_CONCEPTS 
-                ORDER BY CONCEPT_ID
-            """)
-            rows = cursor.fetchall()
+def _q(conn, sql, params=None):
+    cur = conn.cursor()
+    cur.execute(sql, params or {})
+    cols = [c[0].lower() for c in cur.description]
+    return [{c: _sanitize_val(v) for c, v in zip(cols, r)} for r in cur.fetchall()]
 
-            nodes = []
-            for row in rows:
-                cid, cname, ctype = row
-                nodes.append({
-                    'id': str(cid),
-                    'label': str(cname)[:50] if cname else '',
-                    'group': str(ctype) if ctype else 'CONCEPT',
-                    'color': get_node_color(str(ctype) if ctype else 'CONCEPT'),
-                    'title': f"{ctype}: {cname}" if cname else str(ctype)
-                })
+def load_agents_data():
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        agents = _q(conn, """SELECT a.AGENT_ID, a.AGENT_NAME, a.AGENT_TYPE, a.DESCRIPTION,
+                    a.STATUS, a.PERMISSION_LEVEL, a.CREATED_AT,
+                    (SELECT COUNT(*) FROM AGENT_SESSION s WHERE s.AGENT_ID=a.AGENT_ID AND s.IS_ACTIVE='Y') AS active_sessions,
+                    (SELECT COUNT(*) FROM ENTITY_ACCESS_LOG l WHERE l.AGENT_ID=a.AGENT_ID) AS access_count
+                    FROM AGENT_REGISTRY a ORDER BY a.CREATED_AT""")
+        sessions = _q(conn, """SELECT s.SESSION_ID, s.AGENT_ID, a.AGENT_NAME, s.IS_ACTIVE,
+                    TO_CHAR(s.START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
+                    TO_CHAR(s.LAST_ACTIVITY, 'YYYY-MM-DD HH24:MI:SS') AS LAST_ACTIVITY
+                    FROM AGENT_SESSION s LEFT JOIN AGENT_REGISTRY a ON a.AGENT_ID=s.AGENT_ID
+                    ORDER BY s.START_TIME DESC FETCH FIRST 50 ROWS ONLY""")
+        collabs = _q(conn, """SELECT c.COLLAB_ID, c.SHARING_AGENT, c.RECEIVING_AGENT,
+                    c.SHARE_REASON, c.STATUS,
+                    TO_CHAR(c.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                    sa.AGENT_NAME AS SHARER_NAME, ra.AGENT_NAME AS RECEIVER_NAME
+                    FROM AGENT_COLLABORATION c
+                    LEFT JOIN AGENT_REGISTRY sa ON sa.AGENT_ID=c.SHARING_AGENT
+                    LEFT JOIN AGENT_REGISTRY ra ON ra.AGENT_ID=c.RECEIVING_AGENT
+                    ORDER BY c.CREATED_AT DESC FETCH FIRST 50 ROWS ONLY""")
+        return {'agents': agents, 'sessions': sessions, 'collaborations': collabs}
+    except Exception as e:
+        print(f'  Error loading agents: {e}')
+        return {'agents': [], 'sessions': [], 'collaborations': []}
+    finally:
+        pool.release(conn)
 
-            print(f"   ✅ Loaded {len(nodes)} knowledge nodes")
+def load_tasks_data(status_filter=None, keyword=None):
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        conds = ['1=1']
+        params = {}
+        if status_filter and status_filter != 'ALL':
+            conds.append("p.STATUS = :st")
+            params['st'] = status_filter
+        if keyword:
+            conds.append("(UPPER(p.PLAN_NAME) LIKE UPPER(:kw) OR UPPER(p.DESCRIPTION) LIKE UPPER(:kw))")
+            params['kw'] = f'%{keyword}%'
+        where = ' AND '.join(conds)
+        plans = _q(conn, f"""SELECT p.PLAN_ID, p.PLAN_NAME, p.PLAN_TYPE, p.STATUS,
+                    p.DESCRIPTION, p.GOAL, p.PRIORITY,
+                    TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                    TO_CHAR(p.STARTED_AT, 'YYYY-MM-DD HH24:MI:SS') AS STARTED_AT,
+                    TO_CHAR(p.COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT,
+                    (SELECT COUNT(*) FROM TASK_STEPS s WHERE s.PLAN_ID=p.PLAN_ID) AS total_steps,
+                    (SELECT COUNT(*) FROM TASK_STEPS s WHERE s.PLAN_ID=p.PLAN_ID AND s.STATUS='SUCCESS') AS done_steps
+                    FROM TASK_PLANS p WHERE {where} ORDER BY p.CREATED_AT DESC FETCH FIRST 100 ROWS ONLY""", params)
+        plan_ids = [p['plan_id'] for p in plans]
+        steps = []
+        if plan_ids:
+            id_list = ','.join(str(i) for i in plan_ids)
+            steps = _q(conn, f"""SELECT s.STEP_ID, s.PLAN_ID, s.STEP_ORDER, s.STEP_NAME,
+                        s.ACTION, s.STATUS, s.ERROR_MSG,
+                        TO_CHAR(s.STARTED_AT, 'YYYY-MM-DD HH24:MI:SS') AS STARTED_AT,
+                        TO_CHAR(s.COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
+                        FROM TASK_STEPS s WHERE s.PLAN_ID IN ({id_list}) ORDER BY s.PLAN_ID, s.STEP_ORDER""")
+        stats = _q(conn, "SELECT STATUS, COUNT(*) AS CNT FROM TASK_PLANS GROUP BY STATUS")
+        return {'plans': plans, 'steps': steps, 'stats': {s['status']: s['cnt'] for s in stats}}
+    except Exception as e:
+        print(f'  Error loading tasks: {e}')
+        return {'plans': [], 'steps': [], 'stats': {}}
+    finally:
+        pool.release(conn)
 
-            # Load knowledge edges from KNOWLEDGE_GRAPH
-            edges = []
-            try:
-                cursor.execute("""
-                    SELECT SOURCE_CONCEPT_ID, TARGET_CONCEPT_ID, RELATION_TYPE 
-                    FROM KNOWLEDGE_GRAPH 
-                    ORDER BY ROWNUM
-                """)
-                for row in cursor.fetchall():
-                    src, tgt, rtype = row
-                    edges.append({
-                        'from': str(src), 'to': str(tgt),
-                        'label': str(rtype) if rtype else '',
-                        'arrows': 'to'
-                    })
-            except Exception:
-                # Fallback: group by type
-                type_groups = {}
-                for node in nodes:
-                    type_groups.setdefault(node['group'], []).append(node['id'])
-                for ntype, nids in type_groups.items():
-                    for i in range(min(len(nids), 20)):
-                        for j in range(i + 1, min(len(nids), i + 3)):
-                            edges.append({'from': nids[i], 'to': nids[j], 'label': ntype})
+LOGIN_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.b{background:rgba(255,255,255,.15);backdrop-filter:blur(10px);padding:40px;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:100%;max-width:400px}
+h1{color:#fff;text-align:center;margin-bottom:30px;font-size:24px}
+.fg{margin-bottom:20px}label{display:block;color:#fff;margin-bottom:8px;font-weight:700}
+input{width:100%;padding:12px;border:none;border-radius:8px;font-size:16px;background:rgba(255,255,255,.9)}
+input:focus{outline:2px solid #667eea}
+button{width:100%;padding:14px;background:#667eea;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer}
+button:hover{background:#5568d3}.err{color:#ff6b6b;text-align:center;margin-top:15px;font-size:14px}
+</style></head><body>
+<div class="b"><h1>Oracle Memory System v2.0</h1>
+<form id="lf"><div class="fg"><label>Username</label><input name="username" required placeholder="admin"></div>
+<div class="fg"><label>Password</label><input type="password" name="password" required></div>
+<button type="submit">Login</button></form><div id="err" class="err"></div></div>
+<script>
+document.getElementById('lf').onsubmit=async e=>{e.preventDefault();const d=document.getElementById('err');
+try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(e.target))});
+if(r.ok)location='/knowledge';else{const j=await r.json();d.textContent=j.error||'Login failed'}}
+catch(x){d.textContent='Network error'}};
+</script></body></html>"""
 
-            print(f"   ✅ Created {len(edges)} knowledge edges")
+def build_page(mode):
+    is_kn = mode != 'memory'
+    api = '/api/knowledge' if is_kn else '/api/memory'
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle Memory System - {'Knowledge' if is_kn else 'Memory'}</title>
+<script src="vis-network.min.js"></script>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh}}
+.w{{display:flex;height:100vh}}
+.s{{width:300px;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);padding:20px;color:#fff;overflow-y:auto;display:flex;flex-direction:column}}
+.s h2{{margin-bottom:15px;font-size:20px;border-bottom:2px solid rgba(255,255,255,.3);padding-bottom:10px}}
+.s p{{margin-bottom:6px;font-size:13px;line-height:1.5}}
+.m{{flex:1;padding:15px}}
+#gc{{width:100%;height:100%;background:rgba(255,255,255,.95);border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,.2)}}
+.ld{{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#fff}}
+.sp{{width:50px;height:50px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.st{{font-weight:700;font-size:14px;margin-top:15px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:5px}}
+.nb{{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}}
+.nb button{{flex:1;padding:8px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.nb button:hover{{background:rgba(255,255,255,.35)}}.nb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.lb{{display:flex;gap:8px}}
+.lb button{{flex:1;padding:6px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px}}
+.lb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.ni{{margin-top:15px;padding:12px;background:rgba(255,255,255,.15);border-radius:8px;display:none}}
+.ni.a{{display:block}}.ni h3{{margin-bottom:8px;font-size:14px}}.ni p{{font-size:13px;margin-bottom:4px}}.ni label{{font-weight:700}}
+.sb{{margin-top:10px;padding:10px;background:rgba(0,0,0,.2);border-radius:8px;font-size:12px}}
+.lo{{margin-top:auto;padding:10px;background:rgba(255,0,0,.3);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.lo:hover{{background:rgba(255,0,0,.5)}}#tmr{{font-size:11px;color:#ffeb3b;margin-top:5px}}
+</style></head><body>
+<div class="w"><div class="s">
+<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<div class="st" id="li"></div><p id="pd"></p><p id="ps"></p><p id="pc"></p>
+<div class="st" id="lp"></div>
+<div class="nb"><button id="bk" onclick="location='/knowledge'"></button><button id="bm" onclick="location='/memory'"></button><button id="ba" onclick="location='/agents'"></button><button id="bt" onclick="location='/tasks'"></button></div>
+<div class="st" id="ll"></div>
+<div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
+<div class="ni" id="ni"><h3 id="ld"></h3>
+<p><label>ID:</label> <span id="nid">-</span></p>
+<p><label id="lt">Type:</label> <span id="nt">-</span></p>
+<p><label id="ln">Name:</label> <span id="nl">-</span></p>
+<p><label>Owner:</label> <span id="no">-</span></p>
+<p><label>Visibility:</label> <span id="nv">-</span></p></div>
+<div class="sb" id="sbox"></div><p id="tmr"></p>
+<button class="lo" id="blo" onclick="location='/api/logout'"></button>
+</div><div class="m">
+<div id="ldc" class="ld"><div class="sp"></div><p id="ltxt"></p></div>
+<div id="gc" style="display:none"></div>
+</div></div>
+<script>
+const mode='{mode}',api='{api}';
+const i18n={{zh:{{t:mode==='memory'?'记忆内容':'知识图谱',i:'操作指南',d:'拖拽：移动节点',s:'滚轮：缩放',c:'点击：查看详情',
+k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',dt:'节点详情',ty:'类型:',nm:'名称:',lo:'退出登录',ld:'加载中...',st:'统计'}},
+en:{{t:mode==='memory'?'Memory Content':'Knowledge Graph',i:'Instructions',d:'Drag: Move nodes',s:'Scroll: Zoom',c:'Click: Details',
+k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',dt:'Node Details',ty:'Type:',nm:'Name:',lo:'Logout',ld:'Loading...',st:'Stats'}}}};
+function gL(){{return localStorage.getItem('lang')||'zh'}}
+function setL(l){{localStorage.setItem('lang',l);aL(l)}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('li').textContent=t.i;
+document.getElementById('pd').textContent=t.d;document.getElementById('ps').textContent=t.s;document.getElementById('pc').textContent=t.c;
+document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;
+document.getElementById('ll').textContent=t.l;document.getElementById('ld').textContent=t.dt;
+document.getElementById('lt').textContent=t.ty;document.getElementById('ln').textContent=t.nm;
+document.getElementById('blo').textContent=t.lo;document.getElementById('ltxt').textContent=t.ld;
+document.getElementById('sbox').dataset.label=t.st;
+document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');
+document.getElementById('bk').className=mode==='knowledge'?'a':'';document.getElementById('bm').className=mode==='memory'?'a':'';document.getElementById('ba').className='';document.getElementById('bt').className=''}}
+aL(gL());
+let timer={{s:parseInt('{SESS_TTL}')}};
+function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}
+const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
+['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
+startTimer();
+fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');
+let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+fetch(api).then(r=>r.json()).then(data=>{{const c=document.getElementById('gc'),ld=document.getElementById('ldc');
+const nodes=new vis.DataSet(data.nodes),edges=new vis.DataSet(data.edges);
+const net=new vis.Network(c,{{nodes,edges}},{{physics:{{enabled:true,stabilization:{{iterations:100}}}},interaction:{{hover:true}},
+nodes:{{shape:'dot',font:{{color:'#000',size:12}},borderWidth:2}},edges:{{smooth:true,arrows:{{to:{{enabled:true,scaleFactor:.5}}}}}}}});
+ld.style.display='none';c.style.display='block';
+net.on('click',p=>{{if(p.nodes.length){{const n=nodes.get(p.nodes[0]);document.getElementById('nid').textContent=n.id;
+document.getElementById('nt').textContent=n.group||'-';document.getElementById('nl').textContent=n.label;
+document.getElementById('no').textContent=n.owner||'-';document.getElementById('nv').textContent=n.visibility||'-';
+document.getElementById('ni').className='ni a'}}}})}}).catch(e=>{{document.getElementById('ldc').innerHTML='<p style="color:#fff">Load failed</p>'}});
+</script></body></html>"""
 
-            data = {'nodes': nodes, 'edges': edges}
-            _knowledge_cache['data'] = data
-            _knowledge_cache['timestamp'] = now
-            return data
+def build_agents_page():
+    return f'''<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle Memory System - Agents</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh}}
+.w{{display:flex;height:100vh}}
+.s{{width:300px;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);padding:20px;color:#fff;overflow-y:auto;display:flex;flex-direction:column}}
+.s h2{{margin-bottom:15px;font-size:20px;border-bottom:2px solid rgba(255,255,255,.3);padding-bottom:10px}}
+.s p{{margin-bottom:6px;font-size:13px;line-height:1.5}}
+.m{{flex:1;padding:20px;overflow-y:auto}}
+.st{{font-weight:700;font-size:14px;margin-top:15px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:5px}}
+.nb{{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}}
+.nb button{{flex:1;padding:8px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.nb button:hover{{background:rgba(255,255,255,.35)}}.nb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.lb{{display:flex;gap:8px}}
+.lb button{{flex:1;padding:6px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px}}
+.lb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.sb{{margin-top:10px;padding:10px;background:rgba(0,0,0,.2);border-radius:8px;font-size:12px}}
+.lo{{margin-top:auto;padding:10px;background:rgba(255,0,0,.3);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.lo:hover{{background:rgba(255,0,0,.5)}}#tmr{{font-size:11px;color:#ffeb3b;margin-top:5px}}
+.tbl{{width:100%;border-collapse:collapse;font-size:13px}}
+.tbl th{{background:rgba(102,126,234,.2);color:#fff;padding:10px 8px;text-align:left;font-weight:700;border-bottom:2px solid rgba(255,255,255,.2)}}
+.tbl td{{padding:8px;border-bottom:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.9)}}
+.tbl tr:hover td{{background:rgba(255,255,255,.05)}}
+.badge{{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;display:inline-block}}
+.bg-green{{background:#27ae60;color:#fff}}.bg-red{{background:#e74c3c;color:#fff}}
+.bg-blue{{background:#3498db;color:#fff}}.bg-orange{{background:#f39c12;color:#fff}}
+.bg-gray{{background:#95a5a6;color:#fff}}.bg-purple{{background:#8e44ad;color:#fff}}
+.bg-yellow{{background:#f1c40f;color:#333}}
+.tabs{{display:flex;gap:4px;margin-bottom:20px}}
+.tabs button{{padding:10px 20px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px}}
+.tabs button:hover{{background:rgba(255,255,255,.25)}}.tabs button.a{{background:rgba(255,255,255,.35);font-weight:700}}
+.tabc{{display:none}}.tabc.a{{display:block}}
+.tw{{overflow-x:auto;background:rgba(255,255,255,.05);border-radius:10px;padding:15px;box-shadow:0 4px 20px rgba(0,0,0,.1)}}
+.ld{{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:#fff}}
+.sp{{width:40px;height:40px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+</style></head><body>
+<div class="w"><div class="s">
+<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<div class="st" id="lp"></div>
+<div class="nb">
+<button id="bk" onclick="location='/knowledge'"></button>
+<button id="bm" onclick="location='/memory'"></button>
+<button id="ba" class="a" onclick="location='/agents'"></button>
+<button id="bt" onclick="location='/tasks'"></button>
+</div>
+<div class="st" id="ll"></div>
+<div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
+<div class="sb" id="sbox"></div><p id="tmr"></p>
+<button class="lo" id="blo" onclick="location='/api/logout'"></button>
+</div><div class="m">
+<div class="tabs">
+<button id="t1" class="a" onclick="swTab(0)"></button>
+<button id="t2" onclick="swTab(1)"></button>
+<button id="t3" onclick="swTab(2)"></button>
+</div>
+<div id="tc0" class="tabc a"><div class="tw"><div id="agLd" class="ld"><div class="sp"></div><p id="agLdTxt"></p></div><table id="agTbl" class="tbl" style="display:none"><thead><tr><th>ID</th><th id="thN"></th><th id="thT"></th><th id="thS"></th><th id="thP"></th><th id="thAS"></th><th id="thAC"></th><th id="thC"></th></tr></thead><tbody id="agBody"></tbody></table></div></div>
+<div id="tc1" class="tabc"><div class="tw"><div id="seLd" class="ld"><div class="sp"></div><p id="seLdTxt"></p></div><table id="seTbl" class="tbl" style="display:none"><thead><tr><th>ID</th><th id="thSN"></th><th id="thSA"></th><th id="thST"></th><th id="thSL"></th></tr></thead><tbody id="seBody"></tbody></table></div></div>
+<div id="tc2" class="tabc"><div class="tw"><div id="coLd" class="ld"><div class="sp"></div><p id="coLdTxt"></p></div><table id="coTbl" class="tbl" style="display:none"><thead><tr><th>ID</th><th id="thCF"></th><th id="thCT"></th><th id="thCR"></th><th id="thCS"></th><th id="thCC"></th></tr></thead><tbody id="coBody"></tbody></table></div></div>
+</div></div>
+<script>
+const i18n={{zh:{{t:'多Agent协同',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',t1:'Agent注册表',t2:'活跃会话',t3:'协作请求',thN:'名称',thT:'类型',thS:'状态',thP:'权限',thAS:'活跃会话',thAC:'访问次数',thC:'创建时间',thSN:'Agent名称',thSA:'活跃',thST:'开始时间',thSL:'最近活动',thCF:'发起方',thCT:'接收方',thCR:'原因',thCS:'状态',thCC:'创建时间',noData:'暂无数据'}},en:{{t:'Multi-Agent Collaboration',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',t1:'Agent Registry',t2:'Active Sessions',t3:'Collaboration Requests',thN:'Name',thT:'Type',thS:'Status',thP:'Permission',thAS:'Active Sessions',thAC:'Access Count',thC:'Created',thSN:'Agent Name',thSA:'Active',thST:'Start Time',thSL:'Last Activity',thCF:'From',thCT:'To',thCR:'Reason',thCS:'Status',thCC:'Created',noData:'No data'}}}};
+function gL(){{return localStorage.getItem('lang')||'zh'}}
+function setL(l){{localStorage.setItem('lang',l);aL(l)}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('t1').textContent=t.t1;document.getElementById('t2').textContent=t.t2;document.getElementById('t3').textContent=t.t3;document.getElementById('thN').textContent=t.thN;document.getElementById('thT').textContent=t.thT;document.getElementById('thS').textContent=t.thS;document.getElementById('thP').textContent=t.thP;document.getElementById('thAS').textContent=t.thAS;document.getElementById('thAC').textContent=t.thAC;document.getElementById('thC').textContent=t.thC;document.getElementById('thSN').textContent=t.thSN;document.getElementById('thSA').textContent=t.thSA;document.getElementById('thST').textContent=t.thST;document.getElementById('thSL').textContent=t.thSL;document.getElementById('thCF').textContent=t.thCF;document.getElementById('thCT').textContent=t.thCT;document.getElementById('thCR').textContent=t.thCR;document.getElementById('thCS').textContent=t.thCS;document.getElementById('thCC').textContent=t.thCC;document.getElementById('agLdTxt').textContent=t.ld;document.getElementById('seLdTxt').textContent=t.ld;document.getElementById('coLdTxt').textContent=t.ld;document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='a';document.getElementById('bt').className=''}}
+aL(gL());
+function swTab(i){{document.querySelectorAll('.tabs button').forEach((b,idx)=>b.className=idx===i?'a':'');document.querySelectorAll('.tabc').forEach((c,idx)=>c.className=idx===i?'tabc a':'tabc')}}
+let timer={{s:parseInt('{SESS_TTL}')}};
+function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
+['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
+startTimer();
+fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+function sBadge(v){{const m={{'ACTIVE':'bg-green','DISABLED':'bg-red','SUSPENDED':'bg-orange'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function pBadge(v){{const m={{'READ_ONLY':'bg-blue','READ_WRITE':'bg-green','ADMIN':'bg-purple'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function aBadge(v){{return '<span class="badge '+(v==='Y'?'bg-green':'bg-gray')+'">'+(v==='Y'?'Y':'N')+'</span>'}}
+function cBadge(v){{const m={{'PENDING':'bg-yellow','ACCEPTED':'bg-green','REJECTED':'bg-red','EXPIRED':'bg-gray'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+fetch('/api/agents').then(r=>r.json()).then(d=>{{
+const t=i18n[gL()];
+const agLd=document.getElementById('agLd'),agTbl=document.getElementById('agTbl'),agBody=document.getElementById('agBody');
+if(d.agents&&d.agents.length){{agBody.innerHTML=d.agents.map(a=>'<tr><td>'+a.agent_id+'</td><td>'+(a.agent_name||'')+'</td><td>'+(a.agent_type||'')+'</td><td>'+sBadge(a.status||'')+'</td><td>'+pBadge(a.permission_level||'')+'</td><td>'+(a.active_sessions||0)+'</td><td>'+(a.access_count||0)+'</td><td>'+(a.created_at||'-')+'</td></tr>').join('');agLd.style.display='none';agTbl.style.display='table'}}else{{agLd.innerHTML='<p>'+t.noData+'</p>';agLd.querySelector('.sp').style.display='none'}}
+const seLd=document.getElementById('seLd'),seTbl=document.getElementById('seTbl'),seBody=document.getElementById('seBody');
+if(d.sessions&&d.sessions.length){{seBody.innerHTML=d.sessions.map(s=>'<tr><td title="'+s.session_id+'">'+(s.session_id||'').substring(0,12)+'...</td><td>'+(s.agent_name||'-')+'</td><td>'+aBadge(s.is_active||'N')+'</td><td>'+(s.start_time||'-')+'</td><td>'+(s.last_activity||'-')+'</td></tr>').join('');seLd.style.display='none';seTbl.style.display='table'}}else{{seLd.innerHTML='<p>'+t.noData+'</p>';seLd.querySelector('.sp').style.display='none'}}
+const coLd=document.getElementById('coLd'),coTbl=document.getElementById('coTbl'),coBody=document.getElementById('coBody');
+if(d.collaborations&&d.collaborations.length){{coBody.innerHTML=d.collaborations.map(c=>'<tr><td>'+c.collab_id+'</td><td>'+(c.sharer_name||c.sharing_agent||'-')+'</td><td>'+(c.receiver_name||c.receiving_agent||'-')+'</td><td>'+(c.share_reason||'-')+'</td><td>'+cBadge(c.status||'')+'</td><td>'+(c.created_at||'-')+'</td></tr>').join('');coLd.style.display='none';coTbl.style.display='table'}}else{{coLd.innerHTML='<p>'+t.noData+'</p>';coLd.querySelector('.sp').style.display='none'}}
+}}).catch(e=>{{document.querySelectorAll('.ld').forEach(el=>el.innerHTML='<p style="color:#fff">Load failed</p>')}});
+</script></body></html>'''
 
-        except Exception as e:
-            print(f"   ❌ Error loading knowledge: {e}")
-            return None
-        finally:
-            if conn:
-                release_connection(conn)
+def build_tasks_page():
+    return f'''<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle Memory System - Tasks</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh}}
+.w{{display:flex;height:100vh}}
+.s{{width:300px;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);padding:20px;color:#fff;overflow-y:auto;display:flex;flex-direction:column}}
+.s h2{{margin-bottom:15px;font-size:20px;border-bottom:2px solid rgba(255,255,255,.3);padding-bottom:10px}}
+.s p{{margin-bottom:6px;font-size:13px;line-height:1.5}}
+.m{{flex:1;padding:20px;overflow-y:auto}}
+.st{{font-weight:700;font-size:14px;margin-top:15px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:5px}}
+.nb{{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}}
+.nb button{{flex:1;padding:8px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.nb button:hover{{background:rgba(255,255,255,.35)}}.nb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.lb{{display:flex;gap:8px}}
+.lb button{{flex:1;padding:6px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px}}
+.lb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.sb{{margin-top:10px;padding:10px;background:rgba(0,0,0,.2);border-radius:8px;font-size:12px}}
+.lo{{margin-top:auto;padding:10px;background:rgba(255,0,0,.3);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.lo:hover{{background:rgba(255,0,0,.5)}}#tmr{{font-size:11px;color:#ffeb3b;margin-top:5px}}
+.tbl{{width:100%;border-collapse:collapse;font-size:13px}}
+.tbl th{{background:rgba(102,126,234,.2);color:#fff;padding:10px 8px;text-align:left;font-weight:700;border-bottom:2px solid rgba(255,255,255,.2)}}
+.tbl td{{padding:8px;border-bottom:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.9)}}
+.tbl tr:hover td{{background:rgba(255,255,255,.05)}}
+.badge{{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;display:inline-block}}
+.bg-green{{background:#27ae60;color:#fff}}.bg-red{{background:#e74c3c;color:#fff}}
+.bg-blue{{background:#3498db;color:#fff}}.bg-orange{{background:#f39c12;color:#fff}}
+.bg-gray{{background:#95a5a6;color:#fff}}.bg-purple{{background:#8e44ad;color:#fff}}
+.bg-yellow{{background:#f1c40f;color:#333}}
+.topbar{{display:flex;gap:10px;margin-bottom:20px;align-items:center;flex-wrap:wrap}}
+.topbar select,.topbar input{{padding:8px 12px;border:none;border-radius:5px;font-size:13px;background:rgba(255,255,255,.9);color:#333}}
+.topbar input{{flex:1;min-width:150px}}
+.topbar button{{padding:8px 16px;background:#667eea;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.topbar button:hover{{background:#5568d3}}
+.sbadge{{font-size:12px;padding:2px 8px;border-radius:3px;display:inline-block;margin-left:6px}}
+.plan{{background:rgba(255,255,255,.08);border-radius:10px;margin-bottom:12px;overflow:hidden}}
+.plan-h{{padding:14px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;flex-wrap:wrap}}
+.plan-h:hover{{background:rgba(255,255,255,.05)}}
+.plan-h .pn{{font-size:15px;font-weight:700;color:#fff;flex:1}}
+.plan-b{{display:none;padding:0 16px 14px}}
+.plan-b.a{{display:block}}
+.pbar{{height:6px;background:rgba(255,255,255,.2);border-radius:3px;width:80px;display:inline-block;vertical-align:middle}}
+.pbar-f{{height:100%;background:#27ae60;border-radius:3px}}
+.ld{{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:#fff}}
+.sp{{width:40px;height:40px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+</style></head><body>
+<div class="w"><div class="s">
+<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<div class="st" id="lp"></div>
+<div class="nb">
+<button id="bk" onclick="location='/knowledge'"></button>
+<button id="bm" onclick="location='/memory'"></button>
+<button id="ba" onclick="location='/agents'"></button>
+<button id="bt" class="a" onclick="location='/tasks'"></button>
+</div>
+<div class="st" id="ll"></div>
+<div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
+<div class="sb" id="sbox"></div><p id="tmr"></p>
+<button class="lo" id="blo" onclick="location='/api/logout'"></button>
+</div><div class="m">
+<div class="topbar">
+<select id="sf" onchange="loadTasks()">
+<option value="ALL">ALL</option><option value="PENDING">PENDING</option><option value="RUNNING">RUNNING</option><option value="SUCCESS">SUCCESS</option><option value="FAILED">FAILED</option><option value="CANCELLED">CANCELLED</option><option value="BLOCKED">BLOCKED</option>
+</select>
+<input id="kw" placeholder="Search..." onkeydown="if(event.key==='Enter')loadTasks()">
+<button id="sbtn" onclick="loadTasks()"></button>
+<span id="sstats"></span>
+</div>
+<div id="plc"><div id="pld" class="ld"><div class="sp"></div><p id="pldTxt"></p></div></div>
+</div></div>
+<script>
+const i18n={{zh:{{t:'任务计划',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',search:'搜索',planName:'计划名称',type:'类型',priority:'优先级',progress:'进度',created:'创建',completed:'完成',order:'序号',stepName:'步骤名称',action:'动作',started:'开始',error:'错误',noData:'暂无数据',total:'总计',done:'完成',failed:'失败',running:'运行中',thS:'状态'}},en:{{t:'Task Plans',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',search:'Search',planName:'Plan Name',type:'Type',priority:'Priority',progress:'Progress',created:'Created',completed:'Completed',order:'Order',stepName:'Step Name',action:'Action',started:'Started',error:'Error',noData:'No data',total:'Total',done:'Done',failed:'Failed',running:'Running',thS:'Status'}}}};
+function gL(){{return localStorage.getItem('lang')||'zh'}}
+function setL(l){{localStorage.setItem('lang',l);aL(l)}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('sbtn').textContent=t.search;document.getElementById('kw').placeholder=t.search+'...';document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='';document.getElementById('bt').className='a'}}
+aL(gL());
+let timer={{s:parseInt('{SESS_TTL}')}};
+function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
+['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
+startTimer();
+fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+function psBadge(v){{const m={{'PENDING':'bg-gray','RUNNING':'bg-blue','SUCCESS':'bg-green','FAILED':'bg-red','CANCELLED':'bg-orange','BLOCKED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function ssBadge(v){{const m={{'PENDING':'bg-gray','RUNNING':'bg-blue','SUCCESS':'bg-green','FAILED':'bg-red','CANCELLED':'bg-orange','BLOCKED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function loadTasks(){{
+const st=document.getElementById('sf').value,kw=document.getElementById('kw').value;
+const plc=document.getElementById('plc');
+plc.innerHTML='<div class="ld"><div class="sp"></div><p>'+i18n[gL()].ld+'</p></div>';
+let url='/api/tasks?status='+st;if(kw)url+='&keyword='+encodeURIComponent(kw);
+fetch(url).then(r=>r.json()).then(d=>{{
+const t=i18n[gL()],ss=d.stats||{{}};
+document.getElementById('sstats').innerHTML='<span class="sbadge bg-gray">'+t.total+': '+(d.plans?d.plans.length:0)+'</span><span class="sbadge bg-green">'+t.done+': '+(ss.SUCCESS||0)+'</span><span class="sbadge bg-red">'+t.failed+': '+(ss.FAILED||0)+'</span><span class="sbadge bg-blue">'+t.running+': '+(ss.RUNNING||0)+'</span>';
+if(!d.plans||!d.plans.length){{plc.innerHTML='<div class="ld"><p>'+t.noData+'</p></div>';return}}
+let h='';d.plans.forEach(p=>{{
+const steps=d.steps.filter(s=>s.plan_id===p.plan_id);
+h+='<div class="plan"><div class="plan-h" onclick="this.nextElementSibling.classList.toggle(\\'a\\')"><span class="pn">'+p.plan_name+'</span>'+psBadge(p.status)+'<span style="color:rgba(255,255,255,.7);font-size:12px">'+(p.plan_type||'')+'</span><span style="color:rgba(255,255,255,.7);font-size:12px">P'+(p.priority||0)+'</span><span style="color:rgba(255,255,255,.7);font-size:12px"><span class="pbar"><span class="pbar-f" style="width:'+((p.total_steps?Math.round(p.done_steps/p.total_steps*100):0))+'%"></span></span> '+(p.done_steps||0)+'/'+(p.total_steps||0)+'</span><span style="color:rgba(255,255,255,.5);font-size:11px">'+(p.created_at||'')+'</span></div>';
+h+='<div class="plan-b">';if(steps.length){{h+='<table class="tbl"><thead><tr><th>'+t.order+'</th><th>'+t.stepName+'</th><th>'+t.action+'</th><th>'+t.thS+'</th><th>'+t.started+'</th><th>'+t.completed+'</th><th>'+t.error+'</th></tr></thead><tbody>';steps.forEach(s=>{{h+='<tr><td>'+s.step_order+'</td><td>'+s.step_name+'</td><td>'+(s.action||'-')+'</td><td>'+ssBadge(s.status)+'</td><td>'+(s.started_at||'-')+'</td><td>'+(s.completed_at||'-')+'</td><td style="color:#e74c3c">'+(s.error_msg||'-')+'</td></tr>'}});h+='</tbody></table>'}}h+='</div></div>'}});
+plc.innerHTML=h
+}}).catch(e=>{{plc.innerHTML='<div class="ld"><p style="color:#fff">Load failed</p></div>'}});
+}}
+loadTasks();
+</script></body></html>'''
 
-def load_memory_data():
-    """Load memory graph from MEMORY_NODES + MEMORY_EDGES tables"""
-    with _cache_lock:
-        now = datetime.now().timestamp()
-        if (_memory_cache['data'] is not None and
-            _memory_cache['timestamp'] is not None and
-            now - _memory_cache['timestamp'] < _memory_cache['ttl']):
-            print("📦 Using cached memory data")
-            return _memory_cache['data']
-
-        print("📊 Loading memory graph from MEMORY_NODES + MEMORY_EDGES...")
-        conn = None
-        try:
-            conn = get_connection()
-            cursor = conn.cursor()
-
-            # Load memory nodes
-            cursor.execute("""
-                SELECT NODE_ID, NODE_TYPE, LABEL 
-                FROM MEMORY_NODES 
-                ORDER BY NODE_ID
-            """)
-            rows = cursor.fetchall()
-
-            nodes = []
-            for row in rows:
-                nid, ntype, nlabel = row
-                nodes.append({
-                    'id': str(nid),
-                    'label': str(nlabel)[:50] if nlabel else '',
-                    'group': str(ntype) if ntype else 'UNKNOWN',
-                    'color': get_node_color(str(ntype) if ntype else 'UNKNOWN'),
-                    'title': f"{ntype}: {nlabel}" if nlabel else str(ntype)
-                })
-
-            print(f"   ✅ Loaded {len(nodes)} memory nodes")
-
-            # Load memory edges
-            edges = []
-            try:
-                cursor.execute("""
-                    SELECT SOURCE_NODE_ID, TARGET_NODE_ID, EDGE_TYPE 
-                    FROM MEMORY_EDGES 
-                    ORDER BY EDGE_ID
-                """)
-                for row in cursor.fetchall():
-                    src, tgt, etype = row
-                    edges.append({
-                        'from': str(src), 'to': str(tgt),
-                        'label': str(etype) if etype else '',
-                        'arrows': 'to'
-                    })
-            except Exception:
-                # Fallback: group by type
-                type_groups = {}
-                for node in nodes:
-                    type_groups.setdefault(node['group'], []).append(node['id'])
-                for ntype, nids in type_groups.items():
-                    for i in range(min(len(nids), 20)):
-                        for j in range(i + 1, min(len(nids), i + 3)):
-                            edges.append({'from': nids[i], 'to': nids[j], 'label': ntype})
-
-            print(f"   ✅ Created {len(edges)} memory edges")
-
-            data = {'nodes': nodes, 'edges': edges}
-            _memory_cache['data'] = data
-            _memory_cache['timestamp'] = now
-            return data
-
-        except Exception as e:
-            print(f"   ❌ Error loading memory: {e}")
-            return None
-        finally:
-            if conn:
-                release_connection(conn)
-
-def invalidate_cache():
-    with _cache_lock:
-        _knowledge_cache['data'] = None
-        _knowledge_cache['timestamp'] = None
-        _memory_cache['data'] = None
-        _memory_cache['timestamp'] = None
-
-# ============================================================================
-# HTTP Request Handler
-# ============================================================================
-
-class GraphAPIHandler(http.server.BaseHTTPRequestHandler):
-
-    def log_message(self, format, *args):
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
         pass
 
-    def send_cors_headers(self):
+    def _cors(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
     def do_OPTIONS(self):
+        self.send_response(200); self._cors(); self.end_headers()
+
+    def _check_auth(self):
+        ck = self.headers.get('Cookie', '')
+        for c in ck.split(';'):
+            c = c.strip()
+            if c.startswith('session='):
+                tok = c[8:]
+                if validate_session(tok):
+                    return True
+        return False
+
+    def _redirect(self, path):
+        self.send_response(302); self.send_header('Location', path); self.end_headers()
+
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._cors(); self.end_headers()
+        self.wfile.write(json.dumps(data, default=str).encode('utf-8'))
+
+    def _send_html(self, html):
         self.send_response(200)
-        self.send_cors_headers()
-        self.end_headers()
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self._cors(); self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
 
     def do_GET(self):
+        try:
+            self._do_GET()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self.send_response(500)
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(f'Error: {e}'.encode('utf-8'))
+            except:
+                pass
+
+    def _do_GET(self):
         path = urlparse(self.path).path
-
-        # Login page (no auth required)
         if path == '/login':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(LOGIN_HTML.encode('utf-8'))
-            return
-
-        # Health check (no auth required)
+            self._send_html(LOGIN_HTML); return
         if path == '/api/health':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                'status': 'ok',
-                'cache_valid': _knowledge_cache['data'] is not None,
-                'pool_active': _pool is not None
-            }).encode('utf-8'))
-            return
-
-        # Static files (no auth required)
-        import os
-        static_dir = os.path.dirname(os.path.abspath(__file__))
+            self._send_json({'status': 'ok', 'pool': _pool is not None}); return
         if path == '/vis-network.min.js':
-            filepath = os.path.join(static_dir, 'vis-network.min.js')
-            if os.path.isfile(filepath):
+            fp = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vis-network.min.js')
+            if os.path.isfile(fp):
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/javascript; charset=utf-8')
                 self.send_header('Cache-Control', 'public, max-age=3600')
                 self.end_headers()
-                with open(filepath, 'rb') as f:
+                with open(fp, 'rb') as f:
                     self.wfile.write(f.read())
                 return
-
-        # Check authentication for protected routes
-        if not self.check_auth():
-            self.redirect('/login')
-            return
-
-        # Protected routes
+        if not self._check_auth():
+            self._redirect('/login'); return
         if path in ('/', '/index.html'):
-            self.redirect('/knowledge')
+            self._redirect('/knowledge')
         elif path == '/knowledge':
-            self.serve_page('knowledge')
+            self._send_html(build_page('knowledge'))
         elif path == '/memory':
-            self.serve_page('memory')
+            self._send_html(build_page('memory'))
         elif path == '/api/knowledge':
-            self.send_graph_data('knowledge')
+            self._send_json(load_entity_data('KNOWLEDGE'))
         elif path == '/api/knowledge/refresh':
-            with _cache_lock:
-                _knowledge_cache['data'] = None
-                _knowledge_cache['timestamp'] = None
-            self.send_graph_data('knowledge')
+            with _clock:
+                _cache['knowledge'] = {'data': None, 'ts': 0}
+            self._send_json(load_entity_data('KNOWLEDGE'))
         elif path == '/api/memory':
-            self.send_graph_data('memory')
+            self._send_json(load_entity_data('MEMORY'))
         elif path == '/api/memory/refresh':
-            with _cache_lock:
-                _memory_cache['data'] = None
-                _memory_cache['timestamp'] = None
-            self.send_graph_data('memory')
+            with _clock:
+                _cache['memory'] = {'data': None, 'ts': 0}
+            self._send_json(load_entity_data('MEMORY'))
+        elif path == '/agents':
+            self._send_html(build_agents_page())
+        elif path == '/tasks':
+            self._send_html(build_tasks_page())
+        elif path == '/api/agents':
+            self._send_json(load_agents_data())
+        elif path == '/api/tasks':
+            qs = parse_qs(urlparse(self.path).query)
+            st = qs.get('status', ['ALL'])[0]
+            kw = qs.get('keyword', [None])[0]
+            self._send_json(load_tasks_data(st if st != 'ALL' else None, kw))
         elif path == '/api/stats':
-            self.send_stats()
+            self._send_json(load_db_stats())
         elif path == '/api/logout':
             self.send_response(302)
             self.send_header('Set-Cookie', 'session=; Path=/; Max-Age=0')
-            self.send_header('Location', '/login')
-            self.end_headers()
+            self.send_header('Location', '/login'); self.end_headers()
         else:
-            self.send_response(404)
-            self.send_header('Content-Type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'Not Found')
+            self.send_response(404); self.end_headers()
 
     def do_POST(self):
         path = urlparse(self.path).path
-
         if path == '/api/login':
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length).decode('utf-8')
-
+            cl = int(self.headers.get('Content-Length', 0))
+            pd = self.rfile.read(cl).decode('utf-8')
             params = {}
-            for param in post_data.split('&'):
-                if '=' in param:
-                    key, value = param.split('=', 1)
-                    params[key] = value
-
-            username = params.get('username', '')
-            password = params.get('password', '')
-
-            if authenticate(username, password):
-                token = create_session(username)
+            for p in pd.split('&'):
+                if '=' in p:
+                    k, v = p.split('=', 1)
+                    params[k] = v
+            if authenticate(params.get('username', ''), params.get('password', '')):
+                tok = create_session(params['username'])
                 self.send_response(302)
-                self.send_header('Set-Cookie', f'session={token}; Path=/; HttpOnly; SameSite=Strict')
-                self.send_header('Location', '/knowledge')
-                self.end_headers()
+                self.send_header('Set-Cookie', f'session={tok}; Path=/; HttpOnly; SameSite=Strict')
+                self.send_header('Location', '/knowledge'); self.end_headers()
             else:
-                self.send_response(401)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': '用户名或密码无效 / Invalid username or password'}).encode('utf-8'))
+                self._send_json({'error': 'Invalid credentials'}, 401)
         else:
-            self.send_response(404)
-            self.end_headers()
-
-    def check_auth(self):
-        cookie_header = self.headers.get('Cookie', '')
-        session_token = None
-        for cookie in cookie_header.split(';'):
-            cookie = cookie.strip()
-            if cookie.startswith('session='):
-                session_token = cookie[8:]
-                break
-        if not session_token:
-            return False
-        return validate_session(session_token) is not None
-
-    def redirect(self, path):
-        self.send_response(302)
-        self.send_header('Location', path)
-        self.end_headers()
-
-    def serve_page(self, mode):
-        html = build_page_html(mode)
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_cors_headers()
-        self.end_headers()
-        self.wfile.write(html.encode('utf-8'))
-
-    def send_graph_data(self, data_type='knowledge'):
-        if data_type == 'memory':
-            data = load_memory_data()
-        else:
-            data = load_knowledge_data()
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_cors_headers()
-        self.end_headers()
-        if data:
-            self.wfile.write(json.dumps(data).encode('utf-8'))
-        else:
-            self.wfile.write(json.dumps({'nodes': [], 'edges': [], 'error': 'Failed to load data'}).encode('utf-8'))
-
-    def send_stats(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_cors_headers()
-        self.end_headers()
-        stats = {
-            'knowledge_nodes': len(_knowledge_cache['data']['nodes']) if _knowledge_cache['data'] else 0,
-            'knowledge_edges': len(_knowledge_cache['data']['edges']) if _knowledge_cache['data'] else 0,
-            'memory_nodes': len(_memory_cache['data']['nodes']) if _memory_cache['data'] else 0,
-            'memory_edges': len(_memory_cache['data']['edges']) if _memory_cache['data'] else 0,
-        }
-        self.wfile.write(json.dumps(stats).encode('utf-8'))
-
-# ============================================================================
-# Main
-# ============================================================================
+            self.send_response(404); self.end_headers()
 
 def main():
-    print("\n" + "=" * 70)
-    print("         Oracle Memory System - Web Visualization Server v1.1.0")
-    print("=" * 70)
-
-    init_connection_pool()
-    load_knowledge_data()
-    load_memory_data()
-
-    print(f"\n✅ Starting server on http://{HOST}:{PORT}")
-    print(f"   Local:   http://localhost:{PORT}")
-    print(f"   Network: http://10.10.10.135:{PORT}")
-    print(f"   Login:   admin / admin123")
-    print(f"   Timeout: {_SESSION_TIMEOUT} seconds")
-    print("=" * 70)
-
+    print("\n" + "=" * 60)
+    print("  Oracle Memory System - Web Visualization Server v2.0.0")
+    print("=" * 60)
+    try:
+        get_pool()
+        load_entity_data('KNOWLEDGE')
+        load_entity_data('MEMORY')
+    except Exception as e:
+        print(f"  Data preload warning: {e}")
+    print(f"\n  Server: http://{HOST}:{PORT}")
+    print(f"  Login:  admin / admin123")
+    print(f"  Timeout: {SESS_TTL}s")
+    print("=" * 60)
     socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer((HOST, PORT), GraphAPIHandler) as server:
+    with socketserver.TCPServer((HOST, PORT), Handler) as srv:
         try:
-            server.serve_forever()
+            srv.serve_forever()
         except KeyboardInterrupt:
-            print("\n🛑 Server stopped")
+            print("\nServer stopped")
+            if _pool:
+                _pool.close()
+        except Exception as e:
+            print(f"\nServer error: {e}")
+            import traceback; traceback.print_exc()
             if _pool:
                 _pool.close()
 

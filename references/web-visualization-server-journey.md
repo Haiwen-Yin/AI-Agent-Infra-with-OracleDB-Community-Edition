@@ -13,7 +13,7 @@ User reported that knowledge graph visualization web page was loading very slowl
 **Problem**: Each database query required spawning a new SQLcl subprocess:
 ```python
 # ❌ OLD APPROACH
-cmd = f"/root/sqlcl/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @{temp_file}"
+cmd = f"/root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @{temp_file}"
 result = subprocess.run(['bash', '-c', cmd], capture_output=True, text=True, timeout=90)
 ```
 

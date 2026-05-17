@@ -43,7 +43,7 @@ echo "========================================"
 echo ""
 
 # Execute all inserts
-/root/sqlcl/sqlcl/bin/sql -S openclaw/hermes@//10.10.10.130:1521/openclaw <<EOF
+/root/sqlcl/bin/sql -S openclaw/hermes@//10.10.10.130:1521/openclaw <<EOF
 -- Batch execute all generated SQL files
 @@generate_10020.sql
 @@generate_10021.sql

@@ -57,7 +57,7 @@ import requests
 
 **Original Code** (Incorrect):
 ```python
-result = terminal(f"/root/sqlcl/bin/sql-mcp.sh {conn_string} << 'EOF'\n{sql}\nEXIT;", timeout=30)
+result = terminal(f"/root/sqlcl/bin/sql {conn_string} << 'EOF'\n{sql}\nEXIT;", timeout=30)
 output = result.get('output', '')
 ```
 
@@ -66,7 +66,7 @@ output = result.get('output', '')
 def run_sql_command(conn_string, sql_query):
     """Execute SQL query using SQLcl and return output."""
     import subprocess
-    cmd = f"/root/sqlcl/bin/sql-mcp.sh {conn_string} << 'EOF'\n{sql_query}\nEXIT;"
+    cmd = f"/root/sqlcl/bin/sql {conn_string} << 'EOF'\n{sql_query}\nEXIT;"
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
     return {'output': result.stdout + result.stderr, 'returncode': result.returncode}
 
