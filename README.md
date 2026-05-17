@@ -2,10 +2,11 @@
 
 [![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](RELEASE_NOTES_v2.0.0.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
+[![SQLcl](https://img.shields.io/badge/SQLcl-26.1+-orange.svg)](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Unified AI Agent Memory System with Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 23ai.**
+**Unified AI Agent Memory System with Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 26ai.**
 
 > **v2.0.0 is a complete rewrite.** It is not backward-compatible with v1.x. See [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) for details.
 

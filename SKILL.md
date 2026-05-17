@@ -19,10 +19,10 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 ```
 ENTITIES (unified) ──┬── MEMORY (replaces MEMORIES + MEMORY_NODES)
-                     ├── KNOWLEDGE (replaces KNOWLEDGE_CONCEPTS)
-                     ├── TASK_OUTPUT
-                     ├── EXPERIENCE
-                     └── HARNESS_TEMPLATE (reusable agent execution blueprints)
+                      ├── KNOWLEDGE (replaces KNOWLEDGE_CONCEPTS)
+                      ├── TASK_OUTPUT
+                      ├── EXPERIENCE
+                      └── HARNESS_TEMPLATE (reusable agent execution blueprints)
 
 ENTITY_EDGES (unified) ── replaces MEMORY_EDGES + MEMORY_RELATIONSHIPS + KNOWLEDGE_GRAPH
 
