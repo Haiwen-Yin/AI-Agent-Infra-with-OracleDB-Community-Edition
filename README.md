@@ -1,7 +1,7 @@
 # Oracle AI Database Memory System v2.0.0
 
 [![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](RELEASE_NOTES_v2.0.0.md)
-[![Oracle AI DB](https://img.shields.io/badge/Oracle-23ai-red.svg)](https://www.oracle.com/database/)
+[![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
