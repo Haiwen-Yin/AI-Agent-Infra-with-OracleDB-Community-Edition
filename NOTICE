@@ -1,0 +1,28 @@
+Oracle Memory by YHW
+Copyright (c) 2026 Haiwen Yin (胖头鱼 🐟). All rights reserved.
+
+This SKILL is licensed under the Apache License, Version 2.0 (the "License").
+You may not use this SKILL except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This SKILL uses Oracle Database technologies, including but not limited to:
+- Oracle Database 23ai/26ai
+- Oracle Property Graph (SQL PGQ)
+- Oracle JSON-Relational Duality Views
+- Oracle Vector Data Type
+- Oracle PL/SQL Packages
+- Oracle Scheduler
+
+Oracle and Java are registered trademarks of Oracle and/or its affiliates.
+Other names may be trademarks of their respective owners.
+Use of these trademarks does not imply endorsement by Oracle Corporation.
