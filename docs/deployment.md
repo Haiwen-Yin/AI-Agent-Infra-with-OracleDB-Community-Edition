@@ -1,4 +1,4 @@
-# Deployment Guide - Oracle Memory System v2.0.0
+# Deployment Guide - Oracle Memory System v2.1.0
 
 ## Prerequisites
 
@@ -6,26 +6,34 @@
 - Python 3.8+ with oracledb package
 - SQLcl 26.1+ (for SQL script deployment)
 
+**Important**: v2.1.0 is NOT backward-compatible with v2.0.0. See [migration.md](migration.md) for details.
+
 ## 4-Phase Deployment
 
 ### Phase 1: Schema (1_schema.sql)
-Creates all tables, indexes, property graph, and JSON duality views.
+Creates all tables, partitions, indexes, property graph, and JSON duality views.
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/1_schema.sql
 ```
-- Idempotent: uses safe_ddl/safe_idx helpers
-- Creates 16 tables, ~25 indexes, 1 property graph, 2 duality views
-- Seeds SYSTEM_CONFIG with version 2.0.0
+- **Destructive**: Drops all existing tables before creating new ones (`CASCADE CONSTRAINTS PURGE`)
+- Creates 19 tables (6 partitioned, 5 reference-partitioned, 8 non-partitioned)
+- Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION
+- Partitioning: LIST+RANGE on ENTITIES (6×7), AGENT_SESSION (2×7), TASK_PLANS (2×7); RANGE+HASH on ENTITY_ACCESS_LOG; REFERENCE on 5 child tables
+- ROW MOVEMENT enabled on AGENT_SESSION, TASK_PLANS, TASK_STEPS
+- Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
+- ~25 local indexes + global indexes on non-partitioned tables
+- 1 property graph, 2 duality views
+- Seeds SYSTEM_CONFIG with version 2.1.0
 
 ### Phase 2: API Packages (2_api.sql)
 Creates 4 PL/SQL packages.
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/2_api.sql
 ```
-- MEMORY_FUSION_ENGINE
-- KNOWLEDGE_BASE_API
-- AGENT_PERMISSION_MANAGER
-- SESSION_CLEANUP
+- MEMORY_FUSION_ENGINE (uses RAWTOHEX(SYS_GUID()), JSON_OBJECT VALUE syntax, composite FKs)
+- KNOWLEDGE_BASE_API (spaced review, concept lineage with composite key joins)
+- AGENT_PERMISSION_MANAGER (access control, session cleanup with ROW MOVEMENT)
+- SESSION_CLEANUP (purge logs, archive entities, tag counts)
 
 ### Phase 3: Scheduler Jobs (3_jobs.sql)
 Creates 7 automated scheduler jobs.
@@ -33,11 +41,22 @@ Creates 7 automated scheduler jobs.
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/3_jobs.sql
 ```
 
+| Job | Schedule | Action |
+|-----|----------|--------|
+| MEMORY_FUSION_JOB | Daily 02:00 | Fuse similar memories + decay importance |
+| KNOWLEDGE_EXTRACTION_JOB | Daily 03:00 | Extract knowledge from memory patterns |
+| KNOWLEDGE_REVIEW_JOB | Daily 06:00 | Schedule spaced reviews for knowledge entities |
+| SESSION_CLEANUP_JOB | Every 30 min | Clean expired sessions + purge inactive |
+| ACCESS_LOG_PURGE_JOB | Weekly Sun 04:00 | Purge access logs older than 90 days |
+| ENTITY_ARCHIVE_JOB | Weekly Sun 05:00 | Archive low-importance memories older than 180 days |
+| COLLAB_EXPIRY_JOB | Daily 00:30 | Process collaboration requests |
+
 ### Phase 4: Harness Templates (4_harness_templates.sql)
-Creates HARNESS_META table, extends ENTITY_TYPE constraint, seeds 5 built-in templates.
+Seeds 5 built-in harness templates with HARNESS_META (INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE).
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/4_harness_templates.sql
 ```
+Uses MERGE for idempotent re-runs. Templates: Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor.
 
 ## Python Setup
 
@@ -66,6 +85,8 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
+v2.1.0 test suite: 49 tests across 7 modules (connection: 6, memory: 7, knowledge: 7, agent: 7, security: 10, harness: 10, graph: 8 — new).
+
 ## Starting the Web Server
 
 ```bash
@@ -81,9 +102,42 @@ python -m tests.test_all
 python3.14 viz_server_local_js.py
 ```
 
+## Partitioning Maintenance
+
+### Adding Future Quarterly Subpartitions
+
+When new quarters approach, add subpartitions to LIST+RANGE partitioned tables:
+
+```sql
+-- Add Q3 2027 subpartition to ENTITIES (applies to all 6 list partitions)
+ALTER TABLE ENTITIES SPLIT SUBPARTITION SP_FUTURE
+  AT (TO_DATE('2027-10-01','YYYY-MM-DD'))
+  INTO (SUBPARTITION SP_2027Q3, SUBPARTITION SP_FUTURE);
+
+-- Same for AGENT_SESSION, TASK_PLANS
+ALTER TABLE AGENT_SESSION SPLIT SUBPARTITION SP_FUTURE
+  AT (TO_DATE('2027-10-01','YYYY-MM-DD'))
+  INTO (SUBPARTITION SP_2027Q3, SUBPARTITION SP_FUTURE);
+
+ALTER TABLE TASK_PLANS SPLIT SUBPARTITION SP_FUTURE
+  AT (TO_DATE('2027-10-01','YYYY-MM-DD'))
+  INTO (SUBPARTITION SP_2027Q3, SUBPARTITION SP_FUTURE);
+```
+
+### Adding Monthly Partitions to ENTITY_ACCESS_LOG
+
+```sql
+ALTER TABLE ENTITY_ACCESS_LOG SPLIT PARTITION P_MAX
+  AT (TO_DATE('2026-08-01','YYYY-MM-DD'))
+  INTO (PARTITION P_202607, PARTITION P_MAX);
+```
+
 ## Troubleshooting
 
-- **ORA-00955**: Name already in use - safe_idx/safe_ddl handles this; re-run is safe
+- **ORA-14402**: Updating partition key column causes row movement — ensure ROW MOVEMENT is enabled on AGENT_SESSION, TASK_PLANS, TASK_STEPS. If not: `ALTER TABLE <table> ENABLE ROW MOVEMENT;`
+- **ORA-14650**: Foreign key constraint not compatible with reference partitioning — child table FK must reference the composite PK of the parent, including the partition key column
+- **ORA-00955**: Name already in use — safe_idx/safe_ddl handles this; re-run is safe
+- **ORA-14300**: Partitioning key maps to a partition outside maximum permitted number of partitions — add new subpartitions using SPLIT SUBPARTITION
 - **Connection refused**: Check DSN, ensure listener is running on 10.10.10.130:1521
 - **Pool exhausted**: Increase pool_max in config.json (default: 5)
 - **CLOB fetch**: `oracledb.defaults.fetch_lobs = False` set in connection.py

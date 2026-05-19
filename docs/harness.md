@@ -1,97 +1,77 @@
-# Harness Template System - Oracle Memory System v2.0.0
+# Harness Template System - Oracle Memory System v2.1.0
 
 ## Overview
 
-A Harness Template is a reusable agent execution blueprint stored as an `ENTITY` with `ENTITY_TYPE='HARNESS_TEMPLATE'`. It defines the complete runtime configuration for an agent: prompt templates, tool bindings, memory access, guardrails, and evaluation criteria. Templates support inheritance, variable substitution, and lifecycle management.
+A Harness Template is a reusable agent execution blueprint stored as an `ENTITY` with `ENTITY_TYPE='HARNESS_TEMPLATE'`. It defines input/output schemas, execution mode, and runtime configuration for an agent. Templates are extended via HARNESS_META and support instantiation with variable substitution.
 
 ## Architecture
 
 ```
 ENTITIES (ENTITY_TYPE='HARNESS_TEMPLATE')
-  └── METADATA JSON column → prompt_templates, tool_bindings, memory_access,
-                               guardrails, evaluation, variables
+  PK: (ENTITY_ID, ENTITY_TYPE)
 
-HARNESS_META
-  └── TEMPLATE_VERSION, TEMPLATE_STATUS, VARIABLES, CHANGELOG
+HARNESS_META (Reference Partitioned)
+  PK: (ENTITY_ID, ENTITY_TYPE)
+  Columns: TEMPLATE_VERSION, INPUT_SCHEMA (JSON), OUTPUT_SCHEMA (JSON), EXECUTION_MODE
 
-ENTITY_EDGES (EDGE_TYPE='DERIVES_FROM')
-  └── Child template → Parent template (inheritance chain)
+ENTITY_TAGS (via ENTITIES)
+  Tags attached to template entities
+
+ENTITY_EDGES (EDGE_TYPE='USES_HARNESS')
+  Instance → Template (created on instantiation)
 ```
 
 | Storage | Purpose |
 |---------|---------|
-| `ENTITIES.METADATA` | Core harness properties (JSON) |
-| `HARNESS_META` | Lifecycle metadata: version, status, variables, changelog |
-| `ENTITY_EDGES` | Inheritance via `DERIVES_FROM` edges |
+| `ENTITIES` columns | TITLE, CONTENT (template body with {variable} slots), SUMMARY, CATEGORY, STATUS, IMPORTANCE, VISIBILITY, SOURCE_AGENT, RETRIEVAL_COUNT |
+| `HARNESS_META` | Lifecycle metadata: version, input/output schemas, execution mode |
+| `ENTITY_TAGS` | Normalized tags via TAGS table |
 
-## Template Structure
+## HARNESS_META Schema (v2.1)
 
-The `ENTITIES.METADATA` JSON column stores all harness properties:
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| ENTITY_ID | VARCHAR2(64) | — | FK to ENTITIES |
+| ENTITY_TYPE | VARCHAR2(32) | 'HARNESS_TEMPLATE' | Denormalized for composite FK |
+| TEMPLATE_VERSION | VARCHAR2(32) | — | Template version number |
+| INPUT_SCHEMA | JSON | NULL | JSON Schema defining input variables |
+| OUTPUT_SCHEMA | JSON | NULL | JSON Schema defining expected output |
+| EXECUTION_MODE | VARCHAR2(32) | 'SEQUENTIAL' | SEQUENTIAL, PARALLEL, or CONDITIONAL |
+
+**v2.1 changes from v2.0**:
+
+| v2.0 Column | v2.1 Replacement |
+|-------------|-----------------|
+| VARIABLES (JSON) | INPUT_SCHEMA (JSON Schema format) |
+| TEMPLATE_STATUS | Use ENTITIES.STATUS |
+| CHANGELOG (JSON) | *(removed)* |
+
+## Input/Output Schema
+
+INPUT_SCHEMA and OUTPUT_SCHEMA use JSON Schema format to define variables:
 
 ```json
 {
-  "prompt_templates": {
-    "system": "You are a {role} specializing in {domain}.",
-    "user": "{query}",
-    "response": "## Findings\n{findings}"
+  "type": "object",
+  "properties": {
+    "role": { "type": "string", "description": "Agent role", "default": "Analyst" },
+    "domain": { "type": "string", "description": "Knowledge domain" },
+    "objective": { "type": "string", "description": "Task objective" },
+    "query": { "type": "string", "description": "Search query" }
   },
-  "tool_bindings": [
-    {"name": "memory_search", "access": "read"},
-    {"name": "memory_create", "access": "write"}
-  ],
-  "memory_access": {
-    "short_term": true,
-    "long_term": true,
-    "compaction": true,
-    "access_policy": "read_write"
-  },
-  "guardrails": {
-    "max_iterations": 15,
-    "max_execution_time": 300,
-    "context_window_strategy": "summarize",
-    "content_moderation": true,
-    "pii_filtering": true,
-    "max_retry_limit": 3
-  },
-  "evaluation": {
-    "output_format": "structured",
-    "quality_threshold": 0.8
-  },
-  "variables": {
-    "role": "Research Analyst",
-    "domain": "general"
-  }
+  "required": ["role", "query"]
 }
 ```
 
-- **prompt_templates**: Slot names mapped to parameterized strings. `{var}` slots are substituted at instantiation. The `system` key is required for validation.
-- **tool_bindings**: List of `{name, access}` dicts. Merged from explicit bindings + `tool_sets`.
-- **memory_access**: Controls which memory tiers the agent can access.
-- **guardrails**: Runtime safety limits. Can be set from presets or custom values.
-- **evaluation**: Output format and quality threshold for validation.
-- **variables**: Default values for prompt template slots.
+The `get_template_with_variables()` function parses INPUT_SCHEMA to extract variable definitions with name, type, description, default value, and required flag.
 
-## Built-in Tool Sets
+## Execution Modes
 
-| Tool Set | Tools |
-|----------|-------|
-| `memory_tools` | `memory_search` (read), `memory_create` (write), `memory_update` (write), `memory_delete` (write) |
-| `knowledge_tools` | `knowledge_search` (read), `knowledge_create` (write), `knowledge_update` (write), `knowledge_graph_query` (read) |
-| `agent_tools` | `agent_register` (write), `session_create` (write), `collaboration_request` (write) |
-| `security_tools` | `data_mask` (read), `data_unmask` (read) |
-| `task_tools` | `task_plan_create` (write), `task_step_execute` (write), `task_status_query` (read) |
-
-Pass tool set names via `tool_sets` parameter in `create_template`. Bindings are merged with any explicit `tool_bindings`.
-
-## Guardrail Presets
-
-| Preset | max_iterations | max_execution_time | context_window | content_moderation | pii_filtering | max_retry_limit |
-|--------|---------------|--------------------|---------------|-------------------|--------------|----------------|
-| `conservative` | 5 | 60s | sliding | true | true | 1 |
-| `balanced` | 15 | 300s | summarize | true | true | 3 |
-| `aggressive` | 50 | 900s | truncate | false | false | 5 |
-
-Default: `balanced`. Specify via `guardrail_preset` parameter or provide custom `guardrails` dict.
+| Mode | Description |
+|------|-------------|
+| SEQUENTIAL | Steps execute in order, one at a time |
+| PARALLEL | Steps execute concurrently where possible |
+| CONDITIONAL | Step execution based on conditions and branching |
 
 ## API Reference
 
@@ -99,114 +79,107 @@ Default: `balanced`. Specify via `guardrail_preset` parameter or provide custom 
 
 | Function | Description |
 |----------|-------------|
-| `create_template(name, ...)` | Create a new template. Returns `entity_id`. Params: `prompt_templates`, `tool_bindings`, `tool_sets`, `memory_access`, `guardrails`, `guardrail_preset`, `evaluation`, `variables`, `category`, `tags`, `metadata`, `owned_by_agent`, `visibility`, `parent_template_id` |
-| `get_template(entity_id)` | Retrieve template with joined `HARNESS_META`. Returns dict or `None` |
-| `list_templates(category, status, limit)` | List templates with optional filters. Default limit 100 |
-| `update_template(entity_id, **kwargs)` | Update entity fields (`name`, `description`, `category`, `tags`, `metadata`, `visibility`) and/or meta fields (`template_status`, `changelog`) |
-| `delete_template(entity_id)` | Delete template, its `HARNESS_META` row, and all related edges. Returns `bool` |
+| `create_harness_template(title, summary, content, category, input_schema, output_schema, execution_mode, importance, owned_by_agent, visibility)` | Create a new template. Returns `entity_id` (str). Creates ENTITIES row + HARNESS_META row |
+| `get_harness_template(entity_id)` | Retrieve template with joined `HARNESS_META`. Returns dict or `None` |
+| `update_harness_template(entity_id, **kwargs)` | Update entity fields and/or meta fields (input_schema, output_schema, execution_mode, template_version) |
+| `delete_harness_template(entity_id)` | Delete template's HARNESS_META row and ENTITIES row. Returns `bool` |
+| `list_harness_templates(category, execution_mode, limit, offset)` | List templates with optional category and execution_mode filters |
+| `count_harness_templates(category)` | Count templates, optionally filtered by category |
 
-### Resolution & Instantiation
-
-| Function | Description |
-|----------|-------------|
-| `resolve_template(entity_id)` | Recursively resolve inheritance chain. Merges parent properties into child via deep merge. Child keys override parent |
-| `instantiate_template(template_id, variables, overrides, agent_id)` | Resolve template, substitute `{variables}` in prompts, apply overrides. Returns runtime-ready dict with `instance_meta` |
-
-### Inheritance & Validation
+### Variable Extraction & Instantiation
 
 | Function | Description |
 |----------|-------------|
-| `derive_template(parent_id, name, ...)` | Create child template from parent with optional `overrides`. Deep-merges parent props, creates `DERIVES_FROM` edge. Returns `entity_id` |
-| `validate_template(entity_id)` | Check template integrity. Validates: `system` prompt exists, variables are declared, no duplicate tool bindings, `max_iterations > 0`, memory access enabled. Returns `{valid, errors, warnings}` |
-| `get_template_lineage(entity_id)` | List all `DERIVES_FROM` edges from this template to its parents |
+| `get_template_with_variables(entity_id)` | Parse INPUT_SCHEMA JSON to extract variable definitions. Returns dict with `variables` list |
+| `instantiate_harness_template(entity_id, variable_values, agent_id)` | Create a TASK_OUTPUT entity with `{variable}` substitution in content, add USES_HARNESS edge. Returns instance `entity_id` (str) |
 
-### Lifecycle
+### Instantiation Details
 
-| Function | Description |
-|----------|-------------|
-| `publish_template(entity_id)` | Set `TEMPLATE_STATUS='PUBLISHED'`. Returns `bool` |
-| `deprecate_template(entity_id, reason)` | Set `TEMPLATE_STATUS='DEPRECATED'`, append changelog entry. Returns `bool` |
+`instantiate_harness_template` performs the following:
+
+1. Retrieves the template via `get_harness_template`
+2. Substitutes `{variable}` slots in CONTENT using `variable_values` dict
+3. Creates a new ENTITY with `ENTITY_TYPE='TASK_OUTPUT'`
+4. Creates an `ENTITY_EDGES` row with `EDGE_TYPE='USES_HARNESS'`, `SOURCE_TYPE='TASK_OUTPUT'`
+5. Returns the new instance entity_id
+
+```python
+from scripts.lib.harness_api import instantiate_harness_template
+
+instance_id = instantiate_harness_template(
+    entity_id="HARNESS_ABC123...",
+    variable_values={"role": "Financial Analyst", "query": "Q3 earnings"},
+    agent_id="agent-1",
+)
+# instance_id → new TASK_OUTPUT entity with substituted content
+```
 
 ## Workflow Examples
 
-### Creating a Template from Scratch
+### Creating a Template
 
 ```python
-from scripts.lib.harness_api import create_template, publish_template
+from scripts.lib.harness_api import create_harness_template, add_memory_tags
 
-tid = create_template(
-    name="Sentiment Analyzer",
-    description="Analyzes text sentiment with memory-backed context",
-    prompt_templates={
-        "system": "You are a {role}. Analyze sentiment of the input.",
-        "user": "{text}",
-        "response": "Sentiment: {sentiment}\nConfidence: {confidence}"
-    },
-    tool_sets=["memory_tools", "knowledge_tools"],
-    guardrail_preset="balanced",
-    variables={"role": "Sentiment Analyzer", "text": "", "sentiment": "", "confidence": ""},
+tid = create_harness_template(
+    title="Sentiment Analyzer",
+    summary="Analyzes text sentiment with memory-backed context",
+    content="You are a {role}. Analyze sentiment of: {text}",
     category="analytics",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "default": "Sentiment Analyzer"},
+            "text": {"type": "string"},
+        },
+        "required": ["text"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "sentiment": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+    },
+    execution_mode="SEQUENTIAL",
+    importance=7,
     visibility="SHARED",
 )
 
-publish_template(tid)
+add_memory_tags(tid, ["nlp", "sentiment", "analytics"])
 ```
 
-### Instantiating a Template with Variables
+### Instantiating a Template
 
 ```python
-from scripts.lib.harness_api import instantiate_template
+from scripts.lib.harness_api import instantiate_harness_template
 
-instance = instantiate_template(
-    template_id=tid,
-    variables={"role": "Financial Sentiment Analyst", "text": "Markets rallied today"},
+instance_id = instantiate_harness_template(
+    entity_id=tid,
+    variable_values={"role": "Financial Analyst", "text": "Markets rallied today"},
+    agent_id="agent-1",
 )
-
-# instance["prompt_templates"]["system"] → "You are a Financial Sentiment Analyst. Analyze sentiment of the input."
-# instance["prompt_templates"]["user"] → "Markets rallied today"
-```
-
-### Deriving a Child Template with Overrides
-
-```python
-from scripts.lib.harness_api import derive_template
-
-child_id = derive_template(
-    parent_id=tid,
-    name="Strict Sentiment Analyzer",
-    overrides={
-        "guardrails": {"max_iterations": 5, "max_retry_limit": 1},
-        "evaluation": {"quality_threshold": 0.95},
-    },
-)
-# Child inherits all parent props; guardrails and evaluation are overridden
+# Content becomes: "You are a Financial Analyst. Analyze sentiment of: Markets rallied today"
 ```
 
 ### Template Lifecycle
 
 ```
-DRAFT ──publish_template()──▸ PUBLISHED ──deprecate_template()──▸ DEPRECATED
-  │                                                          │
-  └── edit/update while in DRAFT                              └── can still be read/derived
-```
-
-```python
-from scripts.lib.harness_api import create_template, publish_template, deprecate_template
-
-tid = create_template(name="Experimental Agent", prompt_templates={"system": "{role}"}, variables={"role": "test"})
-
-publish_template(tid)          # DRAFT → PUBLISHED
-deprecate_template(tid, reason="Replaced by v2")  # PUBLISHED → DEPRECATED
+ACTIVE ──update_harness_template(status='ARCHIVED')──▸ ARCHIVED
+  │
+  └── instantiate to create TASK_OUTPUT entities
 ```
 
 ## Built-in Templates
 
-Seeded by `scripts/deploy/4_harness_templates.sql`. All start as `PUBLISHED`.
+Seeded by `scripts/deploy/4_harness_templates.sql`. All use MERGE for idempotent re-runs.
 
-| Template | Category | Tool Sets | Guardrail Preset | Use Case |
-|----------|----------|-----------|-----------------|----------|
-| **Research Analyst** | research | knowledge_tools, memory_tools | balanced | Research and analysis with memory-backed retrieval |
-| **Code Assistant** | development | knowledge_tools, task_tools | balanced | Code generation and development tasks |
-| **Data Analyst** | analytics | knowledge_tools, memory_tools | conservative | Data analysis and reporting |
-| **Task Planner** | orchestration | task_tools, agent_tools | balanced | Task decomposition and multi-step planning |
-| **Security Auditor** | security | security_tools, knowledge_tools | conservative | Security review and compliance auditing |
+| Template | Category | Execution Mode | Input Variables | Output Fields |
+|----------|----------|---------------|-----------------|---------------|
+| **Research Analyst** | research | SEQUENTIAL | role, domain, objective, query | findings, sources |
+| **Code Assistant** | development | SEQUENTIAL | role, language, guidelines, task | solution, explanation |
+| **Data Analyst** | analytics | PARALLEL | role, focus_area, data_query | analysis, recommendations |
+| **Task Planner** | orchestration | CONDITIONAL | role, constraints, objective | plan, dependencies |
+| **Security Auditor** | security | SEQUENTIAL | role, policies, action | assessment, risks, mitigations |
+
+All templates are seeded with IMPORTANCE=2, VISIBILITY='SHARED', OWNED_BY_AGENT='SYSTEM'.

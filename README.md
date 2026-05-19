@@ -1,33 +1,48 @@
-# Oracle AI Database Memory System v2.0.0
+# Oracle AI Database Memory System v2.1.0
 
-[![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](RELEASE_NOTES_v2.0.0.md)
+[![Version](https://img.shields.io/badge/version-v2.1.0-blue.svg)](RELEASE_NOTES_v2.1.0.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![SQLcl](https://img.shields.io/badge/SQLcl-26.1+-orange.svg)](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Unified AI Agent Memory System with Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 26ai.**
+**Partitioned AI Agent Memory System with Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 26ai.**
 
-> **v2.0.0 is a complete rewrite.** It is not backward-compatible with v1.x. See [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) for details.
+> **v2.1.0 adds table partitioning, composite PKs, reference partitioning, and a full Property Graph API.** See [CHANGELOG.md](CHANGELOG.md) for details.
+
+**[中文说明 / Chinese Introduction](docs/introduction_v2.1.0_zh.md)**
 
 ---
 
-## What's New in v2.0.0
+## What's New in v2.1.0
 
-### Unified Entity Architecture
+### Table Partitioning
 
-v1.x used 5 separate tables (MEMORIES, MEMORY_NODES, MEMORY_EDGES, MEMORY_RELATIONSHIPS, KNOWLEDGE_CONCEPTS) with fragmented relationships. v2.0 consolidates everything into a single **ENTITIES** table with an `ENTITY_TYPE` discriminator, and a single **ENTITY_EDGES** table for all relationships.
+v2.0 used monolithic tables. v2.1 adds enterprise-grade partitioning for scalability and maintenance:
 
-```
-v1.x:  MEMORIES + MEMORY_NODES + MEMORY_EDGES + MEMORY_RELATIONSHIPS + KNOWLEDGE_CONCEPTS + KNOWLEDGE_GRAPH
-v2.0:  ENTITIES (ENTITY_TYPE IN 'MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE') + ENTITY_EDGES
-```
+- **ENTITIES**: LIST(ENTITY_TYPE) + RANGE(CREATED_AT) — 6 list × 7 time subpartitions
+- **5 child tables**: REFERENCE partitioning inheriting ENTITIES layout (ENTITY_EDGES, KNOWLEDGE_META, HARNESS_META, ENTITY_EMBEDDINGS, ENTITY_TAGS)
+- **AGENT_SESSION**: LIST(IS_ACTIVE) + RANGE(START_TIME) with ROW MOVEMENT
+- **ENTITY_ACCESS_LOG**: RANGE(ACCESS_TIME) + HASH(AGENT_ID) 4 buckets
+- **TASK_PLANS**: LIST(STATUS) + RANGE(CREATED_AT); TASK_STEPS: reference partitioned
 
-### oracledb Driver (No SQLcl Subprocess)
+### Property Graph API
 
-v1.x spawned SQLcl subprocess for every database operation (90+ second timeouts). v2.0 uses the Python `oracledb` driver with connection pooling — **4500x faster**.
+v2.1 introduces a full `graph_api.py` powered by Oracle's `GRAPH_TABLE` SQL operator against `ORACLE_MEMORY_GRAPH`:
 
-### 3-Phase + Harness SQL Deployment
+- `get_neighbors()` — outgoing/incoming/both with edge filtering
+- `get_reachable()` — multi-hop traversal (1-N hops)
+- `get_shortest_path()` — path finding between two entities
+- `find_similar_entities()` — graph-based similarity
+- `get_entity_context()` — full entity neighborhood with type/edge breakdown
+- `get_subgraph()` — extract subgraph for visualization
+- `graph_search()` — GRAPH_TABLE-powered entity search
+- `find_communities()` — hub detection
+- `get_graph_stats()` — graph analytics
+
+### Composite Primary Keys & Reference Partitioning
+
+ENTITIES PK changed from `(ENTITY_ID)` to `(ENTITY_ID, ENTITY_TYPE)`, enabling reference partitioning on all child tables. Denormalized columns (SOURCE_TYPE, ENTITY_TYPE, PLAN_STATUS) added for FK alignment.
 
 v1.x had 15+ scattered SQL scripts. v2.0 consolidates into 4 ordered deployment scripts:
 1. `1_schema.sql` — Tables, indexes, property graph, duality views
@@ -256,22 +271,22 @@ Built-in web server with interactive graph visualization and dashboards:
 | [docs/visualization.md](docs/visualization.md) | Web visualization server guide |
 | [docs/harness.md](docs/harness.md) | Harness template system guide |
 | [docs/minimum-privileges.md](docs/minimum-privileges.md) | Minimum database user privileges |
-| [docs/introduction_v2.0.0_zh.md](docs/introduction_v2.0.0_zh.md) | v2.0.0 中文完整介绍 |
-| [RELEASE_NOTES_v2.0.0.md](RELEASE_NOTES_v2.0.0.md) | v2.0.0 release notes |
+| [docs/introduction_v2.1.0_zh.md](docs/introduction_v2.1.0_zh.md) | v2.1.0 中文完整介绍 |
 
 ---
 
 ## Test Results
 
 ```
-Oracle Memory System v2.0.0 - Full Test Suite
+Oracle Memory System v2.1.0 - Full Test Suite
 ============================================================
   Connection:  6/6 PASS
-  Memory:      7/7 PASS
-  Knowledge:   7/7 PASS
-  Agent:       7/7 PASS
-  Security:   10/10 PASS
-  Harness:    10/10 PASS
+  Memory:      8/8 PASS
+  Knowledge:   8/8 PASS
+  Agent:       8/8 PASS
+  Graph:       8/8 PASS
+  Harness:     6/6 PASS
+  Security:    5/5 PASS
 Overall: ALL PASSED
 ```
 
@@ -281,7 +296,8 @@ Overall: ALL PASSED
 
 | Version | Date | Description |
 |---------|------|-------------|
-| **v2.0.0** | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |
+| **v2.1.0** | 2026-05-19 | Table partitioning, composite PKs, reference partitioning, Property Graph API |
+| v2.0.0 | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |
 | v1.1.0 | 2026-05-12 | Web visualization, session security, bilingual UI |
 | v1.0.0 | 2026-05-10 | Production release: knowledge base, property graph, multi-agent |
 | v0.5.1 | 2026-05-08 | Enhanced session management |

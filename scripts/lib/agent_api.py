@@ -1,7 +1,7 @@
-"""Oracle Memory System v2.0.0 - Multi-Agent API
+"""Oracle Memory System v2.1.0 - Agent API
 
-Agent registration, memory visibility control, session management,
-access audit logging, and collaboration requests.
+Agent registration, session management, access audit logging,
+and collaboration tracking.
 """
 
 import json
@@ -12,241 +12,282 @@ from .connection import execute, execute_query, execute_query_one, execute_inser
 
 logger = logging.getLogger(__name__)
 
+_JSON_COLUMNS = {"capabilities", "config", "context"}
+
+_ALLOWED_UPDATE_FIELDS = {
+    "agent_name", "agent_type", "description",
+    "capabilities", "config", "status", "wm_entity_id",
+}
+
+
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        result = dict(row)
+    else:
+        result = dict(row)
+    for key in result:
+        if key.lower() in _JSON_COLUMNS and isinstance(result[key], str):
+            try:
+                result[key] = json.loads(result[key])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return result
+
 
 def register_agent(
     agent_id: str,
     agent_name: str,
-    agent_type: str = "general",
-    capabilities: Optional[List[str]] = None,
-    description: str = "",
-    permission_level: str = "READ_WRITE",
-) -> bool:
+    agent_type: Optional[str] = None,
+    description: Optional[str] = None,
+    capabilities: Optional[Any] = None,
+    config: Optional[Any] = None,
+) -> str:
+    """Register a new agent or update an existing one via MERGE."""
     sql = """
         MERGE INTO AGENT_REGISTRY t
         USING (SELECT :aid AS AGENT_ID FROM DUAL) s
         ON (t.AGENT_ID = s.AGENT_ID)
         WHEN NOT MATCHED THEN
             INSERT (AGENT_ID, AGENT_NAME, AGENT_TYPE, DESCRIPTION,
-                    CAPABILITIES, STATUS, PERMISSION_LEVEL)
-            VALUES (:aid, :aname, :atype, :adesc, :caps, 'ACTIVE', :perm)
+                    CAPABILITIES, CONFIG, STATUS, CREATED_AT, UPDATED_AT)
+            VALUES (:aid, :aname, :atype, :adesc, :caps, :cfg, 'ACTIVE',
+                    SYSTIMESTAMP, SYSTIMESTAMP)
+        WHEN MATCHED THEN
+            UPDATE SET AGENT_NAME = :aname,
+                       LAST_SEEN_AT = SYSTIMESTAMP
     """
-    try:
-        execute(sql, {
-            "aid": agent_id,
-            "aname": agent_name,
-            "atype": agent_type,
-            "adesc": description,
-            "caps": json.dumps(capabilities or []),
-            "perm": permission_level,
-        })
-        return True
-    except Exception as e:
-        logger.error("Failed to register agent %s: %s", agent_id, e)
-        return False
+    caps_val = json.dumps(capabilities) if isinstance(capabilities, (dict, list)) else capabilities
+    cfg_val = json.dumps(config) if isinstance(config, (dict, list)) else config
+    execute(sql, {
+        "aid": agent_id,
+        "aname": agent_name,
+        "atype": agent_type,
+        "adesc": description,
+        "caps": caps_val,
+        "cfg": cfg_val,
+    })
+    return agent_id
 
 
 def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve agent details by ID."""
     sql = """
-        SELECT AGENT_ID, AGENT_NAME, AGENT_TYPE, DESCRIPTION, STATUS,
-               CAPABILITIES, PERMISSION_LEVEL,
+        SELECT AGENT_ID, AGENT_NAME, AGENT_TYPE, DESCRIPTION,
+               CAPABILITIES, CONFIG, WM_ENTITY_ID, STATUS,
+               TO_CHAR(LAST_SEEN_AT, 'YYYY-MM-DD HH24:MI:SS') AS LAST_SEEN_AT,
                TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
                TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
         FROM AGENT_REGISTRY
         WHERE AGENT_ID = :aid
     """
     row = execute_query_one(sql, {"aid": agent_id})
-    if row and isinstance(row.get("capabilities"), str):
-        try:
-            row["capabilities"] = json.loads(row["capabilities"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return row
+    return _row_to_dict(row) if row else None
 
 
-def list_agents(agent_type: Optional[str] = None, status: str = "ACTIVE") -> List[Dict[str, Any]]:
-    conditions = ["STATUS = :status"]
-    params: Dict[str, Any] = {"status": status}
-    if agent_type:
-        conditions.append("AGENT_TYPE = :atype")
-        params["atype"] = agent_type
+def update_agent(agent_id: str, **kwargs: Any) -> bool:
+    """Update allowed fields on an agent. JSON fields are auto-serialized."""
+    updates = {}
+    params: Dict[str, Any] = {"aid": agent_id}
+    for key, value in kwargs.items():
+        col = key.lower()
+        if col not in _ALLOWED_UPDATE_FIELDS:
+            continue
+        db_col = col.upper()
+        if col in ("capabilities", "config") and isinstance(value, (dict, list)):
+            updates[db_col] = f":{col}"
+            params[col] = json.dumps(value)
+        else:
+            updates[db_col] = f":{col}"
+            params[col] = value
+    if not updates:
+        return False
+    updates["UPDATED_AT"] = "SYSTIMESTAMP"
+    set_clause = ", ".join(f"{k} = {v}" for k, v in updates.items())
+    sql = f"UPDATE AGENT_REGISTRY SET {set_clause} WHERE AGENT_ID = :aid"
+    return execute(sql, params) > 0
 
-    where = " AND ".join(conditions)
-    sql = f"""
-        SELECT AGENT_ID, AGENT_NAME, AGENT_TYPE, CAPABILITIES, PERMISSION_LEVEL
-        FROM AGENT_REGISTRY
-        WHERE {where}
-        ORDER BY CREATED_AT
-    """
-    rows = execute_query(sql, params)
-    for r in rows:
-        if isinstance(r.get("capabilities"), str):
-            try:
-                r["capabilities"] = json.loads(r["capabilities"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-    return rows
 
-
-def disable_agent(agent_id: str, reason: str = "") -> bool:
+def decommission_agent(agent_id: str) -> bool:
+    """Mark an agent as decommissioned."""
     sql = """
         UPDATE AGENT_REGISTRY
-        SET STATUS = 'DISABLED', UPDATED_AT = SYSTIMESTAMP,
-            PENDING_RECOVERY = 'Y'
-        WHERE AGENT_ID = :aid
-    """
-    if execute(sql, {"aid": agent_id}) > 0:
-        log_sql = """
-            INSERT INTO AGENT_PERMISSION_LOG (AGENT_ID, OLD_STATUS, NEW_STATUS, CHANGE_REASON, STATUS)
-            VALUES (:aid, 'ACTIVE', 'DISABLED', :reason, 'COMPLETED')
-        """
-        execute(log_sql, {"aid": agent_id, "reason": reason})
-        return True
-    return False
-
-
-def enable_agent(agent_id: str) -> bool:
-    sql = """
-        UPDATE AGENT_REGISTRY
-        SET STATUS = 'ACTIVE', UPDATED_AT = SYSTIMESTAMP,
-            PENDING_RECOVERY = 'N', RECOVERED_COUNT = RECOVERED_COUNT + 1
+        SET STATUS = 'DECOMMISSIONED', UPDATED_AT = SYSTIMESTAMP
         WHERE AGENT_ID = :aid
     """
     return execute(sql, {"aid": agent_id}) > 0
 
 
-def create_session(agent_id: str, working_memory_id: Optional[int] = None) -> Optional[str]:
-    import time
-    session_id = f"session-{agent_id}-{int(time.time())}"
+def heartbeat(agent_id: str) -> bool:
+    """Update the agent's last-seen timestamp."""
     sql = """
-        INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, IS_ACTIVE, CONTEXT_SNAPSHOT, WORKING_MEMORY_ID)
-        VALUES (:sid, :aid, 'Y', '{}', :wmid)
+        UPDATE AGENT_REGISTRY
+        SET LAST_SEEN_AT = SYSTIMESTAMP
+        WHERE AGENT_ID = :aid
     """
-    try:
-        execute(sql, {"sid": session_id, "aid": agent_id, "wmid": working_memory_id})
-        return session_id
-    except Exception as e:
-        logger.error("Failed to create session: %s", e)
-        return None
+    return execute(sql, {"aid": agent_id}) > 0
 
 
-def update_session_context(session_id: str, context: Dict[str, Any]) -> bool:
-    sql = """
-        UPDATE AGENT_SESSION
-        SET CONTEXT_SNAPSHOT = :ctx, LAST_ACTIVITY = SYSTIMESTAMP
-        WHERE SESSION_ID = :sid AND IS_ACTIVE = 'Y'
+def create_session(
+    agent_id: str,
+    wm_entity_id: Optional[str] = None,
+    context: Optional[Any] = None,
+) -> str:
+    """Create a new agent session and return the session ID."""
+    session_id_sql = "'SES_' || RAWTOHEX(SYS_GUID())"
+    ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
+    sql = f"""
+        INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE, START_TIME, CONTEXT)
+        VALUES ({session_id_sql}, :aid, :wmid, 'Y', SYSTIMESTAMP, :ctx)
+        RETURNING SESSION_ID INTO :ret_id
     """
-    return execute(sql, {"sid": session_id, "ctx": json.dumps(context)}) > 0
+    return execute_insert_returning_id(sql, {
+        "aid": agent_id,
+        "wmid": wm_entity_id,
+        "ctx": ctx_val,
+    }, id_column="SESSION_ID")
 
 
-def close_session(session_id: str) -> bool:
+def end_session(session_id: str) -> bool:
+    """End an active session."""
     sql = """
         UPDATE AGENT_SESSION
         SET IS_ACTIVE = 'N', END_TIME = SYSTIMESTAMP
-        WHERE SESSION_ID = :sid
+        WHERE SESSION_ID = :sid AND IS_ACTIVE = 'Y'
     """
     return execute(sql, {"sid": session_id}) > 0
 
 
 def get_active_sessions(agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return all active sessions, optionally filtered by agent."""
     if agent_id:
         sql = """
-            SELECT s.SESSION_ID, s.AGENT_ID, a.AGENT_NAME,
-                   TO_CHAR(s.START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
-                   s.IS_ACTIVE, s.WORKING_MEMORY_ID
-            FROM AGENT_SESSION s
-            LEFT JOIN AGENT_REGISTRY a ON a.AGENT_ID = s.AGENT_ID
-            WHERE s.IS_ACTIVE = 'Y' AND s.AGENT_ID = :aid
-            ORDER BY s.START_TIME DESC
+            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE,
+                   TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
+                   CONTEXT
+            FROM AGENT_SESSION
+            WHERE IS_ACTIVE = 'Y' AND AGENT_ID = :aid
+            ORDER BY START_TIME DESC
         """
-        return execute_query(sql, {"aid": agent_id})
+        rows = execute_query(sql, {"aid": agent_id})
     else:
         sql = """
-            SELECT s.SESSION_ID, s.AGENT_ID, a.AGENT_NAME,
-                   TO_CHAR(s.START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
-                   s.IS_ACTIVE, s.WORKING_MEMORY_ID
-            FROM AGENT_SESSION s
-            LEFT JOIN AGENT_REGISTRY a ON a.AGENT_ID = s.AGENT_ID
-            WHERE s.IS_ACTIVE = 'Y'
-            ORDER BY s.START_TIME DESC
+            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE,
+                   TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
+                   CONTEXT
+            FROM AGENT_SESSION
+            WHERE IS_ACTIVE = 'Y'
+            ORDER BY START_TIME DESC
         """
-        return execute_query(sql)
+        rows = execute_query(sql)
+    return [_row_to_dict(r) for r in rows]
 
 
-def log_access(agent_id: str, entity_id: int, access_type: str = "READ") -> None:
-    sql = """
-        INSERT INTO ENTITY_ACCESS_LOG (AGENT_ID, ENTITY_ID, ACCESS_TYPE, ACCESS_TIME)
-        VALUES (:aid, :eid, :atype, SYSTIMESTAMP)
+def log_access(
+    agent_id: str,
+    entity_id: str,
+    access_type: str,
+    session_id: Optional[str] = None,
+) -> str:
+    """Log an entity access event and return the log ID."""
+    log_id_sql = "'LOG_' || RAWTOHEX(SYS_GUID())"
+    sql = f"""
+        INSERT INTO ENTITY_ACCESS_LOG (LOG_ID, ENTITY_ID, AGENT_ID, ACCESS_TYPE, ACCESS_TIME, SESSION_ID)
+        VALUES ({log_id_sql}, :eid, :aid, :atype, SYSTIMESTAMP, :sid)
+        RETURNING LOG_ID INTO :ret_id
     """
-    execute(sql, {"aid": agent_id, "eid": entity_id, "atype": access_type})
+    return execute_insert_returning_id(sql, {
+        "eid": entity_id,
+        "aid": agent_id,
+        "atype": access_type,
+        "sid": session_id,
+    }, id_column="LOG_ID")
 
 
-def get_access_history(agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-    sql = """
-        SELECT AGENT_ID, ENTITY_ID, ACCESS_TYPE,
-               TO_CHAR(ACCESS_TIME, 'YYYY-MM-DD HH24:MI:SS') AS ACCESS_TIME
+def get_access_log(
+    entity_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Query access logs with optional entity or agent filter."""
+    conditions = []
+    params: Dict[str, Any] = {"lim": limit}
+    if entity_id:
+        conditions.append("ENTITY_ID = :eid")
+        params["eid"] = entity_id
+    if agent_id:
+        conditions.append("AGENT_ID = :aid")
+        params["aid"] = agent_id
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    sql = f"""
+        SELECT LOG_ID, ENTITY_ID, AGENT_ID, ACCESS_TYPE, SESSION_ID,
+               TO_CHAR(ACCESS_TIME, 'YYYY-MM-DD HH24:MI:SS') AS ACCESS_TIME,
+               CONTEXT
         FROM ENTITY_ACCESS_LOG
-        WHERE AGENT_ID = :aid
+        {where}
         ORDER BY ACCESS_TIME DESC
         FETCH FIRST :lim ROWS ONLY
     """
-    return execute_query(sql, {"aid": agent_id, "lim": limit})
+    rows = execute_query(sql, params)
+    return [_row_to_dict(r) for r in rows]
 
 
-def request_collaboration(sharing_agent: str, receiving_agent: str,
-                          entity_id: int, reason: str = "") -> Optional[int]:
-    sql = """
-        INSERT INTO AGENT_COLLABORATION (SHARING_AGENT, RECEIVING_AGENT, MEMORY_ID,
-                                         SHARE_REASON, STATUS)
-        VALUES (:sharer, :receiver, :eid, :reason, 'PENDING')
-        RETURNING COLLAB_ID INTO :ret_id
+def create_collaboration(
+    source_agent_id: str,
+    target_agent_id: str,
+    col_type: str,
+    entity_id: Optional[str] = None,
+    context: Optional[Any] = None,
+    strength: float = 1.0,
+) -> str:
+    """Create a collaboration link between two agents."""
+    col_id_sql = "'COL_' || RAWTOHEX(SYS_GUID())"
+    ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
+    sql = f"""
+        INSERT INTO AGENT_COLLABORATION (COL_ID, SOURCE_AGENT_ID, TARGET_AGENT_ID,
+                                          COL_TYPE, ENTITY_ID, CONTEXT, STRENGTH,
+                                          CREATED_AT, UPDATED_AT)
+        VALUES ({col_id_sql}, :src, :tgt, :ctype, :eid, :ctx, :str,
+                SYSTIMESTAMP, SYSTIMESTAMP)
+        RETURNING COL_ID INTO :ret_id
     """
-    try:
-        return execute_insert_returning_id(sql, {
-            "sharer": sharing_agent,
-            "receiver": receiving_agent,
-            "eid": entity_id,
-            "reason": reason,
-        })
-    except Exception as e:
-        logger.error("Failed to request collaboration: %s", e)
-        return None
+    return execute_insert_returning_id(sql, {
+        "src": source_agent_id,
+        "tgt": target_agent_id,
+        "ctype": col_type,
+        "eid": entity_id,
+        "ctx": ctx_val,
+        "str": strength,
+    }, id_column="COL_ID")
 
 
-def approve_collaboration(collab_id: int) -> bool:
-    sql = """
-        UPDATE AGENT_COLLABORATION
-        SET STATUS = 'ACCEPTED', APPROVED_AT = SYSTIMESTAMP
-        WHERE COLLAB_ID = :cid AND STATUS = 'PENDING'
-    """
-    return execute(sql, {"cid": collab_id}) > 0
-
-
-def reject_collaboration(collab_id: int) -> bool:
-    sql = """
-        UPDATE AGENT_COLLABORATION
-        SET STATUS = 'REJECTED'
-        WHERE COLLAB_ID = :cid AND STATUS = 'PENDING'
-    """
-    return execute(sql, {"cid": collab_id}) > 0
-
-
-def get_pending_requests(agent_id: str, role: str = "receiving") -> List[Dict[str, Any]]:
-    if role == "receiving":
+def get_collaborations(
+    agent_id: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Query collaborations, optionally filtered by agent involvement."""
+    if agent_id:
         sql = """
-            SELECT COLLAB_ID, SHARING_AGENT, RECEIVING_AGENT, MEMORY_ID,
-                   SHARE_REASON, STATUS,
-                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            SELECT COL_ID, SOURCE_AGENT_ID, TARGET_AGENT_ID, COL_TYPE,
+                   ENTITY_ID, CONTEXT, STRENGTH,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                   TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
             FROM AGENT_COLLABORATION
-            WHERE RECEIVING_AGENT = :aid AND STATUS = 'PENDING'
+            WHERE SOURCE_AGENT_ID = :aid OR TARGET_AGENT_ID = :aid
             ORDER BY CREATED_AT DESC
+            FETCH FIRST :lim ROWS ONLY
         """
+        rows = execute_query(sql, {"aid": agent_id, "lim": limit})
     else:
         sql = """
-            SELECT COLLAB_ID, SHARING_AGENT, RECEIVING_AGENT, MEMORY_ID,
-                   SHARE_REASON, STATUS,
-                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            SELECT COL_ID, SOURCE_AGENT_ID, TARGET_AGENT_ID, COL_TYPE,
+                   ENTITY_ID, CONTEXT, STRENGTH,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                   TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
             FROM AGENT_COLLABORATION
-            WHERE SHARING_AGENT = :aid AND STATUS = 'PENDING'
             ORDER BY CREATED_AT DESC
+            FETCH FIRST :lim ROWS ONLY
         """
-    return execute_query(sql, {"aid": agent_id})
+        rows = execute_query(sql, {"lim": limit})
+    return [_row_to_dict(r) for r in rows]

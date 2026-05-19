@@ -1,1 +1,1 @@
-"""Oracle Memory System v2.0.0 - Core Library"""
+"""Oracle Memory System v2.1.0 - Core Library"""

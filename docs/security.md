@@ -1,4 +1,4 @@
-# Security - Oracle Memory System v2.0.0
+# Security - Oracle Memory System v2.1.0
 
 ## Data Masking
 
@@ -61,12 +61,28 @@ is_valid = verify_password("MyPassword123!", hash_val, salt)
 |-------|--------|
 | PRIVATE | Only OWNED_BY_AGENT |
 | SHARED | All registered agents |
-| COLLABORATIVE | Owner + agents in ACCESSIBLE_TO JSON array |
+| PUBLIC | Unrestricted (v2.1 replaces v2.0 COLLABORATIVE) |
+
+Cross-agent sharing is managed via the AGENT_COLLABORATION table, which tracks source/target agents, collaboration type, associated entity, context, and strength.
 
 ## Access Auditing
 
-All entity access is logged to ENTITY_ACCESS_LOG:
-- Agent ID, Entity ID, Access Type (READ/WRITE/DELETE/SHARE/SEARCH), Timestamp
+All entity access is logged to ENTITY_ACCESS_LOG (RANGE+HASH partitioned by ACCESS_TIME and AGENT_ID):
+- LOG_ID (VARCHAR2(64)), Entity ID, Agent ID, Access Type (READ/WRITE/DELETE/SEARCH/EMBED), Access Time, Session ID, Context
+
+## Permission Auditing
 
 Permission changes logged to AGENT_PERMISSION_LOG:
-- Agent ID, Old Status, New Status, Change Reason, Timestamp
+- LOG_ID (VARCHAR2(64)), Agent ID, Granted By, Permission, Resource Type, Resource ID, Action (GRANT/REVOKE/DENY), Timestamp
+
+## Agent Collaboration
+
+AGENT_COLLABORATION tracks cross-agent sharing requests:
+- COL_ID (VARCHAR2(64)), Source Agent ID, Target Agent ID, Collaboration Type, Entity ID, Context (JSON), Strength (0-1), Created/Updated timestamps
+- Foreign keys to AGENT_REGISTRY and ENTITIES
+
+## PL/SQL Security Functions
+
+`AGENT_PERMISSION_MANAGER.check_entity_access(agent_id, entity_id)`:
+- Returns 'GRANTED' if entity is SHARED/PUBLIC or owner matches
+- Returns 'DENIED' for PRIVATE entities not owned by the requesting agent

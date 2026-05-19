@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.0.0 - Memory API Tests"""
+"""Oracle Memory System v2.1.0 - Memory API Tests"""
 
 import sys
 import os
@@ -6,21 +6,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.memory_api import (
     create_memory, get_memory, update_memory, delete_memory,
-    search_memories, get_agent_memories, count_memories
+    search_memories, get_agent_memories, count_memories,
+    add_memory_tags, get_memory_tags, remove_memory_tag
 )
 from lib.connection import close_pool
 
 
 def test_create_memory():
     entity_id = create_memory(
-        name="Test Memory",
-        content="This is a test memory content",
+        title="Test Memory",
+        content="test content",
         category="test",
-        tags=["unit-test", "v2"],
-        metadata={"source": "test"},
+        importance=7,
         owned_by_agent="test-agent",
     )
-    assert entity_id > 0
+    assert isinstance(entity_id, str)
+    assert len(entity_id) > 0
     print(f"PASS: test_create_memory (id={entity_id})")
     return entity_id
 
@@ -28,29 +29,29 @@ def test_create_memory():
 def test_get_memory(entity_id):
     mem = get_memory(entity_id)
     assert mem is not None
-    assert mem["name"] == "Test Memory"
+    assert mem["title"] == "Test Memory"
     assert mem["category"] == "test"
-    assert isinstance(mem["tags"], list)
-    print(f"PASS: test_get_memory (name={mem['name']})")
+    assert mem["importance"] == 7
+    print(f"PASS: test_get_memory (title={mem['title']})")
 
 
 def test_update_memory(entity_id):
-    ok = update_memory(entity_id, name="Updated Test Memory", priority=1)
+    ok = update_memory(entity_id, title="Updated Memory", importance=3)
     assert ok
     mem = get_memory(entity_id)
-    assert mem["name"] == "Updated Test Memory"
-    assert mem["priority"] == 1
+    assert mem["title"] == "Updated Memory"
+    assert mem["importance"] == 3
     print("PASS: test_update_memory")
 
 
 def test_search_memories():
-    results = search_memories(keyword="Test", category="test", limit=10)
+    results = search_memories(keyword="Memory", category="test")
     assert len(results) >= 1
     print(f"PASS: test_search_memories (found={len(results)})")
 
 
 def test_get_agent_memories():
-    results = get_agent_memories("test-agent", limit=10)
+    results = get_agent_memories("test-agent")
     assert len(results) >= 1
     print(f"PASS: test_get_agent_memories (found={len(results)})")
 
@@ -59,6 +60,19 @@ def test_count_memories():
     count = count_memories(category="test")
     assert count >= 1
     print(f"PASS: test_count_memories (count={count})")
+
+
+def test_memory_tags(entity_id):
+    added = add_memory_tags(entity_id, ["unit-test", "v2.1"])
+    assert added == 2
+    tags = get_memory_tags(entity_id)
+    assert len(tags) == 2
+    tag_id = tags[0]["tag_id"]
+    ok = remove_memory_tag(entity_id, tag_id)
+    assert ok
+    tags = get_memory_tags(entity_id)
+    assert len(tags) == 1
+    print("PASS: test_memory_tags")
 
 
 def test_delete_memory(entity_id):
@@ -88,6 +102,7 @@ def run_all():
         test_search_memories,
         test_get_agent_memories,
         test_count_memories,
+        lambda: test_memory_tags(entity_id),
         lambda: test_delete_memory(entity_id),
     ]:
         try:

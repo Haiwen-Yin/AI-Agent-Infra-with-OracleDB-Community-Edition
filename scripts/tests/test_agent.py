@@ -1,106 +1,93 @@
-"""Oracle Memory System v2.0.0 - Agent API Tests"""
+"""Oracle Memory System v2.1.0 - Agent API Tests"""
 
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.agent_api import (
-    register_agent, get_agent, list_agents, disable_agent, enable_agent,
-    create_session, update_session_context, close_session, get_active_sessions,
-    log_access, get_access_history, request_collaboration, get_pending_requests
+    register_agent, get_agent, heartbeat,
+    create_session, end_session, get_active_sessions,
+    log_access, get_access_log,
+    create_collaboration, get_collaborations
 )
 from lib.memory_api import create_memory, delete_memory
 from lib.connection import close_pool
 
-TEST_AGENT = "test-agent-api"
+TEST_AGENT = "test-agent-1"
+TEST_AGENT_2 = "test-agent-2"
 
 
 def test_register_agent():
-    ok = register_agent(
+    agent_id = register_agent(
         agent_id=TEST_AGENT,
-        agent_name="Test Agent for API",
-        agent_type="tester",
-        capabilities=["read", "write", "test"],
-        description="Agent for unit testing",
+        agent_name="Test Agent",
+        agent_type="test",
     )
-    assert ok
-    print(f"PASS: test_register_agent")
+    assert isinstance(agent_id, str)
+    assert agent_id == TEST_AGENT
+    print("PASS: test_register_agent")
 
 
 def test_get_agent():
     agent = get_agent(TEST_AGENT)
     assert agent is not None
-    assert agent["agent_name"] == "Test Agent for API"
-    assert isinstance(agent["capabilities"], list)
+    assert agent["agent_name"] == "Test Agent"
     print(f"PASS: test_get_agent (name={agent['agent_name']})")
 
 
-def test_list_agents():
-    agents = list_agents(agent_type="tester")
-    assert len(agents) >= 1
-    print(f"PASS: test_list_agents (found={len(agents)})")
-
-
-def test_session_lifecycle():
-    session_id = create_session(TEST_AGENT)
-    assert session_id is not None
-    print(f"PASS: test_create_session (id={session_id})")
-
-    ok = update_session_context(session_id, {"test_key": "test_value"})
+def test_heartbeat():
+    ok = heartbeat(TEST_AGENT)
     assert ok
-    print("PASS: test_update_session_context")
+    print("PASS: test_heartbeat")
 
+
+def test_create_session():
+    session_id = create_session(TEST_AGENT)
+    assert isinstance(session_id, str)
+    assert len(session_id) > 0
+    print(f"PASS: test_create_session (id={session_id})")
+    return session_id
+
+
+def test_active_sessions():
     sessions = get_active_sessions(agent_id=TEST_AGENT)
     assert len(sessions) >= 1
-    print(f"PASS: test_get_active_sessions (found={len(sessions)})")
-
-    ok = close_session(session_id)
-    assert ok
-    print("PASS: test_close_session")
+    print(f"PASS: test_active_sessions (found={len(sessions)})")
+    return sessions[0]["session_id"] if sessions else None
 
 
-def test_access_logging():
-    entity_id = create_memory("Access Test Memory", "content", category="test")
-    log_access(TEST_AGENT, entity_id, "READ")
-    history = get_access_history(TEST_AGENT, limit=5)
+def test_log_access():
+    entity_id = create_memory("Access Test", "content", category="test")
+    log_id = log_access(TEST_AGENT, entity_id, "READ")
+    assert isinstance(log_id, str)
+    assert len(log_id) > 0
+    history = get_access_log(entity_id=entity_id, limit=5)
     assert len(history) >= 1
-    print(f"PASS: test_access_logging (history={len(history)})")
+    print(f"PASS: test_log_access (log_id={log_id})")
     from lib.connection import execute
-    execute("DELETE FROM ENTITY_ACCESS_LOG WHERE ENTITY_ID = :eid", {"eid": entity_id})
+    execute("DELETE FROM ENTITY_ACCESS_LOG WHERE ENTITY_ID = :id", {"id": entity_id})
     delete_memory(entity_id)
 
 
-def test_agent_lifecycle():
-    ok = disable_agent(TEST_AGENT, reason="test disable")
+def test_end_session():
+    session_id = create_session(TEST_AGENT)
+    ok = end_session(session_id)
     assert ok
-    agent = get_agent(TEST_AGENT)
-    assert agent["status"] == "DISABLED"
-    print("PASS: test_disable_agent")
-
-    ok = enable_agent(TEST_AGENT)
-    assert ok
-    agent = get_agent(TEST_AGENT)
-    assert agent["status"] == "ACTIVE"
-    print("PASS: test_enable_agent")
+    print("PASS: test_end_session")
 
 
 def test_collaboration():
-    register_agent("test-agent-api-2", "Second Test Agent", agent_type="tester")
-    entity_id = create_memory("Collab Test", "content", category="test")
-    collab_id = request_collaboration(
-        sharing_agent=TEST_AGENT,
-        receiving_agent="test-agent-api-2",
-        entity_id=entity_id,
-        reason="Unit test collaboration",
+    register_agent(TEST_AGENT_2, "Second Test Agent", agent_type="test")
+    col_id = create_collaboration(
+        source_agent_id=TEST_AGENT,
+        target_agent_id=TEST_AGENT_2,
+        col_type="SHARING",
     )
-    if collab_id:
-        print(f"PASS: test_request_collaboration (id={collab_id})")
-        pending = get_pending_requests(TEST_AGENT, role="sharing")
-        print(f"PASS: test_get_pending_requests (found={len(pending)})")
-    else:
-        print("SKIP: test_collaboration (request failed)")
-
-    delete_memory(entity_id)
+    assert isinstance(col_id, str)
+    assert len(col_id) > 0
+    collabs = get_collaborations(agent_id=TEST_AGENT)
+    assert len(collabs) >= 1
+    print(f"PASS: test_collaboration (col_id={col_id})")
 
 
 def run_all():
@@ -109,10 +96,11 @@ def run_all():
     for test_fn in [
         test_register_agent,
         test_get_agent,
-        test_list_agents,
-        test_session_lifecycle,
-        test_access_logging,
-        test_agent_lifecycle,
+        test_heartbeat,
+        test_create_session,
+        test_active_sessions,
+        test_log_access,
+        test_end_session,
         test_collaboration,
     ]:
         try:

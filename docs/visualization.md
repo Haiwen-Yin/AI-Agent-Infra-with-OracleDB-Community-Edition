@@ -1,8 +1,8 @@
-# Web Visualization - Oracle Memory System v2.0.0
+# Web Visualization - Oracle Memory System v2.1.0
 
 ## Server
 
-`viz_server_local_js.py` provides a web interface for browsing entities, relationships, agents, and task plans.
+`viz_server_local_js.py` provides a web interface for browsing entities, relationships, agents, task plans, and graph data.
 
 ## Pages
 
@@ -12,6 +12,7 @@
 | Memory Content | `/memory` | Interactive vis.js graph of MEMORY entities and edges |
 | Agent Collaboration | `/agents` | 3-tab dashboard: Agent Registry, Active Sessions, Collaboration Requests |
 | Task Plans | `/tasks` | Status filter, keyword search, accordion plan list with expandable step tables |
+| Property Graph | `/graph` | Graph API explorer for entity context, paths, and communities |
 
 All pages share: bilingual UI (zh/en), session auth with auto-logout timer, `/api/stats` sidebar.
 
@@ -29,21 +30,58 @@ All pages share: bilingual UI (zh/en), session auth with auto-logout timer, `/ap
 | `/api/stats` | GET | Entity counts by type + edge count |
 | `/api/login` | POST | Authenticate (form: username + password) |
 | `/api/logout` | GET | Clear session cookie, redirect to login |
+| `/api/graph/neighbors` | GET | Graph neighbors for entity (param: `entity_id`, `direction`) |
+| `/api/graph/path` | GET | Shortest path between entities (params: `source_id`, `target_id`) |
+| `/api/graph/context` | GET | Entity context with grouped neighbors (param: `entity_id`) |
+| `/api/graph/stats` | GET | Graph statistics (vertex/edge counts, distributions) |
+| `/api/graph/search` | GET | Graph-aware search (params: `keyword`, `entity_type`, `category`) |
+| `/api/graph/subgraph` | GET | Subgraph extraction (param: `entity_ids`, `include_intermediate`) |
+| `/api/graph/communities` | GET | Community detection (params: `entity_type`, `min_connections`) |
+
+## Graph API Endpoints
+
+The `/api/graph/*` endpoints wrap `graph_api.py` functions, providing Property Graph visualization and analysis:
+
+- **Neighbors**: One-hop adjacency with direction filtering and edge type/strength constraints
+- **Path**: Shortest path between two entities (up to 6 hops) using GRAPH_TABLE
+- **Context**: Full entity view with neighbors grouped by type and edge type
+- **Stats**: Graph-wide statistics including vertex/edge counts, type distributions, average degree
+- **Search**: Graph-aware entity search with importance filtering
+- **Subgraph**: Extract a subgraph by entity ID list, optionally including intermediate nodes
+- **Communities**: Find highly-connected entity clusters
+
+## UI Column Updates (v2.1)
+
+v2.1 renamed several columns visible in the UI:
+
+| v2.0 UI Label | v2.1 UI Label | Field |
+|---------------|---------------|-------|
+| Name | Title | ENTITIES.TITLE |
+| Priority | Importance | ENTITIES.IMPORTANCE (1-10) |
+| Tags (JSON) | Tags (table) | TAGS.TAG_NAME via ENTITY_TAGS |
+| Metadata | *(removed)* | No longer displayed |
+| Accessible To | *(removed)* | Replaced by visibility badge |
+
+New columns displayed:
+- **Summary**: Entity summary text
+- **Source Agent**: Creating agent ID
+- **Retrieval Count**: Access counter
+- **Execution Mode**: On harness templates (SEQUENTIAL/PARALLEL/CONDITIONAL)
 
 ## Agent Collaboration Page
 
 Three tabbed sections:
 
-- **Agent Registry** — Table with Agent ID, Name, Type, Status (colored badge), Permission Level (badge), Active Sessions count, Access Count, Created timestamp
-- **Active Sessions** — Recent 50 sessions with Session ID (truncated), Agent Name, Active (Y/N badge), Start Time, Last Activity
-- **Collaboration Requests** — Recent 50 requests with From/To agent names, Reason, Status (PENDING/ACCEPTED/REJECTED/EXPIRED badges), Created timestamp
+- **Agent Registry** — Table with Agent ID, Name, Type, Status (colored badge), Active Sessions count, Last Seen, Created timestamp
+- **Active Sessions** — Recent 50 sessions with Session ID (truncated), Agent Name, Active (Y/N badge), Start Time
+- **Collaboration Requests** — Recent 50 requests with From/To agent names, Type, Entity ID, Strength, Created timestamp
 
-Status badges: ACTIVE=green, DISABLED=red, SUSPENDED=orange. Permission badges: READ_ONLY=blue, READ_WRITE=green, ADMIN=purple.
+Status badges: ACTIVE=green, INACTIVE=gray, SUSPENDED=orange, DECOMMISSIONED=red.
 
 ## Task Plans Page
 
 - **Top bar**: Status filter dropdown (ALL/PENDING/RUNNING/SUCCESS/FAILED/CANCELLED/BLOCKED), keyword search input, summary stat badges
-- **Plan list**: Accordion-style cards showing Plan Name, Status badge, Type, Priority, Progress bar (done_steps/total_steps), Created, Completed timestamps
+- **Plan list**: Accordion-style cards showing Plan Name, Status badge, Goal, Priority, Progress, Created, Completed timestamps
 - **Step details**: Click a plan to expand its step table — Order, Step Name, Action, Status badge, Started, Completed, Error message
 
 ## UTF-8 Encoding Fix

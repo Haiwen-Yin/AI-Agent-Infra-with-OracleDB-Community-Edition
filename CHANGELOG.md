@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.1.0] - 2026-05-19
+
+### Summary
+
+**Schema evolution with partitioning, composite keys, and Property Graph API.** Not backward-compatible with v2.0.0 — requires fresh deployment or migration.
+
+### Added
+
+- **Table partitioning: LIST+RANGE composite on ENTITIES** — 6 list (ENTITY_TYPE) × 7 time (CREATED_AT) subpartitions
+- **Reference partitioning on 5 child tables** — ENTITY_EDGES, KNOWLEDGE_META, HARNESS_META, ENTITY_EMBEDDINGS, ENTITY_TAGS inherit partitioning from ENTITIES
+- **RANGE+HASH partitioning on ENTITY_ACCESS_LOG** — RANGE(ACCESS_TIME) + HASH(AGENT_ID) with 4 buckets
+- **LIST+RANGE on AGENT_SESSION with ROW MOVEMENT** — LIST(IS_ACTIVE) + RANGE(START_TIME), rows migrate between partitions on status change
+- **LIST+RANGE on TASK_PLANS; reference on TASK_STEPS** — LIST(STATUS) + RANGE(CREATED_AT), TASK_STEPS inherits via reference partitioning
+- **Composite primary keys** — ENTITIES(ENTITY_ID, ENTITY_TYPE), ENTITY_EDGES(EDGE_ID, SOURCE_ID), TASK_PLANS(PLAN_ID, STATUS), etc.
+- **Global unique constraints** for cross-partition FK references — ENTITY_ID globally unique despite composite PK
+- **Denormalized ENTITY_TYPE/SOURCE_TYPE/PLAN_STATUS columns** — added to child tables for reference partitioning key propagation
+- **graph_api.py: Property Graph API** with GRAPH_TABLE SQL operator — 9 functions: get_neighbors, get_reachable, get_shortest_path, find_similar_entities, get_entity_context, get_subgraph, graph_search, find_communities, get_graph_stats
+- **ORACLE_MEMORY_GRAPH** — vertex=ENTITIES, edges=ENTITY_EDGES; supports SQL PGQ traversal via GRAPH_TABLE operator
+- **JSON Relational Duality Views** — MEMORY_DV, KNOWLEDGE_DV with composite _id (ENTITY_ID||ENTITY_TYPE), nested subqueries for edges/tags
+- **KNOWLEDGE_REVIEW_JOB scheduler job** — Daily 04:00 review and validation of knowledge concepts
+- **8 graph tests** in test suite (test_graph.py)
+
+### Changed
+
+- **ENTITIES PK**: ENTITY_ID → (ENTITY_ID, ENTITY_TYPE)
+- **ENTITY_EDGES**: added SOURCE_TYPE column, PK → (EDGE_ID, SOURCE_ID)
+- **KNOWLEDGE_META/HARNESS_META/ENTITY_EMBEDDINGS/ENTITY_TAGS**: added ENTITY_TYPE column for reference partitioning
+- **TASK_STEPS**: added PLAN_STATUS column for reference partitioning
+- **TASK_PLANS PK**: PLAN_ID → (PLAN_ID, STATUS)
+- **All Python APIs**: entity IDs now VARCHAR2(64) not NUMBER, RAWTOHEX(SYS_GUID()) generation
+- **connection.py**: execute_insert_returning_id returns str not int
+- **PL/SQL packages**: rewritten for composite PKs, JSON_OBJECT VALUE syntax, RAWTOHEX(SYS_GUID())
+- **viz_server**: updated for new schema columns, added /api/graph/* endpoints
+- **1_schema.sql**: complete rewrite with 19 tables, 32 indexes, property graph, duality views
+- **2_api.sql**: complete rewrite for v2.1 schema
+- **3_jobs.sql**: added KNOWLEDGE_REVIEW_JOB
+- **4_harness_templates.sql**: rewritten for new HARNESS_META schema
+
+### Removed
+
+- **INTERVAL subpartitioning** — removed due to ORA-14179 incompatibility with LIST+RANGE composite
+- **ACCESSIBLE_TO column** from ENTITIES
+- **NAME, PRIORITY, TAGS, METADATA, DESCRIPTION columns** — replaced by TITLE, IMPORTANCE, separate tag tables
+
+---
+
 ## [2.0.0] - 2026-05-15
 
 ### Summary

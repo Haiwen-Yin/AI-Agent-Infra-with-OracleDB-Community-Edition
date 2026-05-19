@@ -1,4 +1,4 @@
-# Minimum Database Privileges - Oracle Memory System v2.0.0
+# Minimum Database Privileges - Oracle Memory System v2.1.0
 
 ## Current State (openclaw user)
 
@@ -18,13 +18,17 @@
 | Privilege | Reason |
 |-----------|--------|
 | CREATE SESSION | Connect to database |
-| CREATE TABLE | Create 16 tables |
-| CREATE SEQUENCE | Create sequences (IDENTITY columns auto-create, but explicit seqs in script) |
+| CREATE TABLE | Create 19 tables (6 partitioned, 5 reference-partitioned, 8 non-partitioned) |
+| CREATE SEQUENCE | Create sequences (IDENTITY columns on TAGS, TASK_CONTEXT_SNAPSHOTS, etc.) |
 | CREATE VIEW | Create JSON Duality Views (MEMORY_DV, KNOWLEDGE_DV) |
 | CREATE PROCEDURE | Create safe_ddl, safe_idx helper procedures |
 | CREATE PROPERTY GRAPH | Create ORACLE_MEMORY_GRAPH |
-| CREATE TRIGGER | Not required by v2.0 (v1 had triggers, v2 uses IDENTITY) |
 | UNLIMITED TABLESPACE | Or: QUOTA UNLIMITED ON <tablespace_name> |
+
+**Partitioning-specific requirements**:
+- No additional privilege needed for partitioned DDL — `CREATE TABLE` covers it
+- Reference partitioning, LIST+RANGE, and RANGE+HASH are all covered by `CREATE TABLE`
+- ROW MOVEMENT (`ALTER TABLE ... ENABLE ROW MOVEMENT`) requires `ALTER` on the table (auto-granted to schema owner)
 
 ### Phase 2: API Packages (2_api.sql)
 | Privilege | Reason |
@@ -37,11 +41,21 @@
 |-----------|--------|
 | CREATE JOB | Create 7 DBMS_SCHEDULER jobs |
 
+### Phase 4: Harness Templates (4_harness_templates.sql)
+| Privilege | Reason |
+|-----------|--------|
+| *(none beyond Phase 1)* | MERGE and INSERT on existing tables |
+
 ### Runtime (Python oracledb driver)
 | Privilege | Reason |
 |-----------|--------|
 | CREATE SESSION | Connect to database |
 | SELECT, INSERT, UPDATE, DELETE on own schema tables | DML operations (auto-granted to schema owner) |
+
+### Partition Maintenance (operational)
+| Privilege | Reason |
+|-----------|--------|
+| ALTER on own schema tables | SPLIT SUBPARTITION, ADD PARTITION for future quarters (auto-granted to schema owner) |
 
 ### Optional: UTL_HTTP (for GET_EMBEDDING function)
 | Privilege | Reason |
@@ -104,6 +118,21 @@ GRANT CREATE TRIGGER TO openclaw;
 ALTER USER openclaw QUOTA UNLIMITED ON USERS;
 ```
 
+## Partitioned Tables Requiring Maintenance Access
+
+| Table | Partition Strategy | Maintenance Operations |
+|-------|-------------------|----------------------|
+| ENTITIES | LIST + RANGE (6×7) | SPLIT SUBPARTITION for new quarters |
+| AGENT_SESSION | LIST + RANGE (2×7) | SPLIT SUBPARTITION for new quarters |
+| TASK_PLANS | LIST + RANGE (2×7) | SPLIT SUBPARTITION for new quarters |
+| ENTITY_ACCESS_LOG | RANGE + HASH | SPLIT PARTITION for new months |
+| ENTITY_EDGES | REFERENCE | Auto-maintained with parent |
+| KNOWLEDGE_META | REFERENCE | Auto-maintained with parent |
+| ENTITY_EMBEDDINGS | REFERENCE | Auto-maintained with parent |
+| HARNESS_META | REFERENCE | Auto-maintained with parent |
+| ENTITY_TAGS | REFERENCE | Auto-maintained with parent |
+| TASK_STEPS | REFERENCE | Auto-maintained with parent |
+
 ## Privileges to REVOKE (Security Hardening)
 
 ```sql
@@ -122,14 +151,26 @@ ALTER USER openclaw QUOTA UNLIMITED ON USERS;
 SELECT PRIVILEGE FROM USER_SYS_PRIVS ORDER BY PRIVILEGE;
 SELECT GRANTED_ROLE FROM USER_ROLE_PRIVS ORDER BY GRANTED_ROLE;
 
--- Test: can we still create a table?
-CREATE TABLE _priv_test (id NUMBER);
+-- Test: can we still create a partitioned table?
+CREATE TABLE _priv_test (id VARCHAR2(64), type VARCHAR2(32), PRIMARY KEY (id, type))
+  PARTITION BY LIST (type) (PARTITION p1 VALUES ('A'), PARTITION p2 VALUES (DEFAULT));
 DROP TABLE _priv_test;
+
+-- Test: can we enable row movement?
+CREATE TABLE _priv_test2 (id VARCHAR2(64), status VARCHAR2(16), PRIMARY KEY (id, status))
+  PARTITION BY LIST (status) (PARTITION p_a VALUES ('A'), PARTITION p_b VALUES (DEFAULT));
+ALTER TABLE _priv_test2 ENABLE ROW MOVEMENT;
+DROP TABLE _priv_test2;
 
 -- Test: can we still create a procedure?
 CREATE OR REPLACE PROCEDURE _priv_test_proc IS BEGIN NULL; END;
 /
 DROP PROCEDURE _priv_test_proc;
+
+-- Test: can we create a property graph?
+CREATE PROPERTY GRAPH _priv_test_pg
+  VERTEX TABLES (_priv_test KEY (id));
+DROP PROPERTY GRAPH _priv_test_pg;
 ```
 
 ## Risk Summary

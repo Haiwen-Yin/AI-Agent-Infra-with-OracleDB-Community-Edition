@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.0.0 - Database Connection Pool Manager
+"""Oracle Memory System v2.1.0 - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -84,26 +84,25 @@ def execute_query_one(sql: str, params: Optional[Dict[str, Any]] = None) -> Opti
     return rows[0] if rows else None
 
 
-def execute_insert(sql: str, params: Optional[Dict[str, Any]] = None) -> int:
+def execute_insert(sql: str, params: Optional[Dict[str, Any]] = None) -> str:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or {})
-            cur.execute("SELECT :seq.CURRVAL FROM DUAL", {"seq": None})
             conn.commit()
-            return cur.fetchone()[0]
+            return "ok"
 
 
 def execute_insert_returning_id(sql: str, params: Optional[Dict[str, Any]] = None,
-                                 id_column: str = "ENTITY_ID") -> int:
+                                 id_column: str = "ENTITY_ID") -> str:
     with get_connection() as conn:
         with conn.cursor() as cur:
-            new_id = cur.var(oracledb.NUMBER)
+            new_id = cur.var(oracledb.STRING)
             params_with_return = dict(params or {})
             params_with_return["ret_id"] = new_id
             cur.execute(sql, params_with_return)
             conn.commit()
             val = new_id.getvalue()
-            return int(val[0]) if isinstance(val, list) else int(val)
+            return val[0] if isinstance(val, list) else val
 
 
 def execute_many(sql: str, params_list: List[Dict[str, Any]]) -> int:

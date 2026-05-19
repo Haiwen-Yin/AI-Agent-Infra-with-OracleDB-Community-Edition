@@ -1,65 +1,146 @@
-# API Reference - Oracle Memory System v2.0.0
+# API Reference - Oracle Memory System v2.1.0
 
 ## Python API (scripts/lib/)
 
 ### memory_api.py
+
 ```python
-create_memory(name, content, category, memory_type, priority, tags, metadata, owned_by_agent, visibility, accessible_to) -> int
+create_memory(title, content, category, importance, summary, source_agent, owned_by_agent, visibility) -> str
 get_memory(entity_id) -> dict | None
 update_memory(entity_id, **kwargs) -> bool
 delete_memory(entity_id) -> bool
 search_memories(keyword, category, visibility, owned_by_agent, limit, offset) -> list
 get_agent_memories(agent_id, limit) -> list
 count_memories(category) -> int
+add_memory_tags(entity_id, tag_names) -> int
+get_memory_tags(entity_id) -> list
+remove_memory_tag(entity_id, tag_id) -> bool
 ```
+
+- `entity_id` is `str` (VARCHAR2(64) via RAWTOHEX(SYS_GUID()))
+- `title` replaces v2.0 `name`; `importance` replaces `priority` (1-10)
+- Removed: `metadata`, `accessible_to`, `tags` (JSON) — use ENTITY_TAGS table
+- Added: `summary`, `source_agent`, `retrieval_count` fields on return dicts
 
 ### knowledge_api.py
+
 ```python
-create_concept(name, concept_type, description, category, content, source_type, source_entity_ids, confidence, tags, metadata, owned_by_agent, visibility) -> int
-get_concept(entity_id) -> dict | None
-update_concept(entity_id, **kwargs) -> bool
-delete_concept(entity_id) -> bool
-create_relationship(source_id, target_id, edge_type, strength, confidence, properties) -> int
-get_relationships(entity_id, direction) -> list
-delete_relationship(edge_id) -> bool
-search_concepts(keyword, concept_type, category, validation_status, limit) -> list
-get_statistics() -> dict
-get_concept_neighbors(entity_id, max_depth) -> list
+create_knowledge(title, content, domain, topic, difficulty, category, importance, summary, owned_by_agent, visibility) -> str
+get_knowledge(entity_id) -> dict | None
+update_knowledge(entity_id, **kwargs) -> bool
+delete_knowledge(entity_id) -> bool
+search_knowledge(domain, topic, keyword, difficulty, limit, offset) -> list
+get_due_reviews(limit) -> list
+record_review(entity_id) -> bool
+add_edge(source_id, source_type, target_id, edge_type, strength, confidence, metadata) -> str
+get_edges(entity_id, direction) -> list
+count_knowledge(domain) -> int
+add_knowledge_tags(entity_id, tag_names) -> int
+get_knowledge_tags(entity_id) -> list
+remove_knowledge_tag(entity_id, tag_id) -> bool
 ```
+
+- `add_edge` now requires `source_type` parameter (composite FK)
+- Edge IDs prefixed with `E_`: `'E_' || RAWTOHEX(SYS_GUID())`
+- `source_type` is the ENTITY_TYPE of the source entity (e.g., 'KNOWLEDGE', 'MEMORY')
+- KNOWLEDGE_META fields: domain, topic, difficulty, review_count, last_reviewed, next_review
+- Spaced review: `NEXT_REVIEW = SYSTIMESTAMP + LEAST(POWER(2, REVIEW_COUNT + 1), 30)`
+
+### graph_api.py
+
+```python
+get_neighbors(entity_id, direction, edge_type, min_strength, limit) -> list
+get_reachable(entity_id, max_hops, edge_type, limit) -> list
+get_shortest_path(source_id, target_id, max_hops) -> list | None
+find_similar_entities(entity_id, max_hops, limit) -> list
+get_entity_context(entity_id, depth) -> dict
+get_graph_stats() -> dict
+get_subgraph(entity_ids, include_intermediate) -> dict
+find_communities(entity_type, min_connections, limit) -> list
+graph_search(keyword, entity_type, category, min_importance, limit) -> list
+```
+
+All functions use the `GRAPH_TABLE` SQL operator against `ORACLE_MEMORY_GRAPH`:
+
+| Function | GRAPH_TABLE Pattern | Use Case |
+|----------|-------------------|----------|
+| `get_neighbors` | `MATCH (a)-[e]->(b)` or `MATCH (a)<-[e]-(b)` | One-hop adjacency |
+| `get_reachable` | `MATCH (a)-[e]->{1,N}(v)` | Multi-hop reachability |
+| `get_shortest_path` | `MATCH (a)-[e1]->(v1)-[e2]->...(vn)` | Path finding (max 6 hops) |
+| `find_similar_entities` | `MATCH (a)-[e]->{1,N}(v)` | Graph-proximity similarity |
+| `get_entity_context` | Direct SQL + `get_neighbors` | Full entity context with grouped neighbors |
+| `get_graph_stats` | Direct SQL on ENTITIES/ENTITY_EDGES | Graph statistics and distributions |
+| `get_subgraph` | Direct SQL with IN-list | Subgraph extraction with optional intermediate nodes |
+| `find_communities` | Direct SQL with JOIN | Highly-connected entity clusters |
+| `graph_search` | `MATCH (a) WHERE ...` | Graph-aware search with filtering |
 
 ### agent_api.py
+
 ```python
-register_agent(agent_id, agent_name, agent_type, capabilities, description, permission_level) -> bool
+register_agent(agent_id, agent_name, agent_type, description, capabilities, config) -> str
 get_agent(agent_id) -> dict | None
-list_agents(agent_type, status) -> list
-disable_agent(agent_id, reason) -> bool
-enable_agent(agent_id) -> bool
-create_session(agent_id, working_memory_id) -> str | None
-update_session_context(session_id, context) -> bool
-close_session(session_id) -> bool
+update_agent(agent_id, **kwargs) -> bool
+decommission_agent(agent_id) -> bool
+heartbeat(agent_id) -> bool
+create_session(agent_id, wm_entity_id, context) -> str
+end_session(session_id) -> bool
 get_active_sessions(agent_id) -> list
-log_access(agent_id, entity_id, access_type) -> None
-get_access_history(agent_id, limit) -> list
-request_collaboration(sharing_agent, receiving_agent, entity_id, reason) -> int | None
-approve_collaboration(collab_id) -> bool
-reject_collaboration(collab_id) -> bool
-get_pending_requests(agent_id, role) -> list
+log_access(agent_id, entity_id, access_type, session_id) -> str
+get_access_log(entity_id, agent_id, limit) -> list
+create_collaboration(source_agent_id, target_agent_id, col_type, entity_id, context, strength) -> str
+get_collaborations(agent_id, limit) -> list
 ```
+
+- Session IDs: `'SES_' || RAWTOHEX(SYS_GUID())`
+- Access log IDs: `'LOG_' || RAWTOHEX(SYS_GUID())`
+- Collaboration IDs: `'COL_' || RAWTOHEX(SYS_GUID())`
+- AGENT_SESSION is partitioned (LIST+RANGE), ROW MOVEMENT enabled
+- AGENT_COLLABORATION has STRENGTH (0-1) field
 
 ### task_plan_api.py
+
 ```python
-create_task_plan(plan_name, plan_type, description, goal, priority, steps, metadata, tags) -> int
-get_task_plan(plan_id) -> dict | None
-get_task_steps(plan_id) -> list
-update_step_status(plan_id, step_id, status, result, error_msg) -> bool
-save_snapshot(plan_id, context, snapshot_type) -> int
-resume_task(plan_id) -> dict | None
-log_tool_call(plan_id, tool_name, action, step_id, status, result_size, duration_ms) -> int
-add_dependency(source_plan_id, target_plan_id, dependency_type, condition) -> int
-search_completed_tasks(plan_type, status, limit) -> list
+create_plan(agent_id, goal, priority, strategy) -> str
+get_plan(plan_id) -> dict | None
+update_plan(plan_id, **kwargs) -> bool
+add_step(plan_id, plan_status, description, step_order, tool_name, tool_input) -> str
+update_step(step_id, **kwargs) -> bool
+get_plan_steps(plan_id) -> list
+add_dependency(source_plan_id, target_plan_id, dep_type) -> str
+get_plan_dependencies(plan_id) -> list
+log_tool_call(plan_id, step_id, tool_name, tool_input, tool_output, status, duration_ms) -> str
+save_snapshot(plan_id, snapshot_type, context_data) -> str
+list_plans(agent_id, status, limit) -> list
+delete_plan(plan_id) -> bool
 ```
 
+- Plan IDs: `'PLAN_' || RAWTOHEX(SYS_GUID())`
+- Step IDs: `'STEP_' || RAWTOHEX(SYS_GUID())`
+- `add_step` requires `plan_status` parameter — denormalized TASK_PLANS.STATUS for composite FK
+- TASK_PLANS PK is `(PLAN_ID, STATUS)` with ROW MOVEMENT enabled
+- TASK_STEPS PK is `(STEP_ID, PLAN_ID)`, FK `(PLAN_ID, PLAN_STATUS)` references TASK_PLANS
+- Terminal statuses auto-set `COMPLETED_AT = SYSTIMESTAMP`
+
+### harness_api.py
+
+```python
+create_harness_template(title, summary, content, category, input_schema, output_schema, execution_mode, importance, owned_by_agent, visibility) -> str
+get_harness_template(entity_id) -> dict | None
+update_harness_template(entity_id, **kwargs) -> bool
+delete_harness_template(entity_id) -> bool
+list_harness_templates(category, execution_mode, limit, offset) -> list
+get_template_with_variables(entity_id) -> dict | None
+instantiate_harness_template(entity_id, variable_values, agent_id) -> str
+count_harness_templates(category) -> int
+```
+
+- HARNESS_META columns: `TEMPLATE_VERSION`, `INPUT_SCHEMA` (JSON), `OUTPUT_SCHEMA` (JSON), `EXECUTION_MODE`
+- `execution_mode`: SEQUENTIAL, PARALLEL, CONDITIONAL
+- `instantiate_harness_template`: Creates a TASK_OUTPUT entity with `{variable}` substitution in content, adds USES_HARNESS edge
+- `get_template_with_variables`: Extracts variable definitions from INPUT_SCHEMA JSON properties
+
 ### security.py
+
 ```python
 DataMaskingService(context_level).mask_text(text) -> str
 DataMaskingService(context_level).mask_dict(data) -> dict
@@ -73,27 +154,25 @@ verify_password(password, stored_hash, salt_hex, iterations) -> bool
 ## PL/SQL API (packages)
 
 ### MEMORY_FUSION_ENGINE
-- `fuse_similar_memories(category, min_similarity, dry_run)` - Merge similar memories
-- `extract_knowledge_from_memories(category, min_count)` - Auto-extract knowledge
-- `decay_old_memories(days_threshold, decay_factor)` - Reduce priority of old memories
-- `get_fusion_stats() RETURN JSON` - Fusion statistics
+- `fuse_similar_memories(category, min_similarity, dry_run)` — Merge similar memories, inserts SIMILAR_TO edges with `RAWTOHEX(SYS_GUID())` IDs, uses `JSON_OBJECT('key' VALUE val)` syntax
+- `extract_knowledge_from_memories(category, min_count)` — Auto-extract knowledge, creates ENTITIES + KNOWLEDGE_META with composite FK
+- `decay_old_memories(days_threshold, decay_factor)` — Reduce IMPORTANCE (not priority) of old memories
+- `get_fusion_stats() RETURN JSON` — Fusion statistics using `JSON_OBJECT` with `VALUE` syntax
 
 ### KNOWLEDGE_BASE_API
-- `validate_concept(entity_id, validator)` - Mark concept as validated
-- `deprecate_concept(entity_id, reason)` - Deprecate with reason
-- `create_concept_version(entity_id, new_content)` - Version a concept
-- `get_unvalidated() RETURN SYS_REFCURSOR` - List pending concepts
-- `get_concept_lineage(entity_id) RETURN JSON` - Ancestor/descendant graph
+- `schedule_review(entity_id, entity_type)` — Schedule next spaced review (requires both PK components)
+- `record_review(entity_id, entity_type)` — Record review with doubling interval (requires both PK components)
+- `get_due_reviews() RETURN SYS_REFCURSOR` — List pending reviews
+- `get_concept_lineage(entity_id, entity_type) RETURN JSON` — Ancestor/descendant graph using `JSON_OBJECT`/`JSON_ARRAYAGG` with `VALUE` syntax, joins on composite `(SOURCE_ID, SOURCE_TYPE)`
 
 ### AGENT_PERMISSION_MANAGER
-- `check_entity_access(agent_id, entity_id, access_type) RETURN VARCHAR2` - 'GRANTED'/'DENIED'
-- `grant_access(agent_id, entity_id, granted_by)` - Add to ACCESSIBLE_TO
-- `revoke_access(agent_id, entity_id)` - Remove from ACCESSIBLE_TO
-- `cleanup_expired_sessions()` - Close sessions inactive >300min
-- `process_collaboration_requests()` - Expire requests >7 days
+- `check_entity_access(agent_id, entity_id) RETURN VARCHAR2` — 'GRANTED'/'DENIED' based on PRIVATE/SHARED/PUBLIC visibility
+- `log_access(agent_id, entity_id, access_type, session_id)` — Insert into ENTITY_ACCESS_LOG with `'LOG_' || RAWTOHEX(SYS_GUID())`
+- `cleanup_expired_sessions()` — Close sessions inactive >300min (ROW MOVEMENT moves rows to inactive partition)
+- `process_collaboration_requests()` — Process collaboration requests
 
 ### SESSION_CLEANUP
-- `purge_access_logs(days_to_keep)` - Delete old access logs
-- `purge_inactive_sessions(days_to_keep)` - Delete old closed sessions
-- `archive_old_entities(days_threshold)` - Archive low-priority memories
-- `update_tag_counts()` - Recalculate tag usage counts
+- `purge_access_logs(days_to_keep)` — Delete old access logs (partition-aware)
+- `purge_inactive_sessions(days_to_keep)` — Delete old closed sessions
+- `archive_old_entities(days_threshold)` — Archive low-importance memories (IMPORTANCE <= 1)
+- `update_tag_counts()` — Reserved for tag count updates

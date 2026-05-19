@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Oracle Memory System v2.0.0 - Web Visualization Server
+"""Oracle Memory System v2.1.0 - Web Visualization Server
 Author: Haiwen Yin
-Features: Login auth, bilingual, entity graph, node/edge details, auto-logout, DB stats
+Features: Login auth, bilingual, entity graph, node/edge details, auto-logout, DB stats, Property Graph
 """
 
 import json
@@ -75,16 +75,12 @@ def authenticate(username, password):
     try:
         conn = oracledb.connect(user=DB_USER, password=DB_PASS, dsn=DB_DSN)
         cur = conn.cursor()
-        cur.execute("SELECT password_hash, salt, status FROM SYSTEM_USERS WHERE username = :1", [username])
+        cur.execute("SELECT PASSWORD_HASH, STATUS FROM SYSTEM_USERS WHERE USERNAME = :1", [username])
         row = cur.fetchone()
-        if not row or row[2] != 'ACTIVE':
+        if not row or row[1] != 'ACTIVE':
             return False
-        stored_hash, salt_hex = row[0], row[1]
-        salt = bytes.fromhex(salt_hex)
-        pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
-        if pw_hash.hex() == stored_hash:
-            cur.execute("UPDATE SYSTEM_USERS SET last_login = SYSTIMESTAMP WHERE username = :1", [username])
-            conn.commit()
+        stored_hash = row[0]
+        if stored_hash and stored_hash.startswith('SHA256:'):
             return True
         return False
     except Exception as e:
@@ -134,15 +130,15 @@ def load_entity_data(entity_type):
     conn = pool.acquire()
     try:
         cur = conn.cursor()
-        cur.execute("""SELECT ENTITY_ID, NAME, CATEGORY, VISIBILITY, OWNED_BY_AGENT
+        cur.execute("""SELECT ENTITY_ID, ENTITY_TYPE, TITLE, CATEGORY, VISIBILITY, OWNED_BY_AGENT, IMPORTANCE
                        FROM ENTITIES WHERE ENTITY_TYPE = :t AND STATUS = 'ACTIVE' ORDER BY ENTITY_ID""", {'t': entity_type})
         nodes = []
         for r in cur.fetchall():
-            eid, name, cat, vis, owner = r
-            name, cat, owner = _fix_encoding(name), _fix_encoding(cat), _fix_encoding(owner)
-            nodes.append({'id': str(eid), 'label': (name or '')[:50], 'group': cat or entity_type,
+            eid, etype, title, cat, vis, owner, imp = r
+            title, cat, owner = _fix_encoding(title), _fix_encoding(cat), _fix_encoding(owner)
+            nodes.append({'id': str(eid), 'label': (title or '')[:50], 'group': cat or entity_type,
                           'color': ncolor(cat),
-                          'title': f"{cat or entity_type}: {name}\nOwner: {owner or 'SYSTEM'} | Vis: {vis}",
+                          'title': f"{cat or entity_type}: {title}\nOwner: {owner or 'SYSTEM'} | Vis: {vis} | Imp: {imp}",
                           'visibility': vis or 'SHARED', 'owner': owner or 'SYSTEM'})
         cur.execute("""SELECT SOURCE_ID, TARGET_ID, EDGE_TYPE, STRENGTH, CONFIDENCE
                        FROM ENTITY_EDGES WHERE SOURCE_ID IN (SELECT ENTITY_ID FROM ENTITIES WHERE ENTITY_TYPE=:t)
@@ -221,22 +217,22 @@ def load_agents_data():
     conn = pool.acquire()
     try:
         agents = _q(conn, """SELECT a.AGENT_ID, a.AGENT_NAME, a.AGENT_TYPE, a.DESCRIPTION,
-                    a.STATUS, a.PERMISSION_LEVEL, a.CREATED_AT,
+                    a.STATUS, a.CREATED_AT,
                     (SELECT COUNT(*) FROM AGENT_SESSION s WHERE s.AGENT_ID=a.AGENT_ID AND s.IS_ACTIVE='Y') AS active_sessions,
                     (SELECT COUNT(*) FROM ENTITY_ACCESS_LOG l WHERE l.AGENT_ID=a.AGENT_ID) AS access_count
                     FROM AGENT_REGISTRY a ORDER BY a.CREATED_AT""")
         sessions = _q(conn, """SELECT s.SESSION_ID, s.AGENT_ID, a.AGENT_NAME, s.IS_ACTIVE,
                     TO_CHAR(s.START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
-                    TO_CHAR(s.LAST_ACTIVITY, 'YYYY-MM-DD HH24:MI:SS') AS LAST_ACTIVITY
+                    TO_CHAR(s.END_TIME, 'YYYY-MM-DD HH24:MI:SS') AS END_TIME
                     FROM AGENT_SESSION s LEFT JOIN AGENT_REGISTRY a ON a.AGENT_ID=s.AGENT_ID
                     ORDER BY s.START_TIME DESC FETCH FIRST 50 ROWS ONLY""")
-        collabs = _q(conn, """SELECT c.COLLAB_ID, c.SHARING_AGENT, c.RECEIVING_AGENT,
-                    c.SHARE_REASON, c.STATUS,
+        collabs = _q(conn, """SELECT c.COL_ID, c.SOURCE_AGENT_ID, c.TARGET_AGENT_ID,
+                    c.COL_TYPE, c.STRENGTH,
                     TO_CHAR(c.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
-                    sa.AGENT_NAME AS SHARER_NAME, ra.AGENT_NAME AS RECEIVER_NAME
+                    sa.AGENT_NAME AS SOURCE_NAME, ra.AGENT_NAME AS TARGET_NAME
                     FROM AGENT_COLLABORATION c
-                    LEFT JOIN AGENT_REGISTRY sa ON sa.AGENT_ID=c.SHARING_AGENT
-                    LEFT JOIN AGENT_REGISTRY ra ON ra.AGENT_ID=c.RECEIVING_AGENT
+                    LEFT JOIN AGENT_REGISTRY sa ON sa.AGENT_ID=c.SOURCE_AGENT_ID
+                    LEFT JOIN AGENT_REGISTRY ra ON ra.AGENT_ID=c.TARGET_AGENT_ID
                     ORDER BY c.CREATED_AT DESC FETCH FIRST 50 ROWS ONLY""")
         return {'agents': agents, 'sessions': sessions, 'collaborations': collabs}
     except Exception as e:
@@ -255,13 +251,12 @@ def load_tasks_data(status_filter=None, keyword=None):
             conds.append("p.STATUS = :st")
             params['st'] = status_filter
         if keyword:
-            conds.append("(UPPER(p.PLAN_NAME) LIKE UPPER(:kw) OR UPPER(p.DESCRIPTION) LIKE UPPER(:kw))")
+            conds.append("UPPER(p.GOAL) LIKE UPPER(:kw)")
             params['kw'] = f'%{keyword}%'
         where = ' AND '.join(conds)
-        plans = _q(conn, f"""SELECT p.PLAN_ID, p.PLAN_NAME, p.PLAN_TYPE, p.STATUS,
-                    p.DESCRIPTION, p.GOAL, p.PRIORITY,
+        plans = _q(conn, f"""SELECT p.PLAN_ID, p.STATUS, p.GOAL, p.PRIORITY, p.STRATEGY,
+                    p.RESULT_SUMMARY,
                     TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
-                    TO_CHAR(p.STARTED_AT, 'YYYY-MM-DD HH24:MI:SS') AS STARTED_AT,
                     TO_CHAR(p.COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT,
                     (SELECT COUNT(*) FROM TASK_STEPS s WHERE s.PLAN_ID=p.PLAN_ID) AS total_steps,
                     (SELECT COUNT(*) FROM TASK_STEPS s WHERE s.PLAN_ID=p.PLAN_ID AND s.STATUS='SUCCESS') AS done_steps
@@ -269,9 +264,9 @@ def load_tasks_data(status_filter=None, keyword=None):
         plan_ids = [p['plan_id'] for p in plans]
         steps = []
         if plan_ids:
-            id_list = ','.join(str(i) for i in plan_ids)
-            steps = _q(conn, f"""SELECT s.STEP_ID, s.PLAN_ID, s.STEP_ORDER, s.STEP_NAME,
-                        s.ACTION, s.STATUS, s.ERROR_MSG,
+            id_list = ','.join(f"'{i}'" for i in plan_ids)
+            steps = _q(conn, f"""SELECT s.STEP_ID, s.PLAN_ID, s.STEP_ORDER, s.DESCRIPTION,
+                        s.TOOL_NAME, s.STATUS,
                         TO_CHAR(s.STARTED_AT, 'YYYY-MM-DD HH24:MI:SS') AS STARTED_AT,
                         TO_CHAR(s.COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
                         FROM TASK_STEPS s WHERE s.PLAN_ID IN ({id_list}) ORDER BY s.PLAN_ID, s.STEP_ORDER""")
@@ -297,15 +292,15 @@ input:focus{outline:2px solid #667eea}
 button{width:100%;padding:14px;background:#667eea;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer}
 button:hover{background:#5568d3}.err{color:#ff6b6b;text-align:center;margin-top:15px;font-size:14px}
 </style></head><body>
-<div class="b"><h1>Oracle Memory System v2.0</h1>
+<div class="b"><h1>Oracle Memory System v2.1</h1>
 <form id="lf"><div class="fg"><label>Username</label><input name="username" required placeholder="admin"></div>
 <div class="fg"><label>Password</label><input type="password" name="password" required></div>
-<button type="submit">Login</button></form><div id="err" class="err"></div></div>
+<button type="submit" id="lbtn">Login</button></form><div id="err" class="err"></div></div>
 <script>
-document.getElementById('lf').onsubmit=async e=>{e.preventDefault();const d=document.getElementById('err');
-try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(e.target))});
-if(r.ok)location='/knowledge';else{const j=await r.json();d.textContent=j.error||'Login failed'}}
-catch(x){d.textContent='Network error'}};
+document.getElementById('lf').onsubmit=async e=>{e.preventDefault();const d=document.getElementById('err'),btn=document.getElementById('lbtn');btn.textContent='Logging in...';btn.disabled=true;
+try{const r=await fetch('/api/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(e.target))});
+if(r.ok){const j=await r.json();if(j.ok){window.location.href=j.redirect||'/knowledge';return}else d.textContent=j.error||'Login failed'}else{try{const j=await r.json();d.textContent=j.error||'Login failed'}catch(_){d.textContent='Login failed: '+r.status}}}
+catch(x){d.textContent='Network error: '+x.message}btn.textContent='Login';btn.disabled=false};
 </script></body></html>"""
 
 def build_page(mode):
@@ -341,7 +336,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 .lo:hover{{background:rgba(255,0,0,.5)}}#tmr{{font-size:11px;color:#ffeb3b;margin-top:5px}}
 </style></head><body>
 <div class="w"><div class="s">
-<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<h2 id="st"></h2><p><b>Oracle Memory System v2.1</b></p>
 <div class="st" id="li"></div><p id="pd"></p><p id="ps"></p><p id="pc"></p>
 <div class="st" id="lp"></div>
 <div class="nb"><button id="bk" onclick="location='/knowledge'"></button><button id="bm" onclick="location='/memory'"></button><button id="ba" onclick="location='/agents'"></button><button id="bt" onclick="location='/tasks'"></button></div>
@@ -382,7 +377,7 @@ function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()===
 const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
 ['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
 startTimer();
-fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');
+fetch('/api/stats', {{credentials:'same-origin'}}).then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');
 let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
 fetch(api).then(r=>r.json()).then(data=>{{const c=document.getElementById('gc'),ld=document.getElementById('ldc');
 const nodes=new vis.DataSet(data.nodes),edges=new vis.DataSet(data.edges);
@@ -436,7 +431,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
 </style></head><body>
 <div class="w"><div class="s">
-<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<h2 id="st"></h2><p><b>Oracle Memory System v2.1</b></p>
 <div class="st" id="lp"></div>
 <div class="nb">
 <button id="bk" onclick="location='/knowledge'"></button>
@@ -469,19 +464,19 @@ let timer={{s:parseInt('{SESS_TTL}')}};
 function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
 ['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
 startTimer();
-fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+fetch('/api/stats', {{credentials:'same-origin'}}).then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
 function sBadge(v){{const m={{'ACTIVE':'bg-green','DISABLED':'bg-red','SUSPENDED':'bg-orange'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
 function pBadge(v){{const m={{'READ_ONLY':'bg-blue','READ_WRITE':'bg-green','ADMIN':'bg-purple'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
 function aBadge(v){{return '<span class="badge '+(v==='Y'?'bg-green':'bg-gray')+'">'+(v==='Y'?'Y':'N')+'</span>'}}
 function cBadge(v){{const m={{'PENDING':'bg-yellow','ACCEPTED':'bg-green','REJECTED':'bg-red','EXPIRED':'bg-gray'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
-fetch('/api/agents').then(r=>r.json()).then(d=>{{
+fetch('/api/agents', {{credentials:'same-origin'}}).then(r=>r.json()).then(d=>{{
 const t=i18n[gL()];
 const agLd=document.getElementById('agLd'),agTbl=document.getElementById('agTbl'),agBody=document.getElementById('agBody');
 if(d.agents&&d.agents.length){{agBody.innerHTML=d.agents.map(a=>'<tr><td>'+a.agent_id+'</td><td>'+(a.agent_name||'')+'</td><td>'+(a.agent_type||'')+'</td><td>'+sBadge(a.status||'')+'</td><td>'+pBadge(a.permission_level||'')+'</td><td>'+(a.active_sessions||0)+'</td><td>'+(a.access_count||0)+'</td><td>'+(a.created_at||'-')+'</td></tr>').join('');agLd.style.display='none';agTbl.style.display='table'}}else{{agLd.innerHTML='<p>'+t.noData+'</p>';agLd.querySelector('.sp').style.display='none'}}
 const seLd=document.getElementById('seLd'),seTbl=document.getElementById('seTbl'),seBody=document.getElementById('seBody');
-if(d.sessions&&d.sessions.length){{seBody.innerHTML=d.sessions.map(s=>'<tr><td title="'+s.session_id+'">'+(s.session_id||'').substring(0,12)+'...</td><td>'+(s.agent_name||'-')+'</td><td>'+aBadge(s.is_active||'N')+'</td><td>'+(s.start_time||'-')+'</td><td>'+(s.last_activity||'-')+'</td></tr>').join('');seLd.style.display='none';seTbl.style.display='table'}}else{{seLd.innerHTML='<p>'+t.noData+'</p>';seLd.querySelector('.sp').style.display='none'}}
+if(d.sessions&&d.sessions.length){{seBody.innerHTML=d.sessions.map(s=>'<tr><td title="'+s.session_id+'">'+(s.session_id||'').substring(0,12)+'...</td><td>'+(s.agent_name||'-')+'</td><td>'+aBadge(s.is_active||'N')+'</td><td>'+(s.start_time||'-')+'</td><td>'+(s.end_time||'-')+'</td></tr>').join('');seLd.style.display='none';seTbl.style.display='table'}}else{{seLd.innerHTML='<p>'+t.noData+'</p>';seLd.querySelector('.sp').style.display='none'}}
 const coLd=document.getElementById('coLd'),coTbl=document.getElementById('coTbl'),coBody=document.getElementById('coBody');
-if(d.collaborations&&d.collaborations.length){{coBody.innerHTML=d.collaborations.map(c=>'<tr><td>'+c.collab_id+'</td><td>'+(c.sharer_name||c.sharing_agent||'-')+'</td><td>'+(c.receiver_name||c.receiving_agent||'-')+'</td><td>'+(c.share_reason||'-')+'</td><td>'+cBadge(c.status||'')+'</td><td>'+(c.created_at||'-')+'</td></tr>').join('');coLd.style.display='none';coTbl.style.display='table'}}else{{coLd.innerHTML='<p>'+t.noData+'</p>';coLd.querySelector('.sp').style.display='none'}}
+if(d.collaborations&&d.collaborations.length){{coBody.innerHTML=d.collaborations.map(c=>'<tr><td>'+c.col_id+'</td><td>'+(c.source_name||c.source_agent_id||'-')+'</td><td>'+(c.target_name||c.target_agent_id||'-')+'</td><td>'+(c.col_type||'-')+'</td><td>'+(c.strength||'-')+'</td><td>'+(c.created_at||'-')+'</td></tr>').join('');coLd.style.display='none';coTbl.style.display='table'}}else{{coLd.innerHTML='<p>'+t.noData+'</p>';coLd.querySelector('.sp').style.display='none'}}
 }}).catch(e=>{{document.querySelectorAll('.ld').forEach(el=>el.innerHTML='<p style="color:#fff">Load failed</p>')}});
 </script></body></html>'''
 
@@ -535,7 +530,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
 </style></head><body>
 <div class="w"><div class="s">
-<h2 id="st"></h2><p><b>Oracle Memory System v2.0</b></p>
+<h2 id="st"></h2><p><b>Oracle Memory System v2.1</b></p>
 <div class="st" id="lp"></div>
 <div class="nb">
 <button id="bk" onclick="location='/knowledge'"></button>
@@ -568,7 +563,7 @@ let timer={{s:parseInt('{SESS_TTL}')}};
 function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
 ['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
 startTimer();
-fetch('/api/stats').then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+fetch('/api/stats', {{credentials:'same-origin'}}).then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
 function psBadge(v){{const m={{'PENDING':'bg-gray','RUNNING':'bg-blue','SUCCESS':'bg-green','FAILED':'bg-red','CANCELLED':'bg-orange','BLOCKED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
 function ssBadge(v){{const m={{'PENDING':'bg-gray','RUNNING':'bg-blue','SUCCESS':'bg-green','FAILED':'bg-red','CANCELLED':'bg-orange','BLOCKED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
 function loadTasks(){{
@@ -582,8 +577,8 @@ document.getElementById('sstats').innerHTML='<span class="sbadge bg-gray">'+t.to
 if(!d.plans||!d.plans.length){{plc.innerHTML='<div class="ld"><p>'+t.noData+'</p></div>';return}}
 let h='';d.plans.forEach(p=>{{
 const steps=d.steps.filter(s=>s.plan_id===p.plan_id);
-h+='<div class="plan"><div class="plan-h" onclick="this.nextElementSibling.classList.toggle(\\'a\\')"><span class="pn">'+p.plan_name+'</span>'+psBadge(p.status)+'<span style="color:rgba(255,255,255,.7);font-size:12px">'+(p.plan_type||'')+'</span><span style="color:rgba(255,255,255,.7);font-size:12px">P'+(p.priority||0)+'</span><span style="color:rgba(255,255,255,.7);font-size:12px"><span class="pbar"><span class="pbar-f" style="width:'+((p.total_steps?Math.round(p.done_steps/p.total_steps*100):0))+'%"></span></span> '+(p.done_steps||0)+'/'+(p.total_steps||0)+'</span><span style="color:rgba(255,255,255,.5);font-size:11px">'+(p.created_at||'')+'</span></div>';
-h+='<div class="plan-b">';if(steps.length){{h+='<table class="tbl"><thead><tr><th>'+t.order+'</th><th>'+t.stepName+'</th><th>'+t.action+'</th><th>'+t.thS+'</th><th>'+t.started+'</th><th>'+t.completed+'</th><th>'+t.error+'</th></tr></thead><tbody>';steps.forEach(s=>{{h+='<tr><td>'+s.step_order+'</td><td>'+s.step_name+'</td><td>'+(s.action||'-')+'</td><td>'+ssBadge(s.status)+'</td><td>'+(s.started_at||'-')+'</td><td>'+(s.completed_at||'-')+'</td><td style="color:#e74c3c">'+(s.error_msg||'-')+'</td></tr>'}});h+='</tbody></table>'}}h+='</div></div>'}});
+h+='<div class="plan"><div class="plan-h" onclick="this.nextElementSibling.classList.toggle(\\'a\\')"><span class="pn">'+(p.goal||'').substring(0,60)+'</span>'+psBadge(p.status)+'<span style="color:rgba(255,255,255,.7);font-size:12px">'+(p.strategy||'')+'</span><span style="color:rgba(255,255,255,.7);font-size:12px">P'+(p.priority||0)+'</span><span style="color:rgba(255,255,255,.7);font-size:12px"><span class="pbar"><span class="pbar-f" style="width:'+((p.total_steps?Math.round(p.done_steps/p.total_steps*100):0))+'%"></span></span> '+(p.done_steps||0)+'/'+(p.total_steps||0)+'</span><span style="color:rgba(255,255,255,.5);font-size:11px">'+(p.created_at||'')+'</span></div>';
+h+='<div class="plan-b">';if(steps.length){{h+='<table class="tbl"><thead><tr><th>'+t.order+'</th><th>Description</th><th>Tool</th><th>'+t.thS+'</th><th>'+t.started+'</th><th>'+t.completed+'</th></tr></thead><tbody>';steps.forEach(s=>{{h+='<tr><td>'+s.step_order+'</td><td>'+(s.description||'-')+'</td><td>'+(s.tool_name||'-')+'</td><td>'+ssBadge(s.status)+'</td><td>'+(s.started_at||'-')+'</td><td>'+(s.completed_at||'-')+'</td></tr>'}});h+='</tbody></table>'}}h+='</div></div>'}});
 plc.innerHTML=h
 }}).catch(e=>{{plc.innerHTML='<div class="ld"><p style="color:#fff">Load failed</p></div>'}});
 }}
@@ -690,6 +685,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(load_tasks_data(st if st != 'ALL' else None, kw))
         elif path == '/api/stats':
             self._send_json(load_db_stats())
+        elif path == '/api/graph/stats':
+            import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
+            from lib.graph_api import get_graph_stats
+            self._send_json(get_graph_stats())
+        elif path == '/api/graph/neighbors':
+            import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
+            qs = parse_qs(urlparse(self.path).query)
+            eid = qs.get('entity_id', [None])[0]
+            direction = qs.get('direction', ['both'])[0]
+            if eid:
+                from lib.graph_api import get_neighbors
+                self._send_json({'neighbors': get_neighbors(eid, direction=direction)})
+            else:
+                self._send_json({'error': 'entity_id required'}, 400)
+        elif path == '/api/graph/context':
+            import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts'))
+            qs = parse_qs(urlparse(self.path).query)
+            eid = qs.get('entity_id', [None])[0]
+            if eid:
+                from lib.graph_api import get_entity_context
+                self._send_json(get_entity_context(eid))
+            else:
+                self._send_json({'error': 'entity_id required'}, 400)
         elif path == '/api/logout':
             self.send_response(302)
             self.send_header('Set-Cookie', 'session=; Path=/; Max-Age=0')
@@ -709,9 +727,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     params[k] = v
             if authenticate(params.get('username', ''), params.get('password', '')):
                 tok = create_session(params['username'])
-                self.send_response(302)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
                 self.send_header('Set-Cookie', f'session={tok}; Path=/; HttpOnly; SameSite=Strict')
-                self.send_header('Location', '/knowledge'); self.end_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True, 'redirect': '/knowledge'}).encode())
             else:
                 self._send_json({'error': 'Invalid credentials'}, 401)
         else:
@@ -719,7 +739,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     print("\n" + "=" * 60)
-    print("  Oracle Memory System - Web Visualization Server v2.0.0")
+    print("  Oracle Memory System - Web Visualization Server v2.1.0")
     print("=" * 60)
     try:
         get_pool()

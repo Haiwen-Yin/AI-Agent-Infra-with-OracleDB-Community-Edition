@@ -1,131 +1,138 @@
-"""Oracle Memory System v2.0.0 - Knowledge API Tests"""
+"""Oracle Memory System v2.1.0 - Knowledge API Tests"""
 
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.knowledge_api import (
-    create_concept, get_concept, update_concept, delete_concept,
-    create_relationship, get_relationships, delete_relationship,
-    search_concepts, get_statistics, get_concept_neighbors
+    create_knowledge, get_knowledge, update_knowledge, delete_knowledge,
+    add_edge, get_edges, search_knowledge,
+    add_knowledge_tags, get_knowledge_tags, remove_knowledge_tag,
+    record_review, get_due_reviews
 )
 from lib.connection import close_pool
 
 
-def test_create_concept():
-    entity_id = create_concept(
-        name="Test Concept",
-        concept_type="principle",
-        description="A test knowledge concept",
-        category="testing",
-        content="Detailed content about this concept",
-        source_type="MANUAL",
-        confidence=0.9,
-        tags=["test", "v2"],
+def test_create_knowledge():
+    entity_id = create_knowledge(
+        title="Python Decorators",
+        content="Decorators are a powerful feature in Python",
+        domain="programming",
+        topic="python",
+        difficulty="ADVANCED",
     )
-    assert entity_id > 0
-    print(f"PASS: test_create_concept (id={entity_id})")
+    assert isinstance(entity_id, str)
+    assert len(entity_id) > 0
+    print(f"PASS: test_create_knowledge (id={entity_id})")
     return entity_id
 
 
-def test_get_concept(entity_id):
-    concept = get_concept(entity_id)
-    assert concept is not None
-    assert concept["name"] == "Test Concept"
-    assert concept["validation_status"] == "PENDING"
-    assert concept["confidence"] == 0.9
-    print(f"PASS: test_get_concept (name={concept['name']})")
+def test_get_knowledge(entity_id):
+    k = get_knowledge(entity_id)
+    assert k is not None
+    assert k["domain"] == "programming"
+    assert k["topic"] == "python"
+    assert k["difficulty"] == "ADVANCED"
+    print(f"PASS: test_get_knowledge (domain={k['domain']})")
 
 
-def test_update_concept(entity_id):
-    ok = update_concept(entity_id, description="Updated description", confidence=0.95)
+def test_update_knowledge(entity_id):
+    ok = update_knowledge(entity_id, domain="software", topic="decorators")
     assert ok
-    concept = get_concept(entity_id)
-    assert concept["description"] == "Updated description"
-    print("PASS: test_update_concept")
+    k = get_knowledge(entity_id)
+    assert k["domain"] == "software"
+    assert k["topic"] == "decorators"
+    print("PASS: test_update_knowledge")
 
 
-def test_create_relationship_and_query(entity_id):
-    target_id = create_concept(
-        name="Related Concept",
-        concept_type="fact",
-        description="Another concept for relationship testing",
-        category="testing",
+def test_knowledge_tags(entity_id):
+    added = add_knowledge_tags(entity_id, ["python", "v2.1"])
+    assert added == 2
+    tags = get_knowledge_tags(entity_id)
+    assert len(tags) == 2
+    tag_id = tags[0]["tag_id"]
+    ok = remove_knowledge_tag(entity_id, tag_id)
+    assert ok
+    tags = get_knowledge_tags(entity_id)
+    assert len(tags) == 1
+    print("PASS: test_knowledge_tags")
+
+
+def test_record_review(entity_id):
+    k = get_knowledge(entity_id)
+    count_before = k["review_count"]
+    ok = record_review(entity_id)
+    assert ok
+    k = get_knowledge(entity_id)
+    assert k["review_count"] > count_before
+    print(f"PASS: test_record_review (count={k['review_count']})")
+
+
+def test_knowledge_edges(entity_id):
+    target_id = create_knowledge(
+        title="Python Generators",
+        content="Generators produce items lazily",
+        domain="programming",
+        topic="python",
+        difficulty="INTERMEDIATE",
     )
-    edge_id = create_relationship(
+    edge_id = add_edge(
         source_id=entity_id,
+        source_type="KNOWLEDGE",
         target_id=target_id,
         edge_type="RELATED_TO",
         strength=0.8,
         confidence=0.9,
     )
-    assert edge_id > 0
-    print(f"PASS: test_create_relationship (edge_id={edge_id})")
-
-    rels = get_relationships(entity_id, direction="outgoing")
-    assert len(rels) >= 1
-    print(f"PASS: test_get_relationships (found={len(rels)})")
-
-    neighbors = get_concept_neighbors(entity_id)
-    assert len(neighbors) >= 1
-    print(f"PASS: test_get_concept_neighbors (found={len(neighbors)})")
-
-    ok = delete_relationship(edge_id)
-    assert ok
-    print("PASS: test_delete_relationship")
-
-    delete_concept(target_id)
-    return target_id
+    assert isinstance(edge_id, str)
+    assert len(edge_id) > 0
+    edges = get_edges(entity_id, direction="outgoing")
+    assert len(edges) >= 1
+    print(f"PASS: test_knowledge_edges (edges={len(edges)})")
+    delete_knowledge(target_id)
 
 
-def test_search_concepts():
-    results = search_concepts(keyword="Test", limit=10)
+def test_search_knowledge():
+    results = search_knowledge(domain="software")
     assert len(results) >= 1
-    print(f"PASS: test_search_concepts (found={len(results)})")
+    print(f"PASS: test_search_knowledge (found={len(results)})")
 
 
-def test_get_statistics():
-    stats = get_statistics()
-    assert "total_concepts" in stats
-    assert "total_edges" in stats
-    assert "total_memories" in stats
-    print(f"PASS: test_get_statistics (concepts={stats['total_concepts']}, memories={stats['total_memories']})")
-
-
-def test_delete_concept(entity_id):
-    ok = delete_concept(entity_id)
+def test_delete_knowledge(entity_id):
+    ok = delete_knowledge(entity_id)
     assert ok
-    concept = get_concept(entity_id)
-    assert concept is None
-    print("PASS: test_delete_concept")
+    k = get_knowledge(entity_id)
+    assert k is None
+    print("PASS: test_delete_knowledge")
 
 
 def run_all():
-    entity_id = None
     passed = 0
     failed = 0
+    entity_id = None
     try:
-        entity_id = test_create_concept()
+        entity_id = test_create_knowledge()
         passed += 1
     except Exception as e:
-        print(f"FAIL: test_create_concept - {e}")
+        print(f"FAIL: test_create_knowledge - {e}")
         failed += 1
         close_pool()
         return False
 
     for test_fn in [
-        lambda: test_get_concept(entity_id),
-        lambda: test_update_concept(entity_id),
-        lambda: test_create_relationship_and_query(entity_id),
-        test_search_concepts,
-        test_get_statistics,
-        lambda: test_delete_concept(entity_id),
+        lambda: test_get_knowledge(entity_id),
+        lambda: test_update_knowledge(entity_id),
+        lambda: test_knowledge_tags(entity_id),
+        lambda: test_record_review(entity_id),
+        lambda: test_knowledge_edges(entity_id),
+        test_search_knowledge,
+        lambda: test_delete_knowledge(entity_id),
     ]:
         try:
             test_fn()
             passed += 1
         except Exception as e:
-            print(f"FAIL: {e}")
+            print(f"FAIL: {test_fn.__name__ if hasattr(test_fn, '__name__') else 'test'} - {e}")
             failed += 1
 
     close_pool()

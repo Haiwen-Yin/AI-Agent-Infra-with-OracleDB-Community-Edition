@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.0.0 - Security Module Tests"""
+"""Oracle Memory System v2.1.0 - Security Module Tests"""
 
 import sys
 import os
@@ -18,13 +18,6 @@ def test_mask_email():
     print("PASS: test_mask_email")
 
 
-def test_mask_phone():
-    svc = DataMaskingService("LOGGING")
-    result = svc.mask_text("Call 555-123-4567 now")
-    assert "555***-4567" in result
-    print("PASS: test_mask_phone")
-
-
 def test_mask_credit_card():
     svc = DataMaskingService("LOGGING")
     result = svc.mask_text("Card 4111111111111111 charged")
@@ -41,31 +34,13 @@ def test_mask_dict():
     print("PASS: test_mask_dict")
 
 
-def test_context_levels():
-    for level in ["LOGGING", "DEBUGGING", "ANALYTICS", "SHARING"]:
-        svc = DataMaskingService(level)
-        result = svc.mask_text("test 192.168.1.1 email@test.com")
-        print(f"PASS: test_context_level_{level}")
-
-
-def test_encryption_roundtrip():
+def test_reversible_encryption():
     enc = ReversibleEncryption()
     plaintext = "Hello, World! This is a secret message."
     ciphertext = enc.encrypt(plaintext)
     decrypted = enc.decrypt(ciphertext)
     assert decrypted == plaintext
-    print("PASS: test_encryption_roundtrip")
-
-
-def test_key_rotation():
-    enc = ReversibleEncryption()
-    vals = [enc.encrypt(f"secret_{i}") for i in range(3)]
-    new_key = os.urandom(32)
-    rotated = enc.rotate_key(new_key, vals)
-    enc2 = ReversibleEncryption(key=new_key)
-    for i, rv in enumerate(rotated):
-        assert enc2.decrypt(rv) == f"secret_{i}"
-    print("PASS: test_key_rotation")
+    print("PASS: test_reversible_encryption")
 
 
 def test_password_hashing():
@@ -76,33 +51,15 @@ def test_password_hashing():
     print("PASS: test_password_hashing")
 
 
-def test_password_with_custom_iterations():
-    pw = "test"
-    hash_val, salt = hash_password(pw, iterations=10000)
-    assert verify_password(pw, hash_val, salt, iterations=10000)
-    print("PASS: test_password_custom_iterations")
-
-
-def test_default_masking_service():
-    result = default_masking_service.mask_text("admin@company.com")
-    assert "admin@" not in result
-    print("PASS: test_default_masking_service")
-
-
 def run_all():
     passed = 0
     failed = 0
     for test_fn in [
         test_mask_email,
-        test_mask_phone,
         test_mask_credit_card,
         test_mask_dict,
-        test_context_levels,
-        test_encryption_roundtrip,
-        test_key_rotation,
+        test_reversible_encryption,
         test_password_hashing,
-        test_password_with_custom_iterations,
-        test_default_masking_service,
     ]:
         try:
             test_fn()

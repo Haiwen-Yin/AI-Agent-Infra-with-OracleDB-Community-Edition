@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.0.0 - Connection Pool Tests"""
+"""Oracle Memory System v2.1.0 - Connection Pool Tests"""
 
 import sys
 import os
@@ -75,6 +75,7 @@ def run_all():
         except Exception as e:
             print(f"FAIL: {t.__name__} - {e}")
             failed += 1
+    close_pool()
     print(f"\nConnection Tests: {passed} passed, {failed} failed")
     return failed == 0
 

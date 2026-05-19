@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.0.0 - Security Module
+"""Oracle Memory System v2.1.0 - Security Module
 
 Data masking, context-aware masking, and reversible encryption.
 """
