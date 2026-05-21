@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.2.0] - 2026-05-20
+
+### Summary
+
+**Workspace management, context continuity, agent handoff, and JRD updatable views.** Not backward-compatible with v2.1.0 — requires clean deployment.
+
+### Added
+
+- **WORKSPACES table** — Workspace lifecycle (ACTIVE → PAUSED → ARCHIVED), isolation modes (SHARED/ISOLATED), ownership tracking, metadata JSON
+- **WORKSPACE_CONTEXT table** — Version chain of context entries (SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY) with PARENT_CONTEXT_ID linking
+- **WORKSPACE_TASKS table** — Links task plans to workspaces, composite PK (WORKSPACE_ID, PLAN_ID)
+- **AGENT_SESSION: OWNER_USER_ID column** — User who owns/started the session
+- **AGENT_SESSION: WORKSPACE_ID column** — Workspace the session belongs to
+- **AGENT_SESSION: PREDECESSOR_SESSION_ID column** — Previous session in handoff chain
+- **ENTITIES: WORKSPACE_ID column** — Entity scoping for ISOLATED workspaces
+- **workspace_api.py** — 11 Python functions: create_workspace, get_workspace, get_user_workspaces, update_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace, link_task_to_workspace, get_workspace_tasks
+- **checkpoint_session()** — Save a CHECKPOINT context for the session's workspace
+- **get_session_chain()** — Traverse PREDECESSOR_SESSION_ID backwards for full session handoff chain
+- **WORKSPACE_MANAGER PL/SQL package** — Server-side workspace management procedures
+- **WORKSPACE_CLEANUP_JOB** — Scheduler job for workspace maintenance (daily 01:00)
+- **CONTEXT_ARCHIVE_JOB** — Scheduler job for archiving old context entries (weekly Sun 03:00)
+- **WORKSPACE_DV** — Updatable JSON Relational Duality view for workspace document API
+- **CONTEXT_DV** — Read-only JSON Relational Duality view for context document API
+- **MEMORY_DV** — Now updatable with JSON_TRANSFORM for partial updates
+- **KNOWLEDGE_DV** — Now updatable with JSON_TRANSFORM for partial updates
+- **docs/workspace.md** — Workspace & context continuity guide
+- **12 workspace tests** in test suite (test_workspace.py)
+
+### Changed
+
+- **create_session()** now accepts `owner_user_id`, `workspace_id`, `predecessor_session_id` parameters (all optional)
+- **ON DELETE CASCADE** on WORKSPACE_CONTEXT(WORKSPACE_ID) and WORKSPACE_TASKS(WORKSPACE_ID) for automatic cleanup
+- **1_schema.sql**: 22 tables (3 new), 4 duality views (2 new + 2 updated)
+- **2_api.sql**: 5 PL/SQL packages (WORKSPACE_MANAGER added)
+- **3_jobs.sql**: 9 scheduler jobs (2 new: WORKSPACE_CLEANUP_JOB, CONTEXT_ARCHIVE_JOB)
+
+### Fixed
+
+- **MEMORY_DV now updatable** — Fixed JRD view definition to support INSERT/UPDATE/DELETE via JSON_TRANSFORM
+- **KNOWLEDGE_DV now updatable** — Fixed JRD view definition to support INSERT/UPDATE/DELETE via JSON_TRANSFORM
+
+---
+
 ## [2.1.0] - 2026-05-19
 
 ### Summary

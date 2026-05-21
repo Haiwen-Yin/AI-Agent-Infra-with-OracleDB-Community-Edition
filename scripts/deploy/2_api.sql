@@ -1,5 +1,5 @@
 -- ============================================================
--- Oracle Memory System v2.1.0 - Phase 2: PL/SQL API Packages
+-- Oracle Memory System v2.2.0 - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -171,22 +171,22 @@ CREATE OR REPLACE PACKAGE BODY MEMORY_FUSION_ENGINE AS
         v_stats JSON;
     BEGIN
         SELECT JSON_OBJECT(
-            'total_memories' : (
+            'total_memories' VALUE (
                 SELECT COUNT(*) FROM ENTITIES
                 WHERE ENTITY_TYPE = 'MEMORY' AND STATUS = 'ACTIVE'
             ),
-            'total_knowledge' : (
+            'total_knowledge' VALUE (
                 SELECT COUNT(*) FROM ENTITIES
                 WHERE ENTITY_TYPE = 'KNOWLEDGE' AND STATUS = 'ACTIVE'
             ),
-            'total_edges' : (
+            'total_edges' VALUE (
                 SELECT COUNT(*) FROM ENTITY_EDGES
             ),
-            'similar_pairs' : (
+            'similar_pairs' VALUE (
                 SELECT COUNT(*) FROM ENTITY_EDGES
                 WHERE EDGE_TYPE = 'SIMILAR_TO'
             ),
-            'archived_memories' : (
+            'archived_memories' VALUE (
                 SELECT COUNT(*) FROM ENTITIES
                 WHERE ENTITY_TYPE = 'MEMORY' AND STATUS = 'ARCHIVED'
             )
@@ -323,6 +323,10 @@ CREATE OR REPLACE PACKAGE AGENT_PERMISSION_MANAGER AS
         p_agent_id  IN VARCHAR2,
         p_entity_id IN VARCHAR2
     ) RETURN VARCHAR2;
+    FUNCTION check_workspace_access(
+        p_agent_id  IN VARCHAR2,
+        p_entity_id IN VARCHAR2
+    ) RETURN VARCHAR2;
     PROCEDURE log_access(
         p_agent_id    IN VARCHAR2,
         p_entity_id   IN VARCHAR2,
@@ -336,21 +340,57 @@ END AGENT_PERMISSION_MANAGER;
 
 CREATE OR REPLACE PACKAGE BODY AGENT_PERMISSION_MANAGER AS
 
+    FUNCTION check_workspace_access(
+        p_agent_id  IN VARCHAR2,
+        p_entity_id IN VARCHAR2
+    ) RETURN VARCHAR2 IS
+        v_workspace_id  VARCHAR2(64);
+        v_session_count NUMBER;
+    BEGIN
+        SELECT WORKSPACE_ID
+        INTO v_workspace_id
+        FROM ENTITIES
+        WHERE ENTITY_ID = p_entity_id;
+
+        SELECT COUNT(*)
+        INTO v_session_count
+        FROM AGENT_SESSION
+        WHERE AGENT_ID = p_agent_id
+          AND WORKSPACE_ID = v_workspace_id
+          AND IS_ACTIVE = 'Y';
+
+        IF v_session_count > 0 THEN
+            RETURN 'GRANTED';
+        ELSE
+            RETURN 'DENIED';
+        END IF;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN 'DENIED';
+    END check_workspace_access;
+
     FUNCTION check_entity_access(
         p_agent_id  IN VARCHAR2,
         p_entity_id IN VARCHAR2
     ) RETURN VARCHAR2 IS
-        v_visibility VARCHAR2(16);
-        v_owner      VARCHAR2(64);
+        v_visibility    VARCHAR2(16);
+        v_owner         VARCHAR2(64);
+        v_workspace_id  VARCHAR2(64);
     BEGIN
-        SELECT VISIBILITY, OWNED_BY_AGENT
-        INTO v_visibility, v_owner
+        SELECT VISIBILITY, OWNED_BY_AGENT, WORKSPACE_ID
+        INTO v_visibility, v_owner, v_workspace_id
         FROM ENTITIES
         WHERE ENTITY_ID = p_entity_id;
 
         IF v_visibility = 'PRIVATE' AND v_owner = p_agent_id THEN
+            IF v_workspace_id IS NOT NULL THEN
+                RETURN check_workspace_access(p_agent_id, p_entity_id);
+            END IF;
             RETURN 'GRANTED';
         ELSIF v_visibility = 'SHARED' THEN
+            IF v_workspace_id IS NOT NULL THEN
+                RETURN check_workspace_access(p_agent_id, p_entity_id);
+            END IF;
             RETURN 'GRANTED';
         ELSE
             RETURN 'DENIED';
@@ -443,4 +483,231 @@ CREATE OR REPLACE PACKAGE BODY SESSION_CLEANUP AS
     END update_tag_counts;
 
 END SESSION_CLEANUP;
+/
+
+CREATE OR REPLACE PACKAGE WORKSPACE_MANAGER AS
+    PROCEDURE create_workspace(
+        p_workspace_id   IN VARCHAR2,
+        p_owner_user_id  IN VARCHAR2,
+        p_workspace_name IN VARCHAR2,
+        p_workspace_type IN VARCHAR2 DEFAULT 'CONVERSATION',
+        p_isolation_mode IN VARCHAR2 DEFAULT 'SHARED',
+        p_metadata       IN JSON DEFAULT NULL
+    );
+    PROCEDURE update_workspace(
+        p_workspace_id   IN VARCHAR2,
+        p_workspace_name IN VARCHAR2 DEFAULT NULL,
+        p_status         IN VARCHAR2 DEFAULT NULL,
+        p_isolation_mode IN VARCHAR2 DEFAULT NULL,
+        p_current_agent  IN VARCHAR2 DEFAULT NULL,
+        p_summary        IN VARCHAR2 DEFAULT NULL,
+        p_metadata       IN JSON DEFAULT NULL
+    );
+    PROCEDURE pause_workspace(p_workspace_id IN VARCHAR2);
+    PROCEDURE complete_workspace(p_workspace_id IN VARCHAR2);
+    PROCEDURE save_context(
+        p_context_id   IN VARCHAR2,
+        p_workspace_id IN VARCHAR2,
+        p_agent_id     IN VARCHAR2,
+        p_context_type IN VARCHAR2,
+        p_context_data IN JSON,
+        p_session_id   IN VARCHAR2 DEFAULT NULL,
+        p_parent_ctx   IN VARCHAR2 DEFAULT NULL
+    );
+    FUNCTION get_latest_context(p_workspace_id IN VARCHAR2) RETURN JSON;
+    FUNCTION get_context_chain(p_workspace_id IN VARCHAR2, p_limit IN NUMBER DEFAULT 10) RETURN JSON;
+    PROCEDURE link_task(
+        p_workspace_id IN VARCHAR2,
+        p_plan_id      IN VARCHAR2
+    );
+    PROCEDURE unlink_task(
+        p_workspace_id IN VARCHAR2,
+        p_plan_id      IN VARCHAR2
+    );
+    PROCEDURE cleanup_abandoned(p_days_threshold IN NUMBER DEFAULT 30);
+END WORKSPACE_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY WORKSPACE_MANAGER AS
+
+    PROCEDURE create_workspace(
+        p_workspace_id   IN VARCHAR2,
+        p_owner_user_id  IN VARCHAR2,
+        p_workspace_name IN VARCHAR2,
+        p_workspace_type IN VARCHAR2 DEFAULT 'CONVERSATION',
+        p_isolation_mode IN VARCHAR2 DEFAULT 'SHARED',
+        p_metadata       IN JSON DEFAULT NULL
+    ) IS
+    BEGIN
+        INSERT INTO WORKSPACES (
+            WORKSPACE_ID, OWNER_USER_ID, WORKSPACE_NAME,
+            WORKSPACE_TYPE, ISOLATION_MODE, METADATA
+        ) VALUES (
+            p_workspace_id, p_owner_user_id, p_workspace_name,
+            p_workspace_type, p_isolation_mode, p_metadata
+        );
+
+        COMMIT;
+    END create_workspace;
+
+    PROCEDURE update_workspace(
+        p_workspace_id   IN VARCHAR2,
+        p_workspace_name IN VARCHAR2 DEFAULT NULL,
+        p_status         IN VARCHAR2 DEFAULT NULL,
+        p_isolation_mode IN VARCHAR2 DEFAULT NULL,
+        p_current_agent  IN VARCHAR2 DEFAULT NULL,
+        p_summary        IN VARCHAR2 DEFAULT NULL,
+        p_metadata       IN JSON DEFAULT NULL
+    ) IS
+    BEGIN
+        UPDATE WORKSPACES
+        SET WORKSPACE_NAME   = COALESCE(p_workspace_name, WORKSPACE_NAME),
+            STATUS           = COALESCE(p_status, STATUS),
+            ISOLATION_MODE   = COALESCE(p_isolation_mode, ISOLATION_MODE),
+            CURRENT_AGENT_ID = COALESCE(p_current_agent, CURRENT_AGENT_ID),
+            SUMMARY          = COALESCE(p_summary, SUMMARY),
+            METADATA         = COALESCE(p_metadata, METADATA),
+            UPDATED_AT       = SYSTIMESTAMP
+        WHERE WORKSPACE_ID = p_workspace_id;
+
+        COMMIT;
+    END update_workspace;
+
+    PROCEDURE pause_workspace(p_workspace_id IN VARCHAR2) IS
+    BEGIN
+        UPDATE WORKSPACES
+        SET STATUS    = 'PAUSED',
+            UPDATED_AT = SYSTIMESTAMP
+        WHERE WORKSPACE_ID = p_workspace_id;
+
+        COMMIT;
+    END pause_workspace;
+
+    PROCEDURE complete_workspace(p_workspace_id IN VARCHAR2) IS
+    BEGIN
+        UPDATE WORKSPACES
+        SET STATUS    = 'COMPLETED',
+            UPDATED_AT = SYSTIMESTAMP
+        WHERE WORKSPACE_ID = p_workspace_id;
+
+        COMMIT;
+    END complete_workspace;
+
+    PROCEDURE save_context(
+        p_context_id   IN VARCHAR2,
+        p_workspace_id IN VARCHAR2,
+        p_agent_id     IN VARCHAR2,
+        p_context_type IN VARCHAR2,
+        p_context_data IN JSON,
+        p_session_id   IN VARCHAR2 DEFAULT NULL,
+        p_parent_ctx   IN VARCHAR2 DEFAULT NULL
+    ) IS
+    BEGIN
+        INSERT INTO WORKSPACE_CONTEXT (
+            CONTEXT_ID, WORKSPACE_ID, AGENT_ID,
+            SESSION_ID, CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID
+        ) VALUES (
+            p_context_id, p_workspace_id, p_agent_id,
+            p_session_id, p_context_type, p_context_data, p_parent_ctx
+        );
+
+        COMMIT;
+    END save_context;
+
+    FUNCTION get_latest_context(p_workspace_id IN VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'context_id'   VALUE CONTEXT_ID,
+            'workspace_id' VALUE WORKSPACE_ID,
+            'agent_id'     VALUE AGENT_ID,
+            'session_id'   VALUE SESSION_ID,
+            'context_type' VALUE CONTEXT_TYPE,
+            'context_data' VALUE CONTEXT_DATA,
+            'parent_ctx'   VALUE PARENT_CONTEXT_ID,
+            'created_at'   VALUE TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF3')
+        )
+        INTO v_result
+        FROM WORKSPACE_CONTEXT
+        WHERE WORKSPACE_ID = p_workspace_id
+        ORDER BY CREATED_AT DESC
+        FETCH FIRST 1 ROW ONLY;
+
+        RETURN v_result;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN NULL;
+    END get_latest_context;
+
+    FUNCTION get_context_chain(
+        p_workspace_id IN VARCHAR2,
+        p_limit        IN NUMBER DEFAULT 10
+    ) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT COALESCE(
+            JSON_ARRAYAGG(
+                JSON_OBJECT(
+                    'context_id'   VALUE CONTEXT_ID,
+                    'workspace_id' VALUE WORKSPACE_ID,
+                    'agent_id'     VALUE AGENT_ID,
+                    'session_id'   VALUE SESSION_ID,
+                    'context_type' VALUE CONTEXT_TYPE,
+                    'context_data' VALUE CONTEXT_DATA,
+                    'parent_ctx'   VALUE PARENT_CONTEXT_ID,
+                    'created_at'   VALUE TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS.FF3')
+                )
+                ORDER BY CREATED_AT DESC
+            ),
+            JSON_ARRAY()
+        )
+        INTO v_result
+        FROM (
+            SELECT *
+            FROM WORKSPACE_CONTEXT
+            WHERE WORKSPACE_ID = p_workspace_id
+            ORDER BY CREATED_AT DESC
+            FETCH FIRST p_limit ROWS ONLY
+        );
+
+        RETURN v_result;
+    END get_context_chain;
+
+    PROCEDURE link_task(
+        p_workspace_id IN VARCHAR2,
+        p_plan_id      IN VARCHAR2
+    ) IS
+    BEGIN
+        MERGE INTO WORKSPACE_TASKS t
+        USING (SELECT p_workspace_id AS WORKSPACE_ID, p_plan_id AS PLAN_ID FROM DUAL) s
+        ON (t.WORKSPACE_ID = s.WORKSPACE_ID AND t.PLAN_ID = s.PLAN_ID)
+        WHEN NOT MATCHED THEN INSERT
+            (WORKSPACE_ID, PLAN_ID, ASSIGNED_AT)
+            VALUES (s.WORKSPACE_ID, s.PLAN_ID, SYSTIMESTAMP);
+
+        COMMIT;
+    END link_task;
+
+    PROCEDURE unlink_task(
+        p_workspace_id IN VARCHAR2,
+        p_plan_id      IN VARCHAR2
+    ) IS
+    BEGIN
+        DELETE FROM WORKSPACE_TASKS
+        WHERE WORKSPACE_ID = p_workspace_id
+          AND PLAN_ID = p_plan_id;
+
+        COMMIT;
+    END unlink_task;
+
+    PROCEDURE cleanup_abandoned(p_days_threshold IN NUMBER DEFAULT 30) IS
+    BEGIN
+        DELETE FROM WORKSPACES
+        WHERE STATUS = 'ABANDONED'
+          AND UPDATED_AT < SYSTIMESTAMP - p_days_threshold;
+
+        COMMIT;
+    END cleanup_abandoned;
+
+END WORKSPACE_MANAGER;
 /

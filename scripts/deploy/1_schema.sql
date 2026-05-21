@@ -1,6 +1,6 @@
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.1.0 - Schema Deployment
-PROMPT Partitioned Tables with Composite Primary Keys
+PROMPT Oracle Memory System v2.2.0 - Schema Deployment
+PROMPT Workspace & Context Continuity + JRD Updatable Views
 PROMPT ============================================================
 
 WHENEVER SQLERROR EXIT SQL.SQLCODE
@@ -31,11 +31,25 @@ EXEC safe_ddl('DROP PROPERTY GRAPH IF EXISTS ORACLE_MEMORY_GRAPH');
 PROMPT Dropping old duality views...
 EXEC safe_ddl('DROP VIEW IF EXISTS MEMORY_DV');
 EXEC safe_ddl('DROP VIEW IF EXISTS KNOWLEDGE_DV');
+EXEC safe_ddl('DROP VIEW IF EXISTS WORKSPACE_DV');
+EXEC safe_ddl('DROP VIEW IF EXISTS CONTEXT_DV');
 
 PROMPT Dropping all tables...
 BEGIN
     FOR r IN (SELECT table_name FROM user_tables) LOOP
-        EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
+        EXCEPTION
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('Skip: ' || r.table_name || ' - ' || SQLERRM);
+        END;
+    END LOOP;
+    FOR r IN (SELECT table_name FROM user_tables) LOOP
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
+        EXCEPTION
+            WHEN OTHERS THEN NULL;
+        END;
     END LOOP;
 END;
 /
@@ -57,6 +71,7 @@ CREATE TABLE ENTITIES (
     VISIBILITY      VARCHAR2(16)  DEFAULT 'PRIVATE' NOT NULL,
     IMPORTANCE      NUMBER(3,0)   DEFAULT 5 NOT NULL,
     RETRIEVAL_COUNT NUMBER(10,0)  DEFAULT 0 NOT NULL,
+    WORKSPACE_ID    VARCHAR2(64),
     EXPIRES_AT      TIMESTAMP,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     UPDATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
@@ -102,7 +117,7 @@ CREATE TABLE ENTITY_EDGES (
     METADATA      JSON,
     CREATED_AT    TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     CONSTRAINT PK_ENTITY_EDGES PRIMARY KEY (EDGE_ID, SOURCE_ID),
-    CONSTRAINT FK_EDGE_SOURCE FOREIGN KEY (SOURCE_ID, SOURCE_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE),
+    CONSTRAINT FK_EDGE_SOURCE FOREIGN KEY (SOURCE_ID, SOURCE_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE,
     CONSTRAINT CK_EDGE_STRENGTH CHECK (STRENGTH BETWEEN 0 AND 1),
     CONSTRAINT CK_EDGE_CONFIDENCE CHECK (CONFIDENCE BETWEEN 0 AND 1)
 ) PARTITION BY REFERENCE (FK_EDGE_SOURCE);
@@ -123,7 +138,7 @@ CREATE TABLE KNOWLEDGE_META (
     LAST_REVIEWED   TIMESTAMP,
     NEXT_REVIEW     TIMESTAMP,
     CONSTRAINT PK_KNOWLEDGE_META PRIMARY KEY (ENTITY_ID, ENTITY_TYPE),
-    CONSTRAINT FK_KM_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE),
+    CONSTRAINT FK_KM_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE,
     CONSTRAINT CK_KM_ENTITY_TYPE CHECK (ENTITY_TYPE = 'KNOWLEDGE'),
     CONSTRAINT CK_KM_DIFFICULTY CHECK (DIFFICULTY IN ('BEGINNER','INTERMEDIATE','ADVANCED','EXPERT'))
 ) PARTITION BY REFERENCE (FK_KM_ENTITY);
@@ -140,7 +155,7 @@ CREATE TABLE ENTITY_EMBEDDINGS (
     EMBEDDING_DIM   NUMBER(5,0)   NOT NULL,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     CONSTRAINT PK_ENTITY_EMBEDDINGS PRIMARY KEY (ENTITY_ID, ENTITY_TYPE),
-    CONSTRAINT FK_EE_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE)
+    CONSTRAINT FK_EE_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE
 ) PARTITION BY REFERENCE (FK_EE_ENTITY);
 
 PROMPT ============================================================
@@ -155,7 +170,7 @@ CREATE TABLE HARNESS_META (
     OUTPUT_SCHEMA     JSON,
     EXECUTION_MODE    VARCHAR2(32)  DEFAULT 'SEQUENTIAL' NOT NULL,
     CONSTRAINT PK_HARNESS_META PRIMARY KEY (ENTITY_ID, ENTITY_TYPE),
-    CONSTRAINT FK_HM_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE),
+    CONSTRAINT FK_HM_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE,
     CONSTRAINT CK_HM_ENTITY_TYPE CHECK (ENTITY_TYPE = 'HARNESS_TEMPLATE'),
     CONSTRAINT CK_HM_EXEC_MODE CHECK (EXECUTION_MODE IN ('SEQUENTIAL','PARALLEL','CONDITIONAL'))
 ) PARTITION BY REFERENCE (FK_HM_ENTITY);
@@ -181,7 +196,7 @@ CREATE TABLE ENTITY_TAGS (
     TAG_ID      NUMBER(10,0)  NOT NULL,
     CREATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     CONSTRAINT PK_ENTITY_TAGS PRIMARY KEY (ENTITY_ID, ENTITY_TYPE, TAG_ID),
-    CONSTRAINT FK_ET_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE),
+    CONSTRAINT FK_ET_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE,
     CONSTRAINT FK_ET_TAG FOREIGN KEY (TAG_ID) REFERENCES TAGS(TAG_ID)
 ) PARTITION BY REFERENCE (FK_ET_ENTITY);
 
@@ -204,22 +219,92 @@ CREATE TABLE AGENT_REGISTRY (
     CONSTRAINT CK_AR_STATUS CHECK (STATUS IN ('ACTIVE','INACTIVE','SUSPENDED','DECOMMISSIONED')),
     CONSTRAINT FK_AR_WM_ENTITY FOREIGN KEY (WM_ENTITY_ID) REFERENCES ENTITIES(ENTITY_ID)
 );
+
 PROMPT ============================================================
-PROMPT 9. AGENT_SESSION (Partitioned by LIST + RANGE)
+PROMPT 9. SYSTEM_USERS (Non-Partitioned)
+PROMPT ============================================================
+
+CREATE TABLE SYSTEM_USERS (
+    USER_ID     VARCHAR2(64)  PRIMARY KEY,
+    USERNAME    VARCHAR2(128) NOT NULL,
+    PASSWORD_HASH VARCHAR2(256),
+    ROLE        VARCHAR2(64)  DEFAULT 'USER' NOT NULL,
+    STATUS      VARCHAR2(32)  DEFAULT 'ACTIVE' NOT NULL,
+    LAST_LOGIN  TIMESTAMP,
+    CREATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    UPDATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT CK_SU_ROLE CHECK (ROLE IN ('ADMIN','USER','SERVICE')),
+    CONSTRAINT CK_SU_STATUS CHECK (STATUS IN ('ACTIVE','INACTIVE','LOCKED'))
+);
+
+PROMPT ============================================================
+PROMPT 10. WORKSPACES (Non-Partitioned) [NEW v2.2.0]
+PROMPT ============================================================
+
+CREATE TABLE WORKSPACES (
+    WORKSPACE_ID       VARCHAR2(64)  PRIMARY KEY,
+    OWNER_USER_ID      VARCHAR2(64),
+    WORKSPACE_NAME     VARCHAR2(256) NOT NULL,
+    WORKSPACE_TYPE     VARCHAR2(32)  DEFAULT 'CONVERSATION' NOT NULL,
+    STATUS             VARCHAR2(32)  DEFAULT 'ACTIVE' NOT NULL,
+    ISOLATION_MODE     VARCHAR2(16)  DEFAULT 'SHARED' NOT NULL,
+    CURRENT_AGENT_ID   VARCHAR2(64),
+    CURRENT_SESSION_ID VARCHAR2(64),
+    SUMMARY            VARCHAR2(2000),
+    METADATA           JSON,
+    CREATED_AT         TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    UPDATED_AT         TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT FK_WS_OWNER FOREIGN KEY (OWNER_USER_ID) REFERENCES SYSTEM_USERS(USER_ID),
+    CONSTRAINT FK_WS_AGENT FOREIGN KEY (CURRENT_AGENT_ID) REFERENCES AGENT_REGISTRY(AGENT_ID),
+    CONSTRAINT CK_WS_STATUS CHECK (STATUS IN ('ACTIVE','PAUSED','COMPLETED','ABANDONED')),
+    CONSTRAINT CK_WS_TYPE CHECK (WORKSPACE_TYPE IN ('CONVERSATION','PROJECT','TASK_CHAIN','AUTONOMOUS')),
+    CONSTRAINT CK_WS_ISOLATION CHECK (ISOLATION_MODE IN ('SHARED','ISOLATED'))
+);
+
+PROMPT ============================================================
+PROMPT 11. WORKSPACE_CONTEXT (Non-Partitioned) [NEW v2.2.0]
+PROMPT ============================================================
+
+CREATE TABLE WORKSPACE_CONTEXT (
+    CONTEXT_ID        VARCHAR2(64)  PRIMARY KEY,
+    WORKSPACE_ID      VARCHAR2(64)  NOT NULL,
+    AGENT_ID          VARCHAR2(64)  NOT NULL,
+    SESSION_ID        VARCHAR2(64),
+    CONTEXT_TYPE      VARCHAR2(32)  NOT NULL,
+    CONTEXT_DATA      JSON          NOT NULL,
+    PARENT_CONTEXT_ID VARCHAR2(64),
+    CREATED_AT        TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT FK_WC_WORKSPACE FOREIGN KEY (WORKSPACE_ID) REFERENCES WORKSPACES(WORKSPACE_ID) ON DELETE CASCADE,
+    CONSTRAINT FK_WC_AGENT FOREIGN KEY (AGENT_ID) REFERENCES AGENT_REGISTRY(AGENT_ID),
+    CONSTRAINT FK_WC_PARENT FOREIGN KEY (PARENT_CONTEXT_ID) REFERENCES WORKSPACE_CONTEXT(CONTEXT_ID) ON DELETE SET NULL,
+    CONSTRAINT CK_WC_TYPE CHECK (CONTEXT_TYPE IN ('CHECKPOINT','HANDOFF','SUMMARY','ERROR_STATE','AUTO_SAVE'))
+);
+
+PROMPT ============================================================
+PROMPT 12. WORKSPACE_TASKS - deferred after TASK_PLANS
+PROMPT ============================================================
+
+PROMPT ============================================================
+PROMPT 13. AGENT_SESSION (Partitioned by LIST + RANGE)
 PROMPT ============================================================
 
 CREATE TABLE AGENT_SESSION (
-    SESSION_ID    VARCHAR2(64)  NOT NULL,
-    AGENT_ID      VARCHAR2(64)  NOT NULL,
-    WM_ENTITY_ID  VARCHAR2(64),
-    IS_ACTIVE     VARCHAR2(1)   DEFAULT 'Y' NOT NULL,
-    START_TIME    TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    END_TIME      TIMESTAMP,
-    CONTEXT       JSON,
+    SESSION_ID             VARCHAR2(64)  NOT NULL,
+    AGENT_ID               VARCHAR2(64)  NOT NULL,
+    WM_ENTITY_ID           VARCHAR2(64),
+    OWNER_USER_ID          VARCHAR2(64),
+    WORKSPACE_ID           VARCHAR2(64),
+    PREDECESSOR_SESSION_ID VARCHAR2(64),
+    IS_ACTIVE              VARCHAR2(1)   DEFAULT 'Y' NOT NULL,
+    START_TIME             TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    END_TIME               TIMESTAMP,
+    CONTEXT                JSON,
     CONSTRAINT PK_AGENT_SESSION PRIMARY KEY (SESSION_ID, IS_ACTIVE),
     CONSTRAINT CK_AS_IS_ACTIVE CHECK (IS_ACTIVE IN ('Y','N')),
     CONSTRAINT FK_SESSION_AGENT FOREIGN KEY (AGENT_ID) REFERENCES AGENT_REGISTRY(AGENT_ID),
-    CONSTRAINT FK_SESSION_WM FOREIGN KEY (WM_ENTITY_ID) REFERENCES ENTITIES(ENTITY_ID)
+    CONSTRAINT FK_SESSION_WM FOREIGN KEY (WM_ENTITY_ID) REFERENCES ENTITIES(ENTITY_ID),
+    CONSTRAINT FK_SESSION_OWNER FOREIGN KEY (OWNER_USER_ID) REFERENCES SYSTEM_USERS(USER_ID),
+    CONSTRAINT FK_SESSION_WORKSPACE FOREIGN KEY (WORKSPACE_ID) REFERENCES WORKSPACES(WORKSPACE_ID)
 ) PARTITION BY LIST (IS_ACTIVE)
 SUBPARTITION BY RANGE (START_TIME)
 SUBPARTITION TEMPLATE (
@@ -239,8 +324,11 @@ SUBPARTITION TEMPLATE (
 
 ALTER TABLE AGENT_SESSION ENABLE ROW MOVEMENT;
 
+ALTER TABLE AGENT_SESSION ADD CONSTRAINT UK_SESSION_ID UNIQUE (SESSION_ID);
+ALTER TABLE AGENT_SESSION ADD CONSTRAINT FK_SESSION_PREDECESSOR FOREIGN KEY (PREDECESSOR_SESSION_ID) REFERENCES AGENT_SESSION(SESSION_ID);
+
 PROMPT ============================================================
-PROMPT 10. ENTITY_ACCESS_LOG (Partitioned by RANGE + HASH)
+PROMPT 14. ENTITY_ACCESS_LOG (Partitioned by RANGE + HASH)
 PROMPT ============================================================
 
 CREATE TABLE ENTITY_ACCESS_LOG (
@@ -266,7 +354,7 @@ ALTER TABLE ENTITY_ACCESS_LOG ADD CONSTRAINT FK_EAL_AGENT FOREIGN KEY (AGENT_ID)
 ALTER TABLE ENTITY_ACCESS_LOG ADD CONSTRAINT FK_EAL_ENTITY FOREIGN KEY (ENTITY_ID) REFERENCES ENTITIES(ENTITY_ID);
 
 PROMPT ============================================================
-PROMPT 11. AGENT_PERMISSION_LOG (Non-Partitioned)
+PROMPT 15. AGENT_PERMISSION_LOG (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE AGENT_PERMISSION_LOG (
@@ -283,7 +371,7 @@ CREATE TABLE AGENT_PERMISSION_LOG (
 );
 
 PROMPT ============================================================
-PROMPT 12. AGENT_COLLABORATION (Non-Partitioned)
+PROMPT 16. AGENT_COLLABORATION (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE AGENT_COLLABORATION (
@@ -303,7 +391,7 @@ CREATE TABLE AGENT_COLLABORATION (
 );
 
 PROMPT ============================================================
-PROMPT 13. TASK_PLANS (Partitioned by LIST + RANGE)
+PROMPT 17. TASK_PLANS (Partitioned by LIST + RANGE)
 PROMPT ============================================================
 
 CREATE TABLE TASK_PLANS (
@@ -340,11 +428,10 @@ SUBPARTITION TEMPLATE (
 
 ALTER TABLE TASK_PLANS ADD CONSTRAINT UK_TASK_PLANS_ID UNIQUE (PLAN_ID);
 
-ALTER TABLE TASK_STEPS ENABLE ROW MOVEMENT;
 ALTER TABLE TASK_PLANS ENABLE ROW MOVEMENT;
 
 PROMPT ============================================================
-PROMPT 14. TASK_STEPS (Reference Partitioned)
+PROMPT 18. TASK_STEPS (Reference Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE TASK_STEPS (
@@ -362,12 +449,13 @@ CREATE TABLE TASK_STEPS (
     CONSTRAINT PK_TASK_STEPS PRIMARY KEY (STEP_ID, PLAN_ID),
     CONSTRAINT FK_STEP_PLAN FOREIGN KEY (PLAN_ID, PLAN_STATUS) REFERENCES TASK_PLANS(PLAN_ID, STATUS),
     CONSTRAINT CK_TS_STATUS CHECK (STATUS IN ('PENDING','RUNNING','BLOCKED','SUCCESS','FAILED','SKIPPED'))
-) PARTITION BY REFERENCE (FK_STEP_PLAN);
+) PARTITION BY REFERENCE (FK_STEP_PLAN) ENABLE ROW MOVEMENT;
 
 ALTER TABLE TASK_STEPS ADD CONSTRAINT UK_TASK_STEPS_ID UNIQUE (STEP_ID);
+ALTER TABLE TASK_STEPS ENABLE ROW MOVEMENT;
 
 PROMPT ============================================================
-PROMPT 15. TASK_CONTEXT_SNAPSHOTS (Non-Partitioned)
+PROMPT 19. TASK_CONTEXT_SNAPSHOTS (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE TASK_CONTEXT_SNAPSHOTS (
@@ -380,7 +468,7 @@ CREATE TABLE TASK_CONTEXT_SNAPSHOTS (
 );
 
 PROMPT ============================================================
-PROMPT 16. TASK_TOOL_CALLS (Non-Partitioned)
+PROMPT 20. TASK_TOOL_CALLS (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE TASK_TOOL_CALLS (
@@ -399,7 +487,7 @@ CREATE TABLE TASK_TOOL_CALLS (
 );
 
 PROMPT ============================================================
-PROMPT 17. TASK_DEPENDENCIES (Non-Partitioned)
+PROMPT 21. TASK_DEPENDENCIES (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE TASK_DEPENDENCIES (
@@ -414,7 +502,20 @@ CREATE TABLE TASK_DEPENDENCIES (
 );
 
 PROMPT ============================================================
-PROMPT 18. SYSTEM_CONFIG (Non-Partitioned)
+PROMPT 22. WORKSPACE_TASKS (Non-Partitioned) [NEW v2.2.0]
+PROMPT ============================================================
+
+CREATE TABLE WORKSPACE_TASKS (
+    WORKSPACE_ID  VARCHAR2(64) NOT NULL,
+    PLAN_ID       VARCHAR2(64) NOT NULL,
+    ASSIGNED_AT   TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_WORKSPACE_TASKS PRIMARY KEY (WORKSPACE_ID, PLAN_ID),
+    CONSTRAINT FK_WT_WORKSPACE FOREIGN KEY (WORKSPACE_ID) REFERENCES WORKSPACES(WORKSPACE_ID) ON DELETE CASCADE,
+    CONSTRAINT FK_WT_PLAN FOREIGN KEY (PLAN_ID) REFERENCES TASK_PLANS(PLAN_ID)
+);
+
+PROMPT ============================================================
+PROMPT 23. SYSTEM_CONFIG (Non-Partitioned)
 PROMPT ============================================================
 
 CREATE TABLE SYSTEM_CONFIG (
@@ -425,23 +526,6 @@ CREATE TABLE SYSTEM_CONFIG (
 );
 
 PROMPT ============================================================
-PROMPT 19. SYSTEM_USERS (Non-Partitioned)
-PROMPT ============================================================
-
-CREATE TABLE SYSTEM_USERS (
-    USER_ID     VARCHAR2(64)  PRIMARY KEY,
-    USERNAME    VARCHAR2(128) NOT NULL,
-    PASSWORD_HASH VARCHAR2(256),
-    ROLE        VARCHAR2(64)  DEFAULT 'USER' NOT NULL,
-    STATUS      VARCHAR2(32)  DEFAULT 'ACTIVE' NOT NULL,
-    LAST_LOGIN  TIMESTAMP,
-    CREATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    UPDATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
-    CONSTRAINT CK_SU_ROLE CHECK (ROLE IN ('ADMIN','USER','SERVICE')),
-    CONSTRAINT CK_SU_STATUS CHECK (STATUS IN ('ACTIVE','INACTIVE','LOCKED'))
-);
-
-PROMPT ============================================================
 PROMPT Local Indexes on ENTITIES
 PROMPT ============================================================
 
@@ -449,6 +533,7 @@ CREATE INDEX IDX_ENTITIES_CATEGORY ON ENTITIES(CATEGORY) LOCAL;
 CREATE INDEX IDX_ENTITIES_STATUS ON ENTITIES(STATUS) LOCAL;
 CREATE INDEX IDX_ENTITIES_OWNED_BY ON ENTITIES(OWNED_BY_AGENT) LOCAL;
 CREATE INDEX IDX_ENTITIES_VISIBILITY ON ENTITIES(VISIBILITY) LOCAL;
+CREATE INDEX IDX_ENTITIES_WORKSPACE ON ENTITIES(WORKSPACE_ID) LOCAL;
 
 PROMPT ============================================================
 PROMPT Local Indexes on ENTITY_EDGES
@@ -493,6 +578,19 @@ CREATE INDEX IDX_TTC_STEP ON TASK_TOOL_CALLS(STEP_ID);
 CREATE INDEX IDX_TD_SOURCE ON TASK_DEPENDENCIES(SOURCE_PLAN_ID);
 CREATE INDEX IDX_TD_TARGET ON TASK_DEPENDENCIES(TARGET_PLAN_ID);
 
+ALTER TABLE ENTITIES ADD CONSTRAINT FK_ENTITIES_WORKSPACE FOREIGN KEY (WORKSPACE_ID) REFERENCES WORKSPACES(WORKSPACE_ID);
+
+CREATE INDEX IDX_WS_OWNER ON WORKSPACES(OWNER_USER_ID);
+CREATE INDEX IDX_WS_STATUS ON WORKSPACES(STATUS);
+
+CREATE INDEX IDX_WC_WORKSPACE ON WORKSPACE_CONTEXT(WORKSPACE_ID);
+CREATE INDEX IDX_WC_AGENT ON WORKSPACE_CONTEXT(AGENT_ID);
+CREATE INDEX IDX_WC_TYPE ON WORKSPACE_CONTEXT(CONTEXT_TYPE);
+
+CREATE INDEX IDX_AS_WORKSPACE ON AGENT_SESSION(WORKSPACE_ID) LOCAL;
+CREATE INDEX IDX_AS_PREDECESSOR ON AGENT_SESSION(PREDECESSOR_SESSION_ID) LOCAL;
+CREATE INDEX IDX_AS_OWNER ON AGENT_SESSION(OWNER_USER_ID) LOCAL;
+
 PROMPT ============================================================
 PROMPT Property Graph: ORACLE_MEMORY_GRAPH
 PROMPT ============================================================
@@ -512,98 +610,154 @@ CREATE PROPERTY GRAPH ORACLE_MEMORY_GRAPH
   );
 
 PROMPT ============================================================
-PROMPT JSON-Relational Duality View: MEMORY_DV
+PROMPT JSON-Relational Duality View: MEMORY_DV (Updatable)
 PROMPT ============================================================
 
 CREATE JSON RELATIONAL DUALITY VIEW MEMORY_DV AS
 SELECT JSON {
     '_id'          : JSON {'entity_id': e.ENTITY_ID, 'entity_type': e.ENTITY_TYPE},
-    'title'        : e.TITLE,
-    'content'      : e.CONTENT,
-    'summary'      : e.SUMMARY,
-    'category'     : e.CATEGORY,
-    'status'       : e.STATUS,
-    'owned_by'     : e.OWNED_BY_AGENT,
-    'source_agent' : e.SOURCE_AGENT,
-    'visibility'   : e.VISIBILITY,
-    'importance'   : e.IMPORTANCE,
+    'title'        : e.TITLE WITH UPDATE,
+    'content'      : e.CONTENT WITH UPDATE,
+    'summary'      : e.SUMMARY WITH UPDATE,
+    'category'     : e.CATEGORY WITH UPDATE,
+    'status'       : e.STATUS WITH UPDATE,
+    'owned_by'     : e.OWNED_BY_AGENT WITH UPDATE,
+    'source_agent' : e.SOURCE_AGENT WITH UPDATE,
+    'visibility'   : e.VISIBILITY WITH UPDATE,
+    'importance'   : e.IMPORTANCE WITH UPDATE,
+    'workspace_id' : e.WORKSPACE_ID WITH UPDATE,
     'created_at'   : e.CREATED_AT,
     'updated_at'   : e.UPDATED_AT,
     'edges' : [
         SELECT JSON {
-            'edge_id'   : eg.EDGE_ID,
-            'edge_type' : eg.EDGE_TYPE,
-            'target_id' : eg.TARGET_ID,
-            'strength'  : eg.STRENGTH,
-            'confidence': eg.CONFIDENCE
+            'edge_id'    : eg.EDGE_ID,
+            'source_id'  : eg.SOURCE_ID,
+            'edge_type'  : eg.EDGE_TYPE WITH UPDATE,
+            'target_id'  : eg.TARGET_ID WITH UPDATE,
+            'strength'   : eg.STRENGTH WITH UPDATE,
+            'confidence' : eg.CONFIDENCE WITH UPDATE
         }
-        FROM ENTITY_EDGES eg
+        FROM ENTITY_EDGES eg WITH INSERT UPDATE DELETE
         WHERE eg.SOURCE_ID = e.ENTITY_ID AND eg.SOURCE_TYPE = e.ENTITY_TYPE
     ],
     'tags' : [
         SELECT JSON {
-            'tag_id' : et.TAG_ID
+            'entity_id'   : et.ENTITY_ID,
+            'entity_type' : et.ENTITY_TYPE,
+            'tag_id'      : et.TAG_ID
         }
-        FROM ENTITY_TAGS et
+        FROM ENTITY_TAGS et WITH INSERT DELETE
         WHERE et.ENTITY_ID = e.ENTITY_ID AND et.ENTITY_TYPE = e.ENTITY_TYPE
     ]
 }
-FROM ENTITIES e;
+FROM ENTITIES e WITH INSERT UPDATE DELETE;
 
 PROMPT ============================================================
-PROMPT JSON-Relational Duality View: KNOWLEDGE_DV
+PROMPT JSON-Relational Duality View: KNOWLEDGE_DV (Updatable)
 PROMPT ============================================================
 
 CREATE JSON RELATIONAL DUALITY VIEW KNOWLEDGE_DV AS
 SELECT JSON {
     '_id'           : JSON {'entity_id': e.ENTITY_ID, 'entity_type': e.ENTITY_TYPE},
-    'title'         : e.TITLE,
-    'content'       : e.CONTENT,
-    'summary'       : e.SUMMARY,
-    'category'      : e.CATEGORY,
-    'status'        : e.STATUS,
-    'visibility'    : e.VISIBILITY,
-    'importance'    : e.IMPORTANCE,
+    'title'         : e.TITLE WITH UPDATE,
+    'content'       : e.CONTENT WITH UPDATE,
+    'summary'       : e.SUMMARY WITH UPDATE,
+    'category'      : e.CATEGORY WITH UPDATE,
+    'status'        : e.STATUS WITH UPDATE,
+    'visibility'    : e.VISIBILITY WITH UPDATE,
+    'importance'    : e.IMPORTANCE WITH UPDATE,
+    'workspace_id'  : e.WORKSPACE_ID WITH UPDATE,
     'created_at'    : e.CREATED_AT,
     'updated_at'    : e.UPDATED_AT,
     'knowledge_meta' : [
         SELECT JSON {
-            'domain'        : km.DOMAIN,
-            'topic'         : km.TOPIC,
-            'difficulty'    : km.DIFFICULTY,
-            'review_count'  : km.REVIEW_COUNT,
+            'entity_id'     : km.ENTITY_ID,
+            'entity_type'   : km.ENTITY_TYPE,
+            'domain'        : km.DOMAIN WITH UPDATE,
+            'topic'         : km.TOPIC WITH UPDATE,
+            'difficulty'    : km.DIFFICULTY WITH UPDATE,
+            'review_count'  : km.REVIEW_COUNT WITH UPDATE,
             'last_reviewed' : km.LAST_REVIEWED,
             'next_review'   : km.NEXT_REVIEW
         }
-        FROM KNOWLEDGE_META km
+        FROM KNOWLEDGE_META km WITH INSERT UPDATE DELETE
         WHERE km.ENTITY_ID = e.ENTITY_ID AND km.ENTITY_TYPE = e.ENTITY_TYPE
     ],
     'edges' : [
         SELECT JSON {
-            'edge_id'   : eg.EDGE_ID,
-            'edge_type' : eg.EDGE_TYPE,
-            'target_id' : eg.TARGET_ID,
-            'strength'  : eg.STRENGTH,
-            'confidence': eg.CONFIDENCE
+            'edge_id'    : eg.EDGE_ID,
+            'source_id'  : eg.SOURCE_ID,
+            'edge_type'  : eg.EDGE_TYPE WITH UPDATE,
+            'target_id'  : eg.TARGET_ID WITH UPDATE,
+            'strength'   : eg.STRENGTH WITH UPDATE,
+            'confidence' : eg.CONFIDENCE WITH UPDATE
         }
-        FROM ENTITY_EDGES eg
+        FROM ENTITY_EDGES eg WITH INSERT UPDATE DELETE
         WHERE eg.SOURCE_ID = e.ENTITY_ID AND eg.SOURCE_TYPE = e.ENTITY_TYPE
     ],
     'tags' : [
         SELECT JSON {
-            'tag_id' : et.TAG_ID
+            'entity_id'   : et.ENTITY_ID,
+            'entity_type' : et.ENTITY_TYPE,
+            'tag_id'      : et.TAG_ID
         }
-        FROM ENTITY_TAGS et
+        FROM ENTITY_TAGS et WITH INSERT DELETE
         WHERE et.ENTITY_ID = e.ENTITY_ID AND et.ENTITY_TYPE = e.ENTITY_TYPE
     ]
 }
-FROM ENTITIES e;
+FROM ENTITIES e WITH INSERT UPDATE DELETE;
+
+PROMPT ============================================================
+PROMPT JSON-Relational Duality View: WORKSPACE_DV (Updatable) [NEW v2.2.0]
+PROMPT ============================================================
+
+CREATE JSON RELATIONAL DUALITY VIEW WORKSPACE_DV AS
+SELECT JSON {
+    '_id'             : w.WORKSPACE_ID,
+    'name'            : w.WORKSPACE_NAME WITH UPDATE,
+    'type'            : w.WORKSPACE_TYPE WITH UPDATE,
+    'status'          : w.STATUS WITH UPDATE,
+    'isolation_mode'  : w.ISOLATION_MODE WITH UPDATE,
+    'owner_user_id'   : w.OWNER_USER_ID WITH UPDATE,
+    'current_agent'   : w.CURRENT_AGENT_ID WITH UPDATE,
+    'summary'         : w.SUMMARY WITH UPDATE,
+    'metadata'        : w.METADATA WITH UPDATE,
+    'created_at'      : w.CREATED_AT,
+    'updated_at'      : w.UPDATED_AT,
+    'tasks' : [
+        SELECT JSON {
+            'workspace_id' : wt.WORKSPACE_ID,
+            'plan_id'      : wt.PLAN_ID,
+            'assigned_at'  : wt.ASSIGNED_AT
+        }
+        FROM WORKSPACE_TASKS wt WITH INSERT UPDATE DELETE
+        WHERE wt.WORKSPACE_ID = w.WORKSPACE_ID
+    ]
+}
+FROM WORKSPACES w WITH INSERT UPDATE DELETE;
+
+PROMPT ============================================================
+PROMPT JSON-Relational Duality View: CONTEXT_DV (Read-Only) [NEW v2.2.0]
+PROMPT ============================================================
+
+CREATE JSON RELATIONAL DUALITY VIEW CONTEXT_DV AS
+SELECT JSON {
+    '_id'        : c.CONTEXT_ID,
+    'workspace'  : c.WORKSPACE_ID,
+    'agent'      : c.AGENT_ID,
+    'session'    : c.SESSION_ID,
+    'type'       : c.CONTEXT_TYPE,
+    'data'       : c.CONTEXT_DATA,
+    'parent'     : c.PARENT_CONTEXT_ID,
+    'created_at' : c.CREATED_AT
+}
+FROM WORKSPACE_CONTEXT c;
 
 PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '2.1.0', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '2.2.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1536', 'Default embedding dimension');
@@ -622,5 +776,5 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.1.0 Schema Deployment Complete
+PROMPT Oracle Memory System v2.2.0 Schema Deployment Complete
 PROMPT ============================================================

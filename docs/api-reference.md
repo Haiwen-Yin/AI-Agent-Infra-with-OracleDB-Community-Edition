@@ -1,4 +1,4 @@
-# API Reference - Oracle Memory System v2.1.0
+# API Reference - Oracle Memory System v2.2.0
 
 ## Python API (scripts/lib/)
 
@@ -82,8 +82,10 @@ get_agent(agent_id) -> dict | None
 update_agent(agent_id, **kwargs) -> bool
 decommission_agent(agent_id) -> bool
 heartbeat(agent_id) -> bool
-create_session(agent_id, wm_entity_id, context) -> str
+create_session(agent_id, wm_entity_id, context, owner_user_id, workspace_id, predecessor_session_id) -> str
 end_session(session_id) -> bool
+checkpoint_session(session_id, context_data) -> bool
+get_session_chain(session_id, limit) -> list
 get_active_sessions(agent_id) -> list
 log_access(agent_id, entity_id, access_type, session_id) -> str
 get_access_log(entity_id, agent_id, limit) -> list
@@ -96,6 +98,9 @@ get_collaborations(agent_id, limit) -> list
 - Collaboration IDs: `'COL_' || RAWTOHEX(SYS_GUID())`
 - AGENT_SESSION is partitioned (LIST+RANGE), ROW MOVEMENT enabled
 - AGENT_COLLABORATION has STRENGTH (0-1) field
+- `create_session` new parameters: `owner_user_id` (session owner), `workspace_id` (workspace binding), `predecessor_session_id` (handoff chain)
+- `checkpoint_session`: Saves a CHECKPOINT context to the session's workspace via `workspace_api.save_context()`
+- `get_session_chain`: Traverses PREDECESSOR_SESSION_ID backwards to return the full session handoff chain
 
 ### task_plan_api.py
 
@@ -150,6 +155,32 @@ ReversibleEncryption(key).decrypt(ciphertext) -> str
 hash_password(password, salt, iterations) -> (hash, salt_hex)
 verify_password(password, stored_hash, salt_hex, iterations) -> bool
 ```
+
+### workspace_api.py
+
+```python
+create_workspace(owner_user_id, name, workspace_type, isolation_mode, metadata) -> str
+get_workspace(workspace_id) -> dict | None
+get_user_workspaces(user_id, status) -> list
+update_workspace(workspace_id, **kwargs) -> bool
+save_context(workspace_id, agent_id, context_type, context_data, session_id, parent_context_id) -> str
+get_context_chain(workspace_id, limit) -> list
+get_latest_context(workspace_id) -> dict | None
+create_handoff_session(workspace_id, new_agent_id, handoff_data) -> str
+recover_workspace(workspace_id) -> dict
+link_task_to_workspace(workspace_id, plan_id) -> bool
+get_workspace_tasks(workspace_id) -> list
+```
+
+- Workspace IDs: `'WS_' || RAWTOHEX(SYS_GUID())`
+- Context IDs: `'CTX_' || RAWTOHEX(SYS_GUID())`
+- `workspace_type`: CONVERSATION (default), PROJECT, ANALYSIS
+- `isolation_mode`: SHARED (default) or ISOLATED
+- `context_type`: SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY
+- `create_handoff_session`: Creates a new AGENT_SESSION linked to the predecessor, saves a HANDOFF context entry, and updates WORKSPACES to point to the new agent/session
+- `recover_workspace`: Returns the complete recoverable state — workspace metadata, context chain (latest 5), active tasks, recent sessions, and scoped entities (ISOLATED mode only)
+- `update_workspace` allowed fields: workspace_name, status, isolation_mode, current_agent_id, current_session_id, summary, metadata
+- `save_context` auto-serializes dict/list CONTEXT_DATA to JSON
 
 ## PL/SQL API (packages)
 

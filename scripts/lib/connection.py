@@ -8,6 +8,7 @@ import oracledb
 import threading
 import logging
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from .config import get_config, DatabaseConfig
@@ -128,3 +129,27 @@ def execute_plsql(plsql: str, params: Optional[Dict[str, Any]] = None) -> Any:
                     return rows[0][0]
                 return [dict(zip(columns, row)) for row in rows]
             return None
+
+
+def _sanitize_json(obj):
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_json(i) for i in obj]
+    elif isinstance(obj, Decimal):
+        return int(obj) if obj == obj.to_integral_value() else float(obj)
+    return obj
+
+
+def sanitize_row(d):
+    if not isinstance(d, dict):
+        return d
+    result = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            result[k] = _sanitize_json(v)
+        elif isinstance(v, list):
+            result[k] = [_sanitize_json(i) for i in v]
+        else:
+            result[k] = v
+    return result

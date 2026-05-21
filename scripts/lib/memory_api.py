@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Memory API
+"""Oracle Memory System v2.2.0 - Memory API
 
 Unified memory management using oracledb with bind variables.
 Operates on the ENTITIES table (ENTITY_TYPE='MEMORY').
@@ -21,12 +21,15 @@ def create_memory(
     source_agent: Optional[str] = None,
     owned_by_agent: Optional[str] = None,
     visibility: str = "PRIVATE",
+    workspace_id: Optional[str] = None,
 ) -> str:
     sql = """
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
-                              IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY)
+                              IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
+                              WORKSPACE_ID)
         VALUES (RAWTOHEX(SYS_GUID()), 'MEMORY', :title, :content, :summary, :category,
-                :importance, 'ACTIVE', :owned_by_agent, :source_agent, :visibility)
+                :importance, 'ACTIVE', :owned_by_agent, :source_agent, :visibility,
+                :wsid)
         RETURNING ENTITY_ID INTO :ret_id
     """
     params = {
@@ -38,6 +41,7 @@ def create_memory(
         "owned_by_agent": owned_by_agent,
         "source_agent": source_agent,
         "visibility": visibility,
+        "wsid": workspace_id,
     }
     return execute_insert_returning_id(sql, params)
 
@@ -93,6 +97,8 @@ def search_memories(
     category: Optional[str] = None,
     visibility: Optional[str] = None,
     owned_by_agent: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    isolation_mode: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
@@ -111,6 +117,14 @@ def search_memories(
     if owned_by_agent:
         conditions.append("OWNED_BY_AGENT = :agent")
         params["agent"] = owned_by_agent
+    if isolation_mode == 'SHARED':
+        conditions.append("WORKSPACE_ID IS NULL")
+    elif isolation_mode == 'ISOLATED' and workspace_id:
+        conditions.append("WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
+    elif workspace_id:
+        conditions.append("WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     where = " AND ".join(conditions)
     sql = f"""

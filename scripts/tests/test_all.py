@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Master Test Runner"""
+"""Oracle Memory System v2.2.0 - Master Test Runner"""
 
 import sys
 import os
@@ -11,11 +11,12 @@ from tests.test_agent import run_all as run_agent
 from tests.test_graph import run_all as run_graph
 from tests.test_harness import run_all as run_harness
 from tests.test_security import run_all as run_security
+from tests.test_workspace import run_all as run_workspace
 
 
 def main():
     print("=" * 60)
-    print("Oracle Memory System v2.1.0 - Full Test Suite")
+    print("Oracle Memory System v2.2.0 - Full Test Suite")
     print("=" * 60)
 
     suites = [
@@ -26,6 +27,7 @@ def main():
         ("Graph", run_graph),
         ("Harness", run_harness),
         ("Security", run_security),
+        ("Workspace", run_workspace),
     ]
 
     results = {}

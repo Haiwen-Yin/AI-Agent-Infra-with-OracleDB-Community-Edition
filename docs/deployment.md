@@ -1,4 +1,4 @@
-# Deployment Guide - Oracle Memory System v2.1.0
+# Deployment Guide - Oracle Memory System v2.2.0
 
 ## Prerequisites
 
@@ -6,7 +6,7 @@
 - Python 3.8+ with oracledb package
 - SQLcl 26.1+ (for SQL script deployment)
 
-**Important**: v2.1.0 is NOT backward-compatible with v2.0.0. See [migration.md](migration.md) for details.
+**Important**: v2.2.0 is NOT backward-compatible with v2.1.0. Requires clean re-deploy (same approach as v2.1.0).
 
 ## 4-Phase Deployment
 
@@ -16,17 +16,17 @@ Creates all tables, partitions, indexes, property graph, and JSON duality views.
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/1_schema.sql
 ```
 - **Destructive**: Drops all existing tables before creating new ones (`CASCADE CONSTRAINTS PURGE`)
-- Creates 19 tables (6 partitioned, 5 reference-partitioned, 8 non-partitioned)
-- Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION
+- Creates 22 tables (6 partitioned, 5 reference-partitioned, 11 non-partitioned)
+- Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS
 - Partitioning: LIST+RANGE on ENTITIES (6×7), AGENT_SESSION (2×7), TASK_PLANS (2×7); RANGE+HASH on ENTITY_ACCESS_LOG; REFERENCE on 5 child tables
 - ROW MOVEMENT enabled on AGENT_SESSION, TASK_PLANS, TASK_STEPS
 - Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
 - ~25 local indexes + global indexes on non-partitioned tables
-- 1 property graph, 2 duality views
-- Seeds SYSTEM_CONFIG with version 2.1.0
+- 1 property graph, 4 duality views
+- Seeds SYSTEM_CONFIG with version 2.2.0
 
 ### Phase 2: API Packages (2_api.sql)
-Creates 4 PL/SQL packages.
+Creates 5 PL/SQL packages.
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/2_api.sql
 ```
@@ -34,9 +34,10 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 - KNOWLEDGE_BASE_API (spaced review, concept lineage with composite key joins)
 - AGENT_PERMISSION_MANAGER (access control, session cleanup with ROW MOVEMENT)
 - SESSION_CLEANUP (purge logs, archive entities, tag counts)
+- WORKSPACE_MANAGER (workspace lifecycle, context chain management, cleanup)
 
 ### Phase 3: Scheduler Jobs (3_jobs.sql)
-Creates 7 automated scheduler jobs.
+Creates 9 automated scheduler jobs.
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/3_jobs.sql
 ```
@@ -50,6 +51,8 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 | ACCESS_LOG_PURGE_JOB | Weekly Sun 04:00 | Purge access logs older than 90 days |
 | ENTITY_ARCHIVE_JOB | Weekly Sun 05:00 | Archive low-importance memories older than 180 days |
 | COLLAB_EXPIRY_JOB | Daily 00:30 | Process collaboration requests |
+| WORKSPACE_CLEANUP_JOB | Daily 01:00 | Clean stale workspaces and paused sessions |
+| CONTEXT_ARCHIVE_JOB | Weekly Sun 03:00 | Archive old context entries |
 
 ### Phase 4: Harness Templates (4_harness_templates.sql)
 Seeds 5 built-in harness templates with HARNESS_META (INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE).
@@ -85,7 +88,7 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
-v2.1.0 test suite: 49 tests across 7 modules (connection: 6, memory: 7, knowledge: 7, agent: 7, security: 10, harness: 10, graph: 8 — new).
+v2.2.0 test suite: 61 tests across 8 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12 — new).
 
 ## Starting the Web Server
 

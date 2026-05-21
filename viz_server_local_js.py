@@ -278,6 +278,72 @@ def load_tasks_data(status_filter=None, keyword=None):
     finally:
         pool.release(conn)
 
+def load_workspaces_data():
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        workspaces = _q(conn, """SELECT WORKSPACE_ID, WORKSPACE_NAME, WORKSPACE_TYPE, STATUS, ISOLATION_MODE,
+                    OWNER_USER_ID, CURRENT_AGENT_ID, SUMMARY,
+                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                    TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
+                    FROM WORKSPACES ORDER BY UPDATED_AT DESC""")
+        return {'workspaces': workspaces}
+    except Exception as e:
+        print(f'  Error loading workspaces: {e}')
+        return {'workspaces': []}
+    finally:
+        pool.release(conn)
+
+def load_workspace_detail(wid):
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        rows = _q(conn, """SELECT WORKSPACE_ID, WORKSPACE_NAME, WORKSPACE_TYPE, STATUS, ISOLATION_MODE,
+                    OWNER_USER_ID, CURRENT_AGENT_ID, SUMMARY,
+                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                    TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
+                    FROM WORKSPACES WHERE WORKSPACE_ID = :wid""", {'wid': wid})
+        if not rows:
+            return None
+        ws = rows[0]
+        ctx_cnt = _q(conn, "SELECT COUNT(*) AS CNT FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :wid", {'wid': wid})
+        task_cnt = _q(conn, "SELECT COUNT(*) AS CNT FROM WORKSPACE_TASKS WHERE WORKSPACE_ID = :wid", {'wid': wid})
+        ws['context_count'] = ctx_cnt[0]['cnt'] if ctx_cnt else 0
+        ws['task_count'] = task_cnt[0]['cnt'] if task_cnt else 0
+        return ws
+    except Exception as e:
+        print(f'  Error loading workspace detail: {e}')
+        return None
+    finally:
+        pool.release(conn)
+
+def load_workspace_context(wid):
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        return _q(conn, """SELECT CONTEXT_ID, AGENT_ID, SESSION_ID, CONTEXT_TYPE,
+                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+                    FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :wid
+                    ORDER BY CREATED_AT DESC FETCH FIRST 10 ROWS ONLY""", {'wid': wid})
+    except Exception as e:
+        print(f'  Error loading workspace context: {e}')
+        return []
+    finally:
+        pool.release(conn)
+
+def load_workspace_tasks(wid):
+    pool = get_pool()
+    conn = pool.acquire()
+    try:
+        return _q(conn, """SELECT tp.PLAN_ID, tp.GOAL, tp.STATUS, tp.PRIORITY
+                    FROM TASK_PLANS tp JOIN WORKSPACE_TASKS wt ON tp.PLAN_ID = wt.PLAN_ID
+                    WHERE wt.WORKSPACE_ID = :wid ORDER BY tp.UPDATED_AT DESC""", {'wid': wid})
+    except Exception as e:
+        print(f'  Error loading workspace tasks: {e}')
+        return []
+    finally:
+        pool.release(conn)
+
 LOGIN_HTML = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Login</title>
@@ -339,7 +405,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <h2 id="st"></h2><p><b>Oracle Memory System v2.1</b></p>
 <div class="st" id="li"></div><p id="pd"></p><p id="ps"></p><p id="pc"></p>
 <div class="st" id="lp"></div>
-<div class="nb"><button id="bk" onclick="location='/knowledge'"></button><button id="bm" onclick="location='/memory'"></button><button id="ba" onclick="location='/agents'"></button><button id="bt" onclick="location='/tasks'"></button></div>
+<div class="nb"><button id="bk" onclick="location='/knowledge'"></button><button id="bm" onclick="location='/memory'"></button><button id="ba" onclick="location='/agents'"></button><button id="bt" onclick="location='/tasks'"></button><button id="bw" onclick="location='/workspaces'"></button></div>
 <div class="st" id="ll"></div>
 <div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
 <div class="ni" id="ni"><h3 id="ld"></h3>
@@ -357,20 +423,20 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <script>
 const mode='{mode}',api='{api}';
 const i18n={{zh:{{t:mode==='memory'?'记忆内容':'知识图谱',i:'操作指南',d:'拖拽：移动节点',s:'滚轮：缩放',c:'点击：查看详情',
-k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',dt:'节点详情',ty:'类型:',nm:'名称:',lo:'退出登录',ld:'加载中...',st:'统计'}},
+k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',ws:'工作空间',p:'页面',l:'语言',dt:'节点详情',ty:'类型:',nm:'名称:',lo:'退出登录',ld:'加载中...',st:'统计'}},
 en:{{t:mode==='memory'?'Memory Content':'Knowledge Graph',i:'Instructions',d:'Drag: Move nodes',s:'Scroll: Zoom',c:'Click: Details',
-k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',dt:'Node Details',ty:'Type:',nm:'Name:',lo:'Logout',ld:'Loading...',st:'Stats'}}}};
+k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',ws:'Workspaces',p:'Pages',l:'Language',dt:'Node Details',ty:'Type:',nm:'Name:',lo:'Logout',ld:'Loading...',st:'Stats'}}}};
 function gL(){{return localStorage.getItem('lang')||'zh'}}
 function setL(l){{localStorage.setItem('lang',l);aL(l)}}
 function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('li').textContent=t.i;
 document.getElementById('pd').textContent=t.d;document.getElementById('ps').textContent=t.s;document.getElementById('pc').textContent=t.c;
-document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;
+document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('bw').textContent=t.ws;document.getElementById('lp').textContent=t.p;
 document.getElementById('ll').textContent=t.l;document.getElementById('ld').textContent=t.dt;
 document.getElementById('lt').textContent=t.ty;document.getElementById('ln').textContent=t.nm;
 document.getElementById('blo').textContent=t.lo;document.getElementById('ltxt').textContent=t.ld;
 document.getElementById('sbox').dataset.label=t.st;
 document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');
-document.getElementById('bk').className=mode==='knowledge'?'a':'';document.getElementById('bm').className=mode==='memory'?'a':'';document.getElementById('ba').className='';document.getElementById('bt').className=''}}
+document.getElementById('bk').className=mode==='knowledge'?'a':'';document.getElementById('bm').className=mode==='memory'?'a':'';document.getElementById('ba').className='';document.getElementById('bt').className='';document.getElementById('bw').className=''}}
 aL(gL());
 let timer={{s:parseInt('{SESS_TTL}')}};
 function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}
@@ -438,6 +504,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <button id="bm" onclick="location='/memory'"></button>
 <button id="ba" class="a" onclick="location='/agents'"></button>
 <button id="bt" onclick="location='/tasks'"></button>
+<button id="bw" onclick="location='/workspaces'"></button>
 </div>
 <div class="st" id="ll"></div>
 <div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
@@ -454,10 +521,10 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <div id="tc2" class="tabc"><div class="tw"><div id="coLd" class="ld"><div class="sp"></div><p id="coLdTxt"></p></div><table id="coTbl" class="tbl" style="display:none"><thead><tr><th>ID</th><th id="thCF"></th><th id="thCT"></th><th id="thCR"></th><th id="thCS"></th><th id="thCC"></th></tr></thead><tbody id="coBody"></tbody></table></div></div>
 </div></div>
 <script>
-const i18n={{zh:{{t:'多Agent协同',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',t1:'Agent注册表',t2:'活跃会话',t3:'协作请求',thN:'名称',thT:'类型',thS:'状态',thP:'权限',thAS:'活跃会话',thAC:'访问次数',thC:'创建时间',thSN:'Agent名称',thSA:'活跃',thST:'开始时间',thSL:'最近活动',thCF:'发起方',thCT:'接收方',thCR:'原因',thCS:'状态',thCC:'创建时间',noData:'暂无数据'}},en:{{t:'Multi-Agent Collaboration',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',t1:'Agent Registry',t2:'Active Sessions',t3:'Collaboration Requests',thN:'Name',thT:'Type',thS:'Status',thP:'Permission',thAS:'Active Sessions',thAC:'Access Count',thC:'Created',thSN:'Agent Name',thSA:'Active',thST:'Start Time',thSL:'Last Activity',thCF:'From',thCT:'To',thCR:'Reason',thCS:'Status',thCC:'Created',noData:'No data'}}}};
+const i18n={{zh:{{t:'多Agent协同',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',ws:'工作空间',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',t1:'Agent注册表',t2:'活跃会话',t3:'协作请求',thN:'名称',thT:'类型',thS:'状态',thP:'权限',thAS:'活跃会话',thAC:'访问次数',thC:'创建时间',thSN:'Agent名称',thSA:'活跃',thST:'开始时间',thSL:'最近活动',thCF:'发起方',thCT:'接收方',thCR:'原因',thCS:'状态',thCC:'创建时间',noData:'暂无数据'}},en:{{t:'Multi-Agent Collaboration',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',ws:'Workspaces',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',t1:'Agent Registry',t2:'Active Sessions',t3:'Collaboration Requests',thN:'Name',thT:'Type',thS:'Status',thP:'Permission',thAS:'Active Sessions',thAC:'Access Count',thC:'Created',thSN:'Agent Name',thSA:'Active',thST:'Start Time',thSL:'Last Activity',thCF:'From',thCT:'To',thCR:'Reason',thCS:'Status',thCC:'Created',noData:'No data'}}}};
 function gL(){{return localStorage.getItem('lang')||'zh'}}
 function setL(l){{localStorage.setItem('lang',l);aL(l)}}
-function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('t1').textContent=t.t1;document.getElementById('t2').textContent=t.t2;document.getElementById('t3').textContent=t.t3;document.getElementById('thN').textContent=t.thN;document.getElementById('thT').textContent=t.thT;document.getElementById('thS').textContent=t.thS;document.getElementById('thP').textContent=t.thP;document.getElementById('thAS').textContent=t.thAS;document.getElementById('thAC').textContent=t.thAC;document.getElementById('thC').textContent=t.thC;document.getElementById('thSN').textContent=t.thSN;document.getElementById('thSA').textContent=t.thSA;document.getElementById('thST').textContent=t.thST;document.getElementById('thSL').textContent=t.thSL;document.getElementById('thCF').textContent=t.thCF;document.getElementById('thCT').textContent=t.thCT;document.getElementById('thCR').textContent=t.thCR;document.getElementById('thCS').textContent=t.thCS;document.getElementById('thCC').textContent=t.thCC;document.getElementById('agLdTxt').textContent=t.ld;document.getElementById('seLdTxt').textContent=t.ld;document.getElementById('coLdTxt').textContent=t.ld;document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='a';document.getElementById('bt').className=''}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('bw').textContent=t.ws;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('t1').textContent=t.t1;document.getElementById('t2').textContent=t.t2;document.getElementById('t3').textContent=t.t3;document.getElementById('thN').textContent=t.thN;document.getElementById('thT').textContent=t.thT;document.getElementById('thS').textContent=t.thS;document.getElementById('thP').textContent=t.thP;document.getElementById('thAS').textContent=t.thAS;document.getElementById('thAC').textContent=t.thAC;document.getElementById('thC').textContent=t.thC;document.getElementById('thSN').textContent=t.thSN;document.getElementById('thSA').textContent=t.thSA;document.getElementById('thST').textContent=t.thST;document.getElementById('thSL').textContent=t.thSL;document.getElementById('thCF').textContent=t.thCF;document.getElementById('thCT').textContent=t.thCT;document.getElementById('thCR').textContent=t.thCR;document.getElementById('thCS').textContent=t.thCS;document.getElementById('thCC').textContent=t.thCC;document.getElementById('agLdTxt').textContent=t.ld;document.getElementById('seLdTxt').textContent=t.ld;document.getElementById('coLdTxt').textContent=t.ld;document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='a';document.getElementById('bt').className='';document.getElementById('bw').className=''}}
 aL(gL());
 function swTab(i){{document.querySelectorAll('.tabs button').forEach((b,idx)=>b.className=idx===i?'a':'');document.querySelectorAll('.tabc').forEach((c,idx)=>c.className=idx===i?'tabc a':'tabc')}}
 let timer={{s:parseInt('{SESS_TTL}')}};
@@ -537,6 +604,7 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <button id="bm" onclick="location='/memory'"></button>
 <button id="ba" onclick="location='/agents'"></button>
 <button id="bt" class="a" onclick="location='/tasks'"></button>
+<button id="bw" onclick="location='/workspaces'"></button>
 </div>
 <div class="st" id="ll"></div>
 <div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
@@ -554,10 +622,10 @@ body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#66
 <div id="plc"><div id="pld" class="ld"><div class="sp"></div><p id="pldTxt"></p></div></div>
 </div></div>
 <script>
-const i18n={{zh:{{t:'任务计划',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',search:'搜索',planName:'计划名称',type:'类型',priority:'优先级',progress:'进度',created:'创建',completed:'完成',order:'序号',stepName:'步骤名称',action:'动作',started:'开始',error:'错误',noData:'暂无数据',total:'总计',done:'完成',failed:'失败',running:'运行中',thS:'状态'}},en:{{t:'Task Plans',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',search:'Search',planName:'Plan Name',type:'Type',priority:'Priority',progress:'Progress',created:'Created',completed:'Completed',order:'Order',stepName:'Step Name',action:'Action',started:'Started',error:'Error',noData:'No data',total:'Total',done:'Done',failed:'Failed',running:'Running',thS:'Status'}}}};
+const i18n={{zh:{{t:'任务计划',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',ws:'工作空间',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',search:'搜索',planName:'计划名称',type:'类型',priority:'优先级',progress:'进度',created:'创建',completed:'完成',order:'序号',stepName:'步骤名称',action:'动作',started:'开始',error:'错误',noData:'暂无数据',total:'总计',done:'完成',failed:'失败',running:'运行中',thS:'状态'}},en:{{t:'Task Plans',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',ws:'Workspaces',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',search:'Search',planName:'Plan Name',type:'Type',priority:'Priority',progress:'Progress',created:'Created',completed:'Completed',order:'Order',stepName:'Step Name',action:'Action',started:'Started',error:'Error',noData:'No data',total:'Total',done:'Done',failed:'Failed',running:'Running',thS:'Status'}}}};
 function gL(){{return localStorage.getItem('lang')||'zh'}}
 function setL(l){{localStorage.setItem('lang',l);aL(l)}}
-function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('sbtn').textContent=t.search;document.getElementById('kw').placeholder=t.search+'...';document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='';document.getElementById('bt').className='a'}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('bw').textContent=t.ws;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('sbtn').textContent=t.search;document.getElementById('kw').placeholder=t.search+'...';document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='';document.getElementById('bt').className='a';document.getElementById('bw').className=''}}
 aL(gL());
 let timer={{s:parseInt('{SESS_TTL}')}};
 function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
@@ -583,6 +651,115 @@ plc.innerHTML=h
 }}).catch(e=>{{plc.innerHTML='<div class="ld"><p style="color:#fff">Load failed</p></div>'}});
 }}
 loadTasks();
+</script></body></html>'''
+
+def build_workspaces_page():
+    return f'''<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Oracle Memory System - Workspaces</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh}}
+.w{{display:flex;height:100vh}}
+.s{{width:300px;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);padding:20px;color:#fff;overflow-y:auto;display:flex;flex-direction:column}}
+.s h2{{margin-bottom:15px;font-size:20px;border-bottom:2px solid rgba(255,255,255,.3);padding-bottom:10px}}
+.s p{{margin-bottom:6px;font-size:13px;line-height:1.5}}
+.m{{flex:1;padding:20px;overflow-y:auto}}
+.st{{font-weight:700;font-size:14px;margin-top:15px;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,.2);padding-bottom:5px}}
+.nb{{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}}
+.nb button{{flex:1;padding:8px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.nb button:hover{{background:rgba(255,255,255,.35)}}.nb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.lb{{display:flex;gap:8px}}
+.lb button{{flex:1;padding:6px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px}}
+.lb button.a{{background:rgba(255,255,255,.5);font-weight:700}}
+.sb{{margin-top:10px;padding:10px;background:rgba(0,0,0,.2);border-radius:8px;font-size:12px}}
+.lo{{margin-top:auto;padding:10px;background:rgba(255,0,0,.3);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px}}
+.lo:hover{{background:rgba(255,0,0,.5)}}#tmr{{font-size:11px;color:#ffeb3b;margin-top:5px}}
+.badge{{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;display:inline-block}}
+.bg-green{{background:#27ae60;color:#fff}}.bg-red{{background:#e74c3c;color:#fff}}
+.bg-blue{{background:#3498db;color:#fff}}.bg-orange{{background:#f39c12;color:#fff}}
+.bg-gray{{background:#95a5a6;color:#fff}}.bg-purple{{background:#8e44ad;color:#fff}}
+.bg-yellow{{background:#f1c40f;color:#333}}.bg-teal{{background:#1abc9c;color:#fff}}
+.wcard{{background:rgba(255,255,255,.08);border-radius:12px;margin-bottom:14px;overflow:hidden;cursor:pointer;transition:background .2s}}
+.wcard:hover{{background:rgba(255,255,255,.14)}}
+.wcard-h{{padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}}
+.wcard-h .wn{{font-size:16px;font-weight:700;color:#fff;flex:1;min-width:120px}}
+.wcard-h .wmeta{{font-size:12px;color:rgba(255,255,255,.6);display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+.wcard-b{{display:none;padding:0 16px 16px}}
+.wcard-b.a{{display:block}}
+.wcard-b .sub{{font-size:13px;font-weight:700;color:rgba(255,255,255,.8);margin:10px 0 6px;border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:4px}}
+.tbl{{width:100%;border-collapse:collapse;font-size:13px}}
+.tbl th{{background:rgba(102,126,234,.2);color:#fff;padding:8px 6px;text-align:left;font-weight:700;border-bottom:2px solid rgba(255,255,255,.2)}}
+.tbl td{{padding:6px;border-bottom:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.9)}}
+.tbl tr:hover td{{background:rgba(255,255,255,.05)}}
+.ld{{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;color:#fff}}
+.sp{{width:40px;height:40px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.back-btn{{padding:6px 14px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;margin-bottom:14px}}
+.back-btn:hover{{background:rgba(255,255,255,.3)}}
+</style></head><body>
+<div class="w"><div class="s">
+<h2 id="st"></h2><p><b>Oracle Memory System v2.1</b></p>
+<div class="st" id="lp"></div>
+<div class="nb">
+<button id="bk" onclick="location='/knowledge'"></button>
+<button id="bm" onclick="location='/memory'"></button>
+<button id="ba" onclick="location='/agents'"></button>
+<button id="bt" onclick="location='/tasks'"></button>
+<button id="bw" class="a" onclick="location='/workspaces'"></button>
+</div>
+<div class="st" id="ll"></div>
+<div class="lb"><button id="bz" onclick="setL('zh')">中文</button><button id="be" onclick="setL('en')">EN</button></div>
+<div class="sb" id="sbox"></div><p id="tmr"></p>
+<button class="lo" id="blo" onclick="location='/api/logout'"></button>
+</div><div class="m">
+<div id="wlist">
+<div id="wld" class="ld"><div class="sp"></div><p id="wldTxt"></p></div>
+</div>
+<div id="wdet" style="display:none">
+<button class="back-btn" id="backBtn" onclick="showList()"></button>
+<div id="wdetInner"></div>
+</div>
+</div></div>
+<script>
+const i18n={{zh:{{t:'工作空间',k:'知识图谱',m:'记忆内容',a:'Agent',tk:'任务',ws:'工作空间',p:'页面',l:'语言',lo:'退出登录',ld:'加载中...',st:'统计',wName:'名称',wType:'类型',wStatus:'状态',wIso:'隔离模式',wOwner:'所有者',wAgent:'当前Agent',wSummary:'摘要',wCreated:'创建时间',wUpdated:'更新时间',ctxChain:'上下文链',linkedTasks:'关联任务',noData:'暂无数据',back:'返回列表',ctxId:'上下文ID',ctxAgent:'Agent',ctxSession:'会话',ctxType:'类型',ctxTime:'时间',taskId:'计划ID',taskGoal:'目标',taskStatus:'状态',taskPri:'优先级',noCtx:'暂无上下文',noTasks:'暂无关联任务'}},en:{{t:'Workspaces',k:'Knowledge',m:'Memory',a:'Agents',tk:'Tasks',ws:'Workspaces',p:'Pages',l:'Language',lo:'Logout',ld:'Loading...',st:'Stats',wName:'Name',wType:'Type',wStatus:'Status',wIso:'Isolation',wOwner:'Owner',wAgent:'Current Agent',wSummary:'Summary',wCreated:'Created',wUpdated:'Updated',ctxChain:'Context Chain',linkedTasks:'Linked Tasks',noData:'No data',back:'Back to list',ctxId:'Context ID',ctxAgent:'Agent',ctxSession:'Session',ctxType:'Type',ctxTime:'Time',taskId:'Plan ID',taskGoal:'Goal',taskStatus:'Status',taskPri:'Priority',noCtx:'No context',noTasks:'No linked tasks'}}}};
+function gL(){{return localStorage.getItem('lang')||'zh'}}
+function setL(l){{localStorage.setItem('lang',l);aL(l)}}
+function aL(l){{const t=i18n[l];document.getElementById('st').textContent=t.t;document.getElementById('bk').textContent=t.k;document.getElementById('bm').textContent=t.m;document.getElementById('ba').textContent=t.a;document.getElementById('bt').textContent=t.tk;document.getElementById('bw').textContent=t.ws;document.getElementById('lp').textContent=t.p;document.getElementById('ll').textContent=t.l;document.getElementById('blo').textContent=t.lo;document.getElementById('wldTxt').textContent=t.ld;document.getElementById('backBtn').textContent=t.back;document.getElementById('sbox').dataset.label=t.st;document.getElementById('bz').className='lb button'+(l==='zh'?' a':'');document.getElementById('be').className='lb button'+(l==='en'?' a':'');document.getElementById('bk').className='';document.getElementById('bm').className='';document.getElementById('ba').className='';document.getElementById('bt').className='';document.getElementById('bw').className='a'}}
+aL(gL());
+let timer={{s:parseInt('{SESS_TTL}')}};
+function startTimer(){{setInterval(()=>{{timer.s--;if(timer.s<=0){{alert(gL()==='zh'?'已超时登出':'Session expired');location='/api/logout'}}const m=Math.floor(timer.s/60),ss=timer.s%60;document.getElementById('tmr').textContent=(gL()==='zh'?'登出倒计时: ':'Auto-logout: ')+m+'m '+ss+'s'}},1000)}}
+['mousedown','keydown','scroll','click','touchstart'].forEach(e=>document.addEventListener(e,()=>{{timer.s=parseInt('{SESS_TTL}')}}));
+startTimer();
+fetch('/api/stats', {{credentials:'same-origin'}}).then(r=>r.json()).then(s=>{{const box=document.getElementById('sbox');let h='<b>'+(box.dataset.label||'Stats')+'</b>';for(const[k,v]of Object.entries(s))h+='<br>'+k+': '+v;box.innerHTML=h}}).catch(()=>{{}});
+function wsBadge(v){{const m={{'ACTIVE':'bg-green','INACTIVE':'bg-gray','ARCHIVED':'bg-orange','SUSPENDED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function isoBadge(v){{const m={{'STRICT':'bg-red','MODERATE':'bg-orange','OPEN':'bg-teal'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+function psBadge(v){{const m={{'PENDING':'bg-gray','RUNNING':'bg-blue','SUCCESS':'bg-green','FAILED':'bg-red','CANCELLED':'bg-orange','BLOCKED':'bg-yellow'}};return '<span class="badge '+(m[v]||'bg-gray')+'">'+v+'</span>'}}
+let wsData=[];
+fetch('/api/workspaces', {{credentials:'same-origin'}}).then(r=>r.json()).then(d=>{{
+wsData=d.workspaces||[];
+const t=i18n[gL()];
+const wld=document.getElementById('wld'),wlist=document.getElementById('wlist');
+if(!wsData.length){{wld.innerHTML='<p>'+t.noData+'</p>';wld.querySelector('.sp').style.display='none';return}}
+wld.style.display='none';
+let h='';wsData.forEach(ws=>{{
+h+='<div class="wcard" onclick="showDetail(\\''+ws.workspace_id+'\\')"><div class="wcard-h"><span class="wn">'+(ws.workspace_name||ws.workspace_id)+'</span><div class="wmeta">'+wsBadge(ws.status||'')+(ws.workspace_type?'<span>'+ws.workspace_type+'</span>':'')+(ws.isolation_mode?isoBadge(ws.isolation_mode):'')+(ws.owner_user_id?'<span>'+ws.owner_user_id+'</span>':'')+(ws.current_agent_id?'<span>Agent: '+ws.current_agent_id+'</span>':'')+'</div></div></div>'
+}});
+wlist.innerHTML+=h
+}}).catch(e=>{{document.getElementById('wld').innerHTML='<p style="color:#fff">Load failed</p>'}});
+function showList(){{document.getElementById('wlist').style.display='block';document.getElementById('wdet').style.display='none'}}
+function showDetail(wid){{document.getElementById('wlist').style.display='none';document.getElementById('wdet').style.display='block';
+const inner=document.getElementById('wdetInner');const t=i18n[gL()];
+inner.innerHTML='<div class="ld"><div class="sp"></div><p>'+t.ld+'</p></div>';
+Promise.all([fetch('/api/workspaces/'+wid).then(r=>r.json()),fetch('/api/workspaces/'+wid+'/context').then(r=>r.json()),fetch('/api/workspaces/'+wid+'/tasks').then(r=>r.json())]).then(([ws,ctx,tasks])=>{{
+let h='<div class="wcard" style="cursor:default"><div class="wcard-h" style="flex-direction:column;align-items:flex-start"><div style="font-size:20px;font-weight:700;color:#fff">'+(ws.workspace_name||ws.workspace_id)+'</div><div class="wmeta" style="margin-top:8px">'+wsBadge(ws.status||'')+(ws.workspace_type?'<span>'+t.wType+': '+ws.workspace_type+'</span>':'')+(ws.isolation_mode?isoBadge(ws.isolation_mode):'')+'</div>'+(ws.summary?'<div style="margin-top:8px;color:rgba(255,255,255,.7);font-size:13px">'+ws.summary+'</div>':'')+'<div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.5)">'+(ws.owner_user_id?t.wOwner+': '+ws.owner_user_id:'')+(ws.current_agent_id?' | '+t.wAgent+': '+ws.current_agent_id:'')+'</div><div style="margin-top:4px;font-size:12px;color:rgba(255,255,255,.5)">'+t.wCreated+': '+(ws.created_at||'-')+' | '+t.wUpdated+': '+(ws.updated_at||'-')+'</div></div></div>';
+h+='<div class="sub">'+t.ctxChain+'</div>';
+if(ctx&&ctx.length){{h+='<table class="tbl"><thead><tr><th>'+t.ctxId+'</th><th>'+t.ctxAgent+'</th><th>'+t.ctxSession+'</th><th>'+t.ctxType+'</th><th>'+t.ctxTime+'</th></tr></thead><tbody>';ctx.forEach(c=>{{h+='<tr><td title="'+c.context_id+'">'+(c.context_id||'').substring(0,12)+'...</td><td>'+(c.agent_id||'-')+'</td><td title="'+(c.session_id||'')+'">'+(c.session_id||'-').substring(0,12)+'...</td><td>'+(c.context_type||'-')+'</td><td>'+(c.created_at||'-')+'</td></tr>'}});h+='</tbody></table>'}}else{{h+='<p style="color:rgba(255,255,255,.5);font-size:13px">'+t.noCtx+'</p>'}}
+h+='<div class="sub">'+t.linkedTasks+'</div>';
+if(tasks&&tasks.length){{h+='<table class="tbl"><thead><tr><th>'+t.taskId+'</th><th>'+t.taskGoal+'</th><th>'+t.taskStatus+'</th><th>'+t.taskPri+'</th></tr></thead><tbody>';tasks.forEach(tk=>{{h+='<tr><td>'+tk.plan_id+'</td><td>'+(tk.goal||'-')+'</td><td>'+psBadge(tk.status||'')+'</td><td>'+(tk.priority||'-')+'</td></tr>'}});h+='</tbody></table>'}}else{{h+='<p style="color:rgba(255,255,255,.5);font-size:13px">'+t.noTasks+'</p>'}}
+inner.innerHTML=h
+}}).catch(e=>{{inner.innerHTML='<p style="color:#fff">Load failed</p>'}});
+}}
 </script></body></html>'''
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -683,6 +860,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             st = qs.get('status', ['ALL'])[0]
             kw = qs.get('keyword', [None])[0]
             self._send_json(load_tasks_data(st if st != 'ALL' else None, kw))
+        elif path == '/workspaces':
+            self._send_html(build_workspaces_page())
+        elif path == '/api/workspaces':
+            self._send_json(load_workspaces_data())
+        elif path.startswith('/api/workspaces/') and path.endswith('/context'):
+            wid = path.split('/')[3]
+            self._send_json(load_workspace_context(wid))
+        elif path.startswith('/api/workspaces/') and path.endswith('/tasks'):
+            wid = path.split('/')[3]
+            self._send_json(load_workspace_tasks(wid))
+        elif path.startswith('/api/workspaces/'):
+            wid = path.split('/')[3]
+            d = load_workspace_detail(wid)
+            if d:
+                self._send_json(d)
+            else:
+                self._send_json({'error': 'not found'}, 404)
         elif path == '/api/stats':
             self._send_json(load_db_stats())
         elif path == '/api/graph/stats':

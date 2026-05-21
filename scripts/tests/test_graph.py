@@ -29,7 +29,7 @@ def test_graph_stats():
 
 
 def test_graph_search():
-    results = graph_search(entity_type="HARNESS_TEMPLATE", limit=5)
+    results = graph_search(entity_type="MEMORY", limit=5)
     assert len(results) >= 1
     print(f"PASS: test_graph_search (found={len(results)})")
 

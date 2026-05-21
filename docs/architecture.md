@@ -1,8 +1,8 @@
-# Architecture - Oracle Memory System v2.1.0
+# Architecture - Oracle Memory System v2.2.0
 
 ## Unified Entity Model
 
-v2.1 extends the unified model with composite primary keys, partitioning, and denormalized columns.
+v2.2 extends the unified model with workspace management, context continuity, and JRD updatable views.
 
 ### ENTITIES
 
@@ -185,3 +185,101 @@ All IDs are `VARCHAR2(64)`, generated via `RAWTOHEX(SYS_GUID())` producing 32-ch
 8. **CLOB** for CONTENT fields (large text storage)
 9. **VECTOR** for embeddings (compatible with BGE-M3 model)
 10. **ON DELETE CASCADE** not used — explicit child-table deletes in Python APIs for safety with partitioned tables
+
+## Workspace & Context Continuity
+
+v2.2 adds workspace-based session management with context chains for agent handoff and recovery.
+
+### WORKSPACES Table
+
+Top-level container for grouping entities, sessions, and tasks:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| WORKSPACE_ID | VARCHAR2(64) | PK, `'WS_' \|\| RAWTOHEX(SYS_GUID())` |
+| OWNER_USER_ID | VARCHAR2(64) | User who owns the workspace |
+| WORKSPACE_NAME | VARCHAR2(200) | Human-readable name |
+| WORKSPACE_TYPE | VARCHAR2(30) | CONVERSATION, PROJECT, ANALYSIS |
+| ISOLATION_MODE | VARCHAR2(20) | SHARED (default) or ISOLATED |
+| CURRENT_AGENT_ID | VARCHAR2(64) | Agent currently controlling the workspace |
+| CURRENT_SESSION_ID | VARCHAR2(64) | Active session in the workspace |
+| SUMMARY | VARCHAR2(4000) | Current workspace summary |
+| METADATA | JSON | Arbitrary workspace metadata |
+| STATUS | VARCHAR2(20) | ACTIVE, PAUSED, ARCHIVED |
+| CREATED_AT / UPDATED_AT | TIMESTAMP | Lifecycle timestamps |
+
+Lifecycle: `ACTIVE → PAUSED → ARCHIVED`. In ISOLATED mode, entities created within the workspace are scoped by `ENTITIES.WORKSPACE_ID`.
+
+### WORKSPACE_CONTEXT Table
+
+Version chain of context entries enabling continuity across sessions and agent handoffs:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| CONTEXT_ID | VARCHAR2(64) | PK, `'CTX_' \|\| RAWTOHEX(SYS_GUID())` |
+| WORKSPACE_ID | VARCHAR2(64) | FK to WORKSPACES |
+| AGENT_ID | VARCHAR2(64) | Agent that created this context |
+| SESSION_ID | VARCHAR2(64) | Session during which context was created |
+| CONTEXT_TYPE | VARCHAR2(30) | SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY |
+| CONTEXT_DATA | JSON | Structured context payload |
+| PARENT_CONTEXT_ID | VARCHAR2(64) | FK to parent context (version chain) |
+| CREATED_AT | TIMESTAMP | Creation timestamp |
+
+The `PARENT_CONTEXT_ID` column forms a linked list (version chain) — each context entry points to its predecessor, enabling full history traversal. CONTEXT_TYPE determines the structure of CONTEXT_DATA:
+
+- **SNAPSHOT**: Full workspace state at a point in time
+- **CHECKPOINT**: Intermediate save during a session
+- **HANDOFF**: Context transferred between agents during handoff
+- **SUMMARY**: Condensed summary of session activity
+- **RECOVERY**: Context used to restore a workspace after interruption
+
+### WORKSPACE_TASKS Table
+
+Links task plans to workspaces:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| WORKSPACE_ID | VARCHAR2(64) | FK to WORKSPACES |
+| PLAN_ID | VARCHAR2(64) | FK to TASK_PLANS |
+| ASSIGNED_AT | TIMESTAMP | When the task was linked |
+
+Composite PK: `(WORKSPACE_ID, PLAN_ID)`.
+
+### AGENT_SESSION New Columns
+
+v2.2 adds three columns to AGENT_SESSION for workspace integration and session chaining:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| OWNER_USER_ID | VARCHAR2(64) | User who owns/started the session |
+| WORKSPACE_ID | VARCHAR2(64) | Workspace the session belongs to |
+| PREDECESSOR_SESSION_ID | VARCHAR2(64) | Previous session in the handoff chain |
+
+`PREDECESSOR_SESSION_ID` creates a linked list of sessions — when an agent hands off to another agent, the new session points back to the predecessor. `get_session_chain()` traverses this chain backwards.
+
+### ENTITIES.WORKSPACE_ID
+
+New column `WORKSPACE_ID VARCHAR2(64)` on ENTITIES, nullable FK to WORKSPACES. When a workspace has `ISOLATION_MODE = 'ISOLATED'`, entities created within it are tagged with WORKSPACE_ID for scope isolation. In SHARED mode, WORKSPACE_ID is optional.
+
+### JRD Views
+
+v2.2 updates and adds JSON Relational Duality views:
+
+| View | Mode | Description |
+|------|------|-------------|
+| WORKSPACE_DV | Updatable | Full workspace with nested context chain and tasks |
+| CONTEXT_DV | Read-only | Context entries with workspace and agent details |
+| MEMORY_DV | Updatable | Now updatable (was read/write in v2.1; confirmed updatable with JSON_TRANSFORM) |
+| KNOWLEDGE_DV | Updatable | Now updatable (was read/write in v2.1; confirmed updatable with JSON_TRANSFORM) |
+
+WORKSPACE_DV nests WORKSPACE_CONTEXT and WORKSPACE_TASKS as sub-documents, enabling atomic workspace updates via a single JSON document. CONTEXT_DV is read-only to prevent direct context manipulation — context changes go through `save_context()` to maintain the version chain integrity.
+
+### JSON Strategy
+
+v2.2 uses a layered JSON approach:
+
+1. **Native JSON columns** for storage — `WORKSPACES.METADATA`, `WORKSPACE_CONTEXT.CONTEXT_DATA`, `AGENT_SESSION.CONTEXT` use Oracle's native JSON type for schemaless, queryable data
+2. **JRD (JSON Relational Duality)** for document API — WORKSPACE_DV, CONTEXT_DV, MEMORY_DV, KNOWLEDGE_DV provide REST-friendly JSON document access over the relational schema
+3. **JSON_TRANSFORM for partial updates** — Updatable JRD views use `JSON_TRANSFORM` under the hood for atomic partial JSON updates without full document replacement
+
+This strategy balances: (a) relational integrity for FK constraints and partitioning, (b) document convenience for API consumers, and (c) partial update efficiency for large JSON payloads.

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Agent API
+"""Oracle Memory System v2.2.0 - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -133,18 +133,27 @@ def create_session(
     agent_id: str,
     wm_entity_id: Optional[str] = None,
     context: Optional[Any] = None,
+    owner_user_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    predecessor_session_id: Optional[str] = None,
 ) -> str:
     """Create a new agent session and return the session ID."""
     session_id_sql = "'SES_' || RAWTOHEX(SYS_GUID())"
     ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
     sql = f"""
-        INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE, START_TIME, CONTEXT)
-        VALUES ({session_id_sql}, :aid, :wmid, 'Y', SYSTIMESTAMP, :ctx)
+        INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WM_ENTITY_ID, 
+            OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID,
+            IS_ACTIVE, START_TIME, CONTEXT)
+        VALUES ({session_id_sql}, :aid, :wmid, :owner_uid, :ws_id, :pred_sid,
+            'Y', SYSTIMESTAMP, :ctx)
         RETURNING SESSION_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
         "aid": agent_id,
         "wmid": wm_entity_id,
+        "owner_uid": owner_user_id,
+        "ws_id": workspace_id,
+        "pred_sid": predecessor_session_id,
         "ctx": ctx_val,
     }, id_column="SESSION_ID")
 
@@ -156,14 +165,64 @@ def end_session(session_id: str) -> bool:
         SET IS_ACTIVE = 'N', END_TIME = SYSTIMESTAMP
         WHERE SESSION_ID = :sid AND IS_ACTIVE = 'Y'
     """
-    return execute(sql, {"sid": session_id}) > 0
+    result = execute(sql, {"sid": session_id}) > 0
+    # TODO: auto-save SUMMARY context to workspace if session has WORKSPACE_ID
+    # This will be implemented in the Python API layer to avoid circular imports
+    # with workspace_api module.
+    return result
+
+
+def checkpoint_session(session_id: str, context_data: Any) -> bool:
+    """Save a checkpoint context for the session's workspace."""
+    sql = """
+        SELECT WORKSPACE_ID, AGENT_ID
+        FROM AGENT_SESSION
+        WHERE SESSION_ID = :sid
+    """
+    row = execute_query_one(sql, {"sid": session_id})
+    if not row or not row.get("workspace_id"):
+        return False
+    from .workspace_api import save_context
+    save_context(
+        workspace_id=row["workspace_id"],
+        agent_id=row["agent_id"],
+        context_type="CHECKPOINT",
+        context_data=context_data,
+        session_id=session_id,
+    )
+    return True
+
+
+def get_session_chain(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Trace the session chain backwards via PREDECESSOR_SESSION_ID."""
+    chain = []
+    current_id = session_id
+    visited = set()
+    while current_id and current_id not in visited and len(chain) < limit:
+        visited.add(current_id)
+        sql = """
+            SELECT SESSION_ID, AGENT_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID,
+                   IS_ACTIVE,
+                   TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
+                   TO_CHAR(END_TIME, 'YYYY-MM-DD HH24:MI:SS') AS END_TIME,
+                   CONTEXT
+            FROM AGENT_SESSION
+            WHERE SESSION_ID = :sid
+        """
+        row = execute_query_one(sql, {"sid": current_id})
+        if not row:
+            break
+        chain.append(_row_to_dict(row))
+        current_id = row.get("predecessor_session_id")
+    return chain
 
 
 def get_active_sessions(agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return all active sessions, optionally filtered by agent."""
     if agent_id:
         sql = """
-            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE,
+            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, WORKSPACE_ID, OWNER_USER_ID,
+                   IS_ACTIVE,
                    TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
                    CONTEXT
             FROM AGENT_SESSION
@@ -173,7 +232,8 @@ def get_active_sessions(agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         rows = execute_query(sql, {"aid": agent_id})
     else:
         sql = """
-            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, IS_ACTIVE,
+            SELECT SESSION_ID, AGENT_ID, WM_ENTITY_ID, WORKSPACE_ID, OWNER_USER_ID,
+                   IS_ACTIVE,
                    TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI:SS') AS START_TIME,
                    CONTEXT
             FROM AGENT_SESSION

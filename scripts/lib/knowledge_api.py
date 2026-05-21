@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Knowledge API
+"""Oracle Memory System v2.2.0 - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.
@@ -24,12 +24,15 @@ def create_knowledge(
     summary: Optional[str] = None,
     owned_by_agent: Optional[str] = None,
     visibility: str = "PRIVATE",
+    workspace_id: Optional[str] = None,
 ) -> str:
     entity_sql = """
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
-                              IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY)
+                              IMPORTANCE, STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
+                              WORKSPACE_ID)
         VALUES (RAWTOHEX(SYS_GUID()), 'KNOWLEDGE', :title, :content, :summary, :category,
-                :importance, 'ACTIVE', :owned_by_agent, NULL, :visibility)
+                :importance, 'ACTIVE', :owned_by_agent, NULL, :visibility,
+                :wsid)
         RETURNING ENTITY_ID INTO :ret_id
     """
     params = {
@@ -40,6 +43,7 @@ def create_knowledge(
         "importance": importance,
         "owned_by_agent": owned_by_agent,
         "visibility": visibility,
+        "wsid": workspace_id,
     }
     entity_id = execute_insert_returning_id(entity_sql, params)
 
@@ -126,6 +130,8 @@ def search_knowledge(
     topic: Optional[str] = None,
     keyword: Optional[str] = None,
     difficulty: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    isolation_mode: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
@@ -144,6 +150,14 @@ def search_knowledge(
     if keyword:
         conditions.append("(UPPER(e.TITLE) LIKE UPPER(:kw) OR UPPER(e.CONTENT) LIKE UPPER(:kw))")
         params["kw"] = f"%{keyword}%"
+    if isolation_mode == 'SHARED':
+        conditions.append("e.WORKSPACE_ID IS NULL")
+    elif isolation_mode == 'ISOLATED' and workspace_id:
+        conditions.append("e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
+    elif workspace_id:
+        conditions.append("e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
 
     where = " AND ".join(conditions)
     sql = f"""

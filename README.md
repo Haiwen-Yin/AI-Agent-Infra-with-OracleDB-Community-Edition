@@ -1,16 +1,31 @@
-# Oracle AI Database Memory System v2.1.0
+# Oracle AI Database Memory System v2.2.0
 
-[![Version](https://img.shields.io/badge/version-v2.1.0-blue.svg)](RELEASE_NOTES_v2.1.0.md)
+[![Version](https://img.shields.io/badge/version-v2.2.0-blue.svg)](RELEASE_NOTES_v2.2.0.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![SQLcl](https://img.shields.io/badge/SQLcl-26.1+-orange.svg)](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Partitioned AI Agent Memory System with Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, and Web Visualization — built on Oracle 26ai.**
+**Partitioned AI Agent Memory System with Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, Workspace & Context Continuity, and Web Visualization — built on Oracle 26ai.**
 
-> **v2.1.0 adds table partitioning, composite PKs, reference partitioning, and a full Property Graph API.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v2.2.0 adds workspace management, context continuity, agent handoff, JRD updatable views, and workspace API.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-**[中文说明 / Chinese Introduction](docs/introduction_v2.1.0_zh.md)**
+**[中文说明 / Chinese Introduction](docs/introduction_v2.2.0_zh.md)**
+
+---
+
+## What's New in v2.2.0
+
+### Workspace & Context Continuity
+
+v2.2 introduces workspace-based session management with context chains for agent handoff and recovery:
+
+- **WORKSPACES table** — Workspace lifecycle (ACTIVE → PAUSED → ARCHIVED), isolation modes (SHARED/ISOLATED), ownership tracking
+- **WORKSPACE_CONTEXT table** — Version chain of context entries (SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY) with parent linking
+- **WORKSPACE_TASKS table** — Links task plans to workspaces
+- **Agent Handoff** — `PREDECESSOR_SESSION_ID` chains sessions; `OWNER_USER_ID` and `WORKSPACE_ID` on AGENT_SESSION
+- **JRD Updatable Views** — `WORKSPACE_DV` (updatable), `CONTEXT_DV` (read-only), `MEMORY_DV`/`KNOWLEDGE_DV` now updatable
+- **workspace_api.py** — 11 Python functions for workspace CRUD, context chains, handoff, recovery, and task linking
 
 ---
 
@@ -85,6 +100,7 @@ scripts/
     task_plan_api.py      # Task plans, steps, snapshots, dependencies
     security.py           # Data masking, encryption, password hashing
     harness_api.py        # Harness template CRUD, instantiate, derive, validate
+    workspace_api.py      # Workspace lifecycle, context chains, handoff, recovery
   tests/
     test_connection.py    # Connection pool tests
     test_memory.py        # Memory API tests
@@ -92,6 +108,7 @@ scripts/
     test_agent.py         # Agent API tests
     test_security.py      # Security module tests
     test_harness.py       # Harness template tests
+    test_workspace.py     # Workspace API tests
     test_all.py           # Master test runner
 docs/
   architecture.md         # Design decisions and entity model
@@ -102,6 +119,7 @@ docs/
   visualization.md        # Web visualization server guide
   minimum-privileges.md   # Database user minimum privilege analysis
   harness.md              # Harness template system guide
+  workspace.md            # Workspace & context continuity guide
 config.json               # Database, server, embedding, security config
 viz_server_local_js.py    # Web visualization server
 start_web_server.sh       # Server control script (start/stop/restart/status/config/log)
@@ -181,19 +199,23 @@ KNOWLEDGE_META      Extended metadata for KNOWLEDGE entities
 HARNESS_META        Versioning, status, variables for HARNESS_TEMPLATE entities
 ENTITY_EMBEDDINGS   VECTOR(1024, FLOAT32) for semantic search
 ORACLE_MEMORY_GRAPH Single property graph (replaces 2 separate graphs)
+
+WORKSPACES          Workspace lifecycle, isolation, ownership
+WORKSPACE_CONTEXT   Version chain for context continuity (SNAPSHOT/CHECKPOINT/HANDOFF/SUMMARY/RECOVERY)
+WORKSPACE_TASKS     Task-to-workspace linking
 ```
 
-### Key Tables (17)
+### Key Tables (20)
 
 | Table | Purpose |
 |-------|---------|
-| ENTITIES | Unified store with ENTITY_TYPE discriminator (incl. HARNESS_TEMPLATE) |
+| ENTITIES | Unified store with ENTITY_TYPE discriminator (incl. HARNESS_TEMPLATE), WORKSPACE_ID |
 | ENTITY_EDGES | Directed edges with strength, confidence, and DERIVES_FROM inheritance |
 | KNOWLEDGE_META | Source, validation, versioning for knowledge |
 | HARNESS_META | Template versioning, status, variables, changelog |
 | ENTITY_EMBEDDINGS | Vector embeddings for semantic search |
 | AGENT_REGISTRY | Agent identity, capabilities, permissions |
-| AGENT_SESSION | Session tracking with context snapshots |
+| AGENT_SESSION | Session tracking with context snapshots, OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID |
 | ENTITY_ACCESS_LOG | Audit trail for all entity access |
 | AGENT_PERMISSION_LOG | Permission change audit |
 | AGENT_COLLABORATION | Cross-agent sharing requests |
@@ -204,6 +226,9 @@ ORACLE_MEMORY_GRAPH Single property graph (replaces 2 separate graphs)
 | TASK_DEPENDENCIES | Inter-plan dependency graph |
 | TAGS / ENTITY_TAGS | Normalized tag system |
 | SYSTEM_CONFIG / SYSTEM_USERS | System configuration and accounts |
+| WORKSPACES | Workspace lifecycle, isolation modes, ownership |
+| WORKSPACE_CONTEXT | Version chain for context continuity |
+| WORKSPACE_TASKS | Task-to-workspace linking |
 
 ---
 
@@ -214,6 +239,7 @@ from scripts.lib.memory_api import create_memory, get_memory, search_memories
 from scripts.lib.knowledge_api import create_concept, create_relationship
 from scripts.lib.agent_api import register_agent, create_session
 from scripts.lib.harness_api import create_template, instantiate_template, derive_template
+from scripts.lib.workspace_api import create_workspace, create_handoff_session, recover_workspace
 
 # Memory
 mid = create_memory("Meeting Notes", "Discussed v2.0", category="meeting")
@@ -233,6 +259,11 @@ tpl_id = create_template("Analyst", prompt_templates={"system": "You are a {role
                          tool_sets=["knowledge_tools", "memory_tools"],
                          variables={"role": "Analyst"})
 config = instantiate_template(tpl_id, variables={"role": "Data Scientist"})
+
+# Workspace
+ws_id = create_workspace(name="Project Alpha", workspace_type="CONVERSATION")
+new_sid = create_handoff_session(ws_id, "agent-2", handoff_data={"status": "in progress"})
+state = recover_workspace(ws_id)
 ```
 
 Full API: [docs/api-reference.md](docs/api-reference.md)
@@ -270,15 +301,16 @@ Built-in web server with interactive graph visualization and dashboards:
 | [docs/security.md](docs/security.md) | Security features and configuration |
 | [docs/visualization.md](docs/visualization.md) | Web visualization server guide |
 | [docs/harness.md](docs/harness.md) | Harness template system guide |
+| [docs/workspace.md](docs/workspace.md) | Workspace & context continuity guide |
 | [docs/minimum-privileges.md](docs/minimum-privileges.md) | Minimum database user privileges |
-| [docs/introduction_v2.1.0_zh.md](docs/introduction_v2.1.0_zh.md) | v2.1.0 中文完整介绍 |
+| [docs/introduction_v2.2.0_zh.md](docs/introduction_v2.2.0_zh.md) | v2.2.0 中文完整介绍 |
 
 ---
 
 ## Test Results
 
 ```
-Oracle Memory System v2.1.0 - Full Test Suite
+Oracle Memory System v2.2.0 - Full Test Suite
 ============================================================
   Connection:  6/6 PASS
   Memory:      8/8 PASS
@@ -287,7 +319,8 @@ Oracle Memory System v2.1.0 - Full Test Suite
   Graph:       8/8 PASS
   Harness:     6/6 PASS
   Security:    5/5 PASS
-Overall: ALL PASSED
+  Workspace:  12/12 PASS
+Overall: 61/61 ALL PASSED
 ```
 
 ---
@@ -296,6 +329,7 @@ Overall: ALL PASSED
 
 | Version | Date | Description |
 |---------|------|-------------|
+| **v2.2.0** | 2026-05-20 | Workspace & context continuity, JRD updatable views, workspace API, agent handoff |
 | **v2.1.0** | 2026-05-19 | Table partitioning, composite PKs, reference partitioning, Property Graph API |
 | v2.0.0 | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |
 | v1.1.0 | 2026-05-12 | Web visualization, session security, bilingual UI |
