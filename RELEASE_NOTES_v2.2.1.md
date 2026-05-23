@@ -124,6 +124,5 @@ Overall: ALL PASSED (61/61)
 
 ## Credits
 
-- UI design inspired by [memory-pg18-by-yhw](https://github.com/anomalyco/memory-pg18-by-yhw) v2.2.0 template-based visualization
 - Vis.js Network: [vis-network.js](https://github.com/visjs/vis-network)
 - Bootstrap 5.3.3: [getbootstrap.com](https://getbootstrap.com/)
