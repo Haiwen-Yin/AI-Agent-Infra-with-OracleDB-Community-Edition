@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasks - Oracle Memory System v2.2.0</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="/static/vis-network.min.js">
+</script>
+<style>
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);flex-wrap:wrap}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+.filter-select{background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:8px;padding:7px 12px;font-size:.85rem;cursor:pointer}
+.filter-select:focus{outline:none;border-color:var(--accent)}
+.filter-select option{background:var(--bg-secondary);color:var(--text-primary)}
+.search-input{background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:8px;padding:7px 14px;font-size:.88rem;width:220px}
+.search-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(233,69,96,.2)}
+.content-area{flex:1;overflow-y:auto;padding:20px;position:relative}
+.accordion-item{background:var(--bg-secondary);border:1px solid var(--border-color);margin-bottom:8px;border-radius:8px!important;overflow:hidden}
+.accordion-button{background:var(--bg-secondary);color:var(--text-primary);font-size:.9rem;padding:14px 18px;box-shadow:none!important;border:none}
+.accordion-button:not(.collapsed){background:rgba(233,69,96,.08);color:var(--accent)}
+.accordion-button::after{filter:invert(1) brightness(0.7)}
+.accordion-button:not(.collapsed)::after{filter:invert(0.6) sepia(1) saturate(5) hue-rotate(310deg)}
+.accordion-body{background:var(--bg-primary);padding:16px 18px}
+.plan-header{display:flex;align-items:center;gap:12px;width:100%;flex-wrap:wrap}
+.plan-header .plan-goal{flex:1;font-weight:600;min-width:150px}
+.plan-header .plan-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:.82rem;color:var(--text-secondary)}
+.plan-header .plan-meta span{white-space:nowrap}
+.badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
+.badge-pending{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-running{background:rgba(52,152,219,.15);color:#3498db}
+.badge-blocked{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-success{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-failed{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-cancelled{background:rgba(160,160,176,.15);color:#a0a0b0}
+.data-table{width:100%;border-collapse:collapse;font-size:.85rem}
+.data-table thead th{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap}
+.data-table tbody td{padding:8px 10px;border-bottom:1px solid rgba(42,42,74,.3);vertical-align:middle;color:#fff}
+.data-table tbody tr:hover{background:rgba(233,69,96,.04)}
+.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;color:var(--text-secondary);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
+.steps-label{color:var(--text-secondary);font-size:.8rem;margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
+.empty-state .icon{font-size:3rem;margin-bottom:12px;opacity:.5}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>Oracle Memory</h5>
+    <small>v2.2.1</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon">&#129504;</span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon">&#129302;</span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks" class="active"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div>
+
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>任务计划</span><span data-en>Task Plans</span></h4>
+    <select class="filter-select" id="statusFilter" onchange="applyFilters()">
+      <option value="">ALL</option>
+      <option value="PENDING">PENDING</option>
+      <option value="RUNNING">RUNNING</option>
+      <option value="BLOCKED">BLOCKED</option>
+      <option value="SUCCESS">SUCCESS</option>
+      <option value="FAILED">FAILED</option>
+      <option value="CANCELLED">CANCELLED</option>
+    </select>
+    <input type="text" class="search-input" id="goalSearch" oninput="applyFilters()" data-ph-zh="搜索目标..." data-ph-en="Search goal...">
+  </div>
+  <div class="content-area">
+    <div id="plansAccordion" class="accordion"></div>
+    <div id="emptyState" class="empty-state d-none">
+      <div class="icon">&#9989;</div>
+      <div><span data-zh>暂无任务计划</span><span data-en>No task plans found</span></div>
+    </div>
+    <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js">
+</script>
+<script>
+var allPlans=[];
+
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n);applyLangPlaceholders()}
+
+function toggleStepDetail(id){var el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'table-row':'none'}
+
+function applyLangPlaceholders(){var l=document.documentElement.getAttribute('data-lang')||'en';document.querySelectorAll('[data-ph-zh]').forEach(function(e){e.placeholder=l==='zh'?e.getAttribute('data-ph-zh'):e.getAttribute('data-ph-en')})}
+
+function escapeHtml(s){if(s==null)return '';var d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+
+function truncId(id){if(!id)return '-';var s=String(id);return s.length>12?'<span title="'+escapeHtml(s)+'" class="truncate-id">'+escapeHtml(s.substring(0,12))+'&hellip;</span>':escapeHtml(s)}
+
+function fmtTime(ts){if(!ts)return '-';try{return new Date(ts).toLocaleString()}catch(e){return escapeHtml(String(ts))}}
+
+function statusBadge(status){
+  var m={PENDING:'badge-pending',RUNNING:'badge-running',BLOCKED:'badge-blocked',SUCCESS:'badge-success',FAILED:'badge-failed',CANCELLED:'badge-cancelled'};
+  var cls=m[status]||'badge-cancelled';
+  return '<span class="badge-status '+cls+'">'+escapeHtml(status||'UNKNOWN')+'</span>';
+}
+
+function priorityLabel(p){
+  var colors={1:'#2ecc71',2:'#2ecc71',3:'#f1c40f',4:'#f1c40f',5:'#e67e22',6:'#e67e22',7:'#e74c3c',8:'#e74c3c',9:'#e74c3c',10:'#e74c3c'};
+  var c=colors[p]||'#a0a0b0';
+  return '<span style="color:'+c+';font-weight:600">'+escapeHtml(p!=null?p:'-')+'</span>';
+}
+
+function renderPlans(plans){
+  var container=document.getElementById('plansAccordion');
+  var empty=document.getElementById('emptyState');
+  if(!plans||!plans.length){container.innerHTML='';empty.classList.remove('d-none');return}
+  empty.classList.add('d-none');
+  var h='';
+  for(var i=0;i<plans.length;i++){
+    var p=plans[i];
+    var pid=escapeHtml(p.plan_id||('plan-'+i));
+    h+='<div class="accordion-item">';
+    h+='<h2 class="accordion-header" id="heading-'+pid+'">';
+    h+='<button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-'+pid+'" aria-expanded="false" aria-controls="collapse-'+pid+'">';
+    h+='<div class="plan-header">';
+    h+='<span class="plan-goal">'+escapeHtml(p.goal||'Untitled')+'</span>';
+    h+='<div class="plan-meta">';
+    h+='<span>'+truncId(p.plan_id)+'</span>';
+    h+=statusBadge(p.status);
+    h+='<span>Agent: '+truncId(p.agent_id)+'</span>';
+    h+='<span><span data-zh>优先级</span><span data-en>Priority</span>: '+priorityLabel(p.priority)+'</span>';
+    h+='<span>'+fmtTime(p.created_at)+'</span>';
+    h+='</div></div>';
+    h+='</button></h2>';
+    h+='<div id="collapse-'+pid+'" class="accordion-collapse collapse" aria-labelledby="heading-'+pid+'" data-bs-parent="#plansAccordion">';
+    h+='<div class="accordion-body">';
+    h+='<div class="steps-label"><span data-zh>执行步骤</span><span data-en>Execution Steps</span></div>';
+    if(p.steps&&p.steps.length){
+      h+='<table class="data-table"><thead><tr>';
+      h+='<th>#</th>';
+      h+='<th><span data-zh>描述</span><span data-en>Description</span></th>';
+      h+='<th><span data-zh>工具</span><span data-en>Tool</span></th>';
+      h+='<th><span data-zh>状态</span><span data-en>Status</span></th>';
+      h+='<th><span data-zh>开始时间</span><span data-en>Started At</span></th>';
+      h+='<th><span data-zh>完成时间</span><span data-en>Completed At</span></th>';
+      h+='</tr></thead><tbody>';
+      for(var j=0;j<p.steps.length;j++){
+        var s=p.steps[j];
+        var hasDetail=s.tool_input||s.tool_output;
+        h+='<tr'+(hasDetail?' style="cursor:pointer" onclick="toggleStepDetail(\'step-detail-'+pid+'-'+j+'\')"':'')+'>';
+        h+='<td>'+escapeHtml(s.step_order!=null?s.step_order:(j+1))+'</td>';
+        h+='<td>'+escapeHtml(s.description||'-')+'</td>';
+        h+='<td>'+(s.tool_name?'<span class="cap-tag">'+escapeHtml(s.tool_name)+'</span>':'-')+'</td>';
+        h+='<td>'+statusBadge(s.status)+'</td>';
+        h+='<td>'+fmtTime(s.started_at)+'</td>';
+        h+='<td>'+fmtTime(s.completed_at)+'</td>';
+        h+='</tr>';
+        if(hasDetail){
+          h+='<tr id="step-detail-'+pid+'-'+j+'" style="display:none"><td colspan="6" style="padding:0">';
+          h+='<div style="background:var(--bg-card);padding:12px 16px;border-left:3px solid var(--accent)">';
+          if(s.tool_input){h+='<div style="margin-bottom:8px"><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输入</span><span data-en>Tool Input</span></div><pre style="margin:0;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_input==='object'?JSON.stringify(s.tool_input,null,2):s.tool_input)+'</pre></div>'}
+          if(s.tool_output){h+='<div><div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px"><span data-zh>工具输出</span><span data-en>Tool Output</span></div><pre style="margin:0;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">'+escapeHtml(typeof s.tool_output==='object'?JSON.stringify(s.tool_output,null,2):s.tool_output)+'</pre></div>'}
+          h+='</div></td></tr>';
+        }
+      }
+      h+='</tbody></table>';
+    }else{
+      h+='<div style="color:var(--text-secondary);font-size:.85rem;padding:8px 0"><span data-zh>暂无步骤</span><span data-en>No steps</span></div>';
+    }
+    h+='<div style="margin-top:12px;padding:12px 16px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border-color)">';
+    h+='<div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><span data-zh>计划详情</span><span data-en>Plan Details</span></div>';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:.85rem">';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>计划ID</span><span data-en>Plan ID</span>: </span>'+escapeHtml(p.plan_id)+'</div>';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>状态</span><span data-en>Status</span>: </span>'+statusBadge(p.status)+'</div>';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>智能体</span><span data-en>Agent</span>: </span>'+truncId(p.agent_id)+'</div>';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>优先级</span><span data-en>Priority</span>: </span>'+priorityLabel(p.priority)+'</div>';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>创建时间</span><span data-en>Created</span>: </span>'+fmtTime(p.created_at)+'</div>';
+    h+='<div><span style="color:var(--text-secondary)"><span data-zh>更新时间</span><span data-en>Updated</span>: </span>'+fmtTime(p.updated_at)+'</div>';
+    if(p.context_summary){h+='<div style="grid-column:1/3"><span style="color:var(--text-secondary)"><span data-zh>上下文</span><span data-en>Context</span>: </span>'+escapeHtml(p.context_summary)+'</div>'}
+    h+='</div></div>';
+    h+='</div></div></div>';
+  }
+  container.innerHTML=h;
+}
+
+function applyFilters(){
+  var sf=document.getElementById('statusFilter').value;
+  var kw=document.getElementById('goalSearch').value.toLowerCase().trim();
+  var filtered=allPlans;
+  if(sf){filtered=filtered.filter(function(p){return p.status===sf})}
+  if(kw){filtered=filtered.filter(function(p){return (p.goal||'').toLowerCase().indexOf(kw)>=0})}
+  renderPlans(filtered);
+}
+
+async function loadData(){
+  try{
+    var res=await fetch('/api/tasks');
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    var data=await res.json();
+    allPlans=data.plans||[];
+    renderPlans(allPlans);
+    document.getElementById('loadingOverlay').style.display='none';
+  }catch(err){
+    document.getElementById('loadingOverlay').innerHTML='<div style="text-align:center;color:var(--accent)"><div style="font-size:2rem;margin-bottom:12px">&#9888;</div><div>'+escapeHtml(err.message)+'</div></div>';
+  }
+}
+
+applyLangPlaceholders();
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadData();
+
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - Oracle Memory System v2.2.0
+# Workspace & Context Continuity - Oracle Memory System v2.2.1
 
 ## Design Philosophy: JRD vs Native JSON
 

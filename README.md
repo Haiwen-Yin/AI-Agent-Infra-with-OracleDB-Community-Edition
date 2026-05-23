@@ -1,6 +1,6 @@
-# Oracle AI Database Memory System v2.2.0
+# Oracle AI Database Memory System v2.2.1
 
-[![Version](https://img.shields.io/badge/version-v2.2.0-blue.svg)](RELEASE_NOTES_v2.2.0.md)
+[![Version](https://img.shields.io/badge/version-v2.2.1-blue.svg)](RELEASE_NOTES_v2.2.1.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![SQLcl](https://img.shields.io/badge/SQLcl-26.1+-orange.svg)](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
@@ -8,9 +8,29 @@
 
 **Partitioned AI Agent Memory System with Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, Workspace & Context Continuity, and Web Visualization — built on Oracle 26ai.**
 
-> **v2.2.0 adds workspace management, context continuity, agent handoff, JRD updatable views, and workspace API.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v2.2.1 upgrades visualization to template-based architecture with sidebar navigation, bilingual persistence, Graph Explorer, and workspace detail views.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-**[中文说明 / Chinese Introduction](docs/introduction_v2.2.0_zh.md)**
+**[中文说明 / Chinese Introduction](docs/introduction_v2.2.1_zh.md)**
+
+---
+
+## What's New in v2.2.1
+
+### Visualization Architecture Upgrade
+
+v2.2.1 replaces the single-file inline visualization with a template-based architecture, delivering a modern dark-themed UI:
+
+- **Template-based architecture** — `scripts/visualization/server.py` (519 lines) + 7 HTML templates + `style.css` + `vis-network.min.js`, replacing the monolithic `viz_server_local_js.py` (963 lines)
+- **Left sidebar navigation** — Fixed sidebar with 6 nav items, language toggle, auto-logout countdown (5 min)
+- **List/Graph dual view** — Knowledge and Memory pages support table + graph toggle with category/domain color grouping
+- **Bootstrap Tabs** — Agents page with Registry / Sessions / Collaborations tabs
+- **Accordion panels** — Tasks page with collapsible plan details, step-by-step tool input/output
+- **Expandable detail rows** — Workspaces page with context timeline and linked tasks
+- **Graph Explorer** — Dedicated page with stats cards, search/filter, node context, detail panel
+- **Bilingual persistence** — Language preference saved to `localStorage`, survives page navigation
+- **5-min auto-logout** — Countdown timer in sidebar,30s title flash warning
+
+- **Decimal sanitization** — `oracledb` thin mode `Decimal` handling in `_clean_row()` for JSON-safe API responses
 
 ---
 
@@ -303,14 +323,14 @@ Built-in web server with interactive graph visualization and dashboards:
 | [docs/harness.md](docs/harness.md) | Harness template system guide |
 | [docs/workspace.md](docs/workspace.md) | Workspace & context continuity guide |
 | [docs/minimum-privileges.md](docs/minimum-privileges.md) | Minimum database user privileges |
-| [docs/introduction_v2.2.0_zh.md](docs/introduction_v2.2.0_zh.md) | v2.2.0 中文完整介绍 |
+| [docs/introduction_v2.2.1_zh.md](docs/introduction_v2.2.1_zh.md) | v2.2.1 中文完整介绍 |
 
 ---
 
 ## Test Results
 
 ```
-Oracle Memory System v2.2.0 - Full Test Suite
+Oracle Memory System v2.2.1 - Full Test Suite
 ============================================================
   Connection:  6/6 PASS
   Memory:      8/8 PASS
@@ -329,6 +349,7 @@ Overall: 61/61 ALL PASSED
 
 | Version | Date | Description |
 |---------|------|-------------|
+| **v2.2.1** | 2026-05-23 | Template-based visualization, sidebar navigation, bilingual persistence, Graph Explorer, workspace detail view |
 | **v2.2.0** | 2026-05-20 | Workspace & context continuity, JRD updatable views, workspace API, agent handoff |
 | **v2.1.0** | 2026-05-19 | Table partitioning, composite PKs, reference partitioning, Property Graph API |
 | v2.0.0 | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |

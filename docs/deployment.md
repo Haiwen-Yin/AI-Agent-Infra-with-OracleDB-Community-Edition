@@ -1,4 +1,4 @@
-# Deployment Guide - Oracle Memory System v2.2.0
+# Deployment Guide - Oracle Memory System v2.2.1
 
 ## Prerequisites
 

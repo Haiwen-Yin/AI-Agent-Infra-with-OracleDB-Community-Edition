@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.2.1] - 2026-05-23
+
+### Summary
+
+**Visualization architecture upgrade** — replaces monolithic single-file visualization with template-based architecture featuring sidebar navigation, bilingual persistence, Graph Explorer, and workspace detail views. No schema changes; fully compatible with v2.2.0 database.
+
+### Added
+
+- **scripts/visualization/** directory — Template-based visualization architecture replacing `viz_server_local_js.py`
+- **scripts/visualization/server.py** (519 lines) — Lightweight HTTP server with session auth, page routing, JSON API endpoints, Decimal sanitization for oracledb thin mode
+- **scripts/visualization/templates/** — 7 HTML templates: login, knowledge, memory, agents, tasks, workspaces, graph
+- **scripts/visualization/static/style.css** — Shared CSS with dark theme CSS variables
+- **scripts/visualization/static/vis-network.min.js** — Vis.js network library for graph visualization
+- **Left sidebar navigation** — Fixed sidebar with 6 page links, language toggle, auto-logout countdown
+- **List/Graph dual view** — Knowledge and Memory pages support table + graph toggle with category/domain color grouping
+- **Bootstrap Tabs** — Agents page with Registry / Sessions / Collaborations tabs, status badges, capability tags
+- **Accordion panels** — Tasks page with collapsible plan details, step status badges, tool input/output expandable rows
+- **Expandable detail rows** — Workspaces page with context timeline and linked tasks table
+- **Graph Explorer page** — Dedicated page with vertex/edge/degree stats cards, search + type filter, node context API, detail panel
+- **Bilingual persistence** — Language preference saved to `localStorage`, survives page navigation via `data-zh`/`data-en` attributes
+- **5-min auto-logout countdown** — Timer in sidebar, 60s warning color, 30s title flash
+- **Decimal sanitization** — `_clean_row()` and `_serialize_datetime()` handle oracledb thin mode Decimal/datetime in JSON API responses
+- **Workspace API enrichment** — `/api/workspaces` now returns `context_chain`, `linked_tasks`, `task_count` per workspace
+- **Task steps seed data** — 21 steps across 6 plans with mixed statuses (SUCCESS/RUNNING/FAILED/PENDING)
+
+### Changed
+
+- **server.py** VERSION updated from "2.2.0" to "2.2.1"
+- **start_web_server.sh** — Points to `scripts/visualization/server.py` instead of `viz_server_local_js.py`; version updated to v2.2.1
+- **All HTML templates** — Version badge updated from "v2.2.0" to "v2.2.1"; "PG Memory" branding replaced with "Oracle Memory"
+
+### Removed
+
+- **viz_server_local_js.py** — Replaced by template-based `scripts/visualization/server.py` + templates
+- **vis-network.min.js** (root level) — Moved to `scripts/visualization/static/vis-network.min.js`
+
+### Fixed
+
+- **Language persistence** — Switching to Chinese no longer resets on page navigation; preference persisted in `localStorage`
+- **test_graph_search** — Changed entity_type from `HARNESS_TEMPLATE` to `MEMORY` to match available test data
+- **Task steps display** — Tasks page now shows execution steps with proper data from database
+- **Tasks table readability** — Changed `.data-table tbody td` color to `#fff` for better contrast on dark background
+
+---
+
 ## [2.2.0] - 2026-05-20
 
 ### Summary

@@ -1,4 +1,4 @@
-# API Reference - Oracle Memory System v2.2.0
+# API Reference - Oracle Memory System v2.2.1
 
 ## Python API (scripts/lib/)
 

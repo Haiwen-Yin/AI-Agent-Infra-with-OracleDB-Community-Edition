@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# Oracle Memory System v2.1.0 - Web Server Control Script
+# Oracle Memory System v2.2.1 - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_FILE="$SCRIPT_DIR/viz_server_local_js.py"
+SERVER_FILE="$SCRIPT_DIR/scripts/visualization/server.py"
 CONFIG_FILE="$SCRIPT_DIR/config.json"
 PID_FILE="/tmp/oracle_memory_viz.pid"
 LOG_FILE="$SCRIPT_DIR/viz_server.log"
@@ -78,7 +78,7 @@ get_pid() {
         fi
         rm -f "$PID_FILE"
     fi
-    pgrep -f "viz_server_local_js.py" 2>/dev/null | head -1
+    pgrep -f "scripts/visualization/server.py" 2>/dev/null | head -1
 }
 
 is_running() {
@@ -89,7 +89,7 @@ is_running() {
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Oracle Memory System v2.1.0${NC}"
+    echo -e "${BLUE}  Oracle Memory System v2.2.1${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -140,7 +140,7 @@ do_start() {
 
     if ss -tlnp 2>/dev/null | grep -q ":${CFG_PORT} "; then
         echo -e "${YELLOW}Port $CFG_PORT is in use, freeing...${NC}"
-        pkill -f "viz_server_local_js.py" 2>/dev/null || true
+        pkill -f "scripts/visualization/server.py" 2>/dev/null || true
         sleep 2
     fi
 
@@ -294,7 +294,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "Oracle Memory System v2.1.0 - Web Server Control"
+        echo "Oracle Memory System v2.2.1 - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

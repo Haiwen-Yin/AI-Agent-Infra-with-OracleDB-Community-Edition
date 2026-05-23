@@ -1,16 +1,16 @@
 ---
 name: oracle-memory-by-yhw
-version: v2.2.0
+version: v2.2.1
 author: Haiwen Yin
-description: "Oracle AI Database Memory System v2.2.0 - Workspace & context continuity, JRD updatable views, agent handoff, table partitioning, Property Graph API, oracledb driver, 4-phase SQL deployment"
+description: "Oracle AI Database Memory System v2.2.1 - Template-based visualization, sidebar navigation, bilingual persistence, Graph Explorer, workspace detail view"
 tags: [oracle, memory-system, knowledge-base, vector-search, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# Oracle AI Database Memory System v2.2.0
+# Oracle AI Database Memory System v2.2.1
 
 **Author:** Haiwen Yin
-**Version:** v2.2.0 - 2026-05-20
+**Version:** v2.2.1 - 2026-05-23
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -159,37 +159,66 @@ cd scripts && python -m tests.test_all
 ### Start Web Server
 
 ```bash
-./scripts/start_web_server.sh
-# or manually:
-cd scripts && python -m lib.web_server
+./start_web_server.sh start    # Start (daemon)
+./start_web_server.sh status   # Status + config
+./start_web_server.sh stop     # Stop
+./start_web_server.sh restart  # Restart
 ```
 
 ## Project Structure
 
 ```
 scripts/
-+-- deploy/
-|   +-- 01_core_tables.sql
-|   +-- 02_agent_task_tables.sql
-|   +-- 03_workspace_system_tables.sql
-|   +-- 04_views_packages_jobs.sql
-+-- lib/
-|   +-- __init__.py
-|   +-- connection.py
-|   +-- memory_api.py
-|   +-- knowledge_api.py
-|   +-- agent_api.py
-|   +-- task_plan_api.py
-|   +-- harness_api.py
-|   +-- graph_api.py
-|   +-- workspace_api.py
-|   +-- security.py
-|   +-- web_server.py
-+-- tests/
-|   +-- __init__.py
-|   +-- test_all.py
+  deploy/
+    1_schema.sql              # Tables, indexes, property graph, JRD views (22 tables, 4 views)
+    2_api.sql                 # PL/SQL packages (fusion, knowledge, permissions, cleanup, workspace)
+    3_jobs.sql                # Scheduler jobs (9 automated jobs)
+    4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
+  lib/
+    config.py                 # Unified Config dataclass with env var overrides
+    connection.py             # oracledb connection pool + Decimal sanitization helpers
+    memory_api.py             # Memory CRUD on ENTITIES, workspace_id support
+    knowledge_api.py          # Knowledge CRUD + graph + edges, workspace_id support
+    agent_api.py              # Agent registration, sessions, handoff, collaboration
+    task_plan_api.py          # Task plans, steps, snapshots, tool calls, dependencies
+    security.py               # DataMaskingService, ReversibleEncryption, password hashing
+    harness_api.py            # Harness template CRUD, instantiate, derive, validate
+    graph_api.py              # Property Graph API with GRAPH_TABLE SQL operator (9 functions)
+    workspace_api.py          # Workspace lifecycle, context chains, handoff, recovery (11 functions)
+  tests/
+    test_connection.py        # Connection pool tests (6)
+    test_memory.py            # Memory CRUD tests (8)
+    test_knowledge.py         # Knowledge CRUD tests (8)
+    test_agent.py             # Agent registration/session tests (8)
+    test_security.py          # Security feature tests (5)
+    test_harness.py           # Harness template tests (6)
+    test_graph.py             # Property Graph tests (8)
+    test_workspace.py         # Workspace & context tests (12)
+    test_all.py               # Master runner (61 total)
+  visualization/
+    server.py                 # HTTP server (session auth, page routing, JSON API)
+    templates/
+      login.html              # Card-style login page
+      knowledge.html          # Knowledge: list/graph dual view + detail panel
+      memory.html             # Memory: list/graph dual view + category filter
+      agents.html             # Agents: Bootstrap tabs (registry/sessions/collabs)
+      tasks.html              # Tasks: Accordion with step details + tool I/O
+      workspaces.html         # Workspaces: expandable detail rows + context timeline
+      graph.html              # Graph Explorer: stats + search + vis-network + detail
+    static/
+      style.css               # Dark theme CSS variables + sidebar styles
+      vis-network.min.js      # Vis.js network visualization library
 docs/
-+-- SKILL.md
+  architecture.md             # Detailed architecture and design decisions
+  api-reference.md            # Python and PL/SQL API documentation
+  deployment.md               # Deployment guide and troubleshooting
+  migration.md                # v1.x -> v2.2 migration guide
+  security.md                 # Security features and configuration
+  visualization.md            # Web visualization server guide
+  harness.md                  # Harness template system guide
+  workspace.md                # Workspace & context continuity design
+  minimum-privileges.md       # Minimum database user privileges
+  introduction_v2.2.1_zh.md   # v2.2.1 Chinese introduction
 ```
 
 ## Database Schema (22 Tables)

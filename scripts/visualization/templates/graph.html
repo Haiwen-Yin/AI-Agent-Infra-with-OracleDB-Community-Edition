@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph Explorer - Oracle Memory System v2.2.0</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="/static/vis-network.min.js">
+</script>
+<style>
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color)}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+.content-area{flex:1;display:flex;overflow:hidden;position:relative;padding:16px;gap:16px}
+.stats-row{display:flex;gap:12px;margin-bottom:16px}
+.stat-card{flex:1;background:var(--bg-card);border-radius:8px;padding:16px;text-align:center;border:1px solid var(--border-color)}
+.stat-card .stat-val{font-size:1.6rem;font-weight:700;color:var(--accent)}
+.stat-card .stat-lbl{font-size:.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px}
+.stat-card.blue{border-left:3px solid #4fc3f7}
+.stat-card.green{border-left:3px solid #81c784}
+.stat-card.orange{border-left:3px solid #ffb74d}
+.search-row{display:flex;gap:8px;margin-bottom:16px;align-items:flex-end}
+.search-row input,.search-row select{background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:8px;padding:7px 14px;font-size:.88rem}
+.search-row input:focus,.search-row select:focus{outline:none;border-color:var(--accent)}
+.search-row select{min-width:140px}
+.search-row button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 20px;font-size:.88rem;cursor:pointer}
+.search-row button:hover{background:var(--accent-hover)}
+.results-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+.results-table th{background:var(--bg-card);color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border-color)}
+.results-table td{padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:.88rem;cursor:pointer}
+.results-table tr:hover td{background:rgba(233,69,96,.06)}
+.badge-type{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;color:#fff}
+.graph-wrapper{display:flex;flex:1;gap:16px;min-height:0}
+.graph-area{flex:6;min-width:0;width:100%;height:calc(100vh - 200px);background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;position:relative}
+.detail-panel{flex:4;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:16px;overflow-y:auto}
+.detail-panel h5{color:var(--accent);font-size:.95rem;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border-color)}
+.detail-field{margin-bottom:10px}
+.detail-field .lbl{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.detail-field .val{color:var(--text-primary);font-size:.88rem;line-height:1.5;word-break:break-word}
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>Oracle Memory</h5>
+    <small>v2.2.1</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>&#30693;&#35782;</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon">&#129504;</span><span data-zh>&#35760;&#24518;</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon">&#129302;</span><span data-zh>&#26234;&#33021;&#20307;</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>&#20219;&#21153;</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>&#24037;&#20316;&#21306;</span><span data-en>Workspaces</span></a>
+    <a href="/graph" class="active"><span class="icon">&#127760;</span><span data-zh>&#22270;&#25506;&#32034;</span><span data-en>Graph Explorer</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>&#20013;&#25991;</span></button>
+    <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div>
+
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>&#22270;&#35889;API&#25506;&#32034;</span><span data-en>Graph API Explorer</span></h4>
+  </div>
+  <div class="content-area" style="flex-direction:column">
+    <div class="stats-row">
+      <div class="stat-card blue"><div class="stat-val" id="vertexCount">-</div><div class="stat-lbl"><span data-zh>&#39030;&#28857;&#25968;</span><span data-en>Vertices</span></div></div>
+      <div class="stat-card green"><div class="stat-val" id="edgeCount">-</div><div class="stat-lbl"><span data-zh>&#36793;&#25968;</span><span data-en>Edges</span></div></div>
+      <div class="stat-card orange"><div class="stat-val" id="avgDegree">-</div><div class="stat-lbl"><span data-zh>&#24179;&#22343;&#24230;</span><span data-en>Avg Degree</span></div></div>
+    </div>
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search..." style="flex:1">
+      <select id="typeSelect">
+        <option value="">ALL</option>
+        <option value="MEMORY">MEMORY</option>
+        <option value="KNOWLEDGE">KNOWLEDGE</option>
+        <option value="TASK_OUTPUT">TASK_OUTPUT</option>
+        <option value="EXPERIENCE">EXPERIENCE</option>
+        <option value="HARNESS_TEMPLATE">HARNESS_TEMPLATE</option>
+      </select>
+      <button onclick="doSearch()"><span data-zh>&#25628;&#32034;</span><span data-en>Search</span></button>
+    </div>
+    <div id="searchResults" style="display:none;margin-bottom:16px">
+      <table class="results-table">
+        <thead><tr>
+          <th>ID</th><th><span data-zh>&#26631;&#39064;</span><span data-en>Title</span></th><th><span data-zh>&#31867;&#22411;</span><span data-en>Type</span></th><th><span data-zh>&#37325;&#35201;&#24615;</span><span data-en>Importance</span></th>
+        </tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+    <div class="graph-wrapper" id="graphWrapper">
+      <div class="graph-area" id="visNetwork"></div>
+      <div class="detail-panel" id="nodeDetail" style="display:none">
+        <h5><span data-zh>&#33410;&#28857;&#35814;&#24773;</span><span data-en>Node Detail</span></h5>
+        <div id="nodeDetailContent"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var network=null;
+var typeColors={MEMORY:'#4fc3f7',KNOWLEDGE:'#81c784',TASK_OUTPUT:'#ffb74d',EXPERIENCE:'#e57373',HARNESS_TEMPLATE:'#ba68c8'};
+
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
+
+function loadStats(){
+  fetch('/api/graph/stats').then(function(r){return r.json()}).then(function(d){
+    document.getElementById('vertexCount').textContent=d.vertex_count!=null?d.vertex_count:'-';
+    document.getElementById('edgeCount').textContent=d.edge_count!=null?d.edge_count:'-';
+    document.getElementById('avgDegree').textContent=d.avg_degree!=null?d.avg_degree.toFixed(2):'-';
+  }).catch(function(e){console.error('Stats err',e)});
+}
+
+function loadAllGraph(){
+  fetch('/api/graph/all').then(function(r){return r.json()}).then(function(d){
+    var nodes=new vis.DataSet();
+    var visEdges=new vis.DataSet();
+    var typeColors={KNOWLEDGE:'#4a90d9',MEMORY:'#4fc3f7',TASK_OUTPUT:'#ffb74d',EXPERIENCE:'#e57373',HARNESS_TEMPLATE:'#ba68c8'};
+    for(var i=0;i<d.nodes.length;i++){
+      var n=d.nodes[i];var tc=typeColors[n.entity_type]||'#666';
+      nodes.add({id:n.id,label:n.label,color:{background:tc,border:tc,highlight:{background:tc,border:'#fff'},hover:{background:tc,border:'#fff'}},font:{color:'#fff',size:12},size:n.size||15,title:n.title,entityData:n});
+    }
+    for(var j=0;j<d.edges.length;j++){
+      var e=d.edges[j];
+      visEdges.add({from:e.from,to:e.to,label:e.label||'',font:{color:'#aaa',size:10,strokeWidth:0},color:{color:'#555',highlight:'#4fc3f7',hover:'#888'},arrows:'to',smooth:{type:'curvedCW',roundness:0.2}});
+    }
+    var container=document.getElementById('visNetwork');
+    var opts={physics:{solver:'forceAtlas2Based',forceAtlas2Based:{gravitationalConstant:-80,springLength:120},stabilization:{iterations:100}},interaction:{hover:true,tooltipDelay:200,navigationButtons:true,keyboard:true},nodes:{shape:'dot',borderWidth:2},edges:{width:1.5}};
+    if(network)network.destroy();
+    document.getElementById('graphWrapper').style.display='flex';
+    setTimeout(function(){
+      network=new vis.Network(container,{nodes:nodes,edges:visEdges},opts);
+      network.on('click',function(params){if(params.nodes.length>0){var nd=nodes.get(params.nodes[0]);showNodeDetail(nd)}});
+    },100);
+  }).catch(function(e){console.error('Load all err',e)});
+}
+
+function doSearch(){
+  var q=document.getElementById('searchInput').value.trim();
+  var t=document.getElementById('typeSelect').value;
+  if(!q)return;
+  var url='/api/graph/search?q='+encodeURIComponent(q);
+  if(t)url+='&type='+encodeURIComponent(t);
+  fetch(url).then(function(r){return r.json()}).then(function(d){
+    var results=d.results||d||[];
+    var tbody=document.getElementById('resultsBody');
+    tbody.innerHTML='';
+    for(var i=0;i<results.length;i++){
+      (function(r){
+        var tr=document.createElement('tr');
+        var c=typeColors[r.entity_type]||'#666';
+        tr.innerHTML='<td>'+r.entity_id+'</td><td>'+(r.title||'')+'</td><td><span class="badge-type" style="background:'+c+'">'+r.entity_type+'</span></td><td>'+(r.importance!=null?r.importance:'-')+'</td>';
+        tr.addEventListener('click',function(){loadContext(r.entity_id)});
+        tbody.appendChild(tr);
+      })(results[i]);
+    }
+    document.getElementById('searchResults').style.display=results.length?'block':'none';
+  }).catch(function(e){console.error('Search err',e)});
+}
+
+document.getElementById('searchInput').addEventListener('keydown',function(e){if(e.key==='Enter')doSearch()});
+
+function loadContext(eid){
+  fetch('/api/graph/context?entity_id='+encodeURIComponent(eid)).then(function(r){return r.json()}).then(function(d){
+    renderGraph(d);
+    setTimeout(function(){document.getElementById('graphWrapper').style.display='flex'},50);
+  }).catch(function(e){console.error('Context err',e)});
+}
+
+function renderGraph(data){
+  var center=data.center||data.entity||{};
+  var neighbors=data.neighbors||[];
+  var edges=data.edges||[];
+  var nodes=new vis.DataSet();
+  var visEdges=new vis.DataSet();
+  nodes.add({id:center.entity_id,label:center.title||center.entity_id,color:{background:'#e53935',border:'#b71c1c',highlight:{background:'#ef5350',border:'#c62828'}},font:{color:'#fff',size:16,bold:{color:'#fff',size:16,mod:'bold'}},size:30,title:center.entity_type||'',entityData:center});
+  for(var i=0;i<neighbors.length;i++){
+    var n=neighbors[i];var c=typeColors[n.entity_type]||'#666';
+    nodes.add({id:n.entity_id,label:n.title||n.entity_id,color:{background:c,border:c,highlight:{background:c,border:'#fff'}},font:{color:'#fff',size:14},size:20,title:n.entity_type||'',entityData:n});
+  }
+  for(var j=0;j<edges.length;j++){
+    var e=edges[j];
+    visEdges.add({id:e.edge_id||('e_'+j),from:e.source_id,to:e.target_id,label:e.relation_type||e.label||'',font:{color:'#aaa',size:11,strokeWidth:0},color:{color:'#555',highlight:'#4fc3f7',hover:'#888'},arrows:'to',smooth:{type:'curvedCW',roundness:0.2}});
+  }
+  var container=document.getElementById('visNetwork');
+  var graphData={nodes:nodes,edges:visEdges};
+  var options={physics:{solver:'forceAtlas2Based',forceAtlas2Based:{gravitationalConstant:-80,springLength:120},stabilization:{iterations:100}},interaction:{hover:true,tooltipDelay:200},nodes:{shape:'dot',borderWidth:2},edges:{width:1.5}};
+  if(network)network.destroy();
+  network=new vis.Network(container,graphData,options);
+  network.on('click',function(params){
+    if(params.nodes.length>0){var nodeId=params.nodes[0];var nd=nodes.get(nodeId);showNodeDetail(nd)}
+  });
+}
+
+function showNodeDetail(nd){
+  var d=nd.entityData||{};var html='';
+  var fields=['entity_id','title','entity_type','category','importance','content','created_at','updated_at'];
+  for(var i=0;i<fields.length;i++){
+    var f=fields[i];
+    if(d[f]!=null){
+      var val=d[f];if(typeof val==='object')val=JSON.stringify(val,null,2);
+      if(f==='content'&&val.length>500)val=val.substring(0,500)+'...';
+      html+='<div class="detail-field"><div class="lbl">'+f+'</div><div class="val"><pre style="color:#e0e0e0;margin:0;white-space:pre-wrap">'+val+'</pre></div></div>';
+    }
+  }
+  document.getElementById('nodeDetailContent').innerHTML=html;
+  document.getElementById('nodeDetail').style.display='block';
+}
+
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadStats();
+loadAllGraph();
+
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);
+</script>
+</body>
+</html>

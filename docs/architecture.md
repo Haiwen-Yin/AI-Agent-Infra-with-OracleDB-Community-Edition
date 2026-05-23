@@ -1,4 +1,4 @@
-# Architecture - Oracle Memory System v2.2.0
+# Architecture - Oracle Memory System v2.2.1
 
 ## Unified Entity Model
 

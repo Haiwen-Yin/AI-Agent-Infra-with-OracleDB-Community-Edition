@@ -1,0 +1,361 @@
+body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 220px;
+    background: #0f3460;
+    padding: 0;
+    z-index: 1000;
+    overflow-y: auto;
+    border-right: 1px solid #1a3a6a;
+}
+
+.sidebar-brand {
+    padding: 20px 16px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    border-bottom: 1px solid #1a3a6a;
+}
+
+.sidebar-brand small {
+    display: block;
+    font-size: 0.7rem;
+    color: #888;
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.sidebar-link {
+    display: block;
+    padding: 12px 20px;
+    color: #a0b4d0;
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: background 0.2s, color 0.2s;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-link:hover {
+    background: #162d50;
+    color: #e0e0e0;
+    text-decoration: none;
+}
+
+.sidebar-link.active {
+    background: #1a3a6a;
+    color: #fff;
+    border-left: 3px solid #4fc3f7;
+}
+
+.main-content {
+    margin-left: 220px;
+    padding: 20px;
+    min-height: 100vh;
+}
+
+.lang-toggle {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    z-index: 1100;
+    background: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.lang-toggle:hover {
+    background: #0f3460;
+}
+
+.stats-card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    border-left: 4px solid #333;
+    margin-bottom: 12px;
+}
+
+.stats-card-blue { border-left-color: #4fc3f7; }
+.stats-card-green { border-left-color: #81c784; }
+.stats-card-orange { border-left-color: #ffb74d; }
+
+.stats-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.stats-label {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 4px;
+}
+
+.table-dark {
+    --bs-table-bg: #16213e;
+    --bs-table-border-color: #1a3a6a;
+    --bs-table-hover-bg: #1a2d4a;
+    color: #e0e0e0;
+}
+
+.table-dark thead th {
+    background: #0f3460;
+    color: #a0b4d0;
+    border-bottom: 2px solid #1a3a6a;
+    font-weight: 600;
+}
+
+.table-dark tbody tr:nth-child(odd) {
+    background: rgba(15, 52, 96, 0.3);
+}
+
+.table-dark tbody tr:nth-child(even) {
+    background: rgba(22, 33, 62, 0.6);
+}
+
+.table-dark tbody tr:hover {
+    background: #1a2d4a;
+}
+
+.workspace-row {
+    cursor: pointer;
+}
+
+.detail-content {
+    background: #0f1a30;
+    border: 1px solid #1a3a6a;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 8px 0;
+}
+
+.context-timeline {
+    border-left: 2px solid #4fc3f7;
+    padding-left: 16px;
+    margin-left: 8px;
+}
+
+.context-entry {
+    position: relative;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: #16213e;
+    border-radius: 6px;
+    border: 1px solid #1a3a6a;
+}
+
+.context-entry::before {
+    content: '';
+    position: absolute;
+    left: -22px;
+    top: 14px;
+    width: 10px;
+    height: 10px;
+    background: #4fc3f7;
+    border-radius: 50%;
+}
+
+.context-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+
+.context-id { color: #4fc3f7; font-family: monospace; }
+.context-agent { color: #ffb74d; }
+.context-time { color: #888; }
+
+.context-preview {
+    font-size: 0.85rem;
+    color: #aaa;
+    word-break: break-all;
+}
+
+.vis-container {
+    width: 100%;
+    height: calc(100vh - 60px);
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #0f1a30;
+}
+
+.graph-container-wrapper {
+    display: flex;
+    gap: 0;
+    margin-top: 16px;
+}
+
+.graph-area {
+    flex: 0 0 60%;
+    max-width: 60%;
+}
+
+.detail-panel {
+    flex: 0 0 40%;
+    max-width: 40%;
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
+    background: #16213e;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 16px;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(20px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.form-control-dark,
+.form-select-dark {
+    background: #16213e;
+    border: 1px solid #333;
+    color: #e0e0e0;
+}
+
+.form-control-dark:focus,
+.form-select-dark:focus {
+    background: #1a2d4a;
+    border-color: #4fc3f7;
+    color: #e0e0e0;
+    box-shadow: 0 0 0 0.2rem rgba(79, 195, 247, 0.15);
+}
+
+.form-control-dark::placeholder {
+    color: #666;
+}
+
+.form-select-dark option {
+    background: #16213e;
+    color: #e0e0e0;
+}
+
+.btn-primary {
+    background: #0f3460;
+    border-color: #1a3a6a;
+}
+
+.btn-primary:hover {
+    background: #1a3a6a;
+    border-color: #4fc3f7;
+}
+
+.btn-outline-light {
+    border-color: #555;
+    color: #aaa;
+}
+
+.btn-outline-light:hover {
+    background: #333;
+    color: #e0e0e0;
+}
+
+.badge.bg-success { background: #2e7d32 !important; }
+.badge.bg-warning { background: #f9a825 !important; color: #1a1a2e !important; }
+.badge.bg-secondary { background: #555 !important; }
+.badge.bg-info { background: #0277bd !important; }
+
+.modal-content {
+    background: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #333;
+}
+
+.modal-header {
+    border-bottom: 1px solid #333;
+}
+
+.modal-footer {
+    border-top: 1px solid #333;
+}
+
+.btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+.search-section {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #1a3a6a;
+}
+
+h2, h4, h5, h6 {
+    color: #e0e0e0;
+}
+
+.text-muted {
+    color: #666 !important;
+}
+
+.text-danger {
+    color: #e57373 !important;
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: 60px;
+        overflow: visible;
+    }
+
+    .sidebar-brand span,
+    .sidebar-brand small,
+    .sidebar-link span {
+        display: none;
+    }
+
+    .sidebar-brand {
+        padding: 16px 8px;
+        text-align: center;
+    }
+
+    .sidebar-brand::after {
+        content: 'Oracle';
+        display: block;
+        color: #e0e0e0;
+        font-weight: 700;
+    }
+
+    .sidebar-link {
+        padding: 16px 0;
+        text-align: center;
+    }
+
+    .main-content {
+        margin-left: 60px;
+    }
+
+    .graph-container-wrapper {
+        flex-direction: column;
+    }
+
+    .graph-area,
+    .detail-panel {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+
+    .detail-panel {
+        max-height: 300px;
+    }
+}
