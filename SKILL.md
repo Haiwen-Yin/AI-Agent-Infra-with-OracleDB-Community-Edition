@@ -1,16 +1,16 @@
 ---
 name: oracle-memory-by-yhw
-version: v2.2.1
+version: v2.3.0
 author: Haiwen Yin
-description: "Oracle AI Database Memory System v2.2.1 - Template-based visualization, sidebar navigation, bilingual persistence, Graph Explorer, workspace detail view"
-tags: [oracle, memory-system, knowledge-base, vector-search, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view]
+description: "Oracle AI Database Memory System v2.3.0 - Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
+tags: [oracle, memory-system, knowledge-base, vector-search, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# Oracle AI Database Memory System v2.2.1
+# Oracle AI Database Memory System v2.3.0
 
 **Author:** Haiwen Yin
-**Version:** v2.2.1 - 2026-05-23
+**Version:** v2.3.0 - 2026-05-24
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -51,7 +51,19 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 +------------------------------------------------------------------+
 ```
 
-## v2.2.0 Key Addition: Workspace & Context Continuity
+## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration
+
+| Feature | Description |
+|---------|-------------|
+| Spec Driven Development | SPEC_META (reference-partitioned), SPEC_PLAN_LINKS (many-to-many with LINK_TYPE), SPEC_DV (JRD updatable) |
+| Agent Elastic Management | DORMANT (hibernate, preserve context) / POOL (stateless, skills_tags matching), AGENT_CREDENTIALS (encrypted, auto-expiry) |
+| Collaboration Groups | COLLAB_GROUPS + COLLAB_GROUP_MEMBERS, shared Workspace (COLLAB_GROUP) + personal Workspace (PERSONAL_IN_GROUP) |
+| Agent Credentials | ReversibleEncryption, SCOPE={access_level, restricted_domains, max_clearance}, auto-revocation on DORMANT |
+| Scheduler Jobs | DORMANT_AGENT_JOB (30-min timeout), CREDENTIAL_CLEANUP_JOB (daily purge) |
+| Visualization | Specs + Collab pages, /api/specs + /api/collab, inline detail expansion (Tasks pattern), bilingual sidebar |
+| Auth Security | SHA256 password hash verification (was prefix-only), admin default password: admin123 |
+
+## v2.2.0 Key Additions: Workspace & Context Continuity
 
 | Feature | Description |
 |---------|-------------|
@@ -77,18 +89,19 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 | Table | Partitioning Strategy |
 |-------|-----------------------|
-| ENTITIES | RANGE by ENTITY_TYPE (5 partitions: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE) |
+| ENTITIES | LIST by ENTITY_TYPE (7 partitions: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC, OTHER) |
 | ENTITY_EDGES | REFERENCE from ENTITIES |
+| KNOWLEDGE_META | REFERENCE from ENTITIES |
 | ENTITY_EMBEDDINGS | REFERENCE from ENTITIES |
+| SPEC_META | REFERENCE from ENTITIES [NEW v2.3.0] |
+| HARNESS_META | REFERENCE from ENTITIES |
 | ENTITY_TAGS | REFERENCE from ENTITIES |
-| ENTITY_RELATIONSHIPS | REFERENCE from ENTITIES |
-| ENTITY_VERSIONS | REFERENCE from ENTITIES |
 | TASK_PLANS | RANGE by STATUS |
 | TASK_STEPS | REFERENCE from TASK_PLANS |
 | AGENT_SESSION | RANGE by IS_ACTIVE |
 | AGENT_ACCESS_LOG | RANGE by CREATED_AT (monthly) |
 
-**Note:** 5 reference-partitioned children (ENTITY_EDGES, ENTITY_EMBEDDINGS, ENTITY_TAGS, ENTITY_RELATIONSHIPS, ENTITY_VERSIONS). 12 non-partitioned tables: AGENTS, AGENT_PERMISSIONS, KNOWLEDGE_VALIDATIONS, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, HARNESS_TEMPLATES, HARNESS_INSTANCES, GRAPH_METADATA, SYSTEM_CONFIG, SYSTEM_AUDIT_LOG, EMBEDDING_CACHE.
+**Note:** 6 reference-partitioned children (ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, SPEC_META, HARNESS_META, ENTITY_TAGS). Non-partitioned tables: AGENT_REGISTRY, AGENT_CREDENTIALS, AGENT_PERMISSION_LOG, AGENT_COLLABORATION, COLLAB_GROUPS, COLLAB_GROUP_MEMBERS, SPEC_PLAN_LINKS, SYSTEM_USERS, SYSTEM_CONFIG, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES, TAGS.
 
 ## Composite Primary Keys
 
@@ -97,12 +110,13 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 | ENTITIES | (ENTITY_ID, ENTITY_TYPE) | Unified table; ENTITY_TYPE is partition key |
 | ENTITY_EDGES | (EDGE_ID, SOURCE_ID) | SOURCE_ID is part of PK for reference partitioning |
 | TASK_PLANS | (PLAN_ID, STATUS) | STATUS is partition key; included in PK |
+| TASK_STEPS | (STEP_ID, PLAN_ID, PLAN_STATUS) | Composite PK includes parent PK columns for reference partitioning |
 | AGENT_SESSION | (SESSION_ID, IS_ACTIVE) | IS_ACTIVE is partition key; included in PK |
 | WORKSPACE_TASKS | (WORKSPACE_ID, PLAN_ID) | Junction table; FK to both WORKSPACES and TASK_PLANS |
 
 **Note:** Global unique constraints (UK_ENTITY_ID, UK_EDGE_ID, etc.) enforce uniqueness across partitions. ON DELETE CASCADE on all child tables (required for JRD updatable views).
 
-## JRD Duality Views (4 Views)
+## JRD Duality Views (6 Views)
 
 | View | Mode | Root Table | Nested Objects |
 |------|------|------------|----------------|
@@ -110,6 +124,8 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 | CONTEXT_DV | read-only | WORKSPACE_CONTEXT | -- (flat view) |
 | MEMORY_DV | updatable | ENTITIES (ENTITY_TYPE=MEMORY) | ENTITY_TAGS, ENTITY_EDGES |
 | KNOWLEDGE_DV | updatable | ENTITIES (ENTITY_TYPE=KNOWLEDGE) | ENTITY_TAGS, ENTITY_EDGES |
+| SPEC_DV | updatable | ENTITIES (ENTITY_TYPE=SPEC) [NEW v2.3.0] | SPEC_META, SPEC_PLAN_LINKS |
+| COLLAB_GROUP_DV | updatable | COLLAB_GROUPS [NEW v2.3.0] | COLLAB_GROUP_MEMBERS |
 
 **Notes:**
 - 26ai annotations (`@insert`, `@update`, `@delete`) required on columns for write operations
@@ -120,20 +136,17 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 ## Quick Start
 
-### Deploy Schema (4 Phases)
+### Deploy Schema (3 Phases)
 
 ```sql
--- Phase 1: Core tables (ENTITIES, ENTITY_EDGES, ENTITY_EMBEDDINGS, ENTITY_TAGS, etc.)
-@scripts/deploy/01_core_tables.sql
+-- Phase 1: Schema (27 tables, 6 JRD views, indexes, property graph, seed data)
+@scripts/deploy/1_schema.sql
 
--- Phase 2: Agent & Task tables (AGENTS, AGENT_SESSION, TASK_PLANS, TASK_STEPS, etc.)
-@scripts/deploy/02_agent_task_tables.sql
+-- Phase 2: PL/SQL Packages (7 packages: MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER)
+@scripts/deploy/2_api.sql
 
--- Phase 3: Workspace & System tables (WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, etc.)
-@scripts/deploy/03_workspace_system_tables.sql
-
--- Phase 4: Views, Packages, Jobs, Graph (JRD views, PL/SQL, scheduler, property graph)
-@scripts/deploy/04_views_packages_jobs.sql
+-- Phase 3: Scheduler Jobs (11 jobs including DORMANT_AGENT_JOB, CREDENTIAL_CLEANUP_JOB)
+@scripts/deploy/3_jobs.sql
 ```
 
 ### Install Python
@@ -168,119 +181,133 @@ cd scripts && python -m tests.test_all
 ## Project Structure
 
 ```
-scripts/
-  deploy/
-    1_schema.sql              # Tables, indexes, property graph, JRD views (22 tables, 4 views)
-    2_api.sql                 # PL/SQL packages (fusion, knowledge, permissions, cleanup, workspace)
-    3_jobs.sql                # Scheduler jobs (9 automated jobs)
-    4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
-  lib/
-    config.py                 # Unified Config dataclass with env var overrides
-    connection.py             # oracledb connection pool + Decimal sanitization helpers
-    memory_api.py             # Memory CRUD on ENTITIES, workspace_id support
-    knowledge_api.py          # Knowledge CRUD + graph + edges, workspace_id support
-    agent_api.py              # Agent registration, sessions, handoff, collaboration
-    task_plan_api.py          # Task plans, steps, snapshots, tool calls, dependencies
-    security.py               # DataMaskingService, ReversibleEncryption, password hashing
-    harness_api.py            # Harness template CRUD, instantiate, derive, validate
-    graph_api.py              # Property Graph API with GRAPH_TABLE SQL operator (9 functions)
-    workspace_api.py          # Workspace lifecycle, context chains, handoff, recovery (11 functions)
-  tests/
-    test_connection.py        # Connection pool tests (6)
-    test_memory.py            # Memory CRUD tests (8)
-    test_knowledge.py         # Knowledge CRUD tests (8)
-    test_agent.py             # Agent registration/session tests (8)
-    test_security.py          # Security feature tests (5)
-    test_harness.py           # Harness template tests (6)
-    test_graph.py             # Property Graph tests (8)
-    test_workspace.py         # Workspace & context tests (12)
-    test_all.py               # Master runner (61 total)
-  visualization/
-    server.py                 # HTTP server (session auth, page routing, JSON API)
-    templates/
-      login.html              # Card-style login page
-      knowledge.html          # Knowledge: list/graph dual view + detail panel
-      memory.html             # Memory: list/graph dual view + category filter
-      agents.html             # Agents: Bootstrap tabs (registry/sessions/collabs)
-      tasks.html              # Tasks: Accordion with step details + tool I/O
-      workspaces.html         # Workspaces: expandable detail rows + context timeline
-      graph.html              # Graph Explorer: stats + search + vis-network + detail
-    static/
-      style.css               # Dark theme CSS variables + sidebar styles
-      vis-network.min.js      # Vis.js network visualization library
-docs/
-  architecture.md             # Detailed architecture and design decisions
-  api-reference.md            # Python and PL/SQL API documentation
-  deployment.md               # Deployment guide and troubleshooting
-  migration.md                # v1.x -> v2.2 migration guide
-  security.md                 # Security features and configuration
-  visualization.md            # Web visualization server guide
-  harness.md                  # Harness template system guide
-  workspace.md                # Workspace & context continuity design
-  minimum-privileges.md       # Minimum database user privileges
-  introduction_v2.2.1_zh.md   # v2.2.1 Chinese introduction
+oracle-memory-by-yhw/
+  scripts/
+    deploy/
+      1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
+      2_api.sql                 # 7 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER)
+      3_jobs.sql                # 11 scheduler jobs
+      4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
+    lib/
+      config.py                 # Unified Config dataclass with env var overrides
+      connection.py             # oracledb connection pool + Decimal sanitization helpers
+      memory_api.py             # Memory CRUD on ENTITIES, workspace_id support
+      knowledge_api.py          # Knowledge CRUD + graph + edges, workspace_id support
+      agent_api.py              # Agent registration, sessions, handoff, collaboration, credentials, hibernate/wake, pool
+      task_plan_api.py          # Task plans, steps, snapshots, tool calls, dependencies
+      security.py              # DataMaskingService, ReversibleEncryption, password hashing
+      harness_api.py            # Harness template CRUD, instantiate, derive, validate
+      graph_api.py              # Property Graph API with GRAPH_TABLE SQL operator (9 functions)
+      workspace_api.py          # Workspace lifecycle, context chains, handoff, recovery (11 functions)
+      spec_api.py              # Spec CRUD, plan linkage, validation, derivation (10 functions) [NEW v2.3.0]
+      collab_api.py             # Collaboration groups, members, shared memory (10 functions) [NEW v2.3.0]
+    tests/
+      test_connection.py        # Connection pool tests (6)
+      test_memory.py            # Memory CRUD tests (8)
+      test_knowledge.py         # Knowledge CRUD tests (8)
+      test_agent.py             # Agent registration/session tests (8)
+      test_security.py          # Security feature tests (5)
+      test_harness.py           # Harness template tests (6)
+      test_graph.py             # Property Graph tests (8)
+      test_workspace.py         # Workspace & context tests (12)
+      test_spec.py              # Spec CRUD + plan linkage tests (9) [NEW v2.3.0]
+      test_collab.py            # Collab group + shared memory tests (12) [NEW v2.3.0]
+      test_credential.py        # Credential + hibernate/wake/pool tests (9) [NEW v2.3.0]
+      test_all.py               # Master runner (99 total)
+    visualization/
+      server.py                 # HTTP server (session auth, page routing, JSON API, bilingual)
+      templates/
+        login.html              # Card-style login page
+        knowledge.html          # Knowledge: list/graph dual view + inline detail
+        memory.html             # Memory: list/graph dual view + inline detail + category filter
+        agents.html             # Agents: Bootstrap tabs (registry/sessions/collabs)
+        tasks.html              # Tasks: Accordion with step details + tool I/O
+        workspaces.html         # Workspaces: expandable detail rows + context timeline
+        graph.html              # Graph Explorer: stats + search + vis-network + detail panel
+        specs.html              # Specs: list/detail tabs + plan linkage [NEW v2.3.0]
+        collab.html             # Collab: groups/members/shared memory [NEW v2.3.0]
+      static/
+        style.css               # Dark theme CSS variables + sidebar styles
+        vis-network.min.js      # Vis.js network visualization library
 ```
 
-## Database Schema (22 Tables)
+## Database Schema (27 Tables)
 
-### Core Tables (8)
+### Core Tables (7)
+
+| Table | Purpose | Partitioning |
+|-------|---------|-------------|
+| ENTITIES | Unified entity store (MEMORY,KNOWLEDGE,TASK_OUTPUT,EXPERIENCE,HARNESS_TEMPLATE,SPEC,OTHER) | LIST by ENTITY_TYPE |
+| ENTITY_EDGES | Directed relationships between entities | REFERENCE from ENTITIES |
+| KNOWLEDGE_META | Knowledge metadata (domain,topic,difficulty) | REFERENCE from ENTITIES |
+| ENTITY_EMBEDDINGS | Vector embeddings for semantic search | REFERENCE from ENTITIES |
+| SPEC_META | Specification metadata (version,status,acceptance_criteria,constraints) [NEW v2.3.0] | REFERENCE from ENTITIES |
+| HARNESS_META | Harness template metadata | REFERENCE from ENTITIES |
+| ENTITY_TAGS | Tags for categorization and filtering | REFERENCE from ENTITIES |
+
+### System Tables (3)
+
+| Table | Purpose |
+|-------|---------|
+| SYSTEM_USERS | User accounts with SHA256 password hashes |
+| SYSTEM_CONFIG | Key-value configuration store |
+| TAGS | Tag definitions |
+
+### Agent Tables (5)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| ENTITIES | Unified entity store (MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE) | ENTITY_ID, ENTITY_TYPE, WORKSPACE_ID, ENTITY_DATA (JSON), CREATED_AT, UPDATED_AT, IMPORTANCE, ACCESS_COUNT |
-| ENTITY_EDGES | Directed relationships between entities | EDGE_ID, SOURCE_ID, SOURCE_TYPE, TARGET_ID, TARGET_TYPE, EDGE_TYPE, RELATIONSHIP_STRENGTH |
-| ENTITY_EMBEDDINGS | Vector embeddings for semantic search | ENTITY_ID, ENTITY_TYPE, EMBEDDING_VECTOR, EMBEDDING_MODEL |
-| ENTITY_TAGS | Tags for categorization and filtering | ENTITY_ID, ENTITY_TYPE, TAG_NAME, TAG_CATEGORY |
-| ENTITY_RELATIONSHIPS | Rich relationship metadata | RELATIONSHIP_ID, ENTITY_ID, ENTITY_TYPE, RELATED_ENTITY_ID, RELATIONSHIP_TYPE, METADATA (JSON) |
-| ENTITY_VERSIONS | Version history for entities | ENTITY_ID, ENTITY_TYPE, VERSION_NUMBER, ENTITY_DATA (JSON), CHANGE_DESCRIPTION |
-| KNOWLEDGE_VALIDATIONS | Validation records for knowledge entities | VALIDATION_ID, ENTITY_ID, VALIDATED_BY, VALIDATION_STATUS, VALIDATION_NOTES |
-| GRAPH_METADATA | Property Graph metadata | GRAPH_ID, GRAPH_NAME, GRAPH_TYPE, METADATA (JSON) |
+| AGENT_REGISTRY | Agent definitions + elastic management | +5 cols: CREATED_BY_AGENT_ID, AGENT_ROLE, CURRENT_USER_ID, POOL_CONFIG, LAST_ACTIVE_AT |
+| AGENT_CREDENTIALS | Encrypted credential storage [NEW v2.3.0] | CREDENTIAL_ID, AGENT_ID, USER_ID, CREDENTIAL_TYPE, CREDENTIAL_VALUE (encrypted), SCOPE (JSON), EXPIRES_AT |
+| AGENT_SESSION | Session with handoff chain | SESSION_ID, AGENT_ID, CONTEXT (JSON), LAST_ACTIVE_AT [NEW v2.3.0] |
+| ENTITY_ACCESS_LOG | Audit trail of entity access | LOG_ID, SESSION_ID, ACTION_TYPE, RESOURCE_TYPE, RESOURCE_ID |
+| AGENT_PERMISSION_LOG | Agent action audit trail | LOG_ID, AGENT_ID, ACTION, STATUS_CODE, DETAILS |
 
-### Agent Tables (4)
+### Collaboration Tables (2)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| AGENTS | Registered agent definitions | AGENT_ID, AGENT_NAME, AGENT_TYPE, CAPABILITIES (JSON), CREATED_AT |
-| AGENT_SESSION | Agent session with handoff chain | SESSION_ID, IS_ACTIVE, AGENT_ID, OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID, SESSION_DATA (JSON) |
-| AGENT_PERMISSIONS | Agent access control rules | PERMISSION_ID, AGENT_ID, RESOURCE_TYPE, ACCESS_LEVEL, CONSTRAINTS (JSON) |
-| AGENT_ACCESS_LOG | Audit trail of agent actions | LOG_ID, SESSION_ID, ACTION_TYPE, RESOURCE_TYPE, RESOURCE_ID, ACCESSED_AT |
+| AGENT_COLLABORATION | Inter-agent collaboration records | COL_ID, SOURCE_AGENT_ID, TARGET_AGENT_ID, COL_TYPE, ENTITY_ID, CONTEXT |
+| COLLAB_GROUPS | Collaboration group definitions [NEW v2.3.0] | GROUP_ID, GROUP_NAME, GROUP_TYPE, WORKSPACE_ID, SHARING_POLICY, STATUS |
+| COLLAB_GROUP_MEMBERS | Group membership [NEW v2.3.0] | MEMBER_ID, GROUP_ID, AGENT_ID, ROLE, PERSONAL_WORKSPACE_ID |
+
+### Workspace Tables (3)
+
+| Table | Purpose |
+|-------|---------|
+| WORKSPACES | Isolated environments (CONVERSATION,PROJECT,TASK_CHAIN,AUTONOMOUS,COLLAB_GROUP,PERSONAL_IN_GROUP) |
+| WORKSPACE_CONTEXT | Append-only context chain (CHECKPOINT,HANDOFF,SUMMARY,ERROR_STATE,AUTO_SAVE) |
+| WORKSPACE_TASKS | Junction: workspaces ↔ task plans |
 
 ### Task Tables (5)
 
-| Table | Purpose | Key Columns |
-|-------|---------|-------------|
-| TASK_PLANS | Task plan definitions | PLAN_ID, STATUS, TITLE, DESCRIPTION, OWNER_AGENT_ID, CREATED_AT |
-| TASK_STEPS | Individual steps within plans | STEP_ID, PLAN_ID, STATUS, STEP_ORDER, STEP_TYPE, STEP_DATA (JSON) |
-| HARNESS_TEMPLATES | Reusable agent harness templates | TEMPLATE_ID, TEMPLATE_NAME, TEMPLATE_TYPE, INPUT_SCHEMA (JSON), OUTPUT_SCHEMA (JSON), TEMPLATE_DATA (JSON) |
-| HARNESS_INSTANCES | Instantiated harness instances | INSTANCE_ID, TEMPLATE_ID, AGENT_ID, INSTANCE_DATA (JSON), STATUS |
-| EMBEDDING_CACHE | Cached embedding results | CACHE_KEY, EMBEDDING_VECTOR, EMBEDDING_MODEL, CREATED_AT |
+| Table | Purpose |
+|-------|---------|
+| TASK_PLANS | Plan definitions |
+| TASK_STEPS | Plan steps (composite PK: STEP_ID, PLAN_ID, PLAN_STATUS) |
+| TASK_CONTEXT_SNAPSHOTS | Step execution context |
+| TASK_TOOL_CALLS | Tool invocation records |
+| TASK_DEPENDENCIES | Step dependency graph |
 
-### Workspace Tables (3 NEW)
-
-| Table | Purpose | Key Columns |
-|-------|---------|-------------|
-| WORKSPACES | Isolated agent execution environments | WORKSPACE_ID, WORKSPACE_NAME, ISOLATION_MODE, OWNER_USER_ID, DESCRIPTION, CREATED_AT |
-| WORKSPACE_CONTEXT | Append-only context chain (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE) | CONTEXT_ID, WORKSPACE_ID, CONTEXT_TYPE, CONTEXT_DATA (JSON), CREATED_BY, CREATED_AT |
-| WORKSPACE_TASKS | Junction: workspace <-> task plans | WORKSPACE_ID, PLAN_ID, ASSIGNED_AT |
-
-### System Tables (2)
+### Spec Tables (1)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| SYSTEM_CONFIG | Global configuration key-value store | CONFIG_KEY, CONFIG_VALUE (JSON), DESCRIPTION, UPDATED_AT |
-| SYSTEM_AUDIT_LOG | System-level audit trail | AUDIT_ID, EVENT_TYPE, EVENT_DATA (JSON), EVENT_TIMESTAMP |
+| SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-## PL/SQL Packages (5 Packages)
+## PL/SQL Packages (7 Packages)
 
 | Package | Function Count | Key Functions |
 |---------|---------------|---------------|
-| MEMORY_FUSION | 7 | fuse_similar_memories, decay_memories, reinforce_memory, search_memories, get_memory_stats, consolidate_memories, archive_old_memories |
-| KNOWLEDGE_MANAGER | 5 | validate_knowledge, link_knowledge, get_knowledge_graph, find_contradictions, resolve_contradiction |
+| MEMORY_FUSION_ENGINE | 7 | fuse_similar_memories, decay_memories, reinforce_memory, search_memories, get_memory_stats, consolidate_memories, archive_old_memories |
+| KNOWLEDGE_BASE_API | 5 | validate_knowledge, link_knowledge, get_knowledge_graph, find_contradictions, resolve_contradiction |
 | AGENT_PERMISSION_MANAGER | 5 | check_permission, grant_permission, revoke_permission, get_agent_permissions, audit_permissions |
-| SYSTEM_CLEANUP | 4 | cleanup_expired_sessions, cleanup_orphaned_entities, vacuum_embeddings, purge_audit_log |
+| SESSION_CLEANUP | 4 | cleanup_expired_sessions, cleanup_orphaned_entities, vacuum_embeddings, purge_audit_log |
 | WORKSPACE_MANAGER | 10 | create_workspace, get_workspace, update_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace, link_task_to_workspace, cleanup_workspace |
+| SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
+| COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 
-## Python API (10 Modules, 80+ Functions)
+## Python API (12 Modules, 99+ Functions)
 
 ### connection.py
 
@@ -312,13 +339,14 @@ def get_knowledge(entity_id: str) -> dict | None
 def search_knowledge(query: str, top_k: int = 10, workspace_id: str = None, isolation_mode: str = "SHARED") -> list[dict]
 def validate_knowledge(entity_id: str, validated_by: str, status: str, notes: str = None) -> bool
 def link_knowledge(source_id: str, target_id: str, edge_type: str, strength: float = 1.0) -> str
-def add_edge(source_id: str, source_type: str, target_id: str, target_type: str, edge_type: str, strength: float = 1.0) -> str
+def add_edge(source_id: str, source_type: str, target_id: str, edge_type: str, strength: float = 1.0) -> str
 def get_edges(entity_id: str, entity_type: str, direction: str = "outgoing") -> list[dict]
 ```
 
 ### agent_api.py
 
 ```python
+# Original functions
 def register_agent(agent_name: str, agent_type: str, capabilities: dict) -> str
 def get_agent(agent_id: str) -> dict | None
 def create_session(agent_id: str, owner_user_id: str = None, workspace_id: str = None, predecessor_session_id: str = None) -> str
@@ -328,6 +356,15 @@ def log_access(session_id: str, action_type: str, resource_type: str, resource_i
 def request_collaboration(session_id: str, target_agent_id: str, message: str) -> str
 def checkpoint_session(session_id: str, checkpoint_data: dict) -> bool
 def get_session_chain(session_id: str) -> list[dict]
+# NEW v2.3.0
+def issue_credential(agent_id: str, user_id: str, cred_type: str, scope: dict, expires_hours: int = 24) -> str
+def verify_credential(credential_id: str) -> dict | None
+def get_credentials_for_user(user_id: str) -> list[dict]
+def revoke_credential(credential_id: str) -> bool
+def hibernate_agent(agent_id: str) -> bool
+def wake_agent(agent_id: str) -> bool
+def register_pool_agent(agent_name: str, capabilities: dict, skills_tags: list[str]) -> str
+def assign_pool_agent(user_id: str, required_skills: list[str]) -> str | None
 ```
 
 ### task_plan_api.py
@@ -336,7 +373,7 @@ def get_session_chain(session_id: str) -> list[dict]
 def create_plan(title: str, description: str, owner_agent_id: str) -> str
 def get_plan(plan_id: str, status: str = "ACTIVE") -> dict | None
 def update_plan_status(plan_id: str, status: str) -> bool
-def add_step(plan_id: str, step_type: str, step_data: dict, step_order: int = None) -> str
+def add_step(plan_id: str, step_type: str, step_data: dict, step_order: int = None, plan_status: str = "ACTIVE") -> str
 def update_step_status(plan_id: str, step_id: str, status: str) -> bool
 def get_plan_steps(plan_id: str, status: str = "ACTIVE") -> list[dict]
 ```
@@ -384,6 +421,36 @@ def get_workspace_tasks(workspace_id: str) -> list[dict]
 def get_user_workspaces(user_id: str) -> list[dict]
 ```
 
+### spec_api.py [NEW v2.3.0]
+
+```python
+def create_spec(entity_data: dict, spec_meta: dict, workspace_id: str = None) -> str
+def get_spec(spec_id: str) -> dict | None
+def update_spec(spec_id: str, entity_data: dict = None, spec_meta: dict = None) -> bool
+def list_specs(status: str = None, workspace_id: str = None) -> list[dict]
+def create_plan_from_spec(spec_id: str, plan_title: str, plan_description: str) -> str
+def link_spec_to_plan(spec_id: str, plan_id: str, link_type: str = "DRIVES", strength: float = 1.0) -> str
+def get_spec_plan_links(spec_id: str) -> list[dict]
+def validate_plan_against_spec(spec_id: str, plan_id: str) -> dict
+def derive_spec(parent_spec_id: str, entity_data: dict, spec_meta: dict) -> str
+def delete_spec(spec_id: str) -> bool
+```
+
+### collab_api.py [NEW v2.3.0]
+
+```python
+def create_collab_group(group_name: str, group_type: str, sharing_policy: str = "OPEN", created_by: str = None) -> str
+def get_collab_group(group_id: str) -> dict | None
+def update_collab_group(group_id: str, **kwargs) -> bool
+def add_group_member(group_id: str, agent_id: str, role: str = "CONTRIBUTOR") -> str
+def remove_group_member(group_id: str, agent_id: str) -> bool
+def list_group_members(group_id: str) -> list[dict]
+def get_agent_groups(agent_id: str) -> list[dict]
+def share_memory_to_group(group_id: str, memory_id: str, shared_by: str) -> str
+def get_group_shared_memories(group_id: str) -> list[dict]
+def delete_collab_group(group_id: str) -> bool
+```
+
 ### security.py
 
 ```python
@@ -399,19 +466,21 @@ def hash_password(password: str) -> str
 def verify_password(password: str, password_hash: str) -> bool
 ```
 
-## Scheduler Jobs (9 Jobs)
+## Scheduler Jobs (11 Jobs)
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| MEMORY_DECAY_JOB | Daily 03:00 | Decays memory importance scores over time; archives below threshold |
-| KNOWLEDGE_VALIDATION_JOB | Daily 05:00 | Re-validates knowledge entities past validation period |
+| MEMORY_FUSION_JOB | Daily 03:00 | Fuses similar memories, decays importance scores, archives below threshold |
+| MEMORY_FUSION_CYCLE | Daily 04:00 | Runs full fusion cycle (decay + consolidate + archive) |
+| MEMORY_FUSION_STATS | Daily 05:00 | Computes and logs memory fusion statistics |
 | SESSION_CLEANUP_JOB | Hourly | Ends stale active sessions past timeout threshold |
-| ORPHAN_CLEANUP_JOB | Daily 02:00 | Removes entities with no edges and no references |
-| EMBEDDING_VACUUM_JOB | Weekly Sunday 01:00 | Rebuilds embedding index and purges stale cache |
-| AGENT_HEALTH_CHECK_JOB | Every 30 min | Checks agent heartbeats; marks unresponsive agents |
-| PERMISSION_AUDIT_JOB | Daily 06:00 | Audits agent permissions for compliance violations |
+| SESSION_EXPIRY_NOTIFICATION | Hourly | Notifies agents of upcoming session expiry |
+| KNOWLEDGE_EXTRACTION_JOB | Daily 06:00 | Extracts knowledge from high-importance memories |
+| KNOWLEDGE_GRAPH_MAINTENANCE | Weekly Sunday 01:00 | Rebuilds knowledge graph edges and consistency checks |
 | WORKSPACE_CLEANUP_JOB | Daily 04:00 | Archives completed workspaces and their context chains |
-| STALE_WORKSPACE_DETECT_JOB | Hourly | Detects workspaces with no active sessions for N hours |
+| STALE_WORKSPACE_DETECT_JOB | Every 30 min | Detects workspaces with no active sessions for N hours |
+| DORMANT_AGENT_JOB [NEW v2.3.0] | Every 30 min | Auto-hibernates agents inactive beyond dormant_timeout_min |
+| CREDENTIAL_CLEANUP_JOB [NEW v2.3.0] | Daily 02:00 | Purges expired and revoked credentials |
 
 ## Harness Templates (5 Built-in)
 
@@ -482,6 +551,10 @@ def verify_password(password: str, password_hash: str) -> bool
 - **JRD etag**: oracledb returns `bytes`; update without `_metadata` succeeds; wrong etag -> ORA-42699
 - **JRD INSERT via Python**: pass JSON string as bind to `INSERT INTO VIEW (DATA) VALUES (:data)`
 - **Decimal**: oracledb thin returns `decimal.Decimal` for NUMBER in JSON; use `_sanitize_json`/`sanitize_row`
+- **Named bind variables** (`:uid`, `:aid`) cause ORA-01745 on tables with JSON columns; use positional (`:1`,`:2`) or short names (`:b1`,`:b2`)
+- **CONSTRAINTS reserved word**: Oracle reserved; must use double-quote `"CONSTRAINTS"` in all SQL references
+- **PL/SQL JSON_OBJECT**: VALUE clause does not support `FORMAT JSON` in 23ai/26ai; use `RETURN VARCHAR2` instead of `RETURN JSON`
+- **Reference-partitioned tables**: Cannot DISABLE constraints (ORA-14650); constraints always enforced
 
 ## Key Design Decisions
 
@@ -495,6 +568,13 @@ def verify_password(password: str, password_hash: str) -> bool
 - **OWNER_USER_ID nullable** on WORKSPACES (system workspaces may have no owner)
 - **ISOLATION_MODE**: `SHARED` (entities visible across workspaces) vs `ISOLATED` (strict workspace boundary)
 - **Context checkpoint**: agent-initiated only; no automatic checkpointing on session end
+- **Spec storage**: ENTITIES subtype `SPEC`, reuses unified storage+partitioning+JRD; SPEC_META reference-partitioned like HARNESS_META
+- **Spec↔Plan**: Many-to-many via SPEC_PLAN_LINKS; LINK_TYPE: DRIVES/VALIDATES/CONSTRAINS/EXTENDS
+- **Agent states**: ACTIVE/INACTIVE/SUSPENDED/DECOMMISSIONED/DORMANT/POOL; DORMANT preserves identity, POOL is stateless
+- **POOL Agent**: Stateless — context follows user via credentials; matching by skills_tags intersection
+- **Collaboration Groups**: Mode C — group-level shared Workspace + optional personal Workspace per member; LEAD/CONTRIBUTOR get personal WS, OBSERVER does not
+- **SYSTEM_USERS precedes AGENT_REGISTRY** in DDL (FK dependency)
+- **SHA256 password prefix**: `SHA256:` is 7 chars; use `stored_hash[7:]` for comparison
 
 ## Deployment Notes
 

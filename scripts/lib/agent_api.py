@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.2.0 - Agent API
+"""Oracle Memory System v2.3.0 - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id
+from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id, sanitize_row, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -351,3 +351,160 @@ def get_collaborations(
         """
         rows = execute_query(sql, {"lim": limit})
     return [_row_to_dict(r) for r in rows]
+
+
+def issue_credential(agent_id, user_id, scope, credential_type='ACCESS_TOKEN', expires_at=None):
+    from .security import ReversibleEncryption
+    enc = ReversibleEncryption()
+    encrypted_value = enc.encrypt(json.dumps(scope))
+    row = execute_query_one("SELECT RAWTOHEX(SYS_GUID()) AS ID FROM DUAL")
+    cred_id = "CRED_" + row["id"]
+    sql = """
+        INSERT INTO AGENT_CREDENTIALS (CREDENTIAL_ID, AGENT_ID, USER_ID,
+            CREDENTIAL_TYPE, CREDENTIAL_VALUE, SCOPE, IS_ACTIVE, CREATED_AT, EXPIRES_AT)
+        VALUES (:1, :2, :3, :4, :5, :6, 'Y', SYSTIMESTAMP, :7)
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (cred_id, agent_id, user_id, credential_type,
+                              encrypted_value, json.dumps(scope), expires_at))
+            conn.commit()
+    return cred_id
+
+
+def verify_credential(credential_id):
+    row = execute_query_one("""
+        SELECT CREDENTIAL_ID, AGENT_ID, USER_ID, CREDENTIAL_TYPE,
+               CREDENTIAL_VALUE, SCOPE, IS_ACTIVE, EXPIRES_AT
+        FROM AGENT_CREDENTIALS WHERE CREDENTIAL_ID = :cid
+    """, {"cid": credential_id})
+    if not row or row.get("is_active") != 'Y':
+        return None
+    expires_at = row.get("expires_at")
+    if expires_at:
+        from datetime import datetime
+        if hasattr(expires_at, 'isoformat'):
+            expires_at = datetime.fromisoformat(expires_at.isoformat())
+        if expires_at < datetime.now():
+            return None
+    from .security import ReversibleEncryption
+    enc = ReversibleEncryption()
+    try:
+        decrypted_scope = enc.decrypt(row["credential_value"])
+        scope = json.loads(decrypted_scope)
+    except Exception:
+        scope = row.get("scope", {})
+    return {
+        "credential_id": row["credential_id"],
+        "agent_id": row["agent_id"],
+        "user_id": row["user_id"],
+        "credential_type": row["credential_type"],
+        "scope": scope,
+        "expires_at": row.get("expires_at"),
+    }
+
+
+def get_credentials_for_user(user_id, agent_id=None):
+    if agent_id:
+        sql = """SELECT CREDENTIAL_ID, AGENT_ID, USER_ID, CREDENTIAL_TYPE, SCOPE,
+                   IS_ACTIVE, EXPIRES_AT, CREATED_AT
+           FROM AGENT_CREDENTIALS WHERE USER_ID = :b1 AND AGENT_ID = :b2 AND IS_ACTIVE = 'Y'
+           ORDER BY CREATED_AT DESC"""
+        rows = execute_query(sql, {"b1": user_id, "b2": agent_id})
+    else:
+        sql = """SELECT CREDENTIAL_ID, AGENT_ID, USER_ID, CREDENTIAL_TYPE, SCOPE,
+                   IS_ACTIVE, EXPIRES_AT, CREATED_AT
+           FROM AGENT_CREDENTIALS WHERE USER_ID = :b1 AND IS_ACTIVE = 'Y'
+           ORDER BY CREATED_AT DESC"""
+        rows = execute_query(sql, {"b1": user_id})
+    return [_row_to_dict(r) for r in rows]
+
+
+def revoke_credential(credential_id):
+    return execute("""
+        UPDATE AGENT_CREDENTIALS SET IS_ACTIVE = 'N'
+        WHERE CREDENTIAL_ID = :cid AND IS_ACTIVE = 'Y'
+    """, {"cid": credential_id}) > 0
+
+
+def hibernate_agent(agent_id):
+    agent = get_agent(agent_id)
+    if not agent or agent.get("status") != "ACTIVE":
+        return False
+    return execute("""
+        UPDATE AGENT_REGISTRY
+        SET STATUS = 'DORMANT', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP
+        WHERE AGENT_ID = :aid
+    """, {"aid": agent_id}) > 0
+
+
+def wake_agent(agent_id, user_id=None, credential_id=None):
+    agent = get_agent(agent_id)
+    if not agent or agent.get("status") not in ("DORMANT", "POOL"):
+        return None
+    if credential_id:
+        cred = verify_credential(credential_id)
+        if not cred:
+            return None
+        if user_id is None:
+            user_id = cred.get("user_id")
+    params = {"b1": agent_id}
+    set_parts = ["STATUS = 'ACTIVE'", "LAST_ACTIVE_AT = SYSTIMESTAMP", "UPDATED_AT = SYSTIMESTAMP"]
+    if user_id:
+        set_parts.append("CURRENT_USER_ID = :b2")
+        params["b2"] = user_id
+    sql = "UPDATE AGENT_REGISTRY SET " + ", ".join(set_parts) + " WHERE AGENT_ID = :b1"
+    execute(sql, params)
+    refreshed = get_agent(agent_id)
+    if not refreshed:
+        return None
+    result = _row_to_dict(refreshed)
+    if user_id:
+        from .workspace_api import get_user_workspaces
+        workspaces = get_user_workspaces(user_id)
+        result["user_workspaces"] = workspaces
+    return result
+
+
+def register_pool_agent(agent_id, pool_config):
+    agent = get_agent(agent_id)
+    if not agent:
+        return False
+    cfg = agent.get("config", {}) or {}
+    if isinstance(cfg, str):
+        try:
+            cfg = json.loads(cfg)
+        except Exception:
+            cfg = {}
+    cfg["pool_config"] = pool_config
+    return update_agent(agent_id, config=cfg, status="POOL")
+
+
+def assign_pool_agent(user_id, required_skills):
+    rows = execute_query("""
+        SELECT AGENT_ID, CONFIG FROM AGENT_REGISTRY WHERE STATUS = 'POOL'
+    """)
+    best_agent = None
+    best_score = -1
+    for row in rows:
+        config = row.get("config", {})
+        if isinstance(config, str):
+            try:
+                config = json.loads(config)
+            except Exception:
+                config = {}
+        pool_config = config.get("pool_config", {}) if isinstance(config, dict) else {}
+        skills_tags = pool_config.get("skills_tags", [])
+        score = len(set(required_skills) & set(skills_tags))
+        if score > best_score:
+            best_score = score
+            best_agent = row["agent_id"]
+    if best_agent is None or best_score == 0:
+        return None
+    execute("""
+        UPDATE AGENT_REGISTRY
+        SET STATUS = 'ACTIVE', CURRENT_USER_ID = :b1,
+            LAST_ACTIVE_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP
+        WHERE AGENT_ID = :b2
+    """, {"b1": user_id, "b2": best_agent})
+    return _row_to_dict(get_agent(best_agent))

@@ -1,8 +1,8 @@
-"""Oracle Memory System v2.2.1 - Web Visualization Server
+"""Oracle Memory System v2.3.0 - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
-and graph visualization.
+specs, collaboration groups, and graph visualization.
 """
 
 import hashlib
@@ -19,9 +19,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
+from lib import spec_api, collab_api
 from lib import security, config
 
-VERSION = "2.2.1"
+VERSION = "2.3.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -35,6 +36,8 @@ PAGE_ROUTES = {
     '/tasks': 'tasks.html',
     '/workspaces': 'workspaces.html',
     '/graph': 'graph.html',
+    '/specs': 'specs.html',
+    '/collab': 'collab.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login'}
@@ -87,7 +90,10 @@ def _authenticate(username, password):
         return None
     stored_hash = row.get('password_hash', '')
     if stored_hash and stored_hash.startswith('SHA256:'):
-        return row
+        expected = stored_hash[7:]
+        actual = hashlib.sha256(password.encode()).hexdigest()
+        if actual == expected:
+            return row
     return None
 
 
@@ -124,9 +130,9 @@ def _graph_all():
         "SELECT source_id, target_id, edge_type, strength FROM entity_edges"
     )
     type_colors = {
-        'KNOWLEDGE': '#4a90d9', 'MEMORY': '#4fc3f7', 'TASK_OUTPUT': '#ffb74d',
-        'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8',
-    }
+            'KNOWLEDGE': '#4a90d9', 'MEMORY': '#4fc3f7', 'TASK_OUTPUT': '#ffb74d',
+            'EXPERIENCE': '#e57373', 'HARNESS_TEMPLATE': '#ba68c8', 'SPEC': '#66bb6a',
+        }
     nodes = []
     for item in all_items:
         tc = type_colors.get(item.get('entity_type', ''), '#666')
@@ -375,6 +381,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_tasks()
             elif path == '/api/workspaces':
                 self._api_workspaces()
+            elif path == '/api/specs':
+                self._api_specs()
+            elif path == '/api/collab':
+                self._api_collab()
             elif path == '/api/stats':
                 self._api_stats()
             elif path == '/api/graph/neighbors':
@@ -456,6 +466,29 @@ class VisHandler(BaseHTTPRequestHandler):
             ws['task_count'] = len(linked)
         self._send_json({'workspaces': [_clean_row(w) for w in workspaces]})
 
+    def _api_specs(self):
+        specs = spec_api.list_specs(limit=100)
+        for sp in specs:
+            sp['plan_links'] = spec_api.get_spec_plan_links(sp['entity_id'])
+        self._send_json({'specs': [_clean_row(s) for s in specs]})
+
+    def _api_collab(self):
+        groups = connection.execute_query(
+            "SELECT g.group_id, g.group_name, g.group_type, g.description, "
+            "g.workspace_id, g.coordinator_agent_id, g.sharing_policy, g.status, "
+            "g.metadata, g.created_at, g.updated_at, "
+            "(SELECT COUNT(*) FROM collab_group_members cgm WHERE cgm.group_id = g.group_id AND cgm.status = 'ACTIVE') AS member_count "
+            "FROM collab_groups g ORDER BY g.updated_at DESC"
+        )
+        for g in groups:
+            members = connection.execute_query(
+                "SELECT member_id, agent_id, role, personal_workspace_id, joined_at, status "
+                "FROM collab_group_members WHERE group_id = :1 ORDER BY joined_at",
+                (g['group_id'],)
+            )
+            g['members'] = [_clean_row(m) for m in members]
+        self._send_json({'groups': [_clean_row(g) for g in groups]})
+
     def _api_stats(self):
         entity_counts = {}
         type_rows = connection.execute_query(
@@ -466,11 +499,15 @@ class VisHandler(BaseHTTPRequestHandler):
         edge_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entity_edges")
         ws_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM workspaces")
         agent_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM agent_registry")
+        spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SPEC'")
+        collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
             'workspace_count': ws_row['cnt'] if ws_row else 0,
             'agent_count': agent_row['cnt'] if agent_row else 0,
+            'spec_count': spec_row['cnt'] if spec_row else 0,
+            'collab_count': collab_row['cnt'] if collab_row else 0,
         })
 
     def _serve_template(self, filename):

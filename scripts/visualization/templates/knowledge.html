@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Knowledge - Oracle Memory System v2.2.0</title>
+<title>Knowledge - Oracle Memory System v2.3.0</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="/static/vis-network.min.js"></script>
 <style>
@@ -48,18 +48,22 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .data-table tbody tr:hover td{background:rgba(233,69,96,.06)}
 .badge-domain{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.72rem;color:#fff;font-weight:600}
 .content-preview{color:var(--text-secondary);font-size:.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.detail-panel{width:340px;min-width:340px;background:var(--bg-secondary);border-left:1px solid var(--border-color);padding:20px;overflow-y:auto;display:none;position:relative}
-.detail-panel.show{display:block}
-.detail-panel h5{color:var(--accent);font-size:1rem;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-color);padding-right:28px}
-.detail-field{margin-bottom:12px}
-.detail-field .field-label{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
-.detail-field .field-value{color:var(--text-primary);font-size:.9rem;line-height:1.5;word-break:break-word}
+
+
 .tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.75rem;margin:2px 4px 2px 0}
-.close-detail{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer}
-.close-detail:hover{color:var(--accent)}
+
 .loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
 .spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+.detail-row td{padding:0!important;border-bottom:1px solid var(--border-color)}
+.detail-content{padding:16px 20px;background:var(--bg-secondary);border-left:3px solid var(--accent)}
+.detail-content p{margin:4px 0;font-size:.85rem;color:var(--text-primary)}
+.detail-content p strong{color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px}
+.detail-panel{width:340px;min-width:340px;background:var(--bg-secondary);border-left:1px solid var(--border-color);padding:20px;overflow-y:auto;display:none;position:relative}
+.detail-panel h5{color:var(--accent);font-size:1rem;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between}
+.close-detail{background:none;border:none;color:var(--text-secondary);font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1;transition:color .15s}
+.close-detail:hover{color:var(--accent)}
 [data-lang="zh"] [data-en]{display:none!important}
 [data-lang="en"] [data-zh]{display:none!important}
 </style>
@@ -68,7 +72,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <div class="sidebar">
   <div class="sidebar-brand">
     <h5>Oracle Memory</h5>
-    <small>v2.2.1</small>
+    <small>v2.3.0</small>
   </div>
   <nav class="sidebar-nav">
     <a href="/knowledge" class="active"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
@@ -77,6 +81,8 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
     <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
     <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
     <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+                        <a href="/specs"><span class="icon">&#128196;</span><span data-zh>规格</span><span data-en>Specs</span></a>
+            <a href="/collab"><span class="icon">&#128101;</span><span data-zh>协作</span><span data-en>Collab</span></a>
   </nav>
   <div class="sidebar-footer">
     <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
@@ -97,8 +103,12 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
     <button class="view-btn active" id="btnList" onclick="switchView('list')"><span data-zh>列表</span><span data-en>List</span></button>
   </div>
   <div class="content-area">
-    <div id="network-container" style="display:none"></div>
-    <div id="listView" style="display:block">
+     <div id="network-container" style="display:none"></div>
+     <div class="detail-panel" id="nodeDetail" style="display:none">
+       <h5><span data-zh>节点详情</span><span data-en>Node Detail</span><button class="close-detail" onclick="closeGraphDetail()" title="Close">&times;</button></h5>
+       <div id="nodeDetailContent"></div>
+     </div>
+     <div id="listView" style="display:block">
       <table class="data-table">
         <thead><tr>
           <th>ID</th>
@@ -111,18 +121,8 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
         </tr></thead>
         <tbody id="listBody"></tbody>
       </table>
-    </div>
-    <div class="detail-panel" id="detailPanel">
-      <button class="close-detail" onclick="closeDetail()">&times;</button>
-      <h5 id="detailTitle"></h5>
-      <div class="detail-field"><div class="field-label"><span data-zh>内容</span><span data-en>Content</span></div><div class="field-value" id="detailContent"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>摘要</span><span data-en>Summary</span></div><div class="field-value" id="detailSummary"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>领域</span><span data-en>Domain</span></div><div class="field-value" id="detailDomain"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>主题</span><span data-en>Topic</span></div><div class="field-value" id="detailTopic"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>难度</span><span data-en>Difficulty</span></div><div class="field-value" id="detailDifficulty"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>复习次数</span><span data-en>Review Count</span></div><div class="field-value" id="detailReviewCount"></div></div>
-      <div class="detail-field"><div class="field-label"><span data-zh>标签</span><span data-en>Tags</span></div><div class="field-value" id="detailTags"></div></div>
-    </div>
+     </div>
+
     <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
   </div>
 </div>
@@ -162,7 +162,39 @@ function applyLangPlaceholders() {
 }
 
 function closeDetail() {
-  document.getElementById('detailPanel').classList.remove('show');
+  var allD = document.querySelectorAll('.detail-row');
+  for (var i = 0; i < allD.length; i++) allD[i].style.display = 'none';
+}
+
+function toggleDetail(idx) {
+  var el = document.getElementById('kdetail-' + idx);
+  if (!el) return;
+  var allD = document.querySelectorAll('.detail-row');
+  for (var i = 0; i < allD.length; i++) { if (allD[i] !== el) allD[i].style.display = 'none'; }
+  el.style.display = el.style.display === 'table-row' ? 'none' : 'table-row';
+}
+
+function closeGraphDetail() {
+  var dp = document.getElementById('nodeDetail');
+  if (dp) dp.style.display = 'none';
+}
+
+function showGraphDetail(nd) {
+  if (!nd) return;
+  var dp = document.getElementById('nodeDetail');
+  var dc = document.getElementById('nodeDetailContent');
+  if (!dp || !dc) return;
+  var tgs = nd.tags && nd.tags.length > 0 ? nd.tags.map(function(t){return '<span class="tag">'+escapeHtml(t)+'</span>'}).join(' ') : '-';
+  dc.innerHTML = '<p><strong><span data-zh>标题</span><span data-en>Title</span></strong> ' + escapeHtml(nd.title||nd.label||'-') + '</p>' +
+    '<p><strong><span data-zh>内容</span><span data-en>Content</span></strong></p>' +
+    '<pre style="margin:0 0 8px;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">' + escapeHtml(nd.content||'-') + '</pre>' +
+    '<p><strong><span data-zh>摘要</span><span data-en>Summary</span></strong> ' + escapeHtml(nd.summary||'-') + '</p>' +
+    '<p><strong><span data-zh>领域</span><span data-en>Domain</span></strong> ' + escapeHtml(nd.domain||nd.group||'-') + '</p>' +
+    '<p><strong><span data-zh>主题</span><span data-en>Topic</span></strong> ' + escapeHtml(nd.topic||'-') + '</p>' +
+    '<p><strong><span data-zh>难度</span><span data-en>Difficulty</span></strong> ' + escapeHtml(nd.difficulty||'-') + '</p>' +
+    '<p><strong><span data-zh>复习次数</span><span data-en>Review Count</span></strong> ' + (nd.review_count != null ? nd.review_count : '-') + '</p>' +
+    '<p><strong><span data-zh>标签</span><span data-en>Tags</span></strong> ' + tgs + '</p>';
+  dp.style.display = 'block';
 }
 
 function showDetail(nodeId) {
@@ -172,20 +204,19 @@ function showDetail(nodeId) {
     if (allNodes[i].id === nodeId) { nodeData = allNodes[i]; break; }
   }
   if (!nodeData) return;
-  document.getElementById('detailTitle').textContent = nodeData.title || nodeData.label || '';
-  document.getElementById('detailContent').textContent = nodeData.content || '-';
-  document.getElementById('detailSummary').textContent = nodeData.summary || '-';
-  document.getElementById('detailDomain').textContent = nodeData.domain || nodeData.group || '-';
-  document.getElementById('detailTopic').textContent = nodeData.topic || '-';
-  document.getElementById('detailDifficulty').textContent = nodeData.difficulty || '-';
-  document.getElementById('detailReviewCount').textContent = nodeData.review_count != null ? nodeData.review_count : '-';
-  var tagsEl = document.getElementById('detailTags');
-  if (nodeData.tags && nodeData.tags.length > 0) {
-    tagsEl.innerHTML = nodeData.tags.map(function(t) { return '<span class="tag">' + escapeHtml(t) + '</span>'; }).join('');
+  if (currentView === 'graph') {
+    showGraphDetail(nodeData);
   } else {
-    tagsEl.textContent = '-';
+    closeDetail();
+    var tbody = document.getElementById('listBody');
+    for (var i = 0; i < tbody.children.length; i++) {
+      var tr = tbody.children[i];
+      if (tr.getAttribute('data-nid') === nodeId) {
+        toggleDetail(i);
+        return;
+      }
+    }
   }
-  document.getElementById('detailPanel').classList.add('show');
 }
 
 function escapeHtml(str) {
@@ -231,6 +262,8 @@ function filterNodes(keyword) {
 
 function switchView(v) {
   currentView = v;
+  if (v !== 'graph') closeGraphDetail();
+  if (v !== 'list') closeDetail();
   document.getElementById('btnGraph').classList.toggle('active', v === 'graph');
   document.getElementById('btnList').classList.toggle('active', v === 'list');
   document.getElementById('listView').style.display = v === 'list' ? 'block' : 'none';
@@ -269,7 +302,7 @@ function renderList() {
       if (t.indexOf(kw) < 0) continue;
     }
     var dc = domainColors[n.domain || n.group || 'General'] || domainColors.General;
-    h += '<tr onclick="showDetail(' + n.id + ')">';
+    h += '<tr data-nid="' + n.id + '" onclick="toggleDetail(' + i + ')" style="cursor:pointer">';
     h += '<td style="color:var(--text-secondary);font-family:monospace;font-size:.8rem">' + n.id + '</td>';
     h += '<td style="font-weight:600">' + escapeHtml(n.title || n.label) + '</td>';
     h += '<td><span class="badge-domain" style="background:' + dc + '">' + escapeHtml(n.domain || n.group || '-') + '</span></td>';
@@ -278,6 +311,20 @@ function renderList() {
     h += '<td style="text-align:center">' + (n.importance != null ? n.importance : '-') + '</td>';
     h += '<td class="content-preview">' + escapeHtml(n.content || '-') + '</td>';
     h += '</tr>';
+    h += '<tr id="kdetail-' + i + '" class="detail-row" style="display:none"><td colspan="7" style="padding:0">';
+    h += '<div class="detail-content">';
+    h += '<div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><span data-zh>节点详情</span><span data-en>Node Detail</span></div>';
+    h += '<p><strong><span data-zh>标题</span><span data-en>Title</span></strong> ' + escapeHtml(n.title || n.label || '-') + '</p>';
+    h += '<p><strong><span data-zh>内容</span><span data-en>Content</span></strong></p>';
+    h += '<pre style="margin:0 0 8px;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">' + escapeHtml(n.content || '-') + '</pre>';
+    h += '<p><strong><span data-zh>摘要</span><span data-en>Summary</span></strong> ' + escapeHtml(n.summary || '-') + '</p>';
+    h += '<p><strong><span data-zh>领域</span><span data-en>Domain</span></strong> ' + escapeHtml(n.domain || n.group || '-') + '</p>';
+    h += '<p><strong><span data-zh>主题</span><span data-en>Topic</span></strong> ' + escapeHtml(n.topic || '-') + '</p>';
+    h += '<p><strong><span data-zh>难度</span><span data-en>Difficulty</span></strong> ' + escapeHtml(n.difficulty || '-') + '</p>';
+    h += '<p><strong><span data-zh>复习次数</span><span data-en>Review Count</span></strong> ' + (n.review_count != null ? n.review_count : '-') + '</p>';
+    var tgs = n.tags && n.tags.length > 0 ? n.tags.map(function(t){return '<span class="tag">'+escapeHtml(t)+'</span>'}).join(' ') : '-';
+    h += '<p><strong><span data-zh>标签</span><span data-en>Tags</span></strong> ' + tgs + '</p>';
+    h += '</div></td></tr>';
   }
   tbody.innerHTML = h;
 }

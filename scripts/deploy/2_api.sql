@@ -1,5 +1,5 @@
 -- ============================================================
--- Oracle Memory System v2.2.0 - Phase 2: PL/SQL API Packages
+-- Oracle Memory System v2.3.0 - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -711,3 +711,498 @@ CREATE OR REPLACE PACKAGE BODY WORKSPACE_MANAGER AS
 
 END WORKSPACE_MANAGER;
 /
+
+
+CREATE OR REPLACE PACKAGE SPEC_MANAGER AS
+    FUNCTION create_spec(p_title VARCHAR2, p_content CLOB DEFAULT NULL, 
+        p_summary VARCHAR2 DEFAULT NULL, p_category VARCHAR2 DEFAULT NULL,
+        p_importance NUMBER DEFAULT 5, p_owned_by_agent VARCHAR2 DEFAULT NULL,
+        p_visibility VARCHAR2 DEFAULT 'SHARED', p_workspace_id VARCHAR2 DEFAULT NULL,
+        p_spec_scope VARCHAR2 DEFAULT NULL, p_complexity VARCHAR2 DEFAULT 'MEDIUM',
+        p_acceptance_criteria JSON DEFAULT NULL, p_constraints JSON DEFAULT NULL,
+        p_parent_spec_id VARCHAR2 DEFAULT NULL) RETURN VARCHAR2;
+    
+    FUNCTION update_spec(p_entity_id VARCHAR2, p_title VARCHAR2 DEFAULT NULL,
+        p_content CLOB DEFAULT NULL, p_summary VARCHAR2 DEFAULT NULL,
+        p_category VARCHAR2 DEFAULT NULL, p_importance NUMBER DEFAULT NULL,
+        p_visibility VARCHAR2 DEFAULT NULL, p_spec_status VARCHAR2 DEFAULT NULL,
+        p_spec_scope VARCHAR2 DEFAULT NULL, p_complexity VARCHAR2 DEFAULT NULL,
+        p_acceptance_criteria JSON DEFAULT NULL, p_constraints JSON DEFAULT NULL) RETURN NUMBER;
+    
+    FUNCTION get_spec(p_entity_id VARCHAR2) RETURN JSON;
+    
+    FUNCTION list_specs(p_spec_scope VARCHAR2 DEFAULT NULL, 
+        p_spec_status VARCHAR2 DEFAULT NULL, p_limit NUMBER DEFAULT 50) RETURN SYS_REFCURSOR;
+    
+    FUNCTION link_spec_to_plan(p_spec_id VARCHAR2, p_plan_id VARCHAR2,
+        p_link_type VARCHAR2, p_link_strength NUMBER DEFAULT 1.0) RETURN VARCHAR2;
+    
+    FUNCTION validate_spec(p_spec_id VARCHAR2, p_plan_id VARCHAR2 DEFAULT NULL) RETURN VARCHAR2;
+    
+    FUNCTION derive_spec(p_parent_spec_id VARCHAR2, p_title VARCHAR2,
+        p_content CLOB DEFAULT NULL, p_summary VARCHAR2 DEFAULT NULL) RETURN VARCHAR2;
+    
+    PROCEDURE delete_spec(p_entity_id VARCHAR2);
+END SPEC_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY SPEC_MANAGER AS
+
+    FUNCTION create_spec(p_title VARCHAR2, p_content CLOB DEFAULT NULL, 
+        p_summary VARCHAR2 DEFAULT NULL, p_category VARCHAR2 DEFAULT NULL,
+        p_importance NUMBER DEFAULT 5, p_owned_by_agent VARCHAR2 DEFAULT NULL,
+        p_visibility VARCHAR2 DEFAULT 'SHARED', p_workspace_id VARCHAR2 DEFAULT NULL,
+        p_spec_scope VARCHAR2 DEFAULT NULL, p_complexity VARCHAR2 DEFAULT 'MEDIUM',
+        p_acceptance_criteria JSON DEFAULT NULL, p_constraints JSON DEFAULT NULL,
+        p_parent_spec_id VARCHAR2 DEFAULT NULL) RETURN VARCHAR2 IS
+        v_entity_id VARCHAR2(64);
+    BEGIN
+        v_entity_id := RAWTOHEX(SYS_GUID());
+
+        INSERT INTO ENTITIES (
+            ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
+            STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
+            IMPORTANCE, RETRIEVAL_COUNT, WORKSPACE_ID, CREATED_AT, UPDATED_AT
+        ) VALUES (
+            v_entity_id, 'SPEC', p_title, p_content, p_summary, p_category,
+            'DRAFT', p_owned_by_agent, p_owned_by_agent, p_visibility,
+            p_importance, 0, p_workspace_id, SYSTIMESTAMP, SYSTIMESTAMP
+        );
+
+        INSERT INTO SPEC_META (
+            ENTITY_ID, ENTITY_TYPE, SPEC_VERSION, SPEC_STATUS,
+            ACCEPTANCE_CRITERIA, "CONSTRAINTS", SPEC_SCOPE,
+            COMPLEXITY, PARENT_SPEC_ID
+        ) VALUES (
+            v_entity_id, 'SPEC', 1, 'DRAFT',
+            p_acceptance_criteria, p_constraints, p_spec_scope,
+            p_complexity, p_parent_spec_id
+        );
+
+        COMMIT;
+        RETURN v_entity_id;
+    END create_spec;
+
+    FUNCTION update_spec(p_entity_id VARCHAR2, p_title VARCHAR2 DEFAULT NULL,
+        p_content CLOB DEFAULT NULL, p_summary VARCHAR2 DEFAULT NULL,
+        p_category VARCHAR2 DEFAULT NULL, p_importance NUMBER DEFAULT NULL,
+        p_visibility VARCHAR2 DEFAULT NULL, p_spec_status VARCHAR2 DEFAULT NULL,
+        p_spec_scope VARCHAR2 DEFAULT NULL, p_complexity VARCHAR2 DEFAULT NULL,
+        p_acceptance_criteria JSON DEFAULT NULL, p_constraints JSON DEFAULT NULL) RETURN NUMBER IS
+        v_rows NUMBER;
+    BEGIN
+        UPDATE ENTITIES
+        SET TITLE       = COALESCE(p_title, TITLE),
+            CONTENT     = COALESCE(p_content, CONTENT),
+            SUMMARY     = COALESCE(p_summary, SUMMARY),
+            CATEGORY    = COALESCE(p_category, CATEGORY),
+            IMPORTANCE  = COALESCE(p_importance, IMPORTANCE),
+            VISIBILITY  = COALESCE(p_visibility, VISIBILITY),
+            UPDATED_AT  = SYSTIMESTAMP
+        WHERE ENTITY_ID = p_entity_id
+          AND ENTITY_TYPE = 'SPEC';
+
+        v_rows := SQL%ROWCOUNT;
+
+        UPDATE SPEC_META
+        SET SPEC_STATUS         = COALESCE(p_spec_status, SPEC_STATUS),
+            SPEC_SCOPE          = COALESCE(p_spec_scope, SPEC_SCOPE),
+            COMPLEXITY          = COALESCE(p_complexity, COMPLEXITY),
+            ACCEPTANCE_CRITERIA = COALESCE(p_acceptance_criteria, ACCEPTANCE_CRITERIA),
+            "CONSTRAINTS"         = COALESCE(p_constraints, "CONSTRAINTS")
+        WHERE ENTITY_ID = p_entity_id
+          AND ENTITY_TYPE = 'SPEC';
+
+        COMMIT;
+        RETURN v_rows;
+    END update_spec;
+
+    FUNCTION get_spec(p_entity_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'entity_id'    VALUE e.ENTITY_ID,
+            'entity_type'  VALUE e.ENTITY_TYPE,
+            'title'        VALUE e.TITLE,
+            'summary'      VALUE e.SUMMARY,
+            'category'     VALUE e.CATEGORY,
+            'status'       VALUE e.STATUS,
+            'owned_by'     VALUE e.OWNED_BY_AGENT,
+            'visibility'   VALUE e.VISIBILITY,
+            'importance'   VALUE e.IMPORTANCE,
+            'workspace_id' VALUE e.WORKSPACE_ID,
+            'spec_meta'    VALUE JSON_OBJECT(
+                'spec_version'        VALUE sm.SPEC_VERSION,
+                'spec_status'         VALUE sm.SPEC_STATUS,
+                'spec_scope'          VALUE sm.SPEC_SCOPE,
+                'complexity'          VALUE sm.COMPLEXITY,
+                'acceptance_criteria' VALUE sm.ACCEPTANCE_CRITERIA,
+                'constraints'         VALUE sm."CONSTRAINTS",
+                'parent_spec_id'      VALUE sm.PARENT_SPEC_ID
+            ),
+            'plan_links'   VALUE COALESCE(
+                (SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'link_id'       VALUE spl.LINK_ID,
+                        'plan_id'       VALUE spl.PLAN_ID,
+                        'link_type'     VALUE spl.LINK_TYPE,
+                        'link_strength' VALUE spl.LINK_STRENGTH,
+                        'created_at'    VALUE TO_CHAR(spl.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS')
+                    )
+                )
+                FROM SPEC_PLAN_LINKS spl
+                WHERE spl.SPEC_ID = p_entity_id),
+                JSON_ARRAY()
+            ),
+            'created_at'   VALUE TO_CHAR(e.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS'),
+            'updated_at'   VALUE TO_CHAR(e.UPDATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS')
+        ) INTO v_result
+        FROM ENTITIES e
+        JOIN SPEC_META sm
+            ON sm.ENTITY_ID = e.ENTITY_ID
+           AND sm.ENTITY_TYPE = e.ENTITY_TYPE
+        WHERE e.ENTITY_ID = p_entity_id
+          AND e.ENTITY_TYPE = 'SPEC';
+
+        RETURN v_result;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN NULL;
+    END get_spec;
+
+    FUNCTION list_specs(p_spec_scope VARCHAR2 DEFAULT NULL, 
+        p_spec_status VARCHAR2 DEFAULT NULL, p_limit NUMBER DEFAULT 50) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT
+                e.ENTITY_ID, e.TITLE, e.SUMMARY, e.CATEGORY,
+                e.STATUS, e.OWNED_BY_AGENT, e.IMPORTANCE,
+                sm.SPEC_VERSION, sm.SPEC_STATUS, sm.SPEC_SCOPE,
+                sm.COMPLEXITY, sm.PARENT_SPEC_ID,
+                e.CREATED_AT, e.UPDATED_AT
+            FROM ENTITIES e
+            JOIN SPEC_META sm
+                ON sm.ENTITY_ID = e.ENTITY_ID
+               AND sm.ENTITY_TYPE = e.ENTITY_TYPE
+            WHERE e.ENTITY_TYPE = 'SPEC'
+              AND (p_spec_scope IS NULL OR sm.SPEC_SCOPE = p_spec_scope)
+              AND (p_spec_status IS NULL OR sm.SPEC_STATUS = p_spec_status)
+            ORDER BY e.UPDATED_AT DESC
+            FETCH FIRST p_limit ROWS ONLY;
+
+        RETURN v_cur;
+    END list_specs;
+
+    FUNCTION link_spec_to_plan(p_spec_id VARCHAR2, p_plan_id VARCHAR2,
+        p_link_type VARCHAR2, p_link_strength NUMBER DEFAULT 1.0) RETURN VARCHAR2 IS
+        v_link_id VARCHAR2(64);
+    BEGIN
+        v_link_id := RAWTOHEX(SYS_GUID());
+
+        INSERT INTO SPEC_PLAN_LINKS (
+            LINK_ID, SPEC_ID, PLAN_ID, LINK_TYPE, LINK_STRENGTH
+        ) VALUES (
+            v_link_id, p_spec_id, p_plan_id, p_link_type, p_link_strength
+        );
+
+        COMMIT;
+        RETURN v_link_id;
+    END link_spec_to_plan;
+
+    FUNCTION validate_spec(p_spec_id VARCHAR2, p_plan_id VARCHAR2 DEFAULT NULL) RETURN VARCHAR2 IS
+        v_criteria    JSON;
+        v_spec_title  VARCHAR2(512);
+        v_total       NUMBER := 0;
+        v_passed      NUMBER := 0;
+        v_rate        NUMBER := 0;
+        v_status_str  VARCHAR2(16) := 'FAIL';
+    BEGIN
+        SELECT sm.ACCEPTANCE_CRITERIA, e.TITLE
+        INTO v_criteria, v_spec_title
+        FROM SPEC_META sm
+        JOIN ENTITIES e ON e.ENTITY_ID = sm.ENTITY_ID AND e.ENTITY_TYPE = sm.ENTITY_TYPE
+        WHERE sm.ENTITY_ID = p_spec_id
+          AND sm.ENTITY_TYPE = 'SPEC';
+
+        SELECT COUNT(*), COUNT(CASE WHEN ts.STATUS = 'SUCCESS' THEN 1 END)
+        INTO v_total, v_passed
+        FROM TASK_STEPS ts
+        WHERE ts.PLAN_ID = COALESCE(p_plan_id, (
+            SELECT spl.PLAN_ID FROM SPEC_PLAN_LINKS spl
+            WHERE spl.SPEC_ID = p_spec_id AND spl.LINK_TYPE = 'VALIDATES'
+            FETCH FIRST 1 ROW ONLY
+        ));
+
+        IF v_total > 0 THEN
+            v_rate := ROUND(v_passed / v_total, 4);
+            IF v_passed = v_total THEN
+                v_status_str := 'PASS';
+            END IF;
+        END IF;
+
+        RETURN JSON_OBJECT(
+            'spec_id'       VALUE p_spec_id,
+            'spec_title'    VALUE v_spec_title,
+            'plan_id'       VALUE p_plan_id,
+            'total_steps'   VALUE v_total,
+            'passed_steps'  VALUE v_passed,
+            'pass_rate'     VALUE v_rate,
+            'status'        VALUE v_status_str
+        );
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN JSON_OBJECT(
+                'spec_id' VALUE p_spec_id,
+                'status'  VALUE 'NOT_FOUND'
+            );
+    END validate_spec;
+
+    FUNCTION derive_spec(p_parent_spec_id VARCHAR2, p_title VARCHAR2,
+        p_content CLOB DEFAULT NULL, p_summary VARCHAR2 DEFAULT NULL) RETURN VARCHAR2 IS
+        v_entity_id    VARCHAR2(64);
+        v_parent_scope VARCHAR2(64);
+        v_new_version  NUMBER;
+    BEGIN
+        SELECT sm.SPEC_SCOPE, sm.SPEC_VERSION + 1
+        INTO v_parent_scope, v_new_version
+        FROM SPEC_META sm
+        WHERE sm.ENTITY_ID = p_parent_spec_id
+          AND sm.ENTITY_TYPE = 'SPEC';
+
+        v_entity_id := RAWTOHEX(SYS_GUID());
+
+        INSERT INTO ENTITIES (
+            ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, SUMMARY, CATEGORY,
+            STATUS, OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
+            IMPORTANCE, RETRIEVAL_COUNT, CREATED_AT, UPDATED_AT
+        ) SELECT
+            v_entity_id, 'SPEC', p_title, COALESCE(p_content, e.CONTENT),
+            COALESCE(p_summary, e.SUMMARY), e.CATEGORY,
+            'DRAFT', e.OWNED_BY_AGENT, e.OWNED_BY_AGENT, e.VISIBILITY,
+            e.IMPORTANCE, 0, SYSTIMESTAMP, SYSTIMESTAMP
+        FROM ENTITIES e
+        WHERE e.ENTITY_ID = p_parent_spec_id
+          AND e.ENTITY_TYPE = 'SPEC';
+
+        INSERT INTO SPEC_META (
+            ENTITY_ID, ENTITY_TYPE, SPEC_VERSION, SPEC_STATUS,
+            ACCEPTANCE_CRITERIA, "CONSTRAINTS", SPEC_SCOPE,
+            COMPLEXITY, PARENT_SPEC_ID
+        ) SELECT
+            v_entity_id, 'SPEC', v_new_version, 'DRAFT',
+            sm.ACCEPTANCE_CRITERIA, sm."CONSTRAINTS", v_parent_scope,
+            sm.COMPLEXITY, p_parent_spec_id
+        FROM SPEC_META sm
+        WHERE sm.ENTITY_ID = p_parent_spec_id
+          AND sm.ENTITY_TYPE = 'SPEC';
+
+        COMMIT;
+        RETURN v_entity_id;
+    END derive_spec;
+
+    PROCEDURE delete_spec(p_entity_id VARCHAR2) IS
+    BEGIN
+        DELETE FROM SPEC_PLAN_LINKS
+        WHERE SPEC_ID = p_entity_id;
+
+        DELETE FROM SPEC_META
+        WHERE ENTITY_ID = p_entity_id
+          AND ENTITY_TYPE = 'SPEC';
+
+        DELETE FROM ENTITIES
+        WHERE ENTITY_ID = p_entity_id
+          AND ENTITY_TYPE = 'SPEC';
+
+        COMMIT;
+    END delete_spec;
+
+END SPEC_MANAGER;
+/
+
+
+CREATE OR REPLACE PACKAGE COLLAB_GROUP_MANAGER AS
+    FUNCTION create_group(p_group_name VARCHAR2, p_group_type VARCHAR2,
+        p_description VARCHAR2 DEFAULT NULL, p_coordinator_agent_id VARCHAR2 DEFAULT NULL,
+        p_sharing_policy VARCHAR2 DEFAULT 'OPEN', p_metadata JSON DEFAULT NULL) RETURN VARCHAR2;
+    
+    FUNCTION update_group(p_group_id VARCHAR2, p_group_name VARCHAR2 DEFAULT NULL,
+        p_description VARCHAR2 DEFAULT NULL, p_coordinator_agent_id VARCHAR2 DEFAULT NULL,
+        p_sharing_policy VARCHAR2 DEFAULT NULL, p_status VARCHAR2 DEFAULT NULL,
+        p_metadata JSON DEFAULT NULL) RETURN NUMBER;
+    
+    FUNCTION get_group(p_group_id VARCHAR2) RETURN JSON;
+    
+    FUNCTION add_member(p_group_id VARCHAR2, p_agent_id VARCHAR2,
+        p_role VARCHAR2 DEFAULT 'MEMBER') RETURN VARCHAR2;
+    
+    FUNCTION remove_member(p_group_id VARCHAR2, p_agent_id VARCHAR2) RETURN NUMBER;
+    
+    PROCEDURE archive_group(p_group_id VARCHAR2);
+END COLLAB_GROUP_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY COLLAB_GROUP_MANAGER AS
+
+    FUNCTION create_group(p_group_name VARCHAR2, p_group_type VARCHAR2,
+        p_description VARCHAR2 DEFAULT NULL, p_coordinator_agent_id VARCHAR2 DEFAULT NULL,
+        p_sharing_policy VARCHAR2 DEFAULT 'OPEN', p_metadata JSON DEFAULT NULL) RETURN VARCHAR2 IS
+        v_group_id     VARCHAR2(64);
+        v_workspace_id VARCHAR2(64);
+    BEGIN
+        v_group_id := RAWTOHEX(SYS_GUID());
+        v_workspace_id := 'WS_CG_' || RAWTOHEX(SYS_GUID());
+
+        INSERT INTO WORKSPACES (
+            WORKSPACE_ID, OWNER_USER_ID, WORKSPACE_NAME,
+            WORKSPACE_TYPE, ISOLATION_MODE, METADATA
+        ) VALUES (
+            v_workspace_id, p_coordinator_agent_id,
+            'Collab: ' || p_group_name,
+            'COLLAB_GROUP', 'SHARED', p_metadata
+        );
+
+        INSERT INTO COLLAB_GROUPS (
+            GROUP_ID, GROUP_NAME, GROUP_TYPE, DESCRIPTION,
+            WORKSPACE_ID, COORDINATOR_AGENT_ID, SHARING_POLICY,
+            STATUS, METADATA
+        ) VALUES (
+            v_group_id, p_group_name, p_group_type, p_description,
+            v_workspace_id, p_coordinator_agent_id, p_sharing_policy,
+            'ACTIVE', p_metadata
+        );
+
+        COMMIT;
+        RETURN v_group_id;
+    END create_group;
+
+    FUNCTION update_group(p_group_id VARCHAR2, p_group_name VARCHAR2 DEFAULT NULL,
+        p_description VARCHAR2 DEFAULT NULL, p_coordinator_agent_id VARCHAR2 DEFAULT NULL,
+        p_sharing_policy VARCHAR2 DEFAULT NULL, p_status VARCHAR2 DEFAULT NULL,
+        p_metadata JSON DEFAULT NULL) RETURN NUMBER IS
+        v_rows NUMBER;
+    BEGIN
+        UPDATE COLLAB_GROUPS
+        SET GROUP_NAME           = COALESCE(p_group_name, GROUP_NAME),
+            DESCRIPTION          = COALESCE(p_description, DESCRIPTION),
+            COORDINATOR_AGENT_ID = COALESCE(p_coordinator_agent_id, COORDINATOR_AGENT_ID),
+            SHARING_POLICY       = COALESCE(p_sharing_policy, SHARING_POLICY),
+            STATUS               = COALESCE(p_status, STATUS),
+            METADATA             = COALESCE(p_metadata, METADATA),
+            UPDATED_AT           = SYSTIMESTAMP
+        WHERE GROUP_ID = p_group_id;
+
+        v_rows := SQL%ROWCOUNT;
+        COMMIT;
+        RETURN v_rows;
+    END update_group;
+
+    FUNCTION get_group(p_group_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'group_id'       VALUE g.GROUP_ID,
+            'group_name'     VALUE g.GROUP_NAME,
+            'group_type'     VALUE g.GROUP_TYPE,
+            'description'    VALUE g.DESCRIPTION,
+            'workspace_id'   VALUE g.WORKSPACE_ID,
+            'coordinator'    VALUE g.COORDINATOR_AGENT_ID,
+            'sharing_policy' VALUE g.SHARING_POLICY,
+            'status'         VALUE g.STATUS,
+            'metadata'       VALUE g.METADATA,
+            'members'        VALUE COALESCE(
+                (SELECT JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        'member_id'       VALUE m.MEMBER_ID,
+                        'agent_id'        VALUE m.AGENT_ID,
+                        'role'            VALUE m.ROLE,
+                        'personal_workspace_id' VALUE m.PERSONAL_WORKSPACE_ID,
+                        'joined_at'       VALUE TO_CHAR(m.JOINED_AT, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                        'status'          VALUE m.STATUS
+                    )
+                    ORDER BY m.JOINED_AT
+                )
+                FROM COLLAB_GROUP_MEMBERS m
+                WHERE m.GROUP_ID = p_group_id
+                  AND m.STATUS = 'ACTIVE'),
+                JSON_ARRAY()
+            ),
+            'created_at'     VALUE TO_CHAR(g.CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS'),
+            'updated_at'     VALUE TO_CHAR(g.UPDATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS')
+        ) INTO v_result
+        FROM COLLAB_GROUPS g
+        WHERE g.GROUP_ID = p_group_id;
+
+        RETURN v_result;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN NULL;
+    END get_group;
+
+    FUNCTION add_member(p_group_id VARCHAR2, p_agent_id VARCHAR2,
+        p_role VARCHAR2 DEFAULT 'MEMBER') RETURN VARCHAR2 IS
+        v_member_id         VARCHAR2(64);
+        v_personal_ws_id    VARCHAR2(64);
+    BEGIN
+        v_member_id := RAWTOHEX(SYS_GUID());
+
+        IF p_role IN ('LEAD', 'CONTRIBUTOR') THEN
+            v_personal_ws_id := 'WS_PG_' || RAWTOHEX(SYS_GUID());
+
+            INSERT INTO WORKSPACES (
+                WORKSPACE_ID, OWNER_USER_ID, WORKSPACE_NAME,
+                WORKSPACE_TYPE, ISOLATION_MODE, METADATA
+            ) VALUES (
+                v_personal_ws_id, p_agent_id,
+                'Personal: ' || p_agent_id || ' in ' || p_group_id,
+                'PERSONAL_IN_GROUP', 'ISOLATED', NULL
+            );
+        END IF;
+
+        INSERT INTO COLLAB_GROUP_MEMBERS (
+            MEMBER_ID, GROUP_ID, AGENT_ID, ROLE,
+            PERSONAL_WORKSPACE_ID, STATUS
+        ) VALUES (
+            v_member_id, p_group_id, p_agent_id, p_role,
+            v_personal_ws_id, 'ACTIVE'
+        );
+
+        COMMIT;
+        RETURN v_member_id;
+    END add_member;
+
+    FUNCTION remove_member(p_group_id VARCHAR2, p_agent_id VARCHAR2) RETURN NUMBER IS
+    BEGIN
+        UPDATE COLLAB_GROUP_MEMBERS
+        SET STATUS = 'LEFT'
+        WHERE GROUP_ID = p_group_id
+          AND AGENT_ID = p_agent_id
+          AND STATUS = 'ACTIVE';
+
+        COMMIT;
+        RETURN SQL%ROWCOUNT;
+    END remove_member;
+
+    PROCEDURE archive_group(p_group_id VARCHAR2) IS
+    BEGIN
+        UPDATE COLLAB_GROUPS
+        SET STATUS    = 'ARCHIVED',
+            UPDATED_AT = SYSTIMESTAMP
+        WHERE GROUP_ID = p_group_id;
+
+        UPDATE COLLAB_GROUP_MEMBERS
+        SET STATUS = 'REMOVED'
+        WHERE GROUP_ID = p_group_id
+          AND STATUS = 'ACTIVE';
+
+        COMMIT;
+    END archive_group;
+
+END COLLAB_GROUP_MANAGER;
+/
+
+COMMIT;
+
+PROMPT ============================================================
+PROMPT Oracle Memory System v2.3.0 API Deployment Complete
+PROMPT ============================================================

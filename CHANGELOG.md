@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+---
+
+## [2.3.0] - 2026-05-24
+
+### Added
+
+- **Spec Driven Development (SDD)** — 5 new tables (SPEC_META, SPEC_PLAN_LINKS, AGENT_CREDENTIALS, COLLAB_GROUPS, COLLAB_GROUP_MEMBERS), 2 new JRD views (SPEC_DV, COLLAB_GROUP_DV), SPEC_MANAGER + COLLAB_GROUP_MANAGER PL/SQL packages
+- **Python APIs** — spec_api.py (10 functions), collab_api.py (10 functions), agent_api.py extended with 8 new functions (credentials, hibernate, wake, pool management)
+- **Agent Elastic Management** — DORMANT/POOL states, credential-based authentication, reversible encryption, POOL agent matching with skills_tags, DORMANT_AGENT_JOB (auto-hibernate), CREDENTIAL_CLEANUP_JOB
+- **Collaboration Groups** — Mode C (group shared workspace + personal workspace per LEAD/CONTRIBUTOR), OBSERVER role, OPEN/MODERATED/RESTRICTED sharing policies, group-level shared memory API
+- **Visualization** — New Specs and Collab pages with sidebar navigation, /api/specs and /api/collab endpoints, SPEC type in graph visualization, spec/collab counts in stats API
+- **Schema** — ENTITIES extended with SPEC subtype and partition, AGENT_REGISTRY +5 columns, AGENT_SESSION +LAST_ACTIVE_AT, WORKSPACES +COLLAB_GROUP/PERSONAL_IN_GROUP types, SYSTEM_CONFIG +dormant_timeout_min/credential_encryption_key entries
+- **11 Scheduler Jobs** — DORMANT_AGENT_JOB (30-min auto-hibernate), CREDENTIAL_CLEANUP_JOB (daily purge)
+
+### Changed
+
+- **Visualization** — Knowledge/Memory detail display changed from sidebar panel to inline row expansion (Tasks page pattern); Graph view retains right-side detail panel with close button
+- **Authentication** — Password verification now performs actual SHA256 hash comparison instead of prefix-only check; default admin password is `admin123`
+
+### Fixed
+
+- CONSTRAINTS reserved word in Oracle requires double-quote quoting
+- oracledb thin mode named bind variables on JSON columns cause ORA-01745; use positional or short bind names
+- SYSTEM_USERS table must precede AGENT_REGISTRY in DDL (FK dependency)
+- Login page version badge updated from 2.2.0 to 2.3.0
+- Specs/Collab sidebar links bilingual (data-zh/data-en) across all 8 pages
+- Truncated IDs show full content on hover (title attribute)
+- Graph view detail panel auto-closes when switching to List view
+
 ## [2.2.1] - 2026-05-23
 
 ### Summary

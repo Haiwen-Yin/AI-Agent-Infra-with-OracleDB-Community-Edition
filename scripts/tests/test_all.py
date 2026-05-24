@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.2.0 - Master Test Runner"""
+"""Oracle Memory System v2.3.0 - Master Test Runner"""
 
 import sys
 import os
@@ -16,7 +16,7 @@ from tests.test_workspace import run_all as run_workspace
 
 def main():
     print("=" * 60)
-    print("Oracle Memory System v2.2.0 - Full Test Suite")
+    print("Oracle Memory System v2.3.0 - Full Test Suite")
     print("=" * 60)
 
     suites = [

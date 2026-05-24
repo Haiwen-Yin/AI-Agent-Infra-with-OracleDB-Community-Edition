@@ -1,36 +1,59 @@
-# Oracle AI Database Memory System v2.2.1
+# Oracle AI Database Memory System v2.3.0
 
-[![Version](https://img.shields.io/badge/version-v2.2.1-blue.svg)](RELEASE_NOTES_v2.2.1.md)
+[![Version](https://img.shields.io/badge/version-v2.3.0-blue.svg)](RELEASE_NOTES_v2.3.0.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
-[![SQLcl](https://img.shields.io/badge/SQLcl-26.1+-orange.svg)](https://www.oracle.com/database/sqldeveloper/technologies/sqlcl/)
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-99%2F99-brightgreen.svg)]()
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Partitioned AI Agent Memory System with Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, Workspace & Context Continuity, and Web Visualization — built on Oracle 26ai.**
+**Partitioned AI Agent Memory System with Spec Driven Development, Agent Elastic Management, Collaboration Groups, Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, Workspace & Context Continuity, and Web Visualization — built on Oracle 26ai.**
 
-> **v2.2.1 upgrades visualization to template-based architecture with sidebar navigation, bilingual persistence, Graph Explorer, and workspace detail views.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v2.3.0 adds Spec Driven Development (SDD), Agent Elastic Management (DORMANT/POOL + credentials), and Collaboration Groups.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-**[中文说明 / Chinese Introduction](docs/introduction_v2.2.1_zh.md)**
+**[中文说明 / Chinese Introduction](docs/introduction_v2.3.0_zh.md)**
 
 ---
 
-## What's New in v2.2.1
+## What's New in v2.3.0
 
-### Visualization Architecture Upgrade
+### Spec Driven Development (SDD)
 
-v2.2.1 replaces the single-file inline visualization with a template-based architecture, delivering a modern dark-themed UI:
+Specifications as first-class citizens stored as ENTITIES subtype `SPEC`, with reference-partitioned SPEC_META and many-to-many SPEC_PLAN_LINKS:
 
-- **Template-based architecture** — `scripts/visualization/server.py` (519 lines) + 7 HTML templates + `style.css` + `vis-network.min.js`, replacing the monolithic `viz_server_local_js.py` (963 lines)
-- **Left sidebar navigation** — Fixed sidebar with 6 nav items, language toggle, auto-logout countdown (5 min)
-- **List/Graph dual view** — Knowledge and Memory pages support table + graph toggle with category/domain color grouping
-- **Bootstrap Tabs** — Agents page with Registry / Sessions / Collaborations tabs
-- **Accordion panels** — Tasks page with collapsible plan details, step-by-step tool input/output
-- **Expandable detail rows** — Workspaces page with context timeline and linked tasks
-- **Graph Explorer** — Dedicated page with stats cards, search/filter, node context, detail panel
-- **Bilingual persistence** — Language preference saved to `localStorage`, survives page navigation
-- **5-min auto-logout** — Countdown timer in sidebar,30s title flash warning
+- **SPEC_META** — Version, status, acceptance_criteria, constraints (reference-partitioned from ENTITIES)
+- **SPEC_PLAN_LINKS** — Many-to-many with LINK_TYPE: DRIVES / VALIDATES / CONSTRAINS / EXTENDS
+- **spec_api.py** — 10 Python functions: create, get, update, list, create_plan_from_spec, link_spec_to_plan, validate_plan_against_spec, derive_spec, delete
+- **SPEC_MANAGER** PL/SQL package — 8 subprograms including validate_spec and derive_spec
+- **SPEC_DV** — JRD updatable view for spec entities
 
-- **Decimal sanitization** — `oracledb` thin mode `Decimal` handling in `_clean_row()` for JSON-safe API responses
+### Agent Elastic Management
+
+Two new agent states for resource optimization and credential-based authentication:
+
+- **DORMANT** — Temporary hibernate; preserves agent identity and context; wake on demand
+- **POOL** — Stateless idle agents; context follows user via credentials; matched by skills_tags intersection
+- **AGENT_CREDENTIALS** — Encrypted with ReversibleEncryption; auto-expiry; SCOPE = {access_level, restricted_domains, max_clearance}
+- **agent_api.py +8** — issue_credential, verify_credential, get_credentials_for_user, revoke_credential, hibernate_agent, wake_agent, register_pool_agent, assign_pool_agent
+- **DORMANT_AGENT_JOB** — Auto-hibernates agents inactive beyond `dormant_timeout_min` (default 60 min)
+- **CREDENTIAL_CLEANUP_JOB** — Daily purge of expired/revoked credentials
+
+### Collaboration Groups
+
+Mode C collaboration model with group-level shared workspace and optional personal workspace:
+
+- **COLLAB_GROUPS** — Group definitions with SHARING_POLICY: OPEN / MODERATED / RESTRICTED
+- **COLLAB_GROUP_MEMBERS** — Roles: LEAD / CONTRIBUTOR / OBSERVER; LEAD/CONTRIBUTOR get auto-created personal Workspace
+- **COLLAB_GROUP_DV** — JRD updatable view
+- **COLLAB_GROUP_MANAGER** PL/SQL package — 6 subprograms
+- **collab_api.py** — 10 Python functions including share_memory_to_group, get_group_shared_memories
+
+### Visualization Enhancements
+
+- **Specs page** (`/specs`) — List/detail tabs, plan linkage display
+- **Collab page** (`/collab`) — Groups, members, shared memory
+- **Inline detail expansion** — Knowledge/Memory List view uses row expansion (Tasks pattern); Graph view retains right-side detail panel
+- **Bilingual sidebar** — All 8 pages have data-zh/data-en navigation links
+- **Truncated IDs** — Full content on hover via title attribute
 
 ---
 
@@ -38,112 +61,67 @@ v2.2.1 replaces the single-file inline visualization with a template-based archi
 
 ### Workspace & Context Continuity
 
-v2.2 introduces workspace-based session management with context chains for agent handoff and recovery:
-
-- **WORKSPACES table** — Workspace lifecycle (ACTIVE → PAUSED → ARCHIVED), isolation modes (SHARED/ISOLATED), ownership tracking
-- **WORKSPACE_CONTEXT table** — Version chain of context entries (SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY) with parent linking
-- **WORKSPACE_TASKS table** — Links task plans to workspaces
+- **WORKSPACES** — Lifecycle (ACTIVE → PAUSED → ARCHIVED), isolation modes (SHARED/ISOLATED), ownership tracking
+- **WORKSPACE_CONTEXT** — Version chain of context entries (CHECKPOINT, HANDOFF, SUMMARY, ERROR_STATE, AUTO_SAVE)
+- **WORKSPACE_TASKS** — Links task plans to workspaces
 - **Agent Handoff** — `PREDECESSOR_SESSION_ID` chains sessions; `OWNER_USER_ID` and `WORKSPACE_ID` on AGENT_SESSION
-- **JRD Updatable Views** — `WORKSPACE_DV` (updatable), `CONTEXT_DV` (read-only), `MEMORY_DV`/`KNOWLEDGE_DV` now updatable
-- **workspace_api.py** — 11 Python functions for workspace CRUD, context chains, handoff, recovery, and task linking
-
----
-
-## What's New in v2.1.0
-
-### Table Partitioning
-
-v2.0 used monolithic tables. v2.1 adds enterprise-grade partitioning for scalability and maintenance:
-
-- **ENTITIES**: LIST(ENTITY_TYPE) + RANGE(CREATED_AT) — 6 list × 7 time subpartitions
-- **5 child tables**: REFERENCE partitioning inheriting ENTITIES layout (ENTITY_EDGES, KNOWLEDGE_META, HARNESS_META, ENTITY_EMBEDDINGS, ENTITY_TAGS)
-- **AGENT_SESSION**: LIST(IS_ACTIVE) + RANGE(START_TIME) with ROW MOVEMENT
-- **ENTITY_ACCESS_LOG**: RANGE(ACCESS_TIME) + HASH(AGENT_ID) 4 buckets
-- **TASK_PLANS**: LIST(STATUS) + RANGE(CREATED_AT); TASK_STEPS: reference partitioned
-
-### Property Graph API
-
-v2.1 introduces a full `graph_api.py` powered by Oracle's `GRAPH_TABLE` SQL operator against `ORACLE_MEMORY_GRAPH`:
-
-- `get_neighbors()` — outgoing/incoming/both with edge filtering
-- `get_reachable()` — multi-hop traversal (1-N hops)
-- `get_shortest_path()` — path finding between two entities
-- `find_similar_entities()` — graph-based similarity
-- `get_entity_context()` — full entity neighborhood with type/edge breakdown
-- `get_subgraph()` — extract subgraph for visualization
-- `graph_search()` — GRAPH_TABLE-powered entity search
-- `find_communities()` — hub detection
-- `get_graph_stats()` — graph analytics
-
-### Composite Primary Keys & Reference Partitioning
-
-ENTITIES PK changed from `(ENTITY_ID)` to `(ENTITY_ID, ENTITY_TYPE)`, enabling reference partitioning on all child tables. Denormalized columns (SOURCE_TYPE, ENTITY_TYPE, PLAN_STATUS) added for FK alignment.
-
-v1.x had 15+ scattered SQL scripts. v2.0 consolidates into 4 ordered deployment scripts:
-1. `1_schema.sql` — Tables, indexes, property graph, duality views
-2. `2_api.sql` — PL/SQL packages (fusion, knowledge, permissions, cleanup)
-3. `3_jobs.sql` — Scheduler jobs (7 automated maintenance jobs)
-4. `4_harness_templates.sql` — HARNESS_META table + 5 built-in harness templates
-
-### Restructured Documentation
-
-v1.x had a 934-line SKILL.md and 12+ scattered markdown files. v2.0 has a concise SKILL.md + 7 topic-focused docs in `docs/`.
-
-### Harness Template System
-
-Reusable agent execution blueprints stored as ENTITIES (`ENTITY_TYPE='HARNESS_TEMPLATE'`). Each template defines:
-- **prompt_templates** — Parameterized prompt skeletons with `{variable}` slots
-- **tool_bindings** — Which tools the agent can use and with what permissions
-- **memory_access** — Read/write policies for short-term and long-term memory
-- **guardrails** — Execution limits, content moderation, PII filtering
-- **evaluation** — Output format, quality thresholds
-
-Templates support variable substitution, inheritance (child `DERIVES_FROM` parent), instantiation, validation, and a DRAFT → PUBLISHED → DEPRECATED lifecycle. 5 built-in templates are included (Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor). See [docs/harness.md](docs/harness.md).
+- **JRD Updatable Views** — `WORKSPACE_DV` (updatable), `CONTEXT_DV` (read-only), `MEMORY_DV`/`KNOWLEDGE_DV` updatable
 
 ---
 
 ## Project Structure
 
 ```
-scripts/
-  deploy/
-    1_schema.sql          # Phase 1: Schema (tables, indexes, graph, views)
-    2_api.sql             # Phase 2: PL/SQL API packages
-    3_jobs.sql            # Phase 3: Scheduler jobs
-    4_harness_templates.sql  # Phase 4: HARNESS_META + 5 built-in templates
-  lib/
-    config.py             # Unified Config with env var overrides
-    connection.py         # oracledb connection pool manager
-    memory_api.py         # Memory CRUD (ENTITIES, ENTITY_TYPE='MEMORY')
-    knowledge_api.py      # Knowledge CRUD + graph operations
-    agent_api.py          # Agent registration, sessions, collaboration
-    task_plan_api.py      # Task plans, steps, snapshots, dependencies
-    security.py           # Data masking, encryption, password hashing
-    harness_api.py        # Harness template CRUD, instantiate, derive, validate
-    workspace_api.py      # Workspace lifecycle, context chains, handoff, recovery
-  tests/
-    test_connection.py    # Connection pool tests
-    test_memory.py        # Memory API tests
-    test_knowledge.py     # Knowledge API tests
-    test_agent.py         # Agent API tests
-    test_security.py      # Security module tests
-    test_harness.py       # Harness template tests
-    test_workspace.py     # Workspace API tests
-    test_all.py           # Master test runner
-docs/
-  architecture.md         # Design decisions and entity model
-  api-reference.md        # Python + PL/SQL API documentation
-  deployment.md           # Deployment guide and troubleshooting
-  migration.md            # v1.x to v2.0 migration guide
-  security.md             # Security features and configuration
-  visualization.md        # Web visualization server guide
-  minimum-privileges.md   # Database user minimum privilege analysis
-  harness.md              # Harness template system guide
-  workspace.md            # Workspace & context continuity guide
-config.json               # Database, server, embedding, security config
-viz_server_local_js.py    # Web visualization server
-start_web_server.sh       # Server control script (start/stop/restart/status/config/log)
-SKILL.md                  # Concise skill documentation
+oracle-memory-by-yhw/
+  scripts/
+    deploy/
+      1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
+      2_api.sql                 # 7 PL/SQL packages
+      3_jobs.sql                # 11 scheduler jobs
+      4_harness_templates.sql   # HARNESS_META + 5 built-in templates
+    lib/
+      config.py                 # Unified Config with env var overrides
+      connection.py             # oracledb connection pool manager
+      memory_api.py             # Memory CRUD (8 functions)
+      knowledge_api.py          # Knowledge CRUD + graph operations (7 functions)
+      agent_api.py              # Agent, sessions, credentials, elastic (17 functions)
+      task_plan_api.py          # Task plans, steps, dependencies (6 functions)
+      security.py               # Data masking, encryption, password hashing
+      harness_api.py            # Harness template CRUD (6 functions)
+      graph_api.py              # Property Graph API (9 functions)
+      workspace_api.py          # Workspace lifecycle, context, handoff (14 functions)
+      spec_api.py               # Spec CRUD + plan linkage (10 functions) [NEW]
+      collab_api.py             # Collaboration groups (10 functions) [NEW]
+    tests/
+      test_connection.py        # 6 tests
+      test_memory.py            # 8 tests
+      test_knowledge.py         # 8 tests
+      test_agent.py             # 8 tests
+      test_security.py          # 5 tests
+      test_harness.py           # 6 tests
+      test_graph.py             # 8 tests
+      test_workspace.py         # 12 tests
+      test_spec.py              # 9 tests [NEW]
+      test_collab.py            # 12 tests [NEW]
+      test_credential.py        # 9 tests [NEW]
+      test_all.py               # Master runner (99 total)
+    visualization/
+      server.py                 # HTTP server v2.3.0
+      templates/                # 9 HTML templates (login, knowledge, memory, agents, tasks, workspaces, graph, specs, collab)
+      static/                   # style.css + vis-network.min.js
+  docs/
+    architecture.md             # Design decisions and entity model
+    api-reference.md            # Python + PL/SQL API reference
+    deployment.md               # Deployment guide
+    security.md                 # Security features
+    visualization.md            # Web visualization guide
+    harness.md                  # Harness template system guide
+    workspace.md                # Workspace & context continuity
+    minimum-privileges.md       # Database user privileges
+    introduction_v2.3.0_zh.md   # v2.3.0 中文完整介绍
+  CHANGELOG.md
+  SKILL.md
+  README.md
 ```
 
 ---
@@ -152,7 +130,7 @@ SKILL.md                  # Concise skill documentation
 
 ### Prerequisites
 
-- Oracle Database 23ai+ (tested on 23.26.1.0.0)
+- Oracle Database 23ai+ (tested on 26ai)
 - Python 3.8+ with `oracledb` package
 - SQLcl 26.1+ (for SQL script deployment)
 
@@ -173,8 +151,6 @@ pip install oracledb
 
 ### 3. Configure
 
-Edit `config.json` or set environment variables:
-
 ```bash
 export MEMORY_DB_USER=openclaw
 export MEMORY_DB_PASSWORD=hermes
@@ -193,10 +169,7 @@ cd scripts && python -m tests.test_all
 ./start_web_server.sh start    # Start (daemon mode)
 ./start_web_server.sh status   # Check status
 ./start_web_server.sh stop     # Stop
-./start_web_server.sh restart  # Restart
-./start_web_server.sh config   # Show configuration
-./start_web_server.sh log      # View log
-# Open http://localhost:8000
+# Open http://localhost:8000 — Login: admin / admin123
 ```
 
 ---
@@ -204,51 +177,34 @@ cd scripts && python -m tests.test_all
 ## Architecture
 
 ```
-ENTITIES (unified)
-  ├── MEMORY        (replaces MEMORIES + MEMORY_NODES)
-  ├── KNOWLEDGE     (replaces KNOWLEDGE_CONCEPTS)
-  ├── TASK_OUTPUT
-  ├── EXPERIENCE
-  └── HARNESS_TEMPLATE (reusable agent execution blueprints)
+ENTITIES (LIST partitioned by ENTITY_TYPE)
+  ├── MEMORY              Short-term episodic memory
+  ├── KNOWLEDGE           Validated knowledge concepts
+  ├── TASK_OUTPUT         Task execution results
+  ├── EXPERIENCE          Learned patterns
+  ├── HARNESS_TEMPLATE    Reusable agent execution blueprints
+  ├── SPEC [NEW v2.3.0]  Specifications for SDD
+  └── OTHER               Unclassified
 
-ENTITY_EDGES (unified)
-  └── Replaces MEMORY_EDGES + MEMORY_RELATIONSHIPS + KNOWLEDGE_GRAPH
-  └── Supports DERIVES_FROM for template inheritance
+6 REFERENCE-partitioned children:
+  ENTITY_EDGES, KNOWLEDGE_META, SPEC_META [NEW], HARNESS_META,
+  ENTITY_EMBEDDINGS, ENTITY_TAGS
 
-KNOWLEDGE_META      Extended metadata for KNOWLEDGE entities
-HARNESS_META        Versioning, status, variables for HARNESS_TEMPLATE entities
-ENTITY_EMBEDDINGS   VECTOR(1024, FLOAT32) for semantic search
-ORACLE_MEMORY_GRAPH Single property graph (replaces 2 separate graphs)
-
-WORKSPACES          Workspace lifecycle, isolation, ownership
-WORKSPACE_CONTEXT   Version chain for context continuity (SNAPSHOT/CHECKPOINT/HANDOFF/SUMMARY/RECOVERY)
-WORKSPACE_TASKS     Task-to-workspace linking
+27 tables total | 6 JRD views | 7 PL/SQL packages | 11 scheduler jobs
+12 Python modules | 99+ API functions | 99/99 tests pass
 ```
 
-### Key Tables (20)
+### Key Tables (27)
 
-| Table | Purpose |
-|-------|---------|
-| ENTITIES | Unified store with ENTITY_TYPE discriminator (incl. HARNESS_TEMPLATE), WORKSPACE_ID |
-| ENTITY_EDGES | Directed edges with strength, confidence, and DERIVES_FROM inheritance |
-| KNOWLEDGE_META | Source, validation, versioning for knowledge |
-| HARNESS_META | Template versioning, status, variables, changelog |
-| ENTITY_EMBEDDINGS | Vector embeddings for semantic search |
-| AGENT_REGISTRY | Agent identity, capabilities, permissions |
-| AGENT_SESSION | Session tracking with context snapshots, OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID |
-| ENTITY_ACCESS_LOG | Audit trail for all entity access |
-| AGENT_PERMISSION_LOG | Permission change audit |
-| AGENT_COLLABORATION | Cross-agent sharing requests |
-| TASK_PLANS | Multi-step task definitions |
-| TASK_STEPS | Plan steps with status tracking |
-| TASK_CONTEXT_SNAPSHOTS | Breakpoint/recovery snapshots |
-| TASK_TOOL_CALLS | Tool invocation audit |
-| TASK_DEPENDENCIES | Inter-plan dependency graph |
-| TAGS / ENTITY_TAGS | Normalized tag system |
-| SYSTEM_CONFIG / SYSTEM_USERS | System configuration and accounts |
-| WORKSPACES | Workspace lifecycle, isolation modes, ownership |
-| WORKSPACE_CONTEXT | Version chain for context continuity |
-| WORKSPACE_TASKS | Task-to-workspace linking |
+| Category | Tables |
+|----------|--------|
+| Core | ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, SPEC_META [NEW], HARNESS_META, ENTITY_EMBEDDINGS, ENTITY_TAGS |
+| System | SYSTEM_USERS, SYSTEM_CONFIG, TAGS |
+| Agent | AGENT_REGISTRY, AGENT_CREDENTIALS [NEW], AGENT_SESSION, ENTITY_ACCESS_LOG, AGENT_PERMISSION_LOG |
+| Collaboration | AGENT_COLLABORATION, COLLAB_GROUPS [NEW], COLLAB_GROUP_MEMBERS [NEW] |
+| Workspace | WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS |
+| Task | TASK_PLANS, TASK_STEPS, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES |
+| Spec | SPEC_PLAN_LINKS [NEW] |
 
 ---
 
@@ -256,91 +212,77 @@ WORKSPACE_TASKS     Task-to-workspace linking
 
 ```python
 from scripts.lib.memory_api import create_memory, get_memory, search_memories
-from scripts.lib.knowledge_api import create_concept, create_relationship
-from scripts.lib.agent_api import register_agent, create_session
-from scripts.lib.harness_api import create_template, instantiate_template, derive_template
+from scripts.lib.knowledge_api import create_knowledge, add_edge, get_edges
+from scripts.lib.agent_api import register_agent, create_session, issue_credential, hibernate_agent, wake_agent, assign_pool_agent
 from scripts.lib.workspace_api import create_workspace, create_handoff_session, recover_workspace
+from scripts.lib.spec_api import create_spec, create_plan_from_spec, link_spec_to_plan, validate_plan_against_spec
+from scripts.lib.collab_api import create_collab_group, add_group_member, share_memory_to_group
 
 # Memory
-mid = create_memory("Meeting Notes", "Discussed v2.0", category="meeting")
+mid = create_memory({"title": "Meeting Notes", "content": "Discussed v2.3"})
 
 # Knowledge
-kid = create_concept("Unified Architecture", "principle",
-                     description="Single ENTITIES table", confidence=0.95)
+kid = create_knowledge({"title": "SDD Pattern", "domain": "architecture"})
 
-# Relationship
-eid = create_relationship(mid, kid, "DERIVED_FROM", strength=0.9)
+# Spec [NEW v2.3.0]
+sid = create_spec({"title": "API Auth Spec"}, {"version": "1.0", "acceptance_criteria": [...]})
+pid = create_plan_from_spec(sid, "Implement API Auth", "Add authentication layer")
+link_spec_to_plan(sid, pid, "DRIVES")
 
-# Agent
-register_agent("agent-1", "Research Agent", capabilities=["read", "write"])
+# Agent + Credentials [NEW v2.3.0]
+aid = register_agent("agent-1", "Research", {"skills": ["search"]})
+cred_id = issue_credential(aid, "user-1", "API_KEY", {"access_level": "FULL"})
+hibernate_agent(aid)
+wake_agent(aid)
+pool_id = register_pool_agent("worker-1", {"skills": ["analyze"]}, ["analyze", "search"])
+assigned = assign_pool_agent("user-1", ["analyze"])
 
-# Harness Template
-tpl_id = create_template("Analyst", prompt_templates={"system": "You are a {role}..."},
-                         tool_sets=["knowledge_tools", "memory_tools"],
-                         variables={"role": "Analyst"})
-config = instantiate_template(tpl_id, variables={"role": "Data Scientist"})
-
-# Workspace
-ws_id = create_workspace(name="Project Alpha", workspace_type="CONVERSATION")
-new_sid = create_handoff_session(ws_id, "agent-2", handoff_data={"status": "in progress"})
-state = recover_workspace(ws_id)
+# Collaboration [NEW v2.3.0]
+gid = create_collab_group("Security Board", "PROJECT", "MODERATED")
+add_group_member(gid, "agent-1", "LEAD")
+share_memory_to_group(gid, mid, "agent-1")
 ```
 
-Full API: [docs/api-reference.md](docs/api-reference.md)
+Full API: [SKILL.md](SKILL.md)
 
 ---
 
 ## Web Visualization
 
-Built-in web server with interactive graph visualization and dashboards:
+8-page dashboard with dark theme, bilingual UI, and 5-min auto-logout:
 
-- **Knowledge Graph** (`/knowledge`) — Browse KNOWLEDGE entities and their relationships
-- **Memory Content** (`/memory`) — Browse MEMORY entities and their connections
-- **Agent Collaboration** (`/agents`) — Agent registry, active sessions, collaboration requests
-- **Task Plans** (`/tasks`) — Plan list with status filter, search, expandable step details
-- **Bilingual UI** — Chinese/English toggle with localStorage persistence
-- **Session Auth** — Login with SYSTEM_USERS credentials, configurable timeout
-- **UTF-8 Encoding Fix** — Auto-detects and corrects double-encoded Chinese from oracledb
+| Page | URL | Features |
+|------|-----|----------|
+| Knowledge | `/knowledge` | List/Graph dual view, inline detail expansion |
+| Memory | `/memory` | List/Graph dual view, category filter |
+| Agents | `/agents` | Registry/Sessions/Collaborations tabs |
+| Tasks | `/tasks` | Accordion plans, step details, tool I/O |
+| Workspaces | `/workspaces` | Expandable detail rows, context timeline |
+| Graph Explorer | `/graph` | Stats cards, search, vis-network, detail panel |
+| Specs [NEW] | `/specs` | Spec list, plan linkage, detail view |
+| Collab [NEW] | `/collab` | Groups, members, shared memory |
 
-```bash
-./start_web_server.sh start
-# http://localhost:8000
-```
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [SKILL.md](SKILL.md) | Concise skill overview |
-| [docs/architecture.md](docs/architecture.md) | Design decisions and entity model |
-| [docs/api-reference.md](docs/api-reference.md) | Python and PL/SQL API reference |
-| [docs/deployment.md](docs/deployment.md) | Deployment and troubleshooting |
-| [docs/migration.md](docs/migration.md) | v1.x to v2.0 migration guide |
-| [docs/security.md](docs/security.md) | Security features and configuration |
-| [docs/visualization.md](docs/visualization.md) | Web visualization server guide |
-| [docs/harness.md](docs/harness.md) | Harness template system guide |
-| [docs/workspace.md](docs/workspace.md) | Workspace & context continuity guide |
-| [docs/minimum-privileges.md](docs/minimum-privileges.md) | Minimum database user privileges |
-| [docs/introduction_v2.2.1_zh.md](docs/introduction_v2.2.1_zh.md) | v2.2.1 中文完整介绍 |
+Login: `admin` / `admin123`
 
 ---
 
 ## Test Results
 
 ```
-Oracle Memory System v2.2.1 - Full Test Suite
+Oracle Memory System v2.3.0 - Full Test Suite
 ============================================================
-  Connection:  6/6 PASS
-  Memory:      8/8 PASS
-  Knowledge:   8/8 PASS
-  Agent:       8/8 PASS
-  Graph:       8/8 PASS
-  Harness:     6/6 PASS
-  Security:    5/5 PASS
-  Workspace:  12/12 PASS
-Overall: 61/61 ALL PASSED
+  Connection:   6/6 PASS
+  Memory:       8/8 PASS
+  Knowledge:    8/8 PASS
+  Agent:        8/8 PASS
+  Graph:        8/8 PASS
+  Harness:      6/6 PASS
+  Security:     5/5 PASS
+  Workspace:   12/12 PASS
+  Spec:         9/9 PASS [NEW]
+  Collab:      12/12 PASS [NEW]
+  Credential:   9/9 PASS [NEW]
+Overall: 99/99 ALL PASSED
 ```
 
 ---
@@ -349,17 +291,12 @@ Overall: 61/61 ALL PASSED
 
 | Version | Date | Description |
 |---------|------|-------------|
-| **v2.2.1** | 2026-05-23 | Template-based visualization, sidebar navigation, bilingual persistence, Graph Explorer, workspace detail view |
-| **v2.2.0** | 2026-05-20 | Workspace & context continuity, JRD updatable views, workspace API, agent handoff |
-| **v2.1.0** | 2026-05-19 | Table partitioning, composite PKs, reference partitioning, Property Graph API |
-| v2.0.0 | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver, 3-phase deployment |
-| v1.1.0 | 2026-05-12 | Web visualization, session security, bilingual UI |
-| v1.0.0 | 2026-05-10 | Production release: knowledge base, property graph, multi-agent |
-| v0.5.1 | 2026-05-08 | Enhanced session management |
-| v0.5.0 | 2026-05-06 | Multi-agent collaboration framework |
-| v0.4.2 | 2026-05-04 | Bug fixes and stability |
-| v0.4.0 | 2026-05-02 | Task plan system |
-| v0.3.x | 2026-04-28 | Core memory system |
+| **v2.3.0** | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups |
+| v2.2.1 | 2026-05-23 | Template-based visualization, sidebar navigation, Graph Explorer |
+| v2.2.0 | 2026-05-20 | Workspace & context continuity, JRD updatable views |
+| v2.1.0 | 2026-05-19 | Table partitioning, composite PKs, Property Graph API |
+| v2.0.0 | 2026-05-15 | Complete rewrite: unified architecture, oracledb driver |
+| v1.x | 2026-04–05 | Initial releases: knowledge base, multi-agent, task planning |
 
 ---
 
