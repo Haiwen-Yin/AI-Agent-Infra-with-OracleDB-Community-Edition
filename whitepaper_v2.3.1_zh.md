@@ -717,7 +717,7 @@ v2.3.0引入两种新的智能体状态——DORMANT和POOL，配合凭证体系
 | EXPIRES_AT | TIMESTAMP | 过期时间 |
 | REVOKED_AT | TIMESTAMP | 撤销时间 |
 
-**SCOPE JSON结构示侎：**
+**SCOPE JSON结构示例：**
 
 ```json
 {
@@ -988,7 +988,7 @@ WITH INSERT UPDATE DELETE;
 
 **5种上下文类型：**
 
-| 类型 | 说明 | JSON示侎 |
+| 类型 | 说明 | JSON示例 |
 |------|------|------|
 | CHECKPOINT | 工作检查点 | `{"progress": "60%", "state": "processing", "next_action": "validate"}` |
 | HANDOFF | 代理交接 | `{"from_agent": "agent-A", "to_agent": "agent-B", "summary": "已完成分区配置"}` |
@@ -1288,7 +1288,7 @@ graph_api.py提供9个Python函数，均使用GRAPH_TABLE SQL运算符：
 | get_strongest_path | from_id, to_id | list | 查找最强关系路径 |
 | export_graph | entity_ids, depth | dict | 导出子图 |
 
-### 13.4 GRAPH_TABLE查询示侎
+### 13.4 GRAPH_TABLE查询示例
 
 **最短路径查找：**
 
@@ -1642,7 +1642,7 @@ print(f"参数列表: {desc['parameters']}")
 
 数据脱敏服务支持7种敏感模式的上下文感知脱敏：
 
-| 模式 | 正则表达式 | 脱敏规则 | 示侎 |
+| 模式 | 正则表达式 | 脱敏规则 | 示例 |
 |------|----------|----------|------|
 | credit_card | \d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4} | 仅保留后4位 | ****-****-****-1234 |
 | ssn | \d{3}-\d{2}-\d{4} | 仅保留后4位 | ***-**-5678 |
