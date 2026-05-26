@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Credential & Pool Agent Tests"""
+"""Oracle Memory System v2.3.1 - Credential & Pool Agent Tests"""
 
 import sys
 import os

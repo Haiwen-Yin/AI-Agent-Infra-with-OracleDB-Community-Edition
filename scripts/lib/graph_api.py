@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Property Graph API
+"""Oracle Memory System v2.3.1 - Property Graph API
 
 Core graph operations using GRAPH_TABLE SQL operator against ORACLE_MEMORY_GRAPH.
 Provides neighbor traversal, path finding, community detection, and graph analytics.

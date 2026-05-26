@@ -1,16 +1,16 @@
 ---
 name: oracle-memory-by-yhw
-version: v2.3.0
+version: v2.3.1
 author: Haiwen Yin
-description: "Oracle AI Database Memory System v2.3.0 - Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
-tags: [oracle, memory-system, knowledge-base, vector-search, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration]
+description: "Oracle AI Database Memory System v2.3.1 - 5-Signal Unified Hybrid Search + Fulltext Search + Search API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
+tags: [oracle, memory-system, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# Oracle AI Database Memory System v2.3.0
+# Oracle AI Database Memory System v2.3.1
 
 **Author:** Haiwen Yin
-**Version:** v2.3.0 - 2026-05-24
+**Version:** v2.3.1 - 2026-05-26
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -50,6 +50,52 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 |                                                                  |
 +------------------------------------------------------------------+
 ```
+
+## v2.3.1 Key Features: Embedding Fix, Unified Search, Fulltext Search & Search API
+
+**Vector Search Fix** — Fix embedding generation and vector search capabilities omitted during v2.0.0 architecture rewrite
+
+**5-Signal Unified Search** — vector + fulltext + relational + tag + graph multi-signal fusion `search_unified` API:
+
+| Signal | Weight | Source | Scoring |
+|--------|--------|--------|---------|
+| Vector | 0.4 | ENTITY_EMBEDDINGS via VECTOR_DISTANCE(COSINE) | 1 - cosine_distance |
+| Fulltext | 0.25 | Oracle Text CONTAINS(title) + SCORE(1) | ft_score / 100 |
+| Relational | 0.2 | KNOWLEDGE_META(domain,topic) + SPEC_META(scope,complexity) + ENTITIES(category,importance) | Domain/scope match + importance |
+| Tag | 0.15 (included in relational) | ENTITY_TAGS | Tag overlap + query match |
+| Graph | 0.15 | ENTITY_EDGES BFS from seed entity | 1/depth proximity + edge_count/10 connectivity boost |
+
+`search_unified(text, top_k, domain, category, tags, graph_seed_entity_id, ...)` returns `scores{vector,fulltext,relational,tag,graph}` + `final_score`.
+
+**Single-SQL Fusion Search** — `search_unified_sql()` has the exact same 5-signal fusion as `search_unified`, but completes via a single CTE SQL statement, eliminating multi-round Python-SQL round trips:
+- candidates CTE: vector+fulltext+metadata main query
+- tag_scores CTE: tag overlap scoring (GROUP BY)
+- edge_counts CTE: edge count (GROUP BY)
+- graph_prox CTE: graph proximity (UNION ALL depth=1+2)
+- Final SELECT: weighted scoring + ORDER BY final_score DESC
+
+**LLM Context Economics** — Multi-round tool calls during retrieval are a hidden cost for LLM agents: each call's request/response consumes tokens, intermediate step noise pollutes the context window, and cumulative overhead may squeeze reasoning space or cause context overflow. Single-SQL fusion search compresses 5 Python-SQL round trips into 1 database call, reduces tool-call token overhead by 60-80%, eliminates intermediate-step context pollution, and lets agents reserve token budget for reasoning and decision-making.
+
+**Fulltext Search** — `search_fulltext()` uses Oracle Text CONTAINS + SCORE for fulltext relevance search
+
+**Embedding Fix** — EMBEDDING_MANAGER PL/SQL SUBSTR strips double brackets + named binds fix for ORA-01722 + search_similar/search_hybrid/search_multi_type/search_by_entity_id
+
+In-db embedding generation and vector search capabilities were omitted during the v2.0.0 architecture rewrite. v2.3.1 fixes and enhances:
+
+| Feature | Description |
+|---------|-------------|
+| EMBEDDING_MANAGER PL/SQL | `generate_and_store` fix: SUBSTR strips double brackets + VECTOR variable assignment; `cosine_similarity`/`batch_embed_entities`/`get_stats` |
+| embedding_api.py named binds | All `:1,:2,:3` changed to `:eid,:etype,:vec` etc., resolving oracledb thin mode ORA-01722 |
+| search_by_entity_id() | Search similar entities based on existing entity vector, auto-exclude self |
+| search_hybrid() | Vector+keyword hybrid search, adjustable weights, returns 3D scoring (vector/keyword/hybrid) |
+| search_multi_type() | Cross-type vector search (MEMORY/KNOWLEDGE/SPEC), returned grouped by type |
+| EMBEDDING_GENERATION_JOB | Auto-generates embeddings for MEMORY/KNOWLEDGE entities every 2 hours |
+| search_fulltext() | Oracle Text CONTAINS + SCORE fulltext search, supports boolean/fuzzy/stem |
+| search_unified() | 5-Signal Unified Search, adjustable weights, returns per-signal independent score + final score |
+| search_api.py | Unified search entry point, 10 strategies (vector/fulltext/keyword/graph/hybrid/unified/unified_sql/relational/multi_type/auto), automatic strategy detection |
+| 19 embedding tests | Covering generation, storage, retrieval, similarity search, hybrid search, cross-type, batch processing, dimension detection |
+| 31 unified search tests | Covering 5-signal independent verification, domain/category/tags filtering, graph proximity, custom weights, Single-SQL fusion search |
+| 42 search API tests | Covering strategy metadata, auto-detection, per-strategy invocation, result structure, unified_sql strategy |
 
 ## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration
 
@@ -142,10 +188,10 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 -- Phase 1: Schema (27 tables, 6 JRD views, indexes, property graph, seed data)
 @scripts/deploy/1_schema.sql
 
--- Phase 2: PL/SQL Packages (7 packages: MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER)
+-- Phase 2: PL/SQL Packages (8 packages: MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
 @scripts/deploy/2_api.sql
 
--- Phase 3: Scheduler Jobs (11 jobs including DORMANT_AGENT_JOB, CREDENTIAL_CLEANUP_JOB)
+-- Phase 3: Scheduler Jobs (12 jobs including DORMANT_AGENT_JOB, CREDENTIAL_CLEANUP_JOB, EMBEDDING_GENERATION_JOB)
 @scripts/deploy/3_jobs.sql
 ```
 
@@ -185,8 +231,8 @@ oracle-memory-by-yhw/
   scripts/
     deploy/
       1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
-      2_api.sql                 # 7 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER)
-      3_jobs.sql                # 11 scheduler jobs
+      2_api.sql                 # 8 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
+      3_jobs.sql                # 12 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
     lib/
       config.py                 # Unified Config dataclass with env var overrides
@@ -201,6 +247,8 @@ oracle-memory-by-yhw/
       workspace_api.py          # Workspace lifecycle, context chains, handoff, recovery (11 functions)
       spec_api.py              # Spec CRUD, plan linkage, validation, derivation (10 functions) [NEW v2.3.0]
       collab_api.py             # Collaboration groups, members, shared memory (10 functions) [NEW v2.3.0]
+      embedding_api.py          # Vector embedding generation, storage, search (15 functions) [NEW v2.3.1]
+      search_api.py             # Unified search entry point, 10 strategies with auto-detection (3 functions) [NEW v2.3.1]
     tests/
       test_connection.py        # Connection pool tests (6)
       test_memory.py            # Memory CRUD tests (8)
@@ -213,7 +261,10 @@ oracle-memory-by-yhw/
       test_spec.py              # Spec CRUD + plan linkage tests (9) [NEW v2.3.0]
       test_collab.py            # Collab group + shared memory tests (12) [NEW v2.3.0]
       test_credential.py        # Credential + hibernate/wake/pool tests (9) [NEW v2.3.0]
-      test_all.py               # Master runner (99 total)
+      test_embedding.py         # Embedding generation, search, hybrid, multi-type tests (19) [NEW v2.3.1]
+      test_unified_search.py     # 5-signal unified hybrid search tests (20) [NEW v2.3.1]
+      test_search_api.py          # Search API strategy tests (42) [NEW v2.3.1]
+      test_all.py               # Master runner (14 suites, 183 total)
     visualization/
       server.py                 # HTTP server (session auth, page routing, JSON API, bilingual)
       templates/
@@ -295,7 +346,7 @@ oracle-memory-by-yhw/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-## PL/SQL Packages (7 Packages)
+## PL/SQL Packages (8 Packages)
 
 | Package | Function Count | Key Functions |
 |---------|---------------|---------------|
@@ -306,8 +357,9 @@ oracle-memory-by-yhw/
 | WORKSPACE_MANAGER | 10 | create_workspace, get_workspace, update_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace, link_task_to_workspace, cleanup_workspace |
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
+| EMBEDDING_MANAGER [NEW v2.3.1] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
 
-## Python API (12 Modules, 99+ Functions)
+## Python API (15 Modules, 131+ Functions)
 
 ### connection.py
 
@@ -466,7 +518,58 @@ def hash_password(password: str) -> str
 def verify_password(password: str, password_hash: str) -> bool
 ```
 
-## Scheduler Jobs (11 Jobs)
+### embedding_api.py [NEW v2.3.1]
+
+```python
+def generate_embedding(text: str, api_url: str = None, model: str = None, timeout: int = 30) -> list[float]
+def store_embedding(entity_id: str, entity_type: str, text: str, api_url: str = None, model: str = None) -> bool
+def store_embedding_vector(entity_id: str, entity_type: str, embedding: list[float], model: str = None) -> bool
+def get_embedding(entity_id: str, entity_type: str = "MEMORY") -> dict | None
+def delete_embedding(entity_id: str, entity_type: str = "MEMORY") -> bool
+def search_similar(text: str, top_k: int = 10, entity_type: str = None, workspace_id: str = None, api_url: str = None, model: str = None) -> list[dict]
+def search_by_entity_id(entity_id: str, entity_type: str = "MEMORY", top_k: int = 10, workspace_id: str = None) -> list[dict]
+def search_hybrid(text: str, keyword: str = None, top_k: int = 10, entity_type: str = None, workspace_id: str = None, vector_weight: float = 0.7, api_url: str = None, model: str = None) -> list[dict]
+def search_multi_type(text: str, entity_types: list[str] = None, top_k: int = 10, workspace_id: str = None, api_url: str = None, model: str = None) -> dict[str, list[dict]]
+def search_unified(text: str, top_k: int = 20, entity_type: str = None, workspace_id: str = None, domain: str = None, category: str = None, tags: list[str] = None, graph_seed_entity_id: str = None, graph_seed_entity_type: str = None, graph_depth: int = 2, vector_weight: float = 0.4, fulltext_weight: float = 0.25, relational_weight: float = 0.2, graph_weight: float = 0.15, api_url: str = None, model: str = None) -> list[dict]
+def search_unified_sql(text: str, top_k: int = 20, entity_type: str = None, workspace_id: str = None, domain: str = None, category: str = None, tags: list[str] = None, graph_seed_entity_id: str = None, graph_seed_entity_type: str = None, graph_depth: int = 2, vector_weight: float = 0.4, fulltext_weight: float = 0.25, relational_weight: float = 0.2, graph_weight: float = 0.15, api_url: str = None, model: str = None) -> list[dict]
+def search_fulltext(query: str, top_k: int = 20, entity_type: str = None, category: str = None, workspace_id: str = None) -> list[dict]
+def generate_embeddings_batch(entity_type: str = "MEMORY", limit: int = 100, api_url: str = None, model: str = None) -> dict
+def get_embedding_stats() -> dict
+def get_model_dimension(model: str = None) -> int
+```
+
+### search_api.py [NEW v2.3.1]
+
+Unified search entry point for AI agents. 10 strategies with auto-detection:
+
+```python
+def search(text: str, strategy: str = "auto", top_k: int = 10, entity_type: str = None,
+           workspace_id: str = None, domain: str = None, category: str = None,
+           tags: list[str] = None, graph_seed_entity_id: str = None,
+           entity_id: str = None, entity_types: list[str] = None,
+           min_importance: int = None, vector_weight: float = None,
+           fulltext_weight: float = None, relational_weight: float = None,
+           graph_weight: float = None, **kwargs) -> dict
+def list_search_strategies() -> list[dict]
+def describe_search_strategy(strategy: str) -> dict | None
+```
+
+| Strategy | Signals | Best For | Requires Embedding |
+|----------|---------|----------|-------------------|
+| vector | vector | Semantic/concept search | Yes |
+| fulltext | fulltext | Exact keyword/boolean/fuzzy | No |
+| keyword | keyword | Wildcard/LIKE patterns | No |
+| graph | graph | Relationship/neighborhood | No |
+| hybrid | vector+fulltext | Semantic+lexical balanced | Yes |
+| unified | vector+fulltext+relational+tag+graph | Comprehensive multi-dimensional | Yes |
+| unified_sql | vector+fulltext+relational+tag+graph | Single-SQL CTE fusion (low-latency) | Yes |
+| relational | relational | Domain/category/importance filter | No |
+| multi_type | vector+multi_type | Cross-type (MEMORY/KNOWLEDGE/SPEC) | Yes |
+| auto | auto-detected | Unknown query type / convenience | Varies |
+
+Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → fulltext; `%`/`_` → keyword; domain/tags kwargs → unified; graph_seed_entity_id → unified; ≤2 words → fulltext; ≥5 words → unified; else → hybrid.
+
+## Scheduler Jobs (12 Jobs)
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
@@ -481,6 +584,7 @@ def verify_password(password: str, password_hash: str) -> bool
 | STALE_WORKSPACE_DETECT_JOB | Every 30 min | Detects workspaces with no active sessions for N hours |
 | DORMANT_AGENT_JOB [NEW v2.3.0] | Every 30 min | Auto-hibernates agents inactive beyond dormant_timeout_min |
 | CREDENTIAL_CLEANUP_JOB [NEW v2.3.0] | Daily 02:00 | Purges expired and revoked credentials |
+| EMBEDDING_GENERATION_JOB [NEW v2.3.1] | Every 2 hours | Auto-generates embeddings for new MEMORY/KNOWLEDGE entities |
 
 ## Harness Templates (5 Built-in)
 
@@ -555,6 +659,10 @@ def verify_password(password: str, password_hash: str) -> bool
 - **CONSTRAINTS reserved word**: Oracle reserved; must use double-quote `"CONSTRAINTS"` in all SQL references
 - **PL/SQL JSON_OBJECT**: VALUE clause does not support `FORMAT JSON` in 23ai/26ai; use `RETURN VARCHAR2` instead of `RETURN JSON`
 - **Reference-partitioned tables**: Cannot DISABLE constraints (ORA-14650); constraints always enforced
+- **JSON_QUERY WITH WRAPPER on arrays**: Returns `[array]` (double-bracketed); must `SUBSTR(l_vec, 2, DBMS_LOB.GETLENGTH(l_vec)-2)` before `TO_VECTOR()`
+- **TO_VECTOR format**: Requires `[v1,v2,...]` bracketed format; plain comma-separated `v1,v2,...` triggers ORA-51804
+- **Named bind variables with execute_query**: Must use dict `{"eid": "X"}` with named binds `:eid`, NOT list `["X"]` with positional `:1`; oracledb thin mode interprets dict + `:1` as named bind "1" causing ORA-01722
+- **EMBEDDING_MANAGER.generate_and_store**: Only works from anonymous PL/SQL block (not SELECT function call) due to UTL_HTTP context; also requires ENTITIES row to exist first (FK constraint)
 
 ## Key Design Decisions
 

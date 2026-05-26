@@ -1,1 +1,3 @@
-"""Oracle Memory System v2.1.0 - Core Library"""
+"""Oracle Memory System v2.3.1 - Core Library"""
+
+from . import search_api

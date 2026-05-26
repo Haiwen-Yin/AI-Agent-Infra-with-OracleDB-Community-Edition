@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Knowledge API
+"""Oracle Memory System v2.3.1 - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Web Visualization Server
+"""Oracle Memory System v2.3.1 - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -22,7 +22,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api
 from lib import security, config
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -290,6 +290,17 @@ class VisHandler(BaseHTTPRequestHandler):
         return b''
 
     def do_GET(self):
+        try:
+            self._do_GET_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_error(500, str(e))
+            except:
+                pass
+
+    def _do_GET_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip('/') or '/'
         qs = urllib.parse.parse_qs(parsed.query)
@@ -330,6 +341,17 @@ class VisHandler(BaseHTTPRequestHandler):
         self._send_error(404, 'Not found')
 
     def do_POST(self):
+        try:
+            self._do_POST_impl()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                self._send_error(500, str(e))
+            except:
+                pass
+
+    def _do_POST_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip('/') or '/'
 

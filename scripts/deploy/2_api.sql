@@ -1,5 +1,5 @@
 -- ============================================================
--- Oracle Memory System v2.3.0 - Phase 2: PL/SQL API Packages
+-- Oracle Memory System v2.3.1 - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1201,8 +1201,128 @@ CREATE OR REPLACE PACKAGE BODY COLLAB_GROUP_MANAGER AS
 END COLLAB_GROUP_MANAGER;
 /
 
+-- ============================================================
+-- EMBEDDING_MANAGER Package [NEW v2.3.1]
+-- In-database embedding generation via UTL_HTTP, vector storage, similarity search
+-- ============================================================
+
+CREATE OR REPLACE PACKAGE EMBEDDING_MANAGER AS
+    FUNCTION generate_embedding(p_text IN VARCHAR2) RETURN CLOB;
+    FUNCTION generate_and_store(p_entity_id IN VARCHAR2, p_entity_type IN VARCHAR2, p_text IN VARCHAR2) RETURN NUMBER;
+    FUNCTION cosine_similarity(p_id1 IN VARCHAR2, p_type1 IN VARCHAR2, p_id2 IN VARCHAR2, p_type2 IN VARCHAR2) RETURN NUMBER;
+    PROCEDURE batch_embed_entities(p_entity_type IN VARCHAR2, p_limit IN NUMBER DEFAULT 100);
+    FUNCTION get_stats RETURN VARCHAR2;
+END EMBEDDING_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY EMBEDDING_MANAGER AS
+
+    FUNCTION generate_embedding(p_text IN VARCHAR2) RETURN CLOB IS
+        l_url   VARCHAR2(4000) := 'http://10.10.10.1:12345/v1/embeddings';
+        l_body  VARCHAR2(32767);
+        l_req   UTL_HTTP.REQ;
+        l_resp  UTL_HTTP.RESP;
+        l_chunk VARCHAR2(32767);
+        l_result CLOB;
+        l_done  BOOLEAN := FALSE;
+    BEGIN
+        l_body := '{"model":"text-embedding-bge-m3","input":"' || REPLACE(REPLACE(p_text, '"', '\"'), CHR(10), ' ') || '"}';
+        l_req := UTL_HTTP.BEGIN_REQUEST(l_url, 'POST');
+        UTL_HTTP.SET_HEADER(l_req, 'Content-Type', 'application/json');
+        UTL_HTTP.SET_HEADER(l_req, 'Content-Length', LENGTHB(l_body));
+        UTL_HTTP.SET_BODY_CHARSET('UTF-8');
+        UTL_HTTP.WRITE_RAW(l_req, UTL_RAW.CAST_TO_RAW(l_body));
+        l_resp := UTL_HTTP.GET_RESPONSE(l_req);
+        l_result := EMPTY_CLOB();
+        WHILE NOT l_done LOOP
+            BEGIN
+                UTL_HTTP.READ_TEXT(l_resp, l_chunk, 32767);
+                l_result := l_result || l_chunk;
+            EXCEPTION
+                WHEN UTL_HTTP.END_OF_BODY THEN l_done := TRUE;
+            END;
+        END LOOP;
+        UTL_HTTP.END_RESPONSE(l_resp);
+        RETURN l_result;
+    END generate_embedding;
+
+    FUNCTION generate_and_store(p_entity_id IN VARCHAR2, p_entity_type IN VARCHAR2, p_text IN VARCHAR2) RETURN NUMBER IS
+        l_json  CLOB;
+        l_vec   CLOB;
+        l_emb   VECTOR;
+        l_cnt   NUMBER;
+    BEGIN
+        l_json := generate_embedding(p_text);
+        l_vec := JSON_QUERY(l_json, '$.data[0].embedding' WITH WRAPPER);
+        l_vec := SUBSTR(l_vec, 2, DBMS_LOB.GETLENGTH(l_vec) - 2);
+        l_emb := TO_VECTOR(l_vec);
+
+        SELECT COUNT(*) INTO l_cnt FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = p_entity_id AND ENTITY_TYPE = p_entity_type;
+        IF l_cnt > 0 THEN
+            UPDATE ENTITY_EMBEDDINGS SET EMBEDDING = l_emb, EMBEDDING_MODEL = 'text-embedding-bge-m3', EMBEDDING_DIM = 1024
+            WHERE ENTITY_ID = p_entity_id AND ENTITY_TYPE = p_entity_type;
+        ELSE
+            INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
+            VALUES (p_entity_id, p_entity_type, l_emb, 'text-embedding-bge-m3', 1024, SYSTIMESTAMP);
+        END IF;
+        COMMIT;
+        RETURN 1;
+    EXCEPTION WHEN OTHERS THEN RETURN -1;
+    END generate_and_store;
+
+    FUNCTION cosine_similarity(p_id1 IN VARCHAR2, p_type1 IN VARCHAR2, p_id2 IN VARCHAR2, p_type2 IN VARCHAR2) RETURN NUMBER IS
+        l_dist NUMBER;
+    BEGIN
+        SELECT VECTOR_DISTANCE(
+            (SELECT EMBEDDING FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = p_id1 AND ENTITY_TYPE = p_type1),
+            (SELECT EMBEDDING FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = p_id2 AND ENTITY_TYPE = p_type2),
+            COSINE
+        ) INTO l_dist FROM dual;
+        RETURN ROUND(1 - l_dist, 4);
+    EXCEPTION WHEN OTHERS THEN RETURN -1;
+    END cosine_similarity;
+
+    PROCEDURE batch_embed_entities(p_entity_type IN VARCHAR2, p_limit IN NUMBER DEFAULT 100) IS
+        CURSOR c_entities IS
+            SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE
+            FROM ENTITIES e
+            WHERE e.ENTITY_TYPE = p_entity_type
+              AND NOT EXISTS (SELECT 1 FROM ENTITY_EMBEDDINGS em WHERE em.ENTITY_ID = e.ENTITY_ID AND em.ENTITY_TYPE = e.ENTITY_TYPE)
+              AND e.TITLE IS NOT NULL
+            ORDER BY e.CREATED_AT DESC
+            FETCH FIRST p_limit ROWS ONLY;
+        l_count NUMBER := 0;
+    BEGIN
+        FOR r IN c_entities LOOP
+            IF generate_and_store(r.ENTITY_ID, r.ENTITY_TYPE, r.TITLE) = 1 THEN
+                l_count := l_count + 1;
+            END IF;
+        END LOOP;
+        MERGE INTO SYSTEM_CONFIG d
+        USING (SELECT 'last_batch_embed' AS k FROM dual) s
+        ON (d.CONFIG_KEY = s.k)
+        WHEN MATCHED THEN UPDATE SET d.CONFIG_VALUE = TO_CHAR(l_count)
+        WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE) VALUES ('last_batch_embed', TO_CHAR(l_count));
+        COMMIT;
+    END batch_embed_entities;
+
+    FUNCTION get_stats RETURN VARCHAR2 IS
+        l_total NUMBER;
+        l_with_vec NUMBER;
+        l_models VARCHAR2(4000);
+    BEGIN
+        SELECT COUNT(*), COUNT(CASE WHEN EMBEDDING IS NOT NULL THEN 1 END)
+        INTO l_total, l_with_vec FROM ENTITY_EMBEDDINGS;
+        SELECT LISTAGG(DISTINCT EMBEDDING_MODEL, ',') WITHIN GROUP (ORDER BY EMBEDDING_MODEL)
+        INTO l_models FROM ENTITY_EMBEDDINGS WHERE EMBEDDING_MODEL IS NOT NULL;
+        RETURN JSON_OBJECT('total' VALUE l_total, 'with_vector' VALUE l_with_vec, 'models' VALUE l_models);
+    END get_stats;
+
+END EMBEDDING_MANAGER;
+/
+
 COMMIT;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.0 API Deployment Complete
+PROMPT Oracle Memory System v2.3.1 API Deployment Complete
 PROMPT ============================================================

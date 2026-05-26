@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Connection Pool Tests"""
+"""Oracle Memory System v2.3.1 - Connection Pool Tests"""
 
 import sys
 import os

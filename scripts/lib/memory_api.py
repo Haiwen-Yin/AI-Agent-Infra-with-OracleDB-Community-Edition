@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Memory API
+"""Oracle Memory System v2.3.1 - Memory API
 
 Unified memory management using oracledb with bind variables.
 Operates on the ENTITIES table (ENTITY_TYPE='MEMORY').

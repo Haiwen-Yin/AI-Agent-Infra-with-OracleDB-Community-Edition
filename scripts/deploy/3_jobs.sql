@@ -1,4 +1,4 @@
--- Oracle Memory System v2.3.0 - Phase 3: Scheduler Jobs
+-- Oracle Memory System v2.3.1 - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -211,14 +211,35 @@ BEGIN
 END;
 /
 
+-- EMBEDDING_GENERATION_JOB [NEW v2.3.1]
+BEGIN
+    DBMS_SCHEDULER.DROP_JOB('EMBEDDING_GENERATION_JOB', FALSE);
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END;
+/
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB(
+        job_name        => 'EMBEDDING_GENERATION_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN EMBEDDING_MANAGER.batch_embed_entities(''MEMORY'', 50); EMBEDDING_MANAGER.batch_embed_entities(''KNOWLEDGE'', 50); END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=HOURLY; INTERVAL=2',
+        enabled         => TRUE,
+        comments        => 'Auto-embed new MEMORY and KNOWLEDGE entities (v2.3.1)'
+    );
+END;
+/
+
 SELECT JOB_NAME, STATE, REPEAT_INTERVAL
 FROM USER_SCHEDULER_JOBS
 WHERE JOB_NAME IN (
     'MEMORY_FUSION_JOB', 'KNOWLEDGE_EXTRACTION_JOB', 'KNOWLEDGE_REVIEW_JOB',
     'SESSION_CLEANUP_JOB', 'ACCESS_LOG_PURGE_JOB', 'ENTITY_ARCHIVE_JOB', 'COLLAB_EXPIRY_JOB',
     'WORKSPACE_CLEANUP_JOB', 'STALE_WORKSPACE_DETECT_JOB',
-    'DORMANT_AGENT_JOB', 'CREDENTIAL_CLEANUP_JOB'
+    'DORMANT_AGENT_JOB', 'CREDENTIAL_CLEANUP_JOB', 'EMBEDDING_GENERATION_JOB'
 )
 ORDER BY JOB_NAME;
 
-PROMPT Oracle Memory System v2.3.0 - Phase 3: Scheduler Jobs Complete (11 jobs)
+PROMPT Oracle Memory System v2.3.1 - Phase 3: Scheduler Jobs Complete (12 jobs)

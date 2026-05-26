@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Oracle Memory System v2.3.0 - Web Server Control Script
+# Oracle Memory System v2.3.1 - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
@@ -89,7 +89,7 @@ is_running() {
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Oracle Memory System v2.3.0${NC}"
+    echo -e "${BLUE}  Oracle Memory System v2.3.1${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -294,7 +294,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "Oracle Memory System v2.3.0 - Web Server Control"
+        echo "Oracle Memory System v2.3.1 - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

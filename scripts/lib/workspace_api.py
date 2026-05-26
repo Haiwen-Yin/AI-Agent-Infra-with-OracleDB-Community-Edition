@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Workspace API
+"""Oracle Memory System v2.3.1 - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Agent API
+"""Oracle Memory System v2.3.1 - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.

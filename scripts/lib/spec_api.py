@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.0 - Spec API
+"""Oracle Memory System v2.3.1 - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """
@@ -134,7 +134,8 @@ def update_spec(entity_id: str, **kwargs: Any) -> bool:
         affected += execute(sql, entity_updates)
 
     if meta_updates:
-        set_clause = ", ".join(f"{k} = :{k}" for k in meta_updates)
+        quoted_keys = {k: f'"{k.upper()}"' if k in ("acceptance_criteria", "constraints") else k for k in meta_updates}
+        set_clause = ", ".join(f"{quoted_keys[k]} = :{k}" for k in meta_updates)
         meta_updates["eid"] = entity_id
         sql = f"UPDATE SPEC_META SET {set_clause} WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC'"
         affected += execute(sql, meta_updates)

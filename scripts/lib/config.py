@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.1.0 - Unified Configuration Manager
+"""Oracle Memory System v2.3.1 - Unified Configuration Manager
 
 Reads from config.json with environment variable overrides.
 Priority: Environment Variables > config.json > Built-in defaults
