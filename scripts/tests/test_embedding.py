@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Embedding API Tests
+"""Oracle Memory System v2.3.2 - Embedding API Tests
 
 Tests: generate, store, retrieve, search, vector similarity, hybrid search, multi-type search, batch, dimension detection, stats, delete.
 """

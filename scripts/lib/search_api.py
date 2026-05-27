@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Unified Search API
+"""Oracle Memory System v2.3.2 - Unified Search API
 
 Single entry point for AI agents to search across all data types and modalities.
 Agents choose search strategy based on scenario:

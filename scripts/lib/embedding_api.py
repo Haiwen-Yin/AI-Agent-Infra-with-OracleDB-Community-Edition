@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Embedding API
+"""Oracle Memory System v2.3.2 - Embedding API
 
 Generate, store, and search vector embeddings for entities.
 Uses external Embedding API (OpenAI-compatible) + Oracle TO_VECTOR() for storage.

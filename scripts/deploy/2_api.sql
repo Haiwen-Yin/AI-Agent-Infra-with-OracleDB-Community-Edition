@@ -1,5 +1,5 @@
 -- ============================================================
--- Oracle Memory System v2.3.1 - Phase 2: PL/SQL API Packages
+-- Oracle Memory System v2.3.2 - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1202,7 +1202,7 @@ END COLLAB_GROUP_MANAGER;
 /
 
 -- ============================================================
--- EMBEDDING_MANAGER Package [NEW v2.3.1]
+-- EMBEDDING_MANAGER Package [NEW v2.3.2]
 -- In-database embedding generation via UTL_HTTP, vector storage, similarity search
 -- ============================================================
 
@@ -1324,5 +1324,5 @@ END EMBEDDING_MANAGER;
 COMMIT;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.1 API Deployment Complete
+PROMPT Oracle Memory System v2.3.2 API Deployment Complete
 PROMPT ============================================================

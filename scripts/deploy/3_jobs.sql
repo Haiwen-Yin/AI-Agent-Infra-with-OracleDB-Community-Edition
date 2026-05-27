@@ -1,4 +1,4 @@
--- Oracle Memory System v2.3.1 - Phase 3: Scheduler Jobs
+-- Oracle Memory System v2.3.2 - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -211,7 +211,7 @@ BEGIN
 END;
 /
 
--- EMBEDDING_GENERATION_JOB [NEW v2.3.1]
+-- EMBEDDING_GENERATION_JOB [NEW v2.3.2]
 BEGIN
     DBMS_SCHEDULER.DROP_JOB('EMBEDDING_GENERATION_JOB', FALSE);
 EXCEPTION
@@ -227,7 +227,7 @@ BEGIN
         start_date      => SYSTIMESTAMP,
         repeat_interval => 'FREQ=HOURLY; INTERVAL=2',
         enabled         => TRUE,
-        comments        => 'Auto-embed new MEMORY and KNOWLEDGE entities (v2.3.1)'
+        comments        => 'Auto-embed new MEMORY and KNOWLEDGE entities (v2.3.2)'
     );
 END;
 /
@@ -242,4 +242,4 @@ WHERE JOB_NAME IN (
 )
 ORDER BY JOB_NAME;
 
-PROMPT Oracle Memory System v2.3.1 - Phase 3: Scheduler Jobs Complete (12 jobs)
+PROMPT Oracle Memory System v2.3.2 - Phase 3: Scheduler Jobs Complete (12 jobs)

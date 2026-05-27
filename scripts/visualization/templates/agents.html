@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agents - Oracle Memory System v2.3.1</title>
+<title>Agents - Oracle Memory System v2.3.2</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="/static/vis-network.min.js">
 </script>
 <style>
 :root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;overflow:hidden}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
 .sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
 .sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
 .sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
@@ -30,27 +30,32 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
 .top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color)}
 .top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
-.content-area{flex:1;overflow-y:auto;padding:20px;position:relative}
+.content-area{flex:1;overflow-y:auto;padding:0 20px;position:relative;min-height:0}
 .nav-tabs{border-bottom:1px solid var(--border-color)}
 .nav-tabs .nav-link{color:var(--text-secondary);border:1px solid transparent;border-radius:8px 8px 0 0;font-size:.88rem;padding:8px 20px;transition:all .15s}
 .nav-tabs .nav-link:hover{color:var(--text-primary);border-color:var(--border-color) var(--border-color) transparent}
 .nav-tabs .nav-link.active{color:var(--accent);background:var(--bg-secondary);border-color:var(--border-color) var(--border-color) var(--bg-primary)}
 .tab-content{padding-top:16px}
-.data-table{width:100%;border-collapse:collapse;font-size:.88rem}
-.data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap}
-.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.88rem}
+.data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg-card);box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle;color:#fff}
 .data-table tbody tr:hover{background:rgba(233,69,96,.05)}
 .badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
 .badge-active{background:rgba(46,204,113,.15);color:#2ecc71}
 .badge-inactive{background:rgba(160,160,176,.15);color:#a0a0b0}
 .badge-decommissioned{background:rgba(231,76,60,.15);color:#e74c3c}
 .cap-tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:1px 3px 1px 0}
-.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
+.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;color:#fff}
 .loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
 .spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
 .empty-state .icon{font-size:3rem;margin-bottom:12px;opacity:.5}
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap}
+.pagination button{background:rgba(233,69,96,.08);border:1px solid rgba(233,69,96,.2);color:#fff;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s}
+.pagination button:hover{background:rgba(233,69,96,.2);border-color:rgba(233,69,96,.4)}
+.pagination button.active{background:rgba(233,69,96,.15);border:1px solid rgba(233,69,96,.3);color:#e94560;font-weight:700}
+.pagination button:disabled{opacity:.35;cursor:not-allowed}
 [data-lang="zh"] [data-en]{display:none!important}
 [data-lang="en"] [data-zh]{display:none!important}
 </style>
@@ -59,7 +64,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <div class="sidebar">
   <div class="sidebar-brand">
     <h5>Oracle Memory</h5>
-    <small>v2.3.1</small>
+    <small>v2.3.2</small>
   </div>
   <nav class="sidebar-nav">
     <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
@@ -121,6 +126,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
             <tbody id="registryBody"></tbody>
           </table>
         </div>
+        <div id="registryPagination" class="pagination"></div>
       </div>
       <div class="tab-pane fade" id="sessions" role="tabpanel">
         <div id="sessionsEmpty" class="empty-state d-none">
@@ -141,6 +147,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
             <tbody id="sessionsBody"></tbody>
           </table>
         </div>
+        <div id="sessionsPagination" class="pagination"></div>
       </div>
       <div class="tab-pane fade" id="collaborations" role="tabpanel">
         <div id="collabsEmpty" class="empty-state d-none">
@@ -161,6 +168,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
             <tbody id="collabsBody"></tbody>
           </table>
         </div>
+        <div id="collabsPagination" class="pagination"></div>
       </div>
     </div>
     <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
@@ -173,6 +181,30 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
 
 function escapeHtml(s){if(s==null)return '';var d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+
+var PAGE_SIZE=30;
+var registryPage=1,allRegistryItems=[];
+var sessionsPage=1,allSessionItems=[];
+var collabsPage=1,allCollabItems=[];
+
+function renderPagination(totalCount,pagId,curPage,goFn){
+  var pagDiv=document.getElementById(pagId);if(!pagDiv)return;
+  var totalPages=Math.ceil(totalCount/PAGE_SIZE)||1;
+  if(totalPages<=1){pagDiv.innerHTML='';return}
+  var h='';
+  h+='<button onclick="'+goFn+'('+(curPage-1)+')"'+(curPage<=1?' disabled':'')+'>&laquo; Prev</button>';
+  var startPage=Math.max(1,curPage-3);
+  var endPage=Math.min(totalPages,curPage+3);
+  if(startPage>1)h+='<button onclick="'+goFn+'(1)">1</button>';
+  if(startPage>2)h+='<button disabled>...</button>';
+  for(var p=startPage;p<=endPage;p++){
+    h+='<button onclick="'+goFn+'('+p+')"'+(p===curPage?' class="active"':'')+'>'+p+'</button>';
+  }
+  if(endPage<totalPages-1)h+='<button disabled>...</button>';
+  if(endPage<totalPages)h+='<button onclick="'+goFn+'('+totalPages+')">'+totalPages+'</button>';
+  h+='<button onclick="'+goFn+'('+(curPage+1)+')"'+(curPage>=totalPages?' disabled':'')+' >Next &raquo;</button>';
+  pagDiv.innerHTML=h;
+}
 
 function statusBadge(status){
   var cls='badge-inactive',label=status||'UNKNOWN';
@@ -194,13 +226,18 @@ function boolBadge(val){
 function fmtTime(ts){if(!ts)return '-';try{var d=new Date(ts);return d.toLocaleString()}catch(e){return escapeHtml(String(ts))}}
 
 function renderRegistry(agents){
+  allRegistryItems=agents||[];
   var tb=document.getElementById('registryBody');
   var empty=document.getElementById('registryEmpty');
-  if(!agents||!agents.length){tb.innerHTML='';empty.classList.remove('d-none');return}
+  if(!allRegistryItems.length){tb.innerHTML='';empty.classList.remove('d-none');renderPagination(0,'registryPagination',1,'goRegistryPage');return}
   empty.classList.add('d-none');
+  var totalPages=Math.ceil(allRegistryItems.length/PAGE_SIZE)||1;
+  if(registryPage>totalPages)registryPage=totalPages;
+  var start=(registryPage-1)*PAGE_SIZE;
+  var pageItems=allRegistryItems.slice(start,start+PAGE_SIZE);
   var h='';
-  for(var i=0;i<agents.length;i++){
-    var a=agents[i];
+  for(var i=0;i<pageItems.length;i++){
+    var a=pageItems[i];
     h+='<tr>';
     h+='<td>'+truncId(a.agent_id)+'</td>';
     h+='<td>'+escapeHtml(a.agent_name||a.agent_id)+'</td>';
@@ -211,16 +248,29 @@ function renderRegistry(agents){
     h+='</tr>';
   }
   tb.innerHTML=h;
+  renderPagination(allRegistryItems.length,'registryPagination',registryPage,'goRegistryPage');
+}
+
+function goRegistryPage(p){
+  var totalPages=Math.ceil(allRegistryItems.length/PAGE_SIZE)||1;
+  if(p<1||p>totalPages)return;
+  registryPage=p;
+  renderRegistry(allRegistryItems);
 }
 
 function renderSessions(sessions){
+  allSessionItems=sessions||[];
   var tb=document.getElementById('sessionsBody');
   var empty=document.getElementById('sessionsEmpty');
-  if(!sessions||!sessions.length){tb.innerHTML='';empty.classList.remove('d-none');return}
+  if(!allSessionItems.length){tb.innerHTML='';empty.classList.remove('d-none');renderPagination(0,'sessionsPagination',1,'goSessionsPage');return}
   empty.classList.add('d-none');
+  var totalPages=Math.ceil(allSessionItems.length/PAGE_SIZE)||1;
+  if(sessionsPage>totalPages)sessionsPage=totalPages;
+  var start=(sessionsPage-1)*PAGE_SIZE;
+  var pageItems=allSessionItems.slice(start,start+PAGE_SIZE);
   var h='';
-  for(var i=0;i<sessions.length;i++){
-    var s=sessions[i];
+  for(var i=0;i<pageItems.length;i++){
+    var s=pageItems[i];
     h+='<tr>';
     h+='<td>'+truncId(s.session_id)+'</td>';
     h+='<td>'+truncId(s.agent_id)+'</td>';
@@ -230,16 +280,29 @@ function renderSessions(sessions){
     h+='</tr>';
   }
   tb.innerHTML=h;
+  renderPagination(allSessionItems.length,'sessionsPagination',sessionsPage,'goSessionsPage');
+}
+
+function goSessionsPage(p){
+  var totalPages=Math.ceil(allSessionItems.length/PAGE_SIZE)||1;
+  if(p<1||p>totalPages)return;
+  sessionsPage=p;
+  renderSessions(allSessionItems);
 }
 
 function renderCollaborations(collabs){
+  allCollabItems=collabs||[];
   var tb=document.getElementById('collabsBody');
   var empty=document.getElementById('collabsEmpty');
-  if(!collabs||!collabs.length){tb.innerHTML='';empty.classList.remove('d-none');return}
+  if(!allCollabItems.length){tb.innerHTML='';empty.classList.remove('d-none');renderPagination(0,'collabsPagination',1,'goCollabsPage');return}
   empty.classList.add('d-none');
+  var totalPages=Math.ceil(allCollabItems.length/PAGE_SIZE)||1;
+  if(collabsPage>totalPages)collabsPage=totalPages;
+  var start=(collabsPage-1)*PAGE_SIZE;
+  var pageItems=allCollabItems.slice(start,start+PAGE_SIZE);
   var h='';
-  for(var i=0;i<collabs.length;i++){
-    var c=collabs[i];
+  for(var i=0;i<pageItems.length;i++){
+    var c=pageItems[i];
     h+='<tr>';
     h+='<td>'+truncId(c.source_agent_id)+'</td>';
     h+='<td>'+truncId(c.target_agent_id)+'</td>';
@@ -249,6 +312,14 @@ function renderCollaborations(collabs){
     h+='</tr>';
   }
   tb.innerHTML=h;
+  renderPagination(allCollabItems.length,'collabsPagination',collabsPage,'goCollabsPage');
+}
+
+function goCollabsPage(p){
+  var totalPages=Math.ceil(allCollabItems.length/PAGE_SIZE)||1;
+  if(p<1||p>totalPages)return;
+  collabsPage=p;
+  renderCollaborations(allCollabItems);
 }
 
 async function loadData(){

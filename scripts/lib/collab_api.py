@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Collaboration Group API
+"""Oracle Memory System v2.3.2 - Collaboration Group API
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, and group memory sharing.

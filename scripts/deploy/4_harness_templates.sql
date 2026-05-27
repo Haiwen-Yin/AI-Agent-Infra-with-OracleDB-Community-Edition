@@ -1,4 +1,4 @@
--- Oracle Memory System v2.3.1 - Phase 4: Harness Templates
+-- Oracle Memory System v2.3.2 - Phase 4: Harness Templates
 
 WHENEVER SQLERROR CONTINUE;
 

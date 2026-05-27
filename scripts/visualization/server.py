@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Web Visualization Server
+"""Oracle Memory System v2.3.2 - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -8,6 +8,7 @@ specs, collaboration groups, and graph visualization.
 import hashlib
 import json
 import os
+import signal
 import sys
 import time
 import urllib.parse
@@ -22,7 +23,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api
 from lib import security, config
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -589,4 +590,5 @@ def main():
 
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
     main()

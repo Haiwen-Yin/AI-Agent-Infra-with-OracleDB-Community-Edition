@@ -1,6 +1,6 @@
-# Oracle AI Database Memory System v2.3.1
+# Oracle AI Database Memory System v2.3.2
 
-[![Version](https://img.shields.io/badge/version-v2.3.1-blue.svg)](RELEASE_NOTES_v2.3.0.md)
+[![Version](https://img.shields.io/badge/version-v2.3.2-blue.svg)](RELEASE_NOTES_v2.3.2.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-183%2F183-brightgreen.svg)]()
@@ -8,15 +8,29 @@
 
 **Partitioned AI Agent Memory System with Embedding Generation & Vector Search, 5-Signal Unified Hybrid Search + Fulltext Search + Search API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, Property Graph API, Knowledge Graph, Multi-Agent Collaboration, Task Planning, Harness Templates, Workspace & Context Continuity, and Web Visualization — built on Oracle 26ai.**
 
-> **v2.3.1: Embedding fix, 5-signal unified hybrid search, fulltext search, unified search API (10 strategies), and single-SQL CTE fusion search. v2.3.0 added SDD, Agent Elastic Management, and Collaboration Groups.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v2.3.2: Web UI optimization — client-side pagination, sticky headers, viewport fixes. v2.3.1: Embedding fix, 5-signal unified hybrid search, fulltext search, unified search API (10 strategies), single-SQL CTE fusion search. v2.3.0 added SDD, Agent Elastic Management, and Collaboration Groups.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-**[中文说明 / Chinese Introduction](docs/introduction_v2.3.1_zh.md)**
+**[中文说明 / Chinese Introduction](docs/introduction_v2.3.2_zh.md)**
 
 ---
 
+## What's New in v2.3.2
+
+### Web UI Optimization
+
+Pure front-end improvements — no database or API changes. All 183 tests from v2.3.1 continue to pass.
+
+| Feature | Description |
+|---------|-------------|
+| **Client-side pagination** | PAGE_SIZE=30 with Prev/Next + page number buttons for all data tables. Agents page has triple pagination (registry/sessions/collabs). |
+| **Sticky table headers** | Headers stay visible while scrolling with `position:sticky` + shadow effect |
+| **Viewport height fix** | `height:100vh` prevents layout overflow; content areas use `calc(100vh - 120px)` |
+| **Table spacing** | `border-collapse:separate;border-spacing:0` for consistent cell rendering |
+| **Login language persistence** | Language preference saved and restored across sessions |
+
 ## What's New in v2.3.1
 
-### 5-Signal Unified Hybrid Search + Fulltext Search
+### 5-Signal Unified Hybrid Search + Fulltext Search (v2.3.1)
 
 Multi-signal retrieval combining vector similarity, fulltext (Oracle Text), relational metadata, tag overlap, and graph proximity:
 
@@ -52,7 +66,7 @@ for r in results:
           f"rel={r['scores']['relational']:.3f} graph={r['scores']['graph']:.3f}")
 ```
 
-### Fulltext Search (Oracle Text)
+### Fulltext Search (Oracle Text) (v2.3.1)
 
 ```python
 from scripts.lib.embedding_api import search_fulltext
@@ -63,7 +77,7 @@ for r in results:
     print(f"{r['title']:40s} ft_score={r['ft_score']:.3f}")
 ```
 
-### Embedding Generation & Vector Search (RESTORED + ENHANCED)
+### Embedding Generation & Vector Search (v2.3.1 RESTORED + ENHANCED)
 
 The architecture rewrite in v2.0.0 (partitioning, composite PKs, JRD dual views) missed the embedding generation and vector search capabilities from v1.x/v2.0. v2.3.1 fully fixes and enhances:
 
@@ -76,7 +90,7 @@ The architecture rewrite in v2.0.0 (partitioning, composite PKs, JRD dual views)
 - **EMBEDDING_GENERATION_JOB** — Scheduler job that auto-generates embeddings for MEMORY/KNOWLEDGE entities every 2 hours
 - **19 embedding tests** — All passed
 
-### Spec Driven Development (SDD)
+### Spec Driven Development (SDD) (v2.3.0)
 
 Specifications as first-class citizens stored as ENTITIES subtype `SPEC`, with reference-partitioned SPEC_META and many-to-many SPEC_PLAN_LINKS:
 
@@ -171,7 +185,7 @@ oracle-memory-by-yhw/
       test_search_api.py        # 42 tests [NEW]
       test_all.py               # Master runner (171 total)
     visualization/
-      server.py                 # HTTP server v2.3.1
+      server.py                 # HTTP server v2.3.2
       templates/                # 9 HTML templates (login, knowledge, memory, agents, tasks, workspaces, graph, specs, collab)
       static/                   # style.css + vis-network.min.js
   docs/
@@ -183,7 +197,7 @@ oracle-memory-by-yhw/
     harness.md                  # Harness template system guide
     workspace.md                # Workspace & context continuity
     minimum-privileges.md       # Database user privileges
-    introduction_v2.3.1_zh.md   # v2.3.1 Chinese introduction
+    introduction_v2.3.2_zh.md   # v2.3.2 Chinese introduction
   CHANGELOG.md
   SKILL.md
   README.md
@@ -217,9 +231,9 @@ pip install oracledb
 ### 3. Configure
 
 ```bash
-export MEMORY_DB_USER=openclaw
-export MEMORY_DB_PASSWORD=hermes
-export MEMORY_DB_DSN=10.10.10.130:1521/openclaw
+export MEMORY_DB_USER=<db_user>
+export MEMORY_DB_PASSWORD=<db_password>
+export MEMORY_DB_DSN=<db_host>:<db_port>/<db_service>
 ```
 
 ### 4. Run Tests
@@ -234,7 +248,7 @@ cd scripts && python -m tests.test_all
 ./start_web_server.sh start    # Start (daemon mode)
 ./start_web_server.sh status   # Check status
 ./start_web_server.sh stop     # Stop
-# Open http://localhost:8000 — Login: admin / admin123
+# Open http://<web_host>:<web_port> — Login: admin / admin123
 ```
 
 ---
@@ -307,13 +321,13 @@ gid = create_collab_group("Security Board", "PROJECT", "MODERATED")
 add_group_member(gid, "agent-1", "LEAD")
 share_memory_to_group(gid, mid, "agent-1")
 
-# Embedding & Vector Search [NEW v2.3.1]
+# Embedding & Vector Search [NEW v2.3.2]
 store_embedding(mid, "MEMORY", "meeting notes about v2.3")
 results = search_similar("database architecture", top_k=5, entity_type="MEMORY")
 hybrid = search_hybrid("security patterns", keyword="encryption", top_k=5)
 multi = search_multi_type("distributed systems", entity_types=["MEMORY", "KNOWLEDGE"])
 
-# Unified Search API - single entry, 10 strategies [NEW v2.3.1]
+# Unified Search API - single entry, 10 strategies [NEW v2.3.2]
 unified = search("database partitioning", strategy="unified", top_k=5)
 sql_fusion = search("encryption", strategy="unified_sql", domain="security", top_k=5)
 auto = search("security", strategy="auto")
@@ -350,7 +364,7 @@ Login: `admin` / `admin123`
 ## Test Results
 
 ```
-Oracle Memory System v2.3.1 - Full Test Suite
+Oracle Memory System v2.3.2 - Full Test Suite
 ============================================================
   Connection:   6/6 PASS
   Memory:       8/8 PASS
@@ -375,6 +389,7 @@ Overall: 183/183 ALL PASSED
 
 | Version | Date | Description |
 |---------|------|-------------|
+| **v2.3.2** | 2026-05-27 | Web UI optimization — pagination, sticky headers, viewport fixes |
 | **v2.3.1** | 2026-05-26 | Embedding fix, 5-signal unified hybrid search, fulltext search, search API (10 strategies), single-SQL CTE fusion |
 | **v2.3.0** | 2026-05-24 | Spec Driven Development, Agent Elastic Management, Collaboration Groups |
 | v2.2.1 | 2026-05-23 | Template-based visualization, sidebar navigation, Graph Explorer |

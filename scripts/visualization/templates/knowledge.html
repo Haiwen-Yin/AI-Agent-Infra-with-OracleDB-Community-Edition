@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Knowledge - Oracle Memory System v2.3.1</title>
+<title>Knowledge - Oracle Memory System v2.3.2</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="/static/vis-network.min.js"></script>
 <style>
 :root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;overflow:hidden}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
 .sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
 .sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
 .sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
@@ -41,9 +41,9 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .view-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .content-area{flex:1;display:flex;overflow:hidden;position:relative}
 #network-container{flex:1;width:100%;height:calc(100vh - 120px);background:var(--bg-primary)}
-#listView{flex:1;overflow-y:auto;padding:16px 20px;display:none}
-.data-table{width:100%;border-collapse:collapse;font-size:.85rem}
-.data-table thead th{background:var(--bg-card);color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:2}
+#listView{flex:1;overflow-y:auto;padding:0 20px;display:none;min-height:0;height:calc(100vh - 120px)}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.85rem}
+.data-table thead th{background:var(--bg-card);color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:2;box-shadow:0 2px 4px rgba(0,0,0,.3)}
 .data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.3);vertical-align:top;cursor:pointer}
 .data-table tbody tr:hover td{background:rgba(233,69,96,.06)}
 .badge-domain{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.72rem;color:#fff;font-weight:600}
@@ -64,6 +64,12 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .detail-panel h5{color:var(--accent);font-size:1rem;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between}
 .close-detail{background:none;border:none;color:var(--text-secondary);font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1;transition:color .15s}
 .close-detail:hover{color:var(--accent)}
+
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap}
+.pagination button{background:rgba(233,69,96,.08);border:1px solid rgba(233,69,96,.2);color:#fff;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s}
+.pagination button:hover{background:rgba(233,69,96,.2);border-color:rgba(233,69,96,.4)}
+.pagination button.active{background:rgba(233,69,96,.15);border:1px solid rgba(233,69,96,.3);color:#e94560;font-weight:700}
+.pagination button:disabled{opacity:.35;cursor:not-allowed}
 [data-lang="zh"] [data-en]{display:none!important}
 [data-lang="en"] [data-zh]{display:none!important}
 </style>
@@ -72,7 +78,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <div class="sidebar">
   <div class="sidebar-brand">
     <h5>Oracle Memory</h5>
-    <small>v2.3.1</small>
+    <small>v2.3.2</small>
   </div>
   <nav class="sidebar-nav">
     <a href="/knowledge" class="active"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
@@ -121,6 +127,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
         </tr></thead>
         <tbody id="listBody"></tbody>
       </table>
+      <div id="pagination" class="pagination"></div>
      </div>
 
     <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
@@ -134,6 +141,7 @@ var allEdges = null;
 var nodesDataset = null;
 var edgesDataset = null;
 var currentView = 'list';
+var PAGE_SIZE=30;var currentPage=1;var filteredItems=[];
 
 var domainColors = {
   AI: '#4a90d9', NLP: '#50c878', DB: '#e8a838', ML: '#9b59b6',
@@ -294,15 +302,24 @@ function renderList() {
   if (!allNodes) return;
   var kw = document.getElementById('searchInput').value.toLowerCase().trim();
   var tbody = document.getElementById('listBody');
-  var h = '';
+  filteredItems=[];
   for (var i = 0; i < allNodes.length; i++) {
     var n = allNodes[i];
     if (kw) {
       var t = ((n.label || '') + ' ' + (n.title || '') + ' ' + (n.domain || '') + ' ' + (n.topic || '') + ' ' + (n.content || '')).toLowerCase();
       if (t.indexOf(kw) < 0) continue;
     }
+    filteredItems.push(n);
+  }
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;
+  if(currentPage>totalPages)currentPage=totalPages;
+  var start=(currentPage-1)*PAGE_SIZE;
+  var pageItems=filteredItems.slice(start,start+PAGE_SIZE);
+  var h = '';
+  for (var j = 0; j < pageItems.length; j++) {
+    var n = pageItems[j];
     var dc = domainColors[n.domain || n.group || 'General'] || domainColors.General;
-    h += '<tr data-nid="' + n.id + '" onclick="toggleDetail(' + i + ')" style="cursor:pointer">';
+    h += '<tr data-nid="' + n.id + '" onclick="toggleDetail(' + j + ')" style="cursor:pointer">';
     h += '<td style="color:var(--text-secondary);font-family:monospace;font-size:.8rem">' + n.id + '</td>';
     h += '<td style="font-weight:600">' + escapeHtml(n.title || n.label) + '</td>';
     h += '<td><span class="badge-domain" style="background:' + dc + '">' + escapeHtml(n.domain || n.group || '-') + '</span></td>';
@@ -311,7 +328,7 @@ function renderList() {
     h += '<td style="text-align:center">' + (n.importance != null ? n.importance : '-') + '</td>';
     h += '<td class="content-preview">' + escapeHtml(n.content || '-') + '</td>';
     h += '</tr>';
-    h += '<tr id="kdetail-' + i + '" class="detail-row" style="display:none"><td colspan="7" style="padding:0">';
+    h += '<tr id="kdetail-' + j + '" class="detail-row" style="display:none"><td colspan="7" style="padding:0">';
     h += '<div class="detail-content">';
     h += '<div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><span data-zh>节点详情</span><span data-en>Node Detail</span></div>';
     h += '<p><strong><span data-zh>标题</span><span data-en>Title</span></strong> ' + escapeHtml(n.title || n.label || '-') + '</p>';
@@ -327,9 +344,37 @@ function renderList() {
     h += '</div></td></tr>';
   }
   tbody.innerHTML = h;
+  renderPagination(filteredItems.length,'pagination',currentPage,'goPage');
+}
+
+function renderPagination(totalCount,pagId,curPage,goFn){
+  var pagDiv=document.getElementById(pagId);if(!pagDiv)return;
+  var totalPages=Math.ceil(totalCount/PAGE_SIZE)||1;
+  if(totalPages<=1){pagDiv.innerHTML='';return}
+  var h='';
+  h+='<button onclick="'+goFn+'('+(curPage-1)+')"'+(curPage<=1?' disabled':'')+'>&laquo; Prev</button>';
+  var startPage=Math.max(1,curPage-3);
+  var endPage=Math.min(totalPages,curPage+3);
+  if(startPage>1)h+='<button onclick="'+goFn+'(1)">1</button>';
+  if(startPage>2)h+='<button disabled>...</button>';
+  for(var p=startPage;p<=endPage;p++){
+    h+='<button onclick="'+goFn+'('+p+')"'+(p===curPage?' class="active"':'')+'>'+p+'</button>';
+  }
+  if(endPage<totalPages-1)h+='<button disabled>...</button>';
+  if(endPage<totalPages)h+='<button onclick="'+goFn+'('+totalPages+')">'+totalPages+'</button>';
+  h+='<button onclick="'+goFn+'('+(curPage+1)+')"'+(curPage>=totalPages?' disabled':'')+' >Next &raquo;</button>';
+  pagDiv.innerHTML=h;
+}
+
+function goPage(p){
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;
+  if(p<1||p>totalPages)return;
+  currentPage=p;
+  renderList();
 }
 
 function applyFilter() {
+  currentPage=1;
   if (currentView === 'list') { renderList(); return; }
   filterNodes(document.getElementById('searchInput').value);
 }

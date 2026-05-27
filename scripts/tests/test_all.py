@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Master Test Runner"""
+"""Oracle Memory System v2.3.2 - Master Test Runner"""
 
 import sys
 import os
@@ -22,7 +22,7 @@ from tests.test_search_api import run_all as run_search_api
 
 def main():
     print("=" * 60)
-    print("Oracle Memory System v2.3.1 - Full Test Suite")
+    print("Oracle Memory System v2.3.2 - Full Test Suite")
     print("=" * 60)
 
     suites = [

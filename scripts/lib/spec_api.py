@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Spec API
+"""Oracle Memory System v2.3.2 - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """

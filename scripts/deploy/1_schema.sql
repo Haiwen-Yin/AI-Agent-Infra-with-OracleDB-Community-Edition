@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.1 - Schema Deployment
+PROMPT Oracle Memory System v2.3.2 - Schema Deployment
 PROMPT Spec Management, Agent Pools, Collaboration Groups & JRD Views
 PROMPT ============================================================
 
@@ -981,7 +981,7 @@ PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '2.3.1', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '2.3.2', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1536', 'Default embedding dimension');
@@ -995,7 +995,7 @@ INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, ROLE, STATUS) VALUES
 COMMIT;
 
 PROMPT ============================================================
-PROMPT Oracle Text CONTEXT index for full-text search [NEW v2.3.1]
+PROMPT Oracle Text CONTEXT index for full-text search [NEW v2.3.2]
 PROMPT ============================================================
 
 BEGIN
@@ -1023,5 +1023,5 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.1 Schema Deployment Complete
+PROMPT Oracle Memory System v2.3.2 Schema Deployment Complete
 PROMPT ============================================================

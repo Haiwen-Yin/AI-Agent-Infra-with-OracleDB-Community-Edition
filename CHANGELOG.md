@@ -10,6 +10,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2.3.2] - 2026-05-27
+
+### Summary
+
+**Web UI Optimization** — Client-side pagination (PAGE_SIZE=30), sticky table headers with shadow, viewport height fixes, table spacing improvements, and login language persistence across all 7 data pages. Pure front-end release — no database or API changes. All 183 tests from v2.3.1 continue to pass.
+
+### Added
+
+- **Client-side pagination** — PAGE_SIZE=30 with Prev/Next + page number buttons for all data tables. Knowledge, Memory, Tasks, Workspaces, Specs, Collab pages use single pagination; Agents page uses triple pagination (registry/sessions/collabs tabs).
+- **Sticky table headers** — `position:sticky;top:0;z-index:2` with `background` and `box-shadow:0 2px 4px rgba(0,0,0,.3)` for visual separation when scrolling, applied to all data tables.
+- **Viewport height fix** — `body` changed from `min-height:100vh` to `height:100vh`; `content-area`/`listView` given `min-height:0` and `height:calc(100vh - 120px)` to prevent layout overflow.
+- **Table spacing** — `border-collapse:collapse` → `border-collapse:separate;border-spacing:0` for consistent cell rendering.
+- **Text color** — Table body cells use explicit `color:#fff`; info-card divs use `color:#fff` for consistent dark-theme rendering.
+- **Login language persistence** — Language preference saved to `localStorage` on toggle; restored on page load with `document.documentElement.lang` set for screen readers.
+
+### Templates Changed
+
+- `knowledge.html` — pagination, sticky header, viewport fix, listView height
+- `memory.html` — pagination, sticky header, viewport fix, listView height
+- `agents.html` — triple pagination (registry/sessions/collabs), sticky header, viewport fix
+- `tasks.html` — pagination, sticky header, viewport fix
+- `workspaces.html` — pagination, sticky header, viewport fix
+- `specs.html` — pagination, sticky header, viewport fix
+- `collab.html` — pagination, sticky header, viewport fix
+- `graph.html` — language persistence, viewport fix
+- `login.html` — language persistence
+
+---
+
 ## [2.3.1] - 2026-05-26
 
 ### Summary
@@ -52,7 +81,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 
 ### Changed
 
-- **embedding_api.py version** — v2.3.0 → v2.3.1
+- **embedding_api.py version** — v2.3.0 → v2.3.2
 - **test_embedding.py** — Expanded from 10 to 19 tests, covering all new retrieval capabilities
 - **test_all.py** — Added Spec/Collab/Credential/Embedding/UnifiedSearch five test suites (14 total, 183 tests)
 - **Named bind convention** — All `execute_query`/`execute_query_one`/`execute` calls uniformly use dict named binds, no longer using positional binds

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Harness Template API Tests"""
+"""Oracle Memory System v2.3.2 - Harness Template API Tests"""
 
 import sys
 import os

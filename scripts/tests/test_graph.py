@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Property Graph API Tests"""
+"""Oracle Memory System v2.3.2 - Property Graph API Tests"""
 
 import sys
 import os

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Knowledge API Tests"""
+"""Oracle Memory System v2.3.2 - Knowledge API Tests"""
 
 import sys
 import os

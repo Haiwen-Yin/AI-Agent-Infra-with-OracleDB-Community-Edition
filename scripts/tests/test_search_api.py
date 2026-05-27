@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Search API Tests"""
+"""Oracle Memory System v2.3.2 - Search API Tests"""
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

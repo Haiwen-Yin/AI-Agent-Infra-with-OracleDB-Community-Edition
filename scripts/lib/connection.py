@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Database Connection Pool Manager
+"""Oracle Memory System v2.3.2 - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.

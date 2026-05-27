@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Rich Test Data Seeder
+"""Oracle Memory System v2.3.2 - Rich Test Data Seeder
 
 Seeds 50+ entities with embeddings, edges, tags, and metadata across MEMORY/KNOWLEDGE/SPEC types.
 Designed to validate multi-signal hybrid search (vector + keyword + relational + graph).
@@ -209,7 +209,7 @@ def seed_embeddings(entity_map):
 
 def main():
     print("=" * 60)
-    print("Oracle Memory System v2.3.1 - Rich Test Data Seeder")
+    print("Oracle Memory System v2.3.2 - Rich Test Data Seeder")
     print("=" * 60)
 
     print("\n--- Phase 1: Create Entities ---")

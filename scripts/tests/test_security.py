@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Security Module Tests"""
+"""Oracle Memory System v2.3.2 - Security Module Tests"""
 
 import sys
 import os

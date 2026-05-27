@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Task Plan API
+"""Oracle Memory System v2.3.2 - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.

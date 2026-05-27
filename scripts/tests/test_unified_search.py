@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Unified Hybrid Search Tests
+"""Oracle Memory System v2.3.2 - Unified Hybrid Search Tests
 
 Tests the 5-signal unified search: vector + fulltext (Oracle Text) + relational metadata + graph proximity.
 Uses seeded test data with 50+ entities, embeddings, edges, and tags.

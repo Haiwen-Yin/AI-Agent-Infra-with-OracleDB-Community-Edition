@@ -154,7 +154,7 @@ body {
     </button>
   </form>
 
-  <div class="version-badge">v2.3.1</div>
+  <div class="version-badge">v2.3.2</div>
 </div>
 
 <script>
@@ -222,7 +222,7 @@ async function handleLogin(e) {
 
 applyLang(document.documentElement.getAttribute('data-lang') || 'en');
 
-(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
 </script>
 </body>
 </html>

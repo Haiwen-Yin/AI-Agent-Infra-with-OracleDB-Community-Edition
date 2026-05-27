@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.1 - Collaboration Group API Tests"""
+"""Oracle Memory System v2.3.2 - Collaboration Group API Tests"""
 
 import sys
 import os

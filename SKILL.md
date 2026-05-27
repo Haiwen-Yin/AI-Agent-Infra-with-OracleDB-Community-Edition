@@ -1,16 +1,16 @@
 ---
 name: oracle-memory-by-yhw
-version: v2.3.1
+version: v2.3.2
 author: Haiwen Yin
-description: "Oracle AI Database Memory System v2.3.1 - 5-Signal Unified Hybrid Search + Fulltext Search + Search API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
+description: "Oracle AI Database Memory System v2.3.2 - Web UI Optimization, 5-Signal Unified Hybrid Search + Fulltext Search + Search API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
 tags: [oracle, memory-system, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# Oracle AI Database Memory System v2.3.1
+# Oracle AI Database Memory System v2.3.2
 
 **Author:** Haiwen Yin
-**Version:** v2.3.1 - 2026-05-26
+**Version:** v2.3.2 - 2026-05-27
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -50,6 +50,17 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 |                                                                  |
 +------------------------------------------------------------------+
 ```
+
+## v2.3.2 Key Addition: Web UI Optimization
+
+| Feature | Description |
+|---------|-------------|
+| **Client-side pagination** | PAGE_SIZE=30 with Prev/Next + page number buttons. 7 data pages have single pagination; Agents page has triple pagination (registry/sessions/collabs tabs). |
+| **Sticky table headers** | `position:sticky;top:0;z-index:2;background:var(--bg-card);box-shadow:0 2px 4px rgba(0,0,0,.3)` for all data tables |
+| **Viewport height fix** | `body` from `min-height:100vh` to `height:100vh`; content areas get `min-height:0;height:calc(100vh - 120px)` |
+| **Table spacing** | `border-collapse:separate;border-spacing:0` for consistent cell rendering |
+| **Text color** | `color:#fff` for table cells and info-card divs on dark theme |
+| **Login language persistence** | `localStorage` save on toggle; restore with `document.documentElement.lang` on load |
 
 ## v2.3.1 Key Features: Embedding Fix, Unified Search, Fulltext Search & Search API
 
@@ -204,9 +215,9 @@ pip install oracledb
 ### Configure
 
 ```bash
-export ORACLE_DSN="//10.10.10.130:1521/openclaw"
-export ORACLE_USER="openclaw"
-export ORACLE_PASSWORD="hermes"
+export ORACLE_DSN="//<db_host>:<db_port>/<db_service>"
+export ORACLE_USER="<db_user>"
+export ORACLE_PASSWORD="<db_password>"
 ```
 
 ### Run Tests
@@ -247,8 +258,8 @@ oracle-memory-by-yhw/
       workspace_api.py          # Workspace lifecycle, context chains, handoff, recovery (11 functions)
       spec_api.py              # Spec CRUD, plan linkage, validation, derivation (10 functions) [NEW v2.3.0]
       collab_api.py             # Collaboration groups, members, shared memory (10 functions) [NEW v2.3.0]
-      embedding_api.py          # Vector embedding generation, storage, search (15 functions) [NEW v2.3.1]
-      search_api.py             # Unified search entry point, 10 strategies with auto-detection (3 functions) [NEW v2.3.1]
+      embedding_api.py          # Vector embedding generation, storage, search (15 functions) [NEW v2.3.2]
+      search_api.py             # Unified search entry point, 10 strategies with auto-detection (3 functions) [NEW v2.3.2]
     tests/
       test_connection.py        # Connection pool tests (6)
       test_memory.py            # Memory CRUD tests (8)
@@ -261,22 +272,22 @@ oracle-memory-by-yhw/
       test_spec.py              # Spec CRUD + plan linkage tests (9) [NEW v2.3.0]
       test_collab.py            # Collab group + shared memory tests (12) [NEW v2.3.0]
       test_credential.py        # Credential + hibernate/wake/pool tests (9) [NEW v2.3.0]
-      test_embedding.py         # Embedding generation, search, hybrid, multi-type tests (19) [NEW v2.3.1]
-      test_unified_search.py     # 5-signal unified hybrid search tests (20) [NEW v2.3.1]
-      test_search_api.py          # Search API strategy tests (42) [NEW v2.3.1]
+      test_embedding.py         # Embedding generation, search, hybrid, multi-type tests (19) [NEW v2.3.2]
+      test_unified_search.py     # 5-signal unified hybrid search tests (20) [NEW v2.3.2]
+      test_search_api.py          # Search API strategy tests (42) [NEW v2.3.2]
       test_all.py               # Master runner (14 suites, 183 total)
     visualization/
-      server.py                 # HTTP server (session auth, page routing, JSON API, bilingual)
+      server.py                 # HTTP server (session auth, page routing, JSON API, bilingual, pagination)
       templates/
         login.html              # Card-style login page
-        knowledge.html          # Knowledge: list/graph dual view + inline detail
-        memory.html             # Memory: list/graph dual view + inline detail + category filter
-        agents.html             # Agents: Bootstrap tabs (registry/sessions/collabs)
-        tasks.html              # Tasks: Accordion with step details + tool I/O
-        workspaces.html         # Workspaces: expandable detail rows + context timeline
+        knowledge.html          # Knowledge: list/graph dual view + inline detail + pagination
+        memory.html             # Memory: list/graph dual view + inline detail + category filter + pagination
+        agents.html             # Agents: Bootstrap tabs (registry/sessions/collabs) + triple pagination
+        tasks.html              # Tasks: Accordion with step details + tool I/O + pagination
+        workspaces.html         # Workspaces: expandable detail rows + context timeline + pagination
         graph.html              # Graph Explorer: stats + search + vis-network + detail panel
-        specs.html              # Specs: list/detail tabs + plan linkage [NEW v2.3.0]
-        collab.html             # Collab: groups/members/shared memory [NEW v2.3.0]
+        specs.html              # Specs: list/detail tabs + plan linkage + pagination [NEW v2.3.0]
+        collab.html             # Collab: groups/members/shared memory + pagination [NEW v2.3.0]
       static/
         style.css               # Dark theme CSS variables + sidebar styles
         vis-network.min.js      # Vis.js network visualization library
@@ -357,7 +368,7 @@ oracle-memory-by-yhw/
 | WORKSPACE_MANAGER | 10 | create_workspace, get_workspace, update_workspace, save_context, get_context_chain, get_latest_context, create_handoff_session, recover_workspace, link_task_to_workspace, cleanup_workspace |
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
-| EMBEDDING_MANAGER [NEW v2.3.1] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
+| EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
 
 ## Python API (15 Modules, 131+ Functions)
 
@@ -518,7 +529,7 @@ def hash_password(password: str) -> str
 def verify_password(password: str, password_hash: str) -> bool
 ```
 
-### embedding_api.py [NEW v2.3.1]
+### embedding_api.py [NEW v2.3.2]
 
 ```python
 def generate_embedding(text: str, api_url: str = None, model: str = None, timeout: int = 30) -> list[float]
@@ -538,7 +549,7 @@ def get_embedding_stats() -> dict
 def get_model_dimension(model: str = None) -> int
 ```
 
-### search_api.py [NEW v2.3.1]
+### search_api.py [NEW v2.3.2]
 
 Unified search entry point for AI agents. 10 strategies with auto-detection:
 
@@ -584,7 +595,7 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 | STALE_WORKSPACE_DETECT_JOB | Every 30 min | Detects workspaces with no active sessions for N hours |
 | DORMANT_AGENT_JOB [NEW v2.3.0] | Every 30 min | Auto-hibernates agents inactive beyond dormant_timeout_min |
 | CREDENTIAL_CLEANUP_JOB [NEW v2.3.0] | Daily 02:00 | Purges expired and revoked credentials |
-| EMBEDDING_GENERATION_JOB [NEW v2.3.1] | Every 2 hours | Auto-generates embeddings for new MEMORY/KNOWLEDGE entities |
+| EMBEDDING_GENERATION_JOB [NEW v2.3.2] | Every 2 hours | Auto-generates embeddings for new MEMORY/KNOWLEDGE entities |
 
 ## Harness Templates (5 Built-in)
 
@@ -695,7 +706,7 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 
 | Parameter | Value |
 |-----------|-------|
-| DSN | `//10.10.10.130:1521/openclaw` |
-| User | `openclaw` / `hermes` |
-| Python | `/home/linuxbrew/.linuxbrew/bin/python3.14` (3.14.5, oracledb 4.0.0) |
-| Server | `10.10.10.136:8000` (admin/admin) |
+| DSN | `//<db_host>:<db_port>/<db_service>` |
+| User | `<db_user>` / `<db_password>` |
+| Python | 3.14+ / oracledb 4.0.0 thin mode |
+| Server | `http://<web_host>:<web_port>` |
