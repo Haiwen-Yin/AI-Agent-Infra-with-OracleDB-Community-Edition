@@ -274,6 +274,7 @@ ENTITIES (LIST partitioned by ENTITY_TYPE)
 ```
 
 ### Key Tables (27)
+| Key | Tables' Names |
 |----------|--------|
 | Core | ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, SPEC_META [NEW], HARNESS_META, ENTITY_EMBEDDINGS, ENTITY_TAGS |
 | System | SYSTEM_USERS, SYSTEM_CONFIG, TAGS |
@@ -336,7 +337,6 @@ desc = describe_search_strategy("unified")
 ```
 
 **LLM Context Economics**: `unified_sql` executes 5-signal fusion as a single CTE SQL statement, reducing 4-5 Python-SQL round trips to 1. This saves 60-80% of tool-call token overhead and eliminates intermediate-result context pollution — critical for LLM agents with limited context windows.
-```
 
 Full API: [SKILL.md](SKILL.md)
 
