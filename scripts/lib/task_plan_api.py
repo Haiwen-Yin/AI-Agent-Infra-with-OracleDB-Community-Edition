@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Task Plan API
+"""AI Agent Infra v3.0.0 - Community Edition - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.

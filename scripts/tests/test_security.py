@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Security Module Tests"""
+"""AI Agent Infra v3.0.0 - Security Module Tests"""
 
 import sys
 import os

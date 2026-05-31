@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Property Graph API Tests"""
+"""AI Agent Infra v3.0.0 - Property Graph API Tests"""
 
 import sys
 import os

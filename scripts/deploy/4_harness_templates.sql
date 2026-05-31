@@ -1,4 +1,4 @@
--- Oracle Memory System v2.3.2 - Phase 4: Harness Templates
+-- AI Agent Infra v3.0.0 - Phase 4: Harness Templates
 
 WHENEVER SQLERROR CONTINUE;
 

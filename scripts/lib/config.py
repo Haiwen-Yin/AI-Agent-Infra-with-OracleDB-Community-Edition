@@ -1,14 +1,17 @@
-"""Oracle Memory System v2.3.2 - Unified Configuration Manager
+"""AI Agent Infra v3.0.0 - Community Edition - Unified Configuration Manager
 
 Reads from config.json with environment variable overrides.
 Priority: Environment Variables > config.json > Built-in defaults
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -22,6 +25,8 @@ class DatabaseConfig:
     pool_min: int = 2
     pool_max: int = 5
     pool_increment: int = 1
+    _encrypted: Optional[str] = None
+    _key_source: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,23 @@ def _load_config_file() -> dict:
     return {}
 
 
+def _decrypt_database_section(db_raw: dict) -> dict:
+    encrypted_blob = db_raw.get("_encrypted")
+    if not encrypted_blob:
+        return db_raw
+    try:
+        from .connection_crypto import decrypt_section
+        decrypted = decrypt_section(encrypted_blob)
+        merged = dict(db_raw)
+        for k, v in decrypted.items():
+            if k not in ("_encrypted", "_key_source"):
+                merged[k] = v
+        return merged
+    except Exception as e:
+        logger.error("Failed to decrypt database config: %s", e)
+        return db_raw
+
+
 def load_config() -> Config:
     raw = _load_config_file()
 
@@ -74,13 +96,17 @@ def load_config() -> Config:
     emb_raw = raw.get("embedding", {})
     sec_raw = raw.get("security", {})
 
+    db_resolved = _decrypt_database_section(db_raw)
+
     db = DatabaseConfig(
-        user=os.environ.get("MEMORY_DB_USER", db_raw.get("user", DatabaseConfig.user)),
-        password=os.environ.get("MEMORY_DB_PASSWORD", db_raw.get("password", DatabaseConfig.password)),
-        dsn=os.environ.get("MEMORY_DB_DSN", db_raw.get("dsn", DatabaseConfig.dsn)),
-        pool_min=int(db_raw.get("pool_min", DatabaseConfig.pool_min)),
-        pool_max=int(db_raw.get("pool_max", DatabaseConfig.pool_max)),
-        pool_increment=int(db_raw.get("pool_increment", DatabaseConfig.pool_increment)),
+        user=os.environ.get("MEMORY_DB_USER", db_resolved.get("user", DatabaseConfig.user)),
+        password=os.environ.get("MEMORY_DB_PASSWORD", db_resolved.get("password", DatabaseConfig.password)),
+        dsn=os.environ.get("MEMORY_DB_DSN", db_resolved.get("dsn", DatabaseConfig.dsn)),
+        pool_min=int(db_resolved.get("pool_min", DatabaseConfig.pool_min)),
+        pool_max=int(db_resolved.get("pool_max", DatabaseConfig.pool_max)),
+        pool_increment=int(db_resolved.get("pool_increment", DatabaseConfig.pool_increment)),
+        _encrypted=db_raw.get("_encrypted"),
+        _key_source=db_raw.get("_key_source"),
     )
 
     srv = ServerConfig(

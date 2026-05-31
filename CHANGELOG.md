@@ -1,12 +1,69 @@
 # Changelog
 
-All notable changes to the Oracle AI Database Memory System are documented in this file.
+All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
 ## [Unreleased]
+
+---
+
+## [3.0.0] - 2026-05-30
+
+### Summary
+
+**Community Edition Launch + Portal User System & Security Hardening** — The project formerly known as "Oracle AI Database Memory System" (oracle-memory-by-yhw) has been renamed to **AI Agent Infra with OracleDB**, reflecting its evolution from a pure memory system to a comprehensive AI Agent infrastructure architecture. The project now offers two editions: Community Edition (Apache 2.0) and Enterprise Edition (BSL 1.1). This release also adds a full user-facing Portal system (register/login/chat) separate from admin Dashboard, Agent lifecycle with POOL state, encrypted credential storage at rest, and inline detail expansion across all list pages.
+
+### Added - Both Editions
+
+- **Portal login page** (`/portal/login`) — register/login dual-tab; root `/` redirects to Portal; "Admin Dashboard" link in top-right corner
+- **Portal chat page** (`/portal/chat`) — sidebar with user info (larger username + auth type label), session list with rename/delete buttons, new chat button; main chat area with simulated replies
+- **Session management** — new chat creates AGENT_SESSION + CONVERSATION WORKSPACE; switch between sessions; rename via WORKSPACE_ALIAS; delete with cascading WORKSPACE_CONTEXT + WORKSPACES cleanup
+- **Auto-naming** — new sessions default to "New Chat"; first user message auto-renames to first 60 chars of message content
+- **user_api.py** — `register_user()`, `get_user_profile()`, `update_last_login()`, `get_user_sessions()`
+- **Agent pool management** — `assign_random_pool_agent()` random selection from POOL; `hibernate_agent()` sets STATUS='POOL' (was DORMANT)
+- **WORKSPACES.WORKSPACE_ALIAS** column + IDX_WS_ALIAS index
+- **WORKSPACE_CONTEXT.CK_WC_TYPE** — added 'CHAT_MESSAGE' to CHECK constraint
+- **SYSTEM_USERS.AUTH_SOURCE** + **LDAP_DN** columns + indexes
+- **Encrypted config.json** — DB credentials stored as `_encrypted` blob; plaintext keys removed; auto-encrypt on first run
+- **connection_crypto.py** — Master key resolution (env > keyfile > auto-generate); encrypt/decrypt sections; auto_encrypt_config()
+- **config.py** — `_decrypt_database_section()` for transparent credential decryption
+- **Skill Storage & Distribution** — Database-backed Skill registry with direct resource download. New `SKILL_META` table (reference-partitioned, with `SKILL_DESCRIPTION`, `RESOURCE_SERVER_HOST` columns), `SKILL_DV` JRD view, `skill_api.py` (9 functions, update_skill supports title + description), `skill_acquire_api.py` (4 functions: discover, acquire_text, acquire_resource, acquire_full — no auth required), `skill_parser.py` (ZIP package parser with `_meta.json`/YAML frontmatter/`## Metadata` priority), `skill_storage.py` (file storage with server hostname+IP tracking). Two-step skill creation: upload ZIP → auto-parse → editable form → confirm. Dashboard resource download (repack as ZIP with `{skill_name}-{version}.zip` naming).
+- **Encrypted Database Credentials** — Database connection info encrypted at rest in config.json. New `connection_crypto.py` (5 functions), `ConfigEncryption` class in security.py, `encrypt_config.py` CLI tool, auto-encrypt on first run, master key from env var/keyfile/auto-generate
+- **Enterprise Configuration** — `config.json` now supports `enterprise` section (license_type: community) and encrypted `database._encrypted` field
+- **Apache 2.0 License** — Community Edition uses Apache License 2.0
+
+### Added - Community Edition Only
+
+(none — all v3.0.0 additions are shared between editions; LDAP, SKILL_ACCESS_TOKEN, and CONTEXT_AUDIT are Enterprise-only features not included in Community Edition)
+
+### Changed - Both Editions
+
+- **Product rename** — All references updated from "Oracle Memory System" / "oracle-memory-by-yhw" to "AI Agent Infra with OracleDB"
+- **SKILL.md** — Enterprise: name=`ai-agent-infra-enterprise`; Community: name=`ai-agent-infra-community`
+- **hibernate_agent()** — STATUS='DORMANT' → STATUS='POOL'; released agents immediately available for reassignment
+- **DORMANT_AGENT_JOB** — Sets STATUS='POOL' instead of DORMANT
+- **Inline detail expansion** — All list pages (agents, tasks, workspaces, specs, collab, skills, audit) converted from right-side panel to inline row expansion; `toggleDetail()` correctly collapses when clicking same row
+- **Graph explorer** — `navigationButtons:false`, `.vis-navigation{display:none!important}`
+- **Portal chat user info** — Username displayed at 1rem bold; auth type shown below ("系统用户" / "LDAP 用户")
+- **Portal login i18n** — Auth mode dropdown options switch zh/en via JS `_langTexts` dict + `updateLangTexts()`
+- **Register tab** — Shows "注册为本地系统用户" hint text; no auth mode dropdown in register panel
+- **test_credential.py** — DORMANT → POOL assertion updated
+- **config.py** — Rewritten with `EnterpriseConfig` dataclass; encrypted database credential support via `_decrypt_database_section()`
+- **security.py** — New `ConfigEncryption` class with PBKDF2-HMAC-SHA512 key derivation + authenticated encryption
+- **connection.py** — Transparent decryption of database credentials from config
+- **NOTICE** — Updated product name for both editions
+
+### Changed - Community Edition Only
+
+(none)
+
+### Fixed
+
+- oracledb returns lowercase column names; `workspace_alias`/`workspace_name` key access fixed in auto-rename logic
+- `toggleDetail()` now checks if row already expanded before calling `closeDetail()`, preventing double-toggle bug
 
 ---
 
@@ -400,7 +457,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 
 ### Added
 
-- Security & Performance Enterprise Edition
+- Security & Performance Community Edition
 - Data masking (desensitization) with context-aware levels
 - Reversible encryption for sensitive data
 - PBKDF2 password hashing

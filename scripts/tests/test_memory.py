@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Memory API Tests"""
+"""AI Agent Infra v3.0.0 - Memory API Tests"""
 
 import sys
 import os

@@ -1,4 +1,4 @@
--- Oracle Memory System v2.3.2 - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.0.0 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -184,7 +184,7 @@ BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'DORMANT_AGENT_JOB',
         job_type        => 'PLSQL_BLOCK',
-        job_action      => 'DECLARE l_timeout_min NUMBER; l_count NUMBER; BEGIN SELECT NVL(TO_NUMBER(CONFIG_VALUE), 30) INTO l_timeout_min FROM SYSTEM_CONFIG WHERE CONFIG_KEY = ''dormant_timeout_min''; UPDATE AGENT_REGISTRY SET STATUS = ''DORMANT'', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP WHERE STATUS = ''ACTIVE'' AND LAST_ACTIVE_AT IS NOT NULL AND LAST_ACTIVE_AT < SYSTIMESTAMP - NUMTODSINTERVAL(l_timeout_min, ''MINUTE''); l_count := SQL%ROWCOUNT; COMMIT; IF l_count > 0 THEN INSERT INTO SYSTEM_LOGS (LOG_ID, LOG_LEVEL, SOURCE, MESSAGE, CREATED_AT) VALUES (SYSTEM_LOGS_SEQ.NEXTVAL, ''INFO'', ''DORMANT_AGENT_JOB'', ''Marked '' || l_count || '' agent(s) as dormant (timeout: '' || l_timeout_min || '' min)'', SYSTIMESTAMP); COMMIT; END IF; END;',
+        job_action      => 'DECLARE l_timeout_min NUMBER; l_count NUMBER; BEGIN SELECT NVL(TO_NUMBER(CONFIG_VALUE), 30) INTO l_timeout_min FROM SYSTEM_CONFIG WHERE CONFIG_KEY = ''dormant_timeout_min''; UPDATE AGENT_REGISTRY SET STATUS = ''POOL'', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP WHERE STATUS = ''ACTIVE'' AND LAST_ACTIVE_AT IS NOT NULL AND LAST_ACTIVE_AT < SYSTIMESTAMP - NUMTODSINTERVAL(l_timeout_min, ''MINUTE''); l_count := SQL%ROWCOUNT; COMMIT; IF l_count > 0 THEN INSERT INTO SYSTEM_LOGS (LOG_ID, LOG_LEVEL, SOURCE, MESSAGE, CREATED_AT) VALUES (SYSTEM_LOGS_SEQ.NEXTVAL, ''INFO'', ''DORMANT_AGENT_JOB'', ''Marked '' || l_count || '' agent(s) as pool (timeout: '' || l_timeout_min || '' min)'', SYSTIMESTAMP); COMMIT; END IF; END;',
         start_date      => SYSTIMESTAMP,
         repeat_interval => 'FREQ=MINUTELY; INTERVAL=30',
         enabled         => TRUE
@@ -242,4 +242,4 @@ WHERE JOB_NAME IN (
 )
 ORDER BY JOB_NAME;
 
-PROMPT Oracle Memory System v2.3.2 - Phase 3: Scheduler Jobs Complete (12 jobs)
+PROMPT AI Agent Infra v3.0.0 - Community Edition - Phase 3: Scheduler Jobs Complete (12 jobs)

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Master Test Runner"""
+"""AI Agent Infra v3.0.0 - Community Edition - Master Test Runner"""
 
 import sys
 import os
@@ -18,11 +18,12 @@ from tests.test_credential import run_all as run_credential
 from tests.test_embedding import run_all as run_embedding
 from tests.test_unified_search import run_all as run_unified_search
 from tests.test_search_api import run_all as run_search_api
+from tests.test_skill import run_all as run_skill
 
 
 def main():
     print("=" * 60)
-    print("Oracle Memory System v2.3.2 - Full Test Suite")
+    print("AI Agent Infra v3.0.0 - Community Edition - Full Test Suite")
     print("=" * 60)
 
     suites = [
@@ -40,6 +41,7 @@ def main():
         ("Embedding", run_embedding),
         ("UnifiedSearch", run_unified_search),
         ("SearchAPI", run_search_api),
+        ("Skill", run_skill),
     ]
 
     results = {}

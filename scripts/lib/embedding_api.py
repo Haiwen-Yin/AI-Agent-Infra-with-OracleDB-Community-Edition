@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Embedding API
+"""AI Agent Infra v3.0.0 - Community Edition - Embedding API
 
 Generate, store, and search vector embeddings for entities.
 Uses external Embedding API (OpenAI-compatible) + Oracle TO_VECTOR() for storage.

@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Harness Template API Tests"""
+"""AI Agent Infra v3.0.0 - Harness Template API Tests"""
 
 import sys
 import os

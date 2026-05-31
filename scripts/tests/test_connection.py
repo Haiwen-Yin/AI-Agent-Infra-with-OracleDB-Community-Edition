@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Connection Pool Tests"""
+"""AI Agent Infra v3.0.0 - Connection Pool Tests"""
 
 import sys
 import os

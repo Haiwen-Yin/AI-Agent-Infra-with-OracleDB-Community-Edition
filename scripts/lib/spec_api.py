@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Spec API
+"""AI Agent Infra v3.0.0 - Community Edition - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """

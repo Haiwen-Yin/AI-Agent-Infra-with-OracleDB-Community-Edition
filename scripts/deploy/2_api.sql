@@ -1,5 +1,5 @@
 -- ============================================================
--- Oracle Memory System v2.3.2 - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.0.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1324,5 +1324,9 @@ END EMBEDDING_MANAGER;
 COMMIT;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.2 API Deployment Complete
+
+COMMIT;
+
+PROMPT ============================================================
+PROMPT AI Agent Infra v3.0.0 API Deployment Complete
 PROMPT ============================================================

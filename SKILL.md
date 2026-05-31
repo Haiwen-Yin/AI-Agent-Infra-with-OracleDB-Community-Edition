@@ -1,55 +1,72 @@
 ---
-name: oracle-memory-by-yhw
-version: v2.3.2
+name: ai-agent-infra-community
+version: v3.0.0
 author: Haiwen Yin
-description: "Oracle AI Database Memory System v2.3.2 - Web UI Optimization, 5-Signal Unified Hybrid Search + Fulltext Search + Search API, Spec Driven Development, Agent Elastic Management, Collaboration Groups, JRD Duality Views"
-tags: [oracle, memory-system, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration]
+description: "AI Agent Infra with OracleDB - Community Edition v3.0.0 - AI Agent的基础设施架构"
+tags: [oracle, ai-agent, infrastructure, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration, skill]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# Oracle AI Database Memory System v2.3.2
+# AI Agent Infra with OracleDB - Community Edition v3.0.0
 
 **Author:** Haiwen Yin
-**Version:** v2.3.2 - 2026-05-27
+**Version:** v3.0.0 - 2026-05-28
 **License:** Apache License 2.0
 
 ## Architecture Overview
 
 ```
-+------------------------------------------------------------------+
-|                        Oracle AI Memory System                   |
-+------------------------------------------------------------------+
-|                                                                  |
-|  +-----------------------------------------------------------+   |
-|  |           ENTITIES (unified, RANGE partitioned)           |   |
-|  |  +----------+----------+----------+--------+--------------+   |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |   |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE     |   |
-|  |  +----------+----------+----------+--------+--------------+   |
-|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |   |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                          |   |
-|  +-----------------------------------------------------------+   |
-|                         |                                        |
-|  +----------------------------------------------+                |
-|  |  ENTITY_EDGES (REFERENCE partitioned)        |                |
-|  |  PK: (EDGE_ID, SOURCE_ID)                    |                |
-|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |                |
-|  |  + 4 other reference-partitioned children    |                |
-|  +----------------------------------------------+                |
-|                                                                  |
-|  +----------------------------------------------+                |
-|  |  WORKSPACES                                  |                |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |                |
-|  |  +-- WORKSPACE_TASKS (JRD updatable)         |                |
-|  +----------------------------------------------+                |
-|                                                                  |
-|  +----------------------------------------------+                |
-|  |  AGENT_SESSION (handoff chain)               |                |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)      |                |
-|  +----------------------------------------------+                |
-|                                                                  |
-+------------------------------------------------------------------+
++-----------------------------------------------------------------+
+|                AI Agent Infra with OracleDB                     |
+|                   Community Edition v3.0.0                      |
++-----------------------------------------------------------------+
+|                                                                 |
+|  +-----------------------------------------------------------+  |
+|  |  ENTITIES (unified, RANGE partitioned)                    |  |
+|  |  +----------+----------+----------+--------+--------------+  |
+|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |  |
+|  |  |          |          |PUT       |ENCE    | TEMPLATE     |  |
+|  |  +----------+----------+----------+--------+--------------+  |
+|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |  |
+|  |  COL: WORKSPACE_ID -> WORKSPACES                          |  |
+|  +-----------------------------------------------------------+  |
+|                         |                                       |
+|  +----------------------------------------------+               |
+|  |  ENTITY_EDGES (REFERENCE partitioned)        |               |
+|  |  PK: (EDGE_ID, SOURCE_ID)                    |               |
+|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |               |
+|  |  + 4 other reference-partitioned children    |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  WORKSPACES                                  |               |
+|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |               |
+|  |  +-- WORKSPACE_TASKS (JRD updatable)         |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  AGENT_SESSION (handoff chain)               |               |
+|  |  PREDECESSOR_SESSION_ID -> self (chain)      |               |
+|  +----------------------------------------------+               |
+|                                                                 |
++-----------------------------------------------------------------+
 ```
+
+## v3.0.0 Key Addition: Skill Storage & Distribution
+
+| Component | Description |
+|-----------|-------------|
+| **SKILL_META** | Reference-partitioned from ENTITIES subtype `SKILL`; stores text content, resource URI, runtime, parameters, dependencies |
+| **SKILL_DV** | JRD updatable duality view for Skill entities |
+| **skill_api.py** | 8 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate |
+| **SKILL_MANAGER** PL/SQL | 6 subprograms: create, get, update, resolve_dependencies, validate, deprecate |
+| **Skills page** | `/skills` web visualization with list/detail view |
+
+**Community Skill Access Flow:**
+1. `get_skill(skill_id)` → text content + `resource_uri` (directly accessible shared address)
+2. Download resource from `resource_uri` directly
+
+**Enterprise Edition** additionally offers one-time token secure distribution via `skill_token_api.py`.
 
 ## v2.3.2 Key Addition: Web UI Optimization
 
@@ -108,6 +125,53 @@ In-db embedding generation and vector search capabilities were omitted during th
 | 31 unified search tests | Covering 5-signal independent verification, domain/category/tags filtering, graph proximity, custom weights, Single-SQL fusion search |
 | 42 search API tests | Covering strategy metadata, auto-detection, per-strategy invocation, result structure, unified_sql strategy |
 
+## Agent Retrieval Guide
+
+When an AI Agent needs to search for information, **always prefer `unified_sql` strategy** — it fuses all 5 signals in a single database call:
+
+```python
+from lib.search_api import search
+
+# RECOMMENDED: Single-SQL 5-signal fusion (production)
+results = search("database partitioning", strategy="unified_sql", top_k=10)
+# Returns: scores{vector, fulltext, relational, tag, graph} + final_score + engine="single_sql"
+
+# With filters
+results = search("encryption", strategy="unified_sql", domain="security", category="database")
+
+# With graph proximity from a seed entity
+results = search("memory fusion", strategy="unified_sql", graph_seed_entity_id="ABC123")
+
+# DEBUGGING ONLY: Multi-round fusion (observe individual signal scores)
+results = search("database partitioning", strategy="unified", top_k=10)
+
+# CONVENIENCE: Auto-detect best strategy
+results = search("partition*", strategy="auto")
+```
+
+**Why `unified_sql` is the default recommendation**:
+
+| Aspect | `unified_sql` (recommended) | `unified` (debug only) |
+|--------|---------------------------|----------------------|
+| Database calls | **1** | 5+ |
+| Scoring location | Server-side (database kernel) | Client-side (Python) |
+| Latency | Low (70-85% reduction) | High (5 round trips) |
+| Token overhead | Minimal | 60-80% more tool-call tokens |
+| Context pollution | None | Intermediate results pollute LLM context |
+| Use case | **Production retrieval** | Debugging individual signal scores |
+
+**Strategy selection guide**:
+
+| Scenario | Strategy | Why |
+|----------|----------|-----|
+| General information retrieval | `unified_sql` | Best relevance, lowest latency |
+| Domain-specific search | `unified_sql` + `domain=` | Filters applied server-side |
+| Cross-type search (MEMORY+KNOWLEDGE+SPEC) | `unified_sql` | Single query across all types |
+| Exact keyword/phrase | `fulltext` | Oracle Text boolean operators |
+| Pure semantic similarity | `vector` | No fulltext overhead |
+| Relationship/neighborhood | `graph` | BFS traversal from seed entity |
+| Unknown query type | `auto` | Auto-detects best strategy |
+
 ## v2.3.0 Key Additions: SDD, Elastic Agents, Collaboration
 
 | Feature | Description |
@@ -152,6 +216,7 @@ In-db embedding generation and vector search capabilities were omitted during th
 | ENTITY_EMBEDDINGS | REFERENCE from ENTITIES |
 | SPEC_META | REFERENCE from ENTITIES [NEW v2.3.0] |
 | HARNESS_META | REFERENCE from ENTITIES |
+| SKILL_META | REFERENCE from ENTITIES [NEW v3.0.0] |
 | ENTITY_TAGS | REFERENCE from ENTITIES |
 | TASK_PLANS | RANGE by STATUS |
 | TASK_STEPS | REFERENCE from TASK_PLANS |
@@ -190,6 +255,83 @@ In-db embedding generation and vector search capabilities were omitted during th
 - WORKSPACE_CONTEXT is excluded from WORKSPACE_DV because it is append-only (use raw SQL)
 - JRD views must include all PK columns of root table
 - CONTEXT_DV is read-only (no 26ai write annotations)
+
+## ⚠️ CRITICAL: Pre-Deployment Safety Check
+
+**Before running ANY deploy script, an Agent MUST check whether the database already has an existing deployment. Re-running deploy scripts on an existing database will DESTROY all data (agents, sessions, knowledge, workspaces, skills).**
+
+### Python API Check
+
+```python
+from lib.deploy_api import check_deployment
+
+result = check_deployment()
+# result = {
+#   "deployed": True/False,
+#   "schema_version": "3.0.0" or None,
+#   "table_count": 33,
+#   "agent_count": 5,
+#   "user_count": 3,
+#   "recommendation": "..."
+# }
+
+if result["deployed"]:
+    # DO NOT run deploy scripts! Database already has data.
+    # Only register this Skill if needed:
+    from lib.skill_api import register_skill
+    skill_id = register_skill(name="my-skill", ...)
+else:
+    # Safe to deploy from scratch
+    pass
+```
+
+### HTTP Endpoint Check
+
+```bash
+# Public API — no authentication required
+curl http://localhost:8000/api/agent/deployment-check
+```
+
+Response:
+```json
+{
+  "deployed": true,
+  "schema_version": "3.0.0",
+  "table_count": 33,
+  "agent_count": 5,
+  "user_count": 3,
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.0.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+}
+```
+
+### SQL-Level Protection
+
+The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
+
+```
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.0.0
+Deployment aborted: existing deployment found. Schema version: 3.0.0
+```
+
+To force reinitialize (DESTRUCTIVE — requires human admin approval):
+```sql
+BEGIN
+    FOR r IN (SELECT table_name FROM user_tables WHERE table_name != 'DBTOOLS$MCP_LOG') LOOP
+        EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
+    END LOOP;
+END;
+/
+```
+
+### Agent Decision Flow
+
+```
+Agent receives Skill → check_deployment() → deployed?
+                                            ├── YES → Register skill only, DO NOT deploy
+                                            └── NO  → Run full deployment (1_schema → 2_api → 3_jobs → 4_harness)
+```
+
+---
 
 ## Quick Start
 
@@ -238,7 +380,7 @@ cd scripts && python -m tests.test_all
 ## Project Structure
 
 ```
-oracle-memory-by-yhw/
+ai-agent-infra-community/
   scripts/
     deploy/
       1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data

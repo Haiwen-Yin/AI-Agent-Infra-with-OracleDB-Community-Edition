@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Web Visualization Server
+"""AI Agent Infra v3.0.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -7,6 +7,7 @@ specs, collaboration groups, and graph visualization.
 
 import hashlib
 import json
+import logging
 import os
 import signal
 import sys
@@ -21,13 +22,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api
-from lib import security, config
+from lib import security, config, user_api
 
-VERSION = "2.3.2"
+VERSION = "3.0.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
 
+logger = logging.getLogger(__name__)
 sessions = {}
 
 PAGE_ROUTES = {
@@ -39,9 +41,19 @@ PAGE_ROUTES = {
     '/graph': 'graph.html',
     '/specs': 'specs.html',
     '/collab': 'collab.html',
+    '/skills': 'skills.html',
+    '/audit': 'audit.html',
 }
 
-PUBLIC_API = {'/api/health', '/api/login'}
+PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login'}
+
+
+def _is_public_api(path):
+    if path in PUBLIC_API:
+        return True
+    if path.startswith('/api/agent/'):
+        return True
+    return False
 
 
 def _load_server_config():
@@ -79,15 +91,17 @@ def _get_session(request_handler):
     return session_id, sess
 
 
-def _authenticate(username, password):
+def _authenticate_local(username, password):
     try:
         row = connection.execute_query_one(
-            "SELECT user_id, username, password_hash, role, status FROM system_users WHERE username = :1",
-            (username,)
+            "SELECT user_id, username, password_hash, role, status, auth_source FROM system_users WHERE username = :uname",
+            {"uname": username}
         )
     except Exception:
         return None
     if not row or row.get('status') != 'ACTIVE':
+        return None
+    if row.get('auth_source', 'LOCAL') != 'LOCAL':
         return None
     stored_hash = row.get('password_hash', '')
     if stored_hash and stored_hash.startswith('SHA256:'):
@@ -307,11 +321,22 @@ class VisHandler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
 
         if path == '/' :
-            self._send_redirect('/knowledge')
+            self._send_redirect('/portal/login')
             return
 
         if path == '/login':
             self._serve_template('login.html')
+            return
+
+        if path == '/portal/login' or path == '/portal':
+            self._serve_template('portal_login.html')
+            return
+
+        if path == '/portal/chat':
+            if _get_session(self) is None:
+                self._send_redirect('/portal/login')
+                return
+            self._serve_template('portal_chat.html')
             return
 
         if path == '/logout':
@@ -333,6 +358,10 @@ class VisHandler(BaseHTTPRequestHandler):
 
         if path.startswith('/api/'):
             self._handle_api_get(path, qs)
+            return
+
+        if path.startswith('/portal/api/'):
+            self._handle_portal_api_get(path, qs)
             return
 
         if path.startswith('/static/'):
@@ -360,6 +389,50 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_login()
             return
 
+        if path == '/api/skill/create':
+            self._handle_skill_create_route()
+            return
+
+        if path.startswith('/api/skill/token/'):
+            self._handle_skill_token_consume(path)
+            return
+
+        if path.startswith('/api/skill/'):
+            self._handle_skill_post(path)
+            return
+
+        if path == '/portal/api/register':
+            self._handle_portal_register()
+            return
+
+        if path == '/portal/api/login':
+            self._handle_portal_login()
+            return
+
+        if path == '/portal/api/chat/send':
+            self._handle_portal_chat_send()
+            return
+
+        if path == '/portal/api/chat/new':
+            self._handle_portal_chat_new()
+            return
+
+        if path == '/portal/api/chat/rename':
+            self._handle_portal_chat_rename()
+            return
+
+        if path == '/portal/api/chat/delete':
+            self._handle_portal_chat_delete()
+            return
+
+        if path == '/portal/api/chat/switch':
+            self._handle_portal_chat_switch()
+            return
+
+        if path == '/portal/api/agent/release':
+            self._handle_portal_agent_release()
+            return
+
         self._send_error(404, 'Not found')
 
     def _handle_login(self):
@@ -372,7 +445,7 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'Invalid request'}, 400)
             return
 
-        user = _authenticate(username, password)
+        user = _authenticate_local(username, password)
         if not user:
             self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
             return
@@ -387,7 +460,7 @@ class VisHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_api_get(self, path, qs):
-        if path not in PUBLIC_API:
+        if not _is_public_api(path):
             if self._require_auth() is None:
                 return
 
@@ -408,6 +481,20 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_specs()
             elif path == '/api/collab':
                 self._api_collab()
+            elif path == '/api/agent/skills':
+                self._api_agent_discover_skills(qs)
+            elif path == '/api/agent/deployment-check':
+                self._api_agent_deployment_check()
+            elif path.startswith('/api/agent/skill/') and path.endswith('/acquire'):
+                self._api_agent_acquire_skill(path)
+            elif path == '/api/skills':
+                self._api_skills()
+            elif path.startswith('/api/skill/dl/'):
+                self._handle_skill_download(path)
+            elif path.startswith('/api/skill/'):
+                self._handle_skill_get(path)
+            elif path == '/api/audit':
+                self._api_audit()
             elif path == '/api/stats':
                 self._api_stats()
             elif path == '/api/graph/neighbors':
@@ -512,6 +599,319 @@ class VisHandler(BaseHTTPRequestHandler):
             g['members'] = [_clean_row(m) for m in members]
         self._send_json({'groups': [_clean_row(g) for g in groups]})
 
+    def _api_skills(self):
+        from lib import skill_api
+        skills = skill_api.list_skills(limit=200)
+        self._send_json({'skills': [_clean_row(s) for s in skills]})
+
+    def _api_agent_deployment_check(self):
+        from lib import deploy_api
+        result = deploy_api.check_deployment()
+        self._send_json(result)
+
+    def _api_agent_discover_skills(self, qs):
+        from lib import skill_acquire_api
+        keyword = qs.get('keyword', [None])[0] or qs.get('q', [None])[0]
+        skill_type = qs.get('type', [None])[0]
+        runtime = qs.get('runtime', [None])[0]
+        skill_format = qs.get('format', [None])[0]
+        results = skill_acquire_api.discover_skills(
+            skill_type=skill_type, runtime=runtime,
+            skill_format=skill_format, keyword=keyword,
+        )
+        self._send_json({'skills': [_clean_row(r) for r in results]})
+
+    def _api_agent_acquire_skill(self, path):
+        parts = path.split('/')
+        if len(parts) < 6:
+            self._send_error(400, 'Invalid skill acquire path')
+            return
+        skill_id = parts[4]
+        from lib import skill_acquire_api
+        result = skill_acquire_api.acquire_skill_text(skill_id)
+        if result is None:
+            self._send_error(404, 'Skill not found or not active')
+            return
+        self._send_json(_clean_row(result))
+
+    def _handle_skill_get(self, path):
+        if self._require_auth() is None:
+            return
+        from lib import skill_api, skill_storage
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid skill path')
+            return
+        skill_id = parts[3]
+        if len(parts) == 4:
+            skill = skill_api.get_skill(skill_id)
+            if skill is None:
+                self._send_error(404, 'Skill not found')
+                return
+            self._send_json(_clean_row(skill))
+            return
+        action = parts[4] if len(parts) > 4 else ''
+        if action == 'resource':
+            skill = skill_api.get_skill(skill_id)
+            if skill is None:
+                self._send_error(404, 'Skill not found')
+                return
+            if not skill.get('resource_uri'):
+                self._send_error(404, 'No resource attached')
+                return
+            from lib import skill_storage
+            content = skill_storage.read_resource_content(skill_id)
+            if content is None:
+                self._send_error(404, 'Resource file not found')
+                return
+            skill_name = skill.get('skill_name', 'skill')
+            skill_version = skill.get('skill_version', '1.0.0')
+            fname = f"{skill_name}-{skill_version}.zip"
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
+        self._send_error(404, 'Unknown skill action')
+
+    def _handle_skill_post(self, path):
+        if self._require_auth() is None:
+            return
+        from lib import skill_api, skill_token_api
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid skill path')
+            return
+        skill_id = parts[3]
+        action = parts[4] if len(parts) > 4 else ''
+        if action == 'upload':
+            self._handle_skill_upload(skill_id)
+        elif action == 'request-access':
+            self._handle_skill_request_access(skill_id)
+        elif action == 'update':
+            self._handle_skill_update(skill_id)
+        elif action == 'delete':
+            self._handle_skill_delete(skill_id)
+        else:
+            self._send_error(404, 'Unknown skill action')
+
+    def _handle_skill_create(self, data):
+        from lib import skill_api
+        skill_id = skill_api.register_skill(
+            title=data.get('title', ''),
+            skill_name=data.get('skill_name', ''),
+            skill_version=data.get('skill_version', '1.0.0'),
+            skill_type=data.get('skill_type', 'CUSTOM'),
+            skill_format=data.get('skill_format', 'TEXT'),
+            text_content=data.get('text_content'),
+            runtime=data.get('runtime', 'PYTHON'),
+            parameters=data.get('parameters'),
+            dependencies=data.get('dependencies'),
+            category=data.get('category'),
+            owned_by_agent=data.get('owned_by_agent'),
+            visibility=data.get('visibility', 'SHARED'),
+        )
+        return skill_id
+
+    def _handle_skill_create_route(self):
+        if self._require_auth() is None:
+            return
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_error(400, 'multipart/form-data required. Upload a zip containing SKILL.md')
+            return
+        boundary = content_type.split('boundary=')[-1].encode()
+        body = self._read_body()
+        if not body:
+            self._send_error(400, 'Empty body')
+            return
+        import io as _io, zipfile as _zipfile
+        file_content = None
+        filename = None
+        parts_list = body.split(b'--' + boundary)
+        for part in parts_list:
+            if part in (b'', b'--\r\n', b'--', b'--\r\n\r\n'):
+                continue
+            header_end = part.find(b'\r\n\r\n')
+            if header_end == -1:
+                continue
+            headers_raw = part[:header_end].decode('utf-8', errors='replace')
+            part_body = part[header_end + 4:]
+            if part_body.endswith(b'\r\n'):
+                part_body = part_body[:-2]
+            if 'filename=' in headers_raw:
+                for h in headers_raw.split('\r\n'):
+                    if 'filename=' in h:
+                        for seg in h.split(';'):
+                            seg = seg.strip()
+                            if seg.startswith('filename='):
+                                filename = seg.split('=', 1)[1].strip('" ')
+                file_content = part_body
+        if file_content is None or not filename:
+            self._send_error(400, 'No file uploaded')
+            return
+        try:
+            if not _zipfile.is_zipfile(_io.BytesIO(file_content)):
+                self._send_error(400, 'Uploaded file is not a valid ZIP archive')
+                return
+            zf_check = _zipfile.ZipFile(_io.BytesIO(file_content))
+            zip_names = zf_check.namelist()
+            zf_check.close()
+            from lib.skill_parser import parse_skill_package
+            from lib.skill_storage import save_resource_files
+            from lib import skill_api
+            meta, resource_files = parse_skill_package(file_content)
+            skill_id = skill_api.register_skill(
+                title=meta['title'],
+                skill_name=meta['skill_name'],
+                skill_version=meta['skill_version'],
+                skill_type=meta['skill_type'],
+                skill_format=meta['skill_format'],
+                text_content=meta.get('text_content'),
+                skill_description=meta.get('skill_description'),
+                runtime=meta['runtime'],
+                parameters=meta.get('parameters'),
+                dependencies=meta.get('dependencies'),
+                category=meta.get('category'),
+                owned_by_agent=meta.get('owned_by_agent'),
+                visibility=meta.get('visibility', 'SHARED'),
+            )
+            if resource_files:
+                save_resource_files(skill_id, resource_files)
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'success': True, 'skill_id': skill_id, 'skill': _clean_row(skill), 'file_count': len(resource_files)})
+        except ValueError as e:
+            self._send_error(400, str(e))
+        except Exception as e:
+            self._send_error(500, 'Failed to parse skill package: {}'.format(str(e)))
+        else:
+            body = self._read_body()
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                self._send_error(400, 'Invalid JSON')
+                return
+            skill_id = self._handle_skill_create(data)
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'success': True, 'skill_id': skill_id, 'skill': _clean_row(skill)})
+
+    def _handle_skill_upload(self, skill_id):
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_error(400, 'multipart/form-data required')
+            return
+        boundary = content_type.split('boundary=')[-1].encode()
+        body = self._read_body()
+        if not body:
+            self._send_error(400, 'Empty body')
+            return
+        parts_list = body.split(b'--' + boundary)
+        file_content = None
+        filename = 'resource'
+        for part in parts_list:
+            if part in (b'', b'--\r\n', b'--', b'--\r\n\r\n'):
+                continue
+            header_end = part.find(b'\r\n\r\n')
+            if header_end == -1:
+                continue
+            headers_raw = part[:header_end].decode('utf-8', errors='replace')
+            part_body = part[header_end + 4:]
+            if part_body.endswith(b'\r\n'):
+                part_body = part_body[:-2]
+            if 'filename=' in headers_raw:
+                for h in headers_raw.split('\r\n'):
+                    if 'filename=' in h:
+                        for seg in h.split(';'):
+                            seg = seg.strip()
+                            if seg.startswith('filename='):
+                                filename = seg.split('=', 1)[1].strip('" ')
+                file_content = part_body
+        if file_content is None:
+            self._send_error(400, 'No file found in upload')
+            return
+        from lib import skill_api
+        result = skill_api.upload_skill_resource(skill_id, filename, file_content)
+        if result is None:
+            self._send_error(404, 'Skill not found')
+            return
+        self._send_json({'success': True, 'resource': result})
+
+    def _handle_skill_request_access(self, skill_id):
+        body = self._read_body()
+        try:
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        agent_id = data.get('agent_id', '')
+        session_id = data.get('session_id', '')
+        if not agent_id:
+            self._send_error(400, 'agent_id required')
+            return
+        from lib import skill_token_api
+        result = skill_token_api.request_skill_access(agent_id, session_id, skill_id)
+        if result is None:
+            self._send_error(403, 'Access denied or skill/agent not active')
+            return
+        self._send_json(result)
+
+    def _handle_skill_update(self, skill_id):
+        body = self._read_body()
+        try:
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        from lib import skill_api
+        success = skill_api.update_skill(skill_id, **data)
+        self._send_json({'success': success})
+
+    def _handle_skill_delete(self, skill_id):
+        from lib import skill_api
+        success = skill_api.delete_skill(skill_id)
+        self._send_json({'success': success})
+
+    def _handle_skill_token_consume(self, path):
+        parts = path.split('/')
+        if len(parts) < 6 or parts[5] != 'consume':
+            self._send_error(400, 'Invalid token path')
+            return
+        token_id = parts[4]
+        from lib import skill_token_api
+        result = skill_token_api.consume_skill_token(token_id)
+        if result is None:
+            self._send_error(403, 'Token invalid, expired, or already consumed')
+            return
+        self._send_json(result)
+
+    def _handle_skill_download(self, path):
+        parts = path.split('/')
+        if len(parts) < 5:
+            self._send_error(400, 'Invalid download path')
+            return
+        download_token = parts[4]
+        from lib import skill_token_api
+        result = skill_token_api.get_skill_resource_for_download(download_token)
+        if result is None:
+            self._send_error(403, 'Download token invalid or expired')
+            return
+        content = result['content']
+        mime_type = result['mime_type']
+        fname = result['filename']
+        self.send_response(200)
+        self.send_header('Content-Type', mime_type)
+        self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
+        self.send_header('Content-Length', str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _api_audit(self):
+        from lib import audit_api
+        events = audit_api.get_audit_events(limit=200)
+        stats = audit_api.get_audit_stats()
+        self._send_json({'events': [_clean_row(e) for e in events], 'stats': stats})
+
     def _api_stats(self):
         entity_counts = {}
         type_rows = connection.execute_query(
@@ -524,6 +924,8 @@ class VisHandler(BaseHTTPRequestHandler):
         agent_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM agent_registry")
         spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SPEC'")
         collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
+        skill_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SKILL'")
+        audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM context_audit_log WHERE resolution_status = 'OPEN'")
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
@@ -531,7 +933,416 @@ class VisHandler(BaseHTTPRequestHandler):
             'agent_count': agent_row['cnt'] if agent_row else 0,
             'spec_count': spec_row['cnt'] if spec_row else 0,
             'collab_count': collab_row['cnt'] if collab_row else 0,
+            'skill_count': skill_row['cnt'] if skill_row else 0,
+            'audit_open_count': audit_row['cnt'] if audit_row else 0,
         })
+
+    def _handle_portal_register(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
+            if not username or not password or len(username) < 3 or len(password) < 6:
+                self._send_json({'success': False, 'error': 'Username min 3 chars, password min 6 chars'}, 400)
+                return
+            db_exists = connection.execute_query_one(
+                "SELECT USER_ID, AUTH_SOURCE FROM SYSTEM_USERS WHERE UPPER(USERNAME) = UPPER(:v_uname)",
+                {"v_uname": username},
+            )
+            if db_exists:
+                if db_exists.get('auth_source') == 'LDAP':
+                    self._send_json({'success': False, 'error': 'This username belongs to an LDAP user, please use LDAP login'}, 409)
+                else:
+                    self._send_json({'success': False, 'error': 'Username already exists'}, 409)
+                return
+            ldap_exists = False
+            try:
+                from lib import ldap_auth_api
+                ldap_info = ldap_auth_api.get_ldap_user_info(username)
+                if ldap_info:
+                    ldap_exists = True
+            except Exception:
+                pass
+            if ldap_exists:
+                self._send_json({'success': False, 'error': 'Username exists in LDAP, please use LDAP login'}, 409)
+                return
+            result = user_api.register_user(username, password)
+            if not result:
+                self._send_json({'success': False, 'error': 'Username already exists'}, 409)
+                return
+            session_id = _create_session(result['username'], result['user_id'], result['role'])
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+            body_out = json.dumps({'success': True, 'session_id': session_id, 'user_id': result['user_id'], 'username': result['username']}).encode()
+            self.send_header('Content-Length', str(len(body_out)))
+            self.end_headers()
+            self.wfile.write(body_out)
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_login(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            username = data.get('username', '')
+            password = data.get('password', '')
+            auth_mode = data.get('auth_mode', 'local')
+
+            if auth_mode == 'ldap':
+                user = self._authenticate_portal_ldap(username, password)
+            else:
+                user = _authenticate_local(username, password)
+
+            if not user:
+                self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
+                return
+            user_api.update_last_login(str(user['user_id']))
+            session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
+            sess = sessions[session_id]
+            assigned_agent = agent_api.assign_random_pool_agent(str(user['user_id']))
+            if assigned_agent:
+                sess['agent_id'] = assigned_agent['agent_id']
+                sess['agent_name'] = assigned_agent.get('agent_name', '')
+                session_obj = agent_api.create_session(assigned_agent['agent_id'], owner_user_id=str(user['user_id']))
+                sess['agent_session_id'] = session_obj
+                existing_ws = user_api.get_user_workspaces(str(user['user_id']))
+                ws = None
+                for w in existing_ws:
+                    if w.get('workspace_type') == 'CONVERSATION' and w.get('status') == 'ACTIVE':
+                        ws = w['workspace_id']
+                        break
+                if not ws:
+                    ws = workspace_api.create_workspace(owner_user_id=str(user['user_id']),
+                                                         name='New Chat', workspace_type='CONVERSATION')
+                sess['workspace_id'] = ws
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+            resp = {
+                'success': True,
+                'session_id': session_id,
+                'user_id': str(user['user_id']),
+                'username': user['username'],
+                'has_agent': assigned_agent is not None,
+                'agent_id': sess.get('agent_id', ''),
+                'agent_name': sess.get('agent_name', ''),
+            }
+            body_out = json.dumps(resp).encode()
+            self.send_header('Content-Length', str(len(body_out)))
+            self.end_headers()
+            self.wfile.write(body_out)
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _authenticate_portal_ldap(self, username, password):
+        try:
+            from lib import ldap_auth_api
+            ldap_result = ldap_auth_api.authenticate_via_ldap(username, password)
+            if not ldap_result:
+                return None
+            user_dn = ldap_result.get('dn', '')
+            existing = connection.execute_query_one(
+                "SELECT USER_ID, USERNAME, ROLE, STATUS FROM SYSTEM_USERS WHERE USERNAME = :v_uname AND AUTH_SOURCE = 'LDAP'",
+                {"v_uname": username},
+            )
+            if existing:
+                connection.execute(
+                    "UPDATE SYSTEM_USERS SET LDAP_DN = :v_dn, UPDATED_AT = SYSTIMESTAMP WHERE USER_ID = :v_uid",
+                    {"v_dn": user_dn, "v_uid": existing['user_id']},
+                )
+                return {
+                    'user_id': existing['user_id'],
+                    'username': existing['username'],
+                    'role': existing.get('role', 'USER'),
+                    'status': existing.get('status', 'ACTIVE'),
+                    'auth_source': 'LDAP',
+                }
+            result = user_api.register_ldap_user(username, user_dn)
+            return result
+        except Exception as e:
+            logger.error("Portal LDAP auth failed: %s", e)
+            return None
+
+    def _handle_portal_chat_send(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        agent_id = sess.get('agent_id', '')
+        agent_session_id = sess.get('agent_session_id', '')
+        user_id = sess.get('user_id', '')
+        workspace_id = sess.get('workspace_id', '')
+        if not agent_id:
+            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
+            return
+        if not workspace_id:
+            existing_ws = connection.execute_query(
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE OWNER_USER_ID = :v_uid AND WORKSPACE_TYPE = 'CONVERSATION' AND STATUS = 'ACTIVE' ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY",
+                {"v_uid": user_id},
+            )
+            if existing_ws:
+                workspace_id = existing_ws[0]['workspace_id']
+                sess['workspace_id'] = workspace_id
+            else:
+                workspace_id = workspace_api.create_workspace(owner_user_id=user_id, name='New Chat', workspace_type='CONVERSATION')
+                sess['workspace_id'] = workspace_id
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            message = data.get('message', '').strip()
+            if not message:
+                self._send_json({'success': False, 'error': 'Empty message'}, 400)
+                return
+            import datetime
+            ts = datetime.datetime.now().isoformat()
+            if workspace_id:
+                workspace_api.save_context(
+                    workspace_id=workspace_id,
+                    context_type='CHAT_MESSAGE',
+                    context_data=json.dumps({'role': 'user', 'content': message, 'timestamp': ts}),
+                    agent_id=agent_id,
+                )
+            reply = _generate_sim_reply(message, agent_id, sess)
+            if workspace_id:
+                workspace_api.save_context(
+                    workspace_id=workspace_id,
+                    context_type='CHAT_MESSAGE',
+                    context_data=json.dumps({'role': 'agent', 'content': reply, 'timestamp': ts}),
+                    agent_id=agent_id,
+                )
+            ws_row = connection.execute_query_one(
+                "SELECT WORKSPACE_NAME, WORKSPACE_ALIAS FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid",
+                {"v_wid": workspace_id},
+            ) if workspace_id else None
+            if ws_row and not ws_row.get('workspace_alias') and ws_row.get('workspace_name') == 'New Chat':
+                summary = message[:60].replace('\n', ' ').strip()
+                if not summary:
+                    summary = 'New Chat'
+                connection.execute(
+                    "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = SYSTIMESTAMP WHERE WORKSPACE_ID = :v_wid",
+                    {"v_name": summary, "v_wid": workspace_id},
+                )
+            self._send_json({'success': True, 'reply': reply, 'timestamp': ts})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_agent_release(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        agent_id = sess.get('agent_id', '')
+        agent_session_id = sess.get('agent_session_id', '')
+        if not agent_id:
+            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
+            return
+        try:
+            if agent_session_id:
+                agent_api.end_session(agent_session_id)
+            agent_api.hibernate_agent(agent_id)
+            sess.pop('agent_id', None)
+            sess.pop('agent_name', None)
+            sess.pop('agent_session_id', None)
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_new(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        agent_id = sess.get('agent_id', '')
+        user_id = sess.get('user_id', '')
+        if not agent_id:
+            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
+            return
+        try:
+            agent_session_id = sess.get('agent_session_id', '')
+            if agent_session_id:
+                agent_api.end_session(agent_session_id)
+            new_session = agent_api.create_session(agent_id, owner_user_id=user_id)
+            sess['agent_session_id'] = new_session
+            ws = workspace_api.create_workspace(owner_user_id=user_id, name='New Chat', workspace_type='CONVERSATION')
+            sess['workspace_id'] = ws
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_rename(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id', '').strip()
+            new_name = data.get('name', '').strip()
+            if not ws_id or not new_name:
+                self._send_json({'success': False, 'error': 'workspace_id and name required'}, 400)
+                return
+            connection.execute(
+                "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = SYSTIMESTAMP WHERE WORKSPACE_ID = :v_wid",
+                {"v_name": new_name, "v_wid": ws_id},
+            )
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_delete(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        user_id = sess.get('user_id', '')
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id', '').strip()
+            if not ws_id:
+                self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
+                return
+            ws = connection.execute_query_one(
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid",
+                {"v_wid": ws_id, "v_uid": user_id},
+            )
+            if not ws:
+                self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
+                return
+            connection.execute("DELETE FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            connection.execute("DELETE FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            if sess.get('workspace_id') == ws_id:
+                sess.pop('workspace_id', None)
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_chat_switch(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        user_id = sess.get('user_id', '')
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            ws_id = data.get('workspace_id', '').strip()
+            if not ws_id:
+                self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
+                return
+            ws = connection.execute_query_one(
+                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid AND STATUS = 'ACTIVE'",
+                {"v_wid": ws_id, "v_uid": user_id},
+            )
+            if not ws:
+                self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
+                return
+            sess['workspace_id'] = ws_id
+            self._send_json({'success': True})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_api_get(self, path, qs):
+        if path not in PUBLIC_API:
+            session_data = _get_session(self)
+            if not session_data:
+                self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+                return
+            sess = session_data[1]
+        try:
+            if path == '/portal/api/user/profile':
+                session_data = _get_session(self)
+                if session_data:
+                    profile = user_api.get_user_profile(session_data[1].get('user_id', ''))
+                    self._send_json(_clean_row(profile) if profile else {'error': 'User not found'})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/agent/status':
+                session_data = _get_session(self)
+                if session_data:
+                    agent_id = session_data[1].get('agent_id', '')
+                    if agent_id:
+                        agent = agent_api.get_agent(agent_id)
+                        self._send_json(_clean_row(agent) if agent else {'error': 'Agent not found'})
+                    else:
+                        self._send_json({'has_agent': False})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/chat/history':
+                session_data = _get_session(self)
+                if session_data:
+                    user_id = session_data[1].get('user_id', '')
+                    workspace_id = session_data[1].get('workspace_id', '')
+                    if workspace_id:
+                        rows = connection.execute_query("""
+                            SELECT CONTEXT_DATA FROM WORKSPACE_CONTEXT
+                            WHERE CONTEXT_TYPE = 'CHAT_MESSAGE' AND WORKSPACE_ID = :v_wid
+                            ORDER BY CREATED_AT ASC
+                        """, {"v_wid": workspace_id})
+                        messages = []
+                        for r in rows:
+                            try:
+                                cd = r.get('context_data', '{}')
+                                d = cd if isinstance(cd, dict) else json.loads(cd)
+                                messages.append(d)
+                            except Exception:
+                                pass
+                        self._send_json({'messages': messages, 'workspace_id': workspace_id})
+                    else:
+                        self._send_json({'messages': []})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/chat/sessions':
+                session_data = _get_session(self)
+                if session_data:
+                    user_id = session_data[1].get('user_id', '')
+                    current_ws = session_data[1].get('workspace_id', '')
+                    rows = connection.execute_query("""
+                        SELECT w.WORKSPACE_ID, w.WORKSPACE_NAME, w.WORKSPACE_ALIAS,
+                               TO_CHAR(w.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                               (SELECT COUNT(*) FROM WORKSPACE_CONTEXT wc WHERE wc.WORKSPACE_ID = w.WORKSPACE_ID AND wc.CONTEXT_TYPE = 'CHAT_MESSAGE') AS MSG_COUNT
+                        FROM WORKSPACES w
+                        WHERE w.OWNER_USER_ID = :v_uid AND w.WORKSPACE_TYPE = 'CONVERSATION' AND w.STATUS = 'ACTIVE'
+                        ORDER BY w.CREATED_AT DESC
+                    """, {"v_uid": user_id})
+                    sessions_list = []
+                    for r in rows:
+                        sessions_list.append({
+                            'workspace_id': r['workspace_id'],
+                            'name': r.get('workspace_alias') or r.get('workspace_name', ''),
+                            'created_at': r.get('created_at', ''),
+                            'msg_count': r.get('msg_count', 0),
+                            'is_current': r['workspace_id'] == current_ws,
+                        })
+                    self._send_json({'sessions': sessions_list})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/user/workspaces':
+                session_data = _get_session(self)
+                if session_data:
+                    wss = user_api.get_user_workspaces(session_data[1].get('user_id', ''))
+                    self._send_json({'workspaces': [_clean_row(w) for w in wss]})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/user/memories':
+                session_data = _get_session(self)
+                if session_data:
+                    mems = user_api.get_user_memories(session_data[1].get('user_id', ''))
+                    self._send_json({'memories': [_clean_row(m) for m in mems]})
+                else:
+                    self._send_json({'error': 'Not authenticated'}, 401)
+            else:
+                self._send_error(404, 'Not found')
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
 
     def _serve_template(self, filename):
         filepath = os.path.join(TEMPLATES_DIR, filename)
@@ -567,6 +1378,26 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(500, str(e))
 
 
+SIM_REPLIES = {
+    'hello': 'Hello! I am your AI Agent. How can I help you today?',
+    '你好': '你好！我是你的 AI Agent，有什么可以帮你的吗？',
+    'help': 'I can help you manage memories, search knowledge, organize tasks, and collaborate with other agents. What would you like to do?',
+    'memory': 'I can store and retrieve your memories. Just tell me what you want to remember or recall.',
+    'status': 'I am currently active and ready to assist you. All systems are operational.',
+    'skill': 'I have access to various skills including knowledge search, memory management, task planning, and workspace organization.',
+    'workspace': 'Your workspace is ready. I can help you organize your context and collaborate with team members.',
+}
+
+
+def _generate_sim_reply(message, agent_id, sess):
+    msg_lower = message.lower().strip()
+    for key, reply in SIM_REPLIES.items():
+        if key in msg_lower:
+            return reply
+    agent_name = sess.get('agent_name', 'Agent')
+    return f"[{agent_name}] I received your message: \"{message}\". I'm processing it and will respond more intelligently once connected to a real LLM backend. For now, I can help with basic memory, knowledge, and workspace operations."
+
+
 def main():
     cfg = _load_server_config()
     host = getattr(cfg, 'host', '0.0.0.0')
@@ -579,7 +1410,7 @@ def main():
         print("[server] WARNING: Database connection failed: {}".format(e))
 
     server = HTTPServer((host, port), VisHandler)
-    print("[server] Oracle Memory System v{} visualization server".format(VERSION))
+    print("[server] AI Agent Infra v{} visualization server".format(VERSION))
     print("[server] Listening on http://{}:{}".format(host, port))
     try:
         server.serve_forever()

@@ -1,6 +1,6 @@
-"""Oracle Memory System v2.3.2 - Security Module
+"""AI Agent Infra v3.0.0 - Community Edition - Security Module
 
-Data masking, context-aware masking, and reversible encryption.
+Data masking, context-aware masking, reversible encryption, and config encryption.
 """
 
 import re
@@ -145,3 +145,62 @@ def verify_password(password: str, stored_hash: str, salt_hex: str, iterations: 
 
 
 default_masking_service = DataMaskingService()
+
+
+class ConfigEncryption:
+    PBKDF2_ITERATIONS = 210000
+    SALT_SIZE = 32
+    KEY_SIZE = 32
+    NONCE_SIZE = 12
+    TAG_SIZE = 16
+
+    def __init__(self, master_key: Optional[bytes] = None):
+        self._master_key = master_key or self._resolve_master_key()
+
+    @staticmethod
+    def _resolve_master_key() -> bytes:
+        from .connection_crypto import get_master_key
+        return get_master_key()
+
+    def _derive_key(self, salt: bytes) -> bytes:
+        return hashlib.pbkdf2_hmac("sha512", self._master_key, salt, self.PBKDF2_ITERATIONS, dklen=self.KEY_SIZE)
+
+    def encrypt(self, plaintext: str) -> str:
+        salt = os.urandom(self.SALT_SIZE)
+        dk = self._derive_key(salt)
+        nonce = os.urandom(self.NONCE_SIZE)
+        data = plaintext.encode("utf-8")
+        length_prefix = len(data).to_bytes(4, "big")
+        payload = length_prefix + data
+        ciphertext = bytearray(len(payload))
+        for i in range(len(payload)):
+            ciphertext[i] = payload[i] ^ dk[i % self.KEY_SIZE] ^ nonce[i % self.NONCE_SIZE]
+        tag_input = salt + nonce + bytes(ciphertext)
+        tag = hashlib.sha256(tag_input).digest()[:self.TAG_SIZE]
+        blob = salt + nonce + bytes(ciphertext) + tag
+        return base64.b64encode(blob).decode("ascii")
+
+    def decrypt(self, ciphertext: str) -> str:
+        raw = base64.b64decode(ciphertext)
+        salt = raw[:self.SALT_SIZE]
+        nonce = raw[self.SALT_SIZE:self.SALT_SIZE + self.NONCE_SIZE]
+        encrypted = raw[self.SALT_SIZE + self.NONCE_SIZE:-(self.TAG_SIZE)]
+        stored_tag = raw[-(self.TAG_SIZE):]
+        computed_tag = hashlib.sha256(salt + nonce + encrypted).digest()[:self.TAG_SIZE]
+        if stored_tag != computed_tag:
+            raise ValueError("Authentication tag mismatch - wrong master key or corrupted data")
+        dk = self._derive_key(salt)
+        decrypted = bytearray(len(encrypted))
+        for i in range(len(encrypted)):
+            decrypted[i] = encrypted[i] ^ dk[i % self.KEY_SIZE] ^ nonce[i % self.NONCE_SIZE]
+        length = int.from_bytes(bytes(decrypted[:4]), "big")
+        return bytes(decrypted[4:4 + length]).decode("utf-8")
+
+    def rotate_key(self, new_master_key: bytes, encrypted_values: List[str]) -> List[str]:
+        old_key = self._master_key
+        plaintexts = []
+        for val in encrypted_values:
+            self._master_key = old_key
+            plaintexts.append(self.decrypt(val))
+        self._master_key = new_master_key
+        return [self.encrypt(pt) for pt in plaintexts]

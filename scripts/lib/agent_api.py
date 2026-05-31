@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Agent API
+"""AI Agent Infra v3.0.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -433,7 +433,7 @@ def hibernate_agent(agent_id):
         return False
     return execute("""
         UPDATE AGENT_REGISTRY
-        SET STATUS = 'DORMANT', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP
+        SET STATUS = 'POOL', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP
         WHERE AGENT_ID = :aid
     """, {"aid": agent_id}) > 0
 
@@ -508,3 +508,25 @@ def assign_pool_agent(user_id, required_skills):
         WHERE AGENT_ID = :b2
     """, {"b1": user_id, "b2": best_agent})
     return _row_to_dict(get_agent(best_agent))
+
+
+def assign_random_pool_agent(user_id: str) -> Optional[Dict[str, Any]]:
+    rows = execute_query("""
+        SELECT AGENT_ID FROM AGENT_REGISTRY
+        WHERE STATUS = 'POOL'
+        ORDER BY DBMS_RANDOM.VALUE
+    """)
+    if not rows:
+        return None
+    agent_id = rows[0]["agent_id"]
+    execute("""
+        UPDATE AGENT_REGISTRY
+        SET STATUS = 'ACTIVE', CURRENT_USER_ID = :b1,
+            LAST_ACTIVE_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP
+        WHERE AGENT_ID = :b2
+    """, {"b1": user_id, "b2": agent_id})
+    result = _row_to_dict(get_agent(agent_id))
+    if result and user_id:
+        from .workspace_api import get_user_workspaces
+        result["user_workspaces"] = get_user_workspaces(user_id)
+    return result

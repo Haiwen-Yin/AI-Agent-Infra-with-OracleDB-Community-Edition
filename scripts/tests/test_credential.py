@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Credential & Pool Agent Tests"""
+"""AI Agent Infra v3.0.0 - Credential & Pool Agent Tests"""
 
 import sys
 import os
@@ -69,7 +69,7 @@ def test_hibernate_agent():
     ok = hibernate_agent(AGENT)
     assert ok
     agent = get_agent(AGENT)
-    assert agent["status"] == "DORMANT"
+    assert agent["status"] == "POOL"
     print("PASS: test_hibernate_agent")
 
 

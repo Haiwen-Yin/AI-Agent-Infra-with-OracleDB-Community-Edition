@@ -1,3 +1,4 @@
-"""Oracle Memory System v2.3.2 - Core Library"""
+"""AI Agent Infra v3.0.0 - Community Edition - Core Library"""
 
 from . import search_api
+from . import skill_api

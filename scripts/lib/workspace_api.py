@@ -1,4 +1,4 @@
-"""Oracle Memory System v2.3.2 - Workspace API
+"""AI Agent Infra v3.0.0 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.

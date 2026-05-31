@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Oracle Memory System v2.3.2 - Web Server Control Script
+# AI Agent Infra v3.0.0 - Community Edition - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
@@ -89,7 +89,7 @@ is_running() {
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Oracle Memory System v2.3.2${NC}"
+    echo -e "${BLUE}  AI Agent Infra v3.0.0 - Community${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -152,7 +152,7 @@ do_start() {
     export MEMORY_SESSION_TIMEOUT="$CFG_TIMEOUT"
 
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  Starting Oracle Memory Web Server${NC}"
+    echo -e "${BLUE}  Starting AI Agent Infra Web Server${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo -e "  Python:  $PYTHON"
     echo -e "  Host:    ${GREEN}$CFG_HOST${NC}"
@@ -294,7 +294,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "Oracle Memory System v2.3.2 - Web Server Control"
+        echo "AI Agent Infra v3.0.0 - Community Edition - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

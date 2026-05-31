@@ -1,9 +1,44 @@
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.2 - Schema Deployment
-PROMPT Spec Management, Agent Pools, Collaboration Groups & JRD Views
+PROMPT AI Agent Infra v3.0.0 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
-WHENEVER SQLERROR EXIT SQL.SQLCODE
+WHENEVER SQLERROR CONTINUE
+
+PROMPT Checking for existing deployment...
+DECLARE
+    v_count NUMBER;
+    v_version VARCHAR2(32);
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM USER_TABLES WHERE TABLE_NAME = 'SYSTEM_CONFIG';
+    IF v_count > 0 THEN
+        SELECT CONFIG_VALUE INTO v_version 
+        FROM SYSTEM_CONFIG 
+        WHERE CONFIG_KEY = 'schema_version';
+        DBMS_OUTPUT.PUT_LINE('================================================');
+        DBMS_OUTPUT.PUT_LINE('EXISTING DEPLOYMENT DETECTED: schema_version = ' || v_version);
+        DBMS_OUTPUT.PUT_LINE('================================================');
+        DBMS_OUTPUT.PUT_LINE('This database already has AI Agent Infra deployed.');
+        DBMS_OUTPUT.PUT_LINE('To upgrade, use upgrade scripts instead of full deployment.');
+        DBMS_OUTPUT.PUT_LINE('To reinitialize (DESTRUCTIVE), manually drop all tables first:');
+        DBMS_OUTPUT.PUT_LINE('  BEGIN');
+        DBMS_OUTPUT.PUT_LINE('    FOR r IN (SELECT table_name FROM user_tables WHERE table_name != ''DBTOOLS$MCP_LOG'') LOOP');
+        DBMS_OUTPUT.PUT_LINE('      EXECUTE IMMEDIATE ''DROP TABLE "'' || r.table_name || ''" CASCADE CONSTRAINTS PURGE'';');
+        DBMS_OUTPUT.PUT_LINE('    END LOOP;');
+        DBMS_OUTPUT.PUT_LINE('  END;');
+        DBMS_OUTPUT.PUT_LINE('  /');
+        DBMS_OUTPUT.PUT_LINE('================================================');
+        RAISE_APPLICATION_ERROR(-20001, 'Deployment aborted: existing deployment found. Schema version: ' || v_version);
+    END IF;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        NULL;
+    WHEN OTHERS THEN
+        IF SQLCODE = -20001 THEN
+            RAISE;
+        END IF;
+        NULL;
+END;
+/
 
 CREATE OR REPLACE PROCEDURE safe_ddl(p_sql IN VARCHAR2) IS
 BEGIN
@@ -38,7 +73,7 @@ EXEC safe_ddl('DROP VIEW IF EXISTS COLLAB_GROUP_DV');
 
 PROMPT Dropping all tables...
 BEGIN
-    FOR r IN (SELECT table_name FROM user_tables) LOOP
+    FOR r IN (SELECT table_name FROM user_tables WHERE table_name != 'DBTOOLS$MCP_LOG') LOOP
         BEGIN
             EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
         EXCEPTION
@@ -46,7 +81,7 @@ BEGIN
                 DBMS_OUTPUT.PUT_LINE('Skip: ' || r.table_name || ' - ' || SQLERRM);
         END;
     END LOOP;
-    FOR r IN (SELECT table_name FROM user_tables) LOOP
+    FOR r IN (SELECT table_name FROM user_tables WHERE table_name != 'DBTOOLS$MCP_LOG') LOOP
         BEGIN
             EXECUTE IMMEDIATE 'DROP TABLE "' || r.table_name || '" CASCADE CONSTRAINTS PURGE';
         EXCEPTION
@@ -81,7 +116,7 @@ CREATE TABLE ENTITIES (
     CONSTRAINT CK_ENTITIES_STATUS CHECK (STATUS IN ('ACTIVE','ARCHIVED','DELETED','DRAFT')),
     CONSTRAINT CK_ENTITIES_VISIBILITY CHECK (VISIBILITY IN ('PRIVATE','SHARED','PUBLIC')),
     CONSTRAINT CK_ENTITIES_IMPORTANCE CHECK (IMPORTANCE BETWEEN 1 AND 10),
-    CONSTRAINT CK_ENTITIES_TYPE CHECK (ENTITY_TYPE IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC','OTHER'))
+    CONSTRAINT CK_ENTITIES_TYPE CHECK (ENTITY_TYPE IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC','SKILL','OTHER'))
 ) PARTITION BY LIST (ENTITY_TYPE)
 SUBPARTITION BY RANGE (CREATED_AT)
 SUBPARTITION TEMPLATE (
@@ -100,6 +135,7 @@ SUBPARTITION TEMPLATE (
     PARTITION P_EXPERIENCE    VALUES ('EXPERIENCE'),
     PARTITION P_HARNESS       VALUES ('HARNESS_TEMPLATE'),
     PARTITION P_SPEC         VALUES ('SPEC'),
+    PARTITION P_SKILL        VALUES ('SKILL'),
     PARTITION P_OTHERS        VALUES (DEFAULT)
 );
 
@@ -202,6 +238,38 @@ CREATE TABLE SPEC_META (
 ) PARTITION BY REFERENCE (FK_SM_ENTITY);
 
 PROMPT ============================================================
+PROMPT 5c. SKILL_META (Reference Partitioned) [NEW v3.0.0]
+PROMPT ============================================================
+
+CREATE TABLE SKILL_META (
+    ENTITY_ID           VARCHAR2(64)  NOT NULL,
+    ENTITY_TYPE         VARCHAR2(32)  DEFAULT 'SKILL' NOT NULL,
+    SKILL_NAME          VARCHAR2(256) NOT NULL,
+    SKILL_VERSION       VARCHAR2(32)  DEFAULT '1.0.0' NOT NULL,
+    SKILL_TYPE          VARCHAR2(32)  DEFAULT 'CUSTOM' NOT NULL,
+    SKILL_FORMAT        VARCHAR2(32)  DEFAULT 'TEXT' NOT NULL,
+    TEXT_CONTENT        CLOB,
+    RESOURCE_URI        VARCHAR2(2048),
+    RESOURCE_CHECKSUM   VARCHAR2(128),
+    RUNTIME             VARCHAR2(32)  DEFAULT 'PYTHON' NOT NULL,
+    PARAMETERS          JSON,
+    DEPENDENCIES        JSON,
+    SKILL_STATUS        VARCHAR2(32)  DEFAULT 'ACTIVE' NOT NULL,
+    RESOURCE_FILENAME   VARCHAR2(512),
+    RESOURCE_SIZE       NUMBER,
+    RESOURCE_MIME_TYPE  VARCHAR2(128),
+    RESOURCE_SERVER_HOST VARCHAR2(512),
+    SKILL_DESCRIPTION   CLOB,
+    CONSTRAINT PK_SKILL_META PRIMARY KEY (ENTITY_ID, ENTITY_TYPE),
+    CONSTRAINT FK_SKM_ENTITY FOREIGN KEY (ENTITY_ID, ENTITY_TYPE) REFERENCES ENTITIES(ENTITY_ID, ENTITY_TYPE) ON DELETE CASCADE,
+    CONSTRAINT CK_SKM_ENTITY_TYPE CHECK (ENTITY_TYPE = 'SKILL'),
+    CONSTRAINT CK_SKM_TYPE CHECK (SKILL_TYPE IN ('BUILTIN','CUSTOM')),
+    CONSTRAINT CK_SKM_FORMAT CHECK (SKILL_FORMAT IN ('TEXT','SCRIPT','HYBRID')),
+    CONSTRAINT CK_SKM_RUNTIME CHECK (RUNTIME IN ('PYTHON','BASH','NODE','OTHER')),
+    CONSTRAINT CK_SKM_STATUS CHECK (SKILL_STATUS IN ('ACTIVE','DEPRECATED','DISABLED'))
+) PARTITION BY REFERENCE (FK_SKM_ENTITY);
+
+PROMPT ============================================================
 PROMPT 6. TAGS (Non-Partitioned)
 PROMPT ============================================================
 
@@ -236,11 +304,15 @@ CREATE TABLE SYSTEM_USERS (
     PASSWORD_HASH VARCHAR2(256),
     ROLE        VARCHAR2(64)  DEFAULT 'USER' NOT NULL,
     STATUS      VARCHAR2(32)  DEFAULT 'ACTIVE' NOT NULL,
+    AUTH_SOURCE VARCHAR2(16)  DEFAULT 'LOCAL' NOT NULL,
+    LDAP_DN     VARCHAR2(512),
+    LAST_LDAP_SYNC TIMESTAMP,
     LAST_LOGIN  TIMESTAMP,
     CREATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     UPDATED_AT  TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     CONSTRAINT CK_SU_ROLE CHECK (ROLE IN ('ADMIN','USER','SERVICE')),
-    CONSTRAINT CK_SU_STATUS CHECK (STATUS IN ('ACTIVE','INACTIVE','LOCKED'))
+    CONSTRAINT CK_SU_STATUS CHECK (STATUS IN ('ACTIVE','INACTIVE','LOCKED')),
+    CONSTRAINT CK_SU_AUTH_SOURCE CHECK (AUTH_SOURCE IN ('LOCAL','LDAP'))
 );
 
 PROMPT ============================================================
@@ -309,6 +381,7 @@ CREATE TABLE WORKSPACES (
     METADATA           JSON,
     CREATED_AT         TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
     UPDATED_AT         TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    WORKSPACE_ALIAS    VARCHAR2(256),
     CONSTRAINT FK_WS_OWNER FOREIGN KEY (OWNER_USER_ID) REFERENCES SYSTEM_USERS(USER_ID),
     CONSTRAINT FK_WS_AGENT FOREIGN KEY (CURRENT_AGENT_ID) REFERENCES AGENT_REGISTRY(AGENT_ID),
     CONSTRAINT CK_WS_STATUS CHECK (STATUS IN ('ACTIVE','PAUSED','COMPLETED','ABANDONED')),
@@ -332,7 +405,7 @@ CREATE TABLE WORKSPACE_CONTEXT (
     CONSTRAINT FK_WC_WORKSPACE FOREIGN KEY (WORKSPACE_ID) REFERENCES WORKSPACES(WORKSPACE_ID) ON DELETE CASCADE,
     CONSTRAINT FK_WC_AGENT FOREIGN KEY (AGENT_ID) REFERENCES AGENT_REGISTRY(AGENT_ID),
     CONSTRAINT FK_WC_PARENT FOREIGN KEY (PARENT_CONTEXT_ID) REFERENCES WORKSPACE_CONTEXT(CONTEXT_ID) ON DELETE SET NULL,
-    CONSTRAINT CK_WC_TYPE CHECK (CONTEXT_TYPE IN ('CHECKPOINT','HANDOFF','SUMMARY','ERROR_STATE','AUTO_SAVE'))
+    CONSTRAINT CK_WC_TYPE CHECK (CONTEXT_TYPE IN ('CHECKPOINT','HANDOFF','SUMMARY','ERROR_STATE','AUTO_SAVE','CHAT_MESSAGE'))
 );
 
 PROMPT ============================================================
@@ -634,6 +707,17 @@ CREATE TABLE WORKSPACE_TASKS (
 );
 
 PROMPT ============================================================
+
+
+PROMPT ============================================================
+
+
+PROMPT ============================================================
+PROMPT 8d. SKILL_ACCESS_TOKEN (Non-Partitioned) [NEW v3.0.0 ENT]
+PROMPT ============================================================
+
+
+PROMPT ============================================================
 PROMPT 23. SYSTEM_CONFIG (Non-Partitioned)
 PROMPT ============================================================
 
@@ -643,6 +727,16 @@ CREATE TABLE SYSTEM_CONFIG (
     DESCRIPTION  VARCHAR2(2000),
     UPDATED_AT   TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL
 );
+
+PROMPT ============================================================
+PROMPT 24. CONTEXT_AUDIT_LOG (RANGE Partitioned) [NEW v3.0.0 ENT]
+PROMPT ============================================================
+
+
+PROMPT ============================================================
+PROMPT 24b. CONTEXT_AUDIT_RULES (Non-Partitioned) [NEW v3.0.0 ENT]
+PROMPT ============================================================
+
 
 PROMPT ============================================================
 PROMPT Local Indexes on ENTITIES
@@ -701,6 +795,7 @@ ALTER TABLE ENTITIES ADD CONSTRAINT FK_ENTITIES_WORKSPACE FOREIGN KEY (WORKSPACE
 
 CREATE INDEX IDX_WS_OWNER ON WORKSPACES(OWNER_USER_ID);
 CREATE INDEX IDX_WS_STATUS ON WORKSPACES(STATUS);
+CREATE INDEX IDX_WS_ALIAS ON WORKSPACES(WORKSPACE_ALIAS);
 
 CREATE INDEX IDX_WC_WORKSPACE ON WORKSPACE_CONTEXT(WORKSPACE_ID);
 CREATE INDEX IDX_WC_AGENT ON WORKSPACE_CONTEXT(AGENT_ID);
@@ -732,6 +827,18 @@ CREATE INDEX IDX_CGM_AGENT ON COLLAB_GROUP_MEMBERS(AGENT_ID);
 CREATE INDEX IDX_AR_ROLE ON AGENT_REGISTRY(AGENT_ROLE);
 CREATE INDEX IDX_AR_USER ON AGENT_REGISTRY(CURRENT_USER_ID);
 CREATE INDEX IDX_AR_CREATED_BY ON AGENT_REGISTRY(CREATED_BY_AGENT_ID);
+
+
+CREATE INDEX IDX_SU_AUTH_SOURCE ON SYSTEM_USERS(AUTH_SOURCE);
+CREATE INDEX IDX_SU_LDAP_DN ON SYSTEM_USERS(LDAP_DN);
+
+CREATE INDEX IDX_SKM_NAME ON SKILL_META(SKILL_NAME) LOCAL;
+CREATE INDEX IDX_SKM_TYPE ON SKILL_META(SKILL_TYPE) LOCAL;
+CREATE INDEX IDX_SKM_STATUS ON SKILL_META(SKILL_STATUS) LOCAL;
+CREATE INDEX IDX_SKM_RUNTIME ON SKILL_META(RUNTIME) LOCAL;
+
+
+
 
 PROMPT ============================================================
 PROMPT Property Graph: ORACLE_MEMORY_GRAPH
@@ -978,10 +1085,63 @@ SELECT JSON {
 FROM COLLAB_GROUPS g WITH INSERT UPDATE DELETE;
 
 PROMPT ============================================================
+PROMPT JSON-Relational Duality View: SKILL_DV (Updatable) [NEW v3.0.0]
+PROMPT ============================================================
+
+CREATE JSON RELATIONAL DUALITY VIEW SKILL_DV AS
+SELECT JSON {
+    '_id'                : JSON {'entity_id': e.ENTITY_ID, 'entity_type': e.ENTITY_TYPE},
+    'title'              : e.TITLE WITH UPDATE,
+    'content'            : e.CONTENT WITH UPDATE,
+    'summary'            : e.SUMMARY WITH UPDATE,
+    'category'           : e.CATEGORY WITH UPDATE,
+    'status'             : e.STATUS WITH UPDATE,
+    'owned_by'           : e.OWNED_BY_AGENT WITH UPDATE,
+    'visibility'         : e.VISIBILITY WITH UPDATE,
+    'importance'         : e.IMPORTANCE WITH UPDATE,
+    'workspace_id'       : e.WORKSPACE_ID WITH UPDATE,
+    'created_at'         : e.CREATED_AT,
+    'updated_at'         : e.UPDATED_AT,
+    'skill_meta' : [
+        SELECT JSON {
+            'entity_id'          : skm.ENTITY_ID,
+            'entity_type'        : skm.ENTITY_TYPE,
+            'skill_name'         : skm.SKILL_NAME WITH UPDATE,
+            'skill_version'      : skm.SKILL_VERSION WITH UPDATE,
+            'skill_type'         : skm.SKILL_TYPE WITH UPDATE,
+            'skill_format'       : skm.SKILL_FORMAT WITH UPDATE,
+            'resource_uri'       : skm.RESOURCE_URI WITH UPDATE,
+            'resource_filename'  : skm.RESOURCE_FILENAME WITH UPDATE,
+            'resource_size'      : skm.RESOURCE_SIZE WITH UPDATE,
+            'resource_mime_type' : skm.RESOURCE_MIME_TYPE WITH UPDATE,
+            'resource_checksum'  : skm.RESOURCE_CHECKSUM WITH UPDATE,
+            'resource_server_host' : skm.RESOURCE_SERVER_HOST WITH UPDATE,
+            'skill_description'  : skm.SKILL_DESCRIPTION WITH UPDATE,
+            'runtime'            : skm.RUNTIME WITH UPDATE,
+            'parameters'         : skm.PARAMETERS WITH UPDATE,
+            'dependencies'       : skm.DEPENDENCIES WITH UPDATE,
+            'skill_status'       : skm.SKILL_STATUS WITH UPDATE
+        }
+        FROM SKILL_META skm WITH INSERT UPDATE DELETE
+        WHERE skm.ENTITY_ID = e.ENTITY_ID AND skm.ENTITY_TYPE = e.ENTITY_TYPE
+    ],
+    'tags' : [
+        SELECT JSON {
+            'entity_id'   : et.ENTITY_ID,
+            'entity_type' : et.ENTITY_TYPE,
+            'tag_id'      : et.TAG_ID
+        }
+        FROM ENTITY_TAGS et WITH INSERT DELETE
+        WHERE et.ENTITY_ID = e.ENTITY_ID AND et.ENTITY_TYPE = e.ENTITY_TYPE
+    ]
+}
+FROM ENTITIES e WITH INSERT UPDATE DELETE;
+
+PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '2.3.2', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.0.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1536', 'Default embedding dimension');
@@ -989,8 +1149,42 @@ INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('retri
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('dormant_timeout_min', '30', 'Auto-hibernate timeout in minutes');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('credential_encryption_key', 'CHANGE_ME_IN_PRODUCTION', 'Key for credential value encryption');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('session_timeout_min', '60', 'Session timeout in minutes');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('ldap_default_port', '389', 'Default LDAP port');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('ldap_sync_interval_min', '60', 'LDAP sync interval in minutes');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('license_type', 'ENTERPRISE', 'License type: COMMUNITY or ENTERPRISE');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('skill_token_ttl_min', '5', 'Skill access token TTL in minutes (ENT)');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('presigned_url_ttl_sec', '300', 'Presigned URL TTL in seconds (ENT)');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('audit_threshold_score', '0.40', 'Context similarity threshold for audit alerts (ENT)');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('audit_idle_timeout_min', '60', 'Idle pattern detection timeout in minutes (ENT)');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('audit_log_retention_days', '90', 'Audit log retention period in days (ENT)');
 
-INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, ROLE, STATUS) VALUES ('admin', 'admin', 'SHA256:placeholder_change_me', 'ADMIN', 'ACTIVE');
+INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
+    'RULE_CROSS_WS', 'Cross-Workspace Access', 'CROSS_BOUNDARY',
+    'Detect agent accessing entities across workspace boundaries',
+    'entity.workspace_id != agent.workspace_id AND entity.visibility = ''PRIVATE''', 'HIGH'
+);
+INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
+    'RULE_IDLE_AGENT', 'Idle Agent Pattern', 'IDLE_DETECTION',
+    'Detect agents with no activity beyond threshold',
+    'agent.last_seen_at < SYSTIMESTAMP - :idle_timeout_min * INTERVAL ''1'' MINUTE', 'MEDIUM'
+);
+INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
+    'RULE_DATA_LEAK', 'Data Leak Detection', 'DATA_FLOW',
+    'Detect potential data leakage via high-volume entity access',
+    'access_count > :threshold AND entity.visibility = ''PRIVATE'' AND entity.category != agent.category', 'CRITICAL'
+);
+INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
+    'RULE_ACCESS_ANOMALY', 'Access Anomaly', 'ACCESS_PATTERN',
+    'Detect unusual access patterns outside normal behavior',
+    'access_frequency > :baseline * 3', 'HIGH'
+);
+INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
+    'RULE_SIMILARITY_THRESHOLD', 'Context Similarity Threshold', 'THRESHOLD',
+    'Flag context pairs exceeding similarity threshold',
+    'similarity_score > :threshold', 'MEDIUM'
+);
+
+INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, ROLE, STATUS, AUTH_SOURCE) VALUES ('admin', 'admin', 'SHA256:placeholder_change_me', 'ADMIN', 'ACTIVE', 'LOCAL');
 
 COMMIT;
 
@@ -1023,5 +1217,5 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT Oracle Memory System v2.3.2 Schema Deployment Complete
+PROMPT AI Agent Infra v3.0.0 - Community Edition Schema Deployment Complete
 PROMPT ============================================================
