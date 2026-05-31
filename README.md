@@ -317,10 +317,7 @@ ai-agent-infra-enterprise/
 
 ## License
 
-Business Source License 1.1 — see [LICENSE_ENTERPRISE](LICENSE_ENTERPRISE)
-
-Production use requires a commercial license. Non-production use is free.
-On 2028-05-28, this product automatically transitions to Apache License 2.0.
+Apache License 2.0 — see [LICENSE](LICENSE)
 
 ## Author
 
