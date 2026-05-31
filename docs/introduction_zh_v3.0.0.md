@@ -63,7 +63,7 @@ v3.0.0 推出社区版与企业版双版本策略，满足开源社区与企业�
 
 ### 企业版（Enterprise Edition）
 
-- **许可证**：Business Source License 1.1（BSL 1.1），于 2028-05-28 自动转为 Apache 2.0
+- **许可证**：Business Source License 1.1（BSL 1.1）
 - **定位**：企业生产环境、多团队协作、安全合规场景
 - **包含**：社区版全部能力 + 以下企业级扩展
 
