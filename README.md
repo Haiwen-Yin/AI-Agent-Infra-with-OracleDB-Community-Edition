@@ -9,7 +9,7 @@
 
 > **v3.0.0: Portal user system, encrypted credentials, inline detail expansion.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.0.0.md)**
 
 ---
 
