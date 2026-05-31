@@ -3,7 +3,7 @@
 [![Version](https://img.shields.io/badge/version-v3.0.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-BSL_1.1-orange.svg)](LICENSE_ENTERPRISE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Portal user system, Skill storage with direct resource distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
 
