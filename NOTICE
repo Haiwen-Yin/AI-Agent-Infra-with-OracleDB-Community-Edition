@@ -1,8 +1,8 @@
-Oracle Memory by YHW
-Copyright (c) 2026 Haiwen Yin (胖头鱼 🐟). All rights reserved.
+AI Agent Infra with OracleDB - Community Edition
+Copyright (c) 2026 Haiwen Yin. All rights reserved.
 
-This SKILL is licensed under the Apache License, Version 2.0 (the "License").
-You may not use this SKILL except in compliance with the License.
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may not use this product except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
@@ -15,7 +15,7 @@ limitations under the License.
 
 ---
 
-This SKILL uses Oracle Database technologies, including but not limited to:
+This product uses Oracle Database technologies, including but not limited to:
 - Oracle Database 23ai/26ai
 - Oracle Property Graph (SQL PGQ)
 - Oracle JSON-Relational Duality Views
