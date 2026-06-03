@@ -70,7 +70,6 @@ body{background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe U
         <label><span data-zh>密码</span><span data-en>Password</span></label>
         <input type="password" class="form-input" id="loginPassword" required autocomplete="current-password">
       </div>
-      <input type="hidden" id="authMode" value="local">
       <button type="submit" class="submit-btn" id="loginBtn">
         <span data-zh>登录并连接 Agent</span><span data-en>Login & Connect to Agent</span>
       </button>
@@ -100,22 +99,10 @@ body{background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe U
     <div class="error-msg" id="regError"></div>
   </div>
 
-  <div class="version-badge">Community Edition with Oracle v3.0.0</div>
+  <div class="version-badge">Community Edition with Oracle v3.1.0</div>
 </div>
 
 <script>
-var _langTexts={
-  optLocal:{zh:'系统用户',en:'System User'},
-  optLdap:{zh:'LDAP 统一认证',en:'LDAP Authentication'}
-};
-
-function updateLangTexts(){
-  var lang=document.documentElement.getAttribute('data-lang')||'en';
-  document.getElementById('optLocal').textContent=_langTexts.optLocal[lang];
-  document.getElementById('optLdap').textContent=_langTexts.optLdap[lang];
-}
-
-function switchAuthMode(){}
 
 function switchTab(tab){
   document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active')});
@@ -136,8 +123,7 @@ function handleLogin(e){
   document.getElementById('loginError').textContent='';
   var username=document.getElementById('loginUsername').value;
   var password=document.getElementById('loginPassword').value;
-  var authMode=document.getElementById('authMode').value;
-  fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password,auth_mode:authMode})})
+  fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password})})
   .then(function(r){return r.json()})
   .then(function(d){
     btn.disabled=false;
@@ -175,7 +161,7 @@ function handleRegister(e){
   .then(function(d){
     btn.disabled=false;
     if(d.success){
-      fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password,auth_mode:'local'})})
+      fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password})})
       .then(function(r2){return r2.json()})
       .then(function(d2){
         if(d2.success&&d2.has_agent){
@@ -202,12 +188,10 @@ function toggleLang(){
   var next=cur==='en'?'zh':'en';
   html.setAttribute('data-lang',next);
   localStorage.setItem('lang',next);
-  updateLangTexts();
 }
 (function(){
   var saved=localStorage.getItem('lang');
   if(saved)document.documentElement.setAttribute('data-lang',saved);
-  updateLangTexts();
 })();
 </script>
 </body>

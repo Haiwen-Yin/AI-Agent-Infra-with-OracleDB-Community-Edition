@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.0.0
+version: v3.1.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.0.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.1.0 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration, skill]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.0.0
+# AI Agent Infra with OracleDB - Community Edition v3.1.0
 
 **Author:** Haiwen Yin
-**Version:** v3.0.0 - 2026-05-28
+**Version:** v3.1.0 - 2026-05-28
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -52,7 +52,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 +-----------------------------------------------------------------+
 ```
 
-## v3.0.0 Key Addition: Skill Storage & Distribution
+## v3.1.0 Key Addition: Skill Storage & Distribution
 
 | Component | Description |
 |-----------|-------------|
@@ -124,6 +124,66 @@ In-db embedding generation and vector search capabilities were omitted during th
 | 19 embedding tests | Covering generation, storage, retrieval, similarity search, hybrid search, cross-type, batch processing, dimension detection |
 | 31 unified search tests | Covering 5-signal independent verification, domain/category/tags filtering, graph proximity, custom weights, Single-SQL fusion search |
 | 42 search API tests | Covering strategy metadata, auto-detection, per-strategy invocation, result structure, unified_sql strategy |
+
+
+## Multi-Agent Encryption & Key Sharing
+
+### How DB_CRYPTO Works with Multiple Agents
+
+All agents connecting to the **same database** automatically share the same `DB_CRYPTO` encryption key (stored in `SYSTEM_CONFIG`). This means:
+
+- **Agent A** encrypts LDAP bind credential → `DB_CRYPTO.encrypt('ldap_password')`
+- **Agent B** on a different server can decrypt it → `DB_CRYPTO.decrypt(ciphertext)`
+- No key files to copy, no environment variables to sync
+
+### Key Safety Guarantees
+
+| Scenario | Behavior |
+|----------|----------|
+| New Agent connects to existing DB | Key already exists in `SYSTEM_CONFIG` → reuses it, no data loss |
+| Multiple Agents call `encrypt()` simultaneously | `DUP_VAL_ON_INDEX` exception handler prevents key overwrite |
+| Agent loses local `master.key` | Only affects `config.json` decryption; DB_CRYPTO is unaffected |
+| Database migration (expdp/impdp) | `SYSTEM_CONFIG` rows including `db_crypto_master_key` are migrated → all encrypted data works |
+
+### What Depends on Local Master Key vs DB_CRYPTO
+
+| Data | Encryption | Key Location | Shared? |
+|------|-----------|--------------|---------|
+| `config.json` database credentials | `connection_crypto.py` | `~/.oracle-infra/master.key` or `MASTER_DB_KEY` env | No (per-server) |
+| `LDAP_CONFIG.BIND_CREDENTIAL` | `DB_CRYPTO` | `SYSTEM_CONFIG` table | Yes (all DB connections) |
+| `AGENT_CREDENTIALS.CREDENTIAL_VALUE` | `DB_CRYPTO` | `SYSTEM_CONFIG` table | Yes (all DB connections) |
+| `SYSTEM_USERS` password hash | PBKDF2-HMAC-SHA256 (one-way) | Salt stored in `SYSTEM_USERS` row | N/A (verify only) |
+
+### Key Rotation
+
+```sql
+-- WARNING: Re-encrypt all data after rotation!
+-- 1. Decrypt all encrypted data
+-- 2. EXEC DB_CRYPTO.rotate_key();
+-- 3. Re-encrypt all data with new key
+
+-- Example: Rotate and re-encrypt LDAP bind credential
+DECLARE
+    v_plain VARCHAR2(4000);
+    v_new_cipher VARCHAR2(4000);
+BEGIN
+    SELECT DB_CRYPTO.decrypt(BIND_CREDENTIAL) INTO v_plain FROM LDAP_CONFIG WHERE CONFIG_ID = 'LDAP_001';
+    DB_CRYPTO.rotate_key();
+    SELECT DB_CRYPTO.encrypt(v_plain) INTO v_new_cipher FROM DUAL;
+    UPDATE LDAP_CONFIG SET BIND_CREDENTIAL = v_new_cipher WHERE CONFIG_ID = 'LDAP_001';
+    COMMIT;
+END;
+/
+```
+
+### Agent First-Use Checklist
+
+When a new Agent acquires this Skill and connects to a database:
+
+1. **Call `check_deployment()`** first → if deployed, do NOT re-run deploy scripts
+2. **If deploying fresh** → `DBMS_CRYPTO` grant is required (in prerequisites)
+3. **If connecting to existing DB** → `DB_CRYPTO` key already exists, all encrypted data is accessible
+4. **If migrating to new DB** → export `SYSTEM_CONFIG` rows with `db_crypto_*` keys alongside encrypted data
 
 ## Agent Retrieval Guide
 
@@ -216,7 +276,7 @@ results = search("partition*", strategy="auto")
 | ENTITY_EMBEDDINGS | REFERENCE from ENTITIES |
 | SPEC_META | REFERENCE from ENTITIES [NEW v2.3.0] |
 | HARNESS_META | REFERENCE from ENTITIES |
-| SKILL_META | REFERENCE from ENTITIES [NEW v3.0.0] |
+| SKILL_META | REFERENCE from ENTITIES [NEW v3.1.0] |
 | ENTITY_TAGS | REFERENCE from ENTITIES |
 | TASK_PLANS | RANGE by STATUS |
 | TASK_STEPS | REFERENCE from TASK_PLANS |
@@ -268,7 +328,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.0.0" or None,
+#   "schema_version": "3.1.0" or None,
 #   "table_count": 33,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -296,11 +356,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.0.0",
+  "schema_version": "3.1.0",
   "table_count": 33,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.0.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.1.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -309,8 +369,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.0.0
-Deployment aborted: existing deployment found. Schema version: 3.0.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.1.0
+Deployment aborted: existing deployment found. Schema version: 3.1.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):

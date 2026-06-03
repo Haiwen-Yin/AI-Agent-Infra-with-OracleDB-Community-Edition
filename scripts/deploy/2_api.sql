@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.0.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.1.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1328,5 +1328,122 @@ PROMPT ============================================================
 COMMIT;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.0.0 API Deployment Complete
+
+PROMPT ============================================================
+PROMPT Package: DB_CRYPTO [NEW v3.1.0]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE DB_CRYPTO AS
+    FUNCTION encrypt(p_plaintext VARCHAR2) RETURN VARCHAR2;
+    FUNCTION decrypt(p_ciphertext VARCHAR2) RETURN VARCHAR2;
+    FUNCTION encrypt_raw(p_plaintext RAW) RETURN RAW;
+    FUNCTION decrypt_raw(p_ciphertext RAW) RETURN RAW;
+    PROCEDURE rotate_key;
+END DB_CRYPTO;
+/
+
+CREATE OR REPLACE PACKAGE BODY DB_CRYPTO AS
+    CK_KEY VARCHAR2(128) := 'db_crypto_master_key';
+    CK_SALT VARCHAR2(128) := 'db_crypto_key_salt';
+    C_ALG PLS_INTEGER := DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5;
+
+    CK_KEY VARCHAR2(128) := 'db_crypto_master_key';
+    CK_SALT VARCHAR2(128) := 'db_crypto_key_salt';
+    C_ALG PLS_INTEGER := DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5;
+
+    FUNCTION get_db_key RETURN RAW IS
+        v_key_hex VARCHAR2(4000);
+        v_key RAW(32);
+        v_salt RAW(32);
+    BEGIN
+        SELECT CONFIG_VALUE INTO v_key_hex FROM SYSTEM_CONFIG WHERE CONFIG_KEY = CK_KEY;
+        RETURN HEXTORAW(v_key_hex);
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            v_key := DBMS_CRYPTO.RANDOMBYTES(32);
+            v_salt := DBMS_CRYPTO.RANDOMBYTES(32);
+            BEGIN
+                INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+                VALUES (CK_KEY, RAWTOHEX(v_key), 'AES-256 master key for DB-side encryption (auto-generated)');
+                INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+                VALUES (CK_SALT, RAWTOHEX(v_salt), 'Salt for DB_CRYPTO key derivation');
+                COMMIT;
+                RETURN v_key;
+            EXCEPTION
+                WHEN DUP_VAL_ON_INDEX THEN
+                    SELECT CONFIG_VALUE INTO v_key_hex FROM SYSTEM_CONFIG WHERE CONFIG_KEY = CK_KEY;
+                    RETURN HEXTORAW(v_key_hex);
+            END;
+    END get_db_key;
+
+    FUNCTION encrypt(p_plaintext VARCHAR2) RETURN VARCHAR2 IS
+        v_key RAW(32);
+        v_iv RAW(16);
+        v_input RAW(32767);
+        v_encrypted RAW(32767);
+    BEGIN
+        v_key := get_db_key;
+        v_iv := DBMS_CRYPTO.RANDOMBYTES(16);
+        v_input := UTL_I18N.STRING_TO_RAW(p_plaintext, 'AL32UTF8');
+        v_encrypted := DBMS_CRYPTO.ENCRYPT(src => v_input, typ => C_ALG, key => v_key, iv => v_iv);
+        RETURN RAWTOHEX(v_iv || v_encrypted);
+    END encrypt;
+
+    FUNCTION decrypt(p_ciphertext VARCHAR2) RETURN VARCHAR2 IS
+        v_key RAW(32);
+        v_raw RAW(32767);
+        v_iv RAW(16);
+        v_encrypted RAW(32767);
+        v_decrypted RAW(32767);
+        v_len NUMBER;
+    BEGIN
+        v_key := get_db_key;
+        v_raw := HEXTORAW(p_ciphertext);
+        v_len := DBMS_LOB.GETLENGTH(v_raw);
+        v_iv := DBMS_LOB.SUBSTR(v_raw, 16, 1);
+        v_encrypted := DBMS_LOB.SUBSTR(v_raw, v_len - 16, 17);
+        v_decrypted := DBMS_CRYPTO.DECRYPT(src => v_encrypted, typ => C_ALG, key => v_key, iv => v_iv);
+        RETURN UTL_RAW.CAST_TO_VARCHAR2(v_decrypted);
+    END decrypt;
+
+    FUNCTION encrypt_raw(p_plaintext RAW) RETURN RAW IS
+        v_key RAW(32);
+        v_iv RAW(16);
+        v_encrypted RAW(32767);
+    BEGIN
+        v_key := get_db_key;
+        v_iv := DBMS_CRYPTO.RANDOMBYTES(16);
+        v_encrypted := DBMS_CRYPTO.ENCRYPT(src => p_plaintext, typ => C_ALG, key => v_key, iv => v_iv);
+        RETURN v_iv || v_encrypted;
+    END encrypt_raw;
+
+    FUNCTION decrypt_raw(p_ciphertext RAW) RETURN RAW IS
+        v_key RAW(32);
+        v_iv RAW(16);
+        v_encrypted RAW(32767);
+        v_decrypted RAW(32767);
+        v_len NUMBER;
+    BEGIN
+        v_key := get_db_key;
+        v_len := DBMS_LOB.GETLENGTH(p_ciphertext);
+        v_iv := DBMS_LOB.SUBSTR(p_ciphertext, 16, 1);
+        v_encrypted := DBMS_LOB.SUBSTR(p_ciphertext, v_len - 16, 17);
+        v_decrypted := DBMS_CRYPTO.DECRYPT(src => v_encrypted, typ => C_ALG, key => v_key, iv => v_iv);
+        RETURN v_decrypted;
+    END decrypt_raw;
+
+    PROCEDURE rotate_key IS
+        v_new_key RAW(32);
+        v_new_salt RAW(32);
+    BEGIN
+        v_new_key := DBMS_CRYPTO.RANDOMBYTES(32);
+        v_new_salt := DBMS_CRYPTO.RANDOMBYTES(32);
+        UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = RAWTOHEX(v_new_key), UPDATED_AT = SYSTIMESTAMP WHERE CONFIG_KEY = CK_KEY;
+        UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = RAWTOHEX(v_new_salt), UPDATED_AT = SYSTIMESTAMP WHERE CONFIG_KEY = CK_SALT;
+        COMMIT;
+    END rotate_key;
+END DB_CRYPTO;
+/
+
+PROMPT AI Agent Infra v3.1.0 API Deployment Complete
 PROMPT ============================================================

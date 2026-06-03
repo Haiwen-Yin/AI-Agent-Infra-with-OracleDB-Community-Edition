@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.0.0 - Community Edition - Schema Deployment
+PROMPT AI Agent Infra v3.1.0 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -238,7 +238,7 @@ CREATE TABLE SPEC_META (
 ) PARTITION BY REFERENCE (FK_SM_ENTITY);
 
 PROMPT ============================================================
-PROMPT 5c. SKILL_META (Reference Partitioned) [NEW v3.0.0]
+PROMPT 5c. SKILL_META (Reference Partitioned) [NEW v3.1.0]
 PROMPT ============================================================
 
 CREATE TABLE SKILL_META (
@@ -713,7 +713,7 @@ PROMPT ============================================================
 
 
 PROMPT ============================================================
-PROMPT 8d. SKILL_ACCESS_TOKEN (Non-Partitioned) [NEW v3.0.0 ENT]
+PROMPT 8d. SKILL_ACCESS_TOKEN (Non-Partitioned) [NEW v3.1.0 ENT]
 PROMPT ============================================================
 
 
@@ -729,12 +729,12 @@ CREATE TABLE SYSTEM_CONFIG (
 );
 
 PROMPT ============================================================
-PROMPT 24. CONTEXT_AUDIT_LOG (RANGE Partitioned) [NEW v3.0.0 ENT]
+PROMPT 24. CONTEXT_AUDIT_LOG (RANGE Partitioned) [NEW v3.1.0 ENT]
 PROMPT ============================================================
 
 
 PROMPT ============================================================
-PROMPT 24b. CONTEXT_AUDIT_RULES (Non-Partitioned) [NEW v3.0.0 ENT]
+PROMPT 24b. CONTEXT_AUDIT_RULES (Non-Partitioned) [NEW v3.1.0 ENT]
 PROMPT ============================================================
 
 
@@ -1085,7 +1085,7 @@ SELECT JSON {
 FROM COLLAB_GROUPS g WITH INSERT UPDATE DELETE;
 
 PROMPT ============================================================
-PROMPT JSON-Relational Duality View: SKILL_DV (Updatable) [NEW v3.0.0]
+PROMPT JSON-Relational Duality View: SKILL_DV (Updatable) [NEW v3.1.0]
 PROMPT ============================================================
 
 CREATE JSON RELATIONAL DUALITY VIEW SKILL_DV AS
@@ -1141,7 +1141,7 @@ PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.0.0', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.1.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1536', 'Default embedding dimension');
@@ -1217,5 +1217,5 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.0.0 - Community Edition Schema Deployment Complete
+PROMPT AI Agent Infra v3.1.0 - Community Edition Schema Deployment Complete
 PROMPT ============================================================

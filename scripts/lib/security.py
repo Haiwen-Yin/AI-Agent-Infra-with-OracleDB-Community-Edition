@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.0.0 - Community Edition - Security Module
+"""AI Agent Infra v3.1.0 - Community Edition - Security Module
 
 Data masking, context-aware masking, reversible encryption, and config encryption.
 """

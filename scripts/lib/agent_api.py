@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.0.0 - Community Edition - Agent API
+"""AI Agent Infra v3.1.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -354,9 +354,8 @@ def get_collaborations(
 
 
 def issue_credential(agent_id, user_id, scope, credential_type='ACCESS_TOKEN', expires_at=None):
-    from .security import ReversibleEncryption
-    enc = ReversibleEncryption()
-    encrypted_value = enc.encrypt(json.dumps(scope))
+    enc_result = execute_query_one("SELECT DB_CRYPTO.encrypt(:plain) AS ciphertext FROM DUAL", {"plain": json.dumps(scope)})
+    encrypted_value = enc_result['ciphertext'] if enc_result else json.dumps(scope)
     row = execute_query_one("SELECT RAWTOHEX(SYS_GUID()) AS ID FROM DUAL")
     cred_id = "CRED_" + row["id"]
     sql = """
@@ -387,11 +386,9 @@ def verify_credential(credential_id):
             expires_at = datetime.fromisoformat(expires_at.isoformat())
         if expires_at < datetime.now():
             return None
-    from .security import ReversibleEncryption
-    enc = ReversibleEncryption()
     try:
-        decrypted_scope = enc.decrypt(row["credential_value"])
-        scope = json.loads(decrypted_scope)
+        dec_result = execute_query_one("SELECT DB_CRYPTO.decrypt(:cipher) AS plaintext FROM DUAL", {"cipher": row["credential_value"]})
+        scope = json.loads(dec_result['plaintext']) if dec_result and dec_result.get('plaintext') else row.get("scope", {})
     except Exception:
         scope = row.get("scope", {})
     return {

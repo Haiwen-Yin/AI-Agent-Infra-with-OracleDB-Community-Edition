@@ -1,4 +1,4 @@
-# Release Notes — v3.0.0
+# Release Notes — v3.1.0
 
 **AI Agent Infra with OracleDB — Community Edition**
 
@@ -12,7 +12,7 @@ License: Apache License 2.0
 
 The project formerly known as "Oracle AI Database Memory System" (oracle-memory-by-yhw) has been renamed to **AI Agent Infra with OracleDB**, reflecting its evolution from a pure memory system to a comprehensive AI Agent infrastructure architecture. This is the inaugural release of the **Community Edition** (Apache 2.0), shipping alongside the Enterprise Edition (BSL 1.1).
 
-v3.0.0 introduces three major subsystems: **Portal User System**, **Skill Storage & Distribution** (with direct download), and **Encrypted Database Credentials** — all built on Oracle 26ai with JSON Relational Duality Views, reference partitioning, and PL/SQL packages.
+v3.1.0 introduces three major subsystems: **Portal User System**, **Skill Storage & Distribution** (with direct download), and **Encrypted Database Credentials** — all built on Oracle 26ai with JSON Relational Duality Views, reference partitioning, and PL/SQL packages.
 
 > **Note**: The Community Edition does not include LDAP authentication, Skill one-time-token distribution, or Workspace Context Audit. These are Enterprise Edition features.
 

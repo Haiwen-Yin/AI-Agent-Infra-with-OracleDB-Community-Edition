@@ -10,6 +10,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.1.0] - 2026-06-02
+
+### Summary
+
+**Database-Side Encryption with DB_CRYPTO** — Moved all in-database encryption (LDAP BIND_CREDENTIAL, AGENT CREDENTIALS) from Python-side `encrypt_section()`/`decrypt_section()` (which depended on a local `master.key` file) to Oracle `DBMS_CRYPTO` via a new `DB_CRYPTO` PL/SQL package. Database-side encryption keys are stored in `SYSTEM_CONFIG` and fully managed by the database — no dependency on external files.
+
+### Added - Both Editions
+
+- **DB_CRYPTO PL/SQL package** — AES-256-CBC encryption/decryption using `DBMS_CRYPTO`, with keys auto-generated and stored in `SYSTEM_CONFIG`. Functions: `encrypt()`, `decrypt()`, `encrypt_raw()`, `decrypt_raw()`, `rotate_key()`
+- **DBMS_CRYPTO grant** — `GRANT EXECUTE ON SYS.DBMS_CRYPTO` added to deployment prerequisites
+- **DB_CRYPTO key auto-generation** — First call to `encrypt()` auto-generates a 256-bit key + salt and stores in `SYSTEM_CONFIG` with `db_crypto_master_key` / `db_crypto_key_salt` keys
+- **DB_CRYPTO.rotate_key()** — Re-generates the encryption key (note: existing encrypted data must be re-encrypted after rotation)
+
+### Changed - Both Editions
+
+- **agent_api.py:issue_credential()** — Now uses `DB_CRYPTO.encrypt()` instead of Python-side encryption (was `encrypt_section` in ENT, broken `ReversibleEncryption` in COM)
+- **agent_api.py:verify_credential()** — Now uses `DB_CRYPTO.decrypt()` instead of Python-side decryption
+- **DB_CRYPTO.get_db_key()** — Concurrent-safe: uses `SELECT → NO_DATA_FOUND → INSERT → DUP_VAL_ON_INDEX` pattern instead of `COUNT + INSERT`, preventing key overwrite on parallel first-use
+
+### Deployment Prerequisites - Both Editions
+
+- **`GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <db_user>`** — Required by `DB_CRYPTO` package (new prerequisite, must be granted by SYSDBA before running `2_api.sql`)
+
+### Documentation - Both Editions
+
+- **Data Isolation Model** — Documented three-layer isolation: physical (ENTITY_TYPE LIST partition), access (VISIBILITY + OWNED_BY_AGENT), workspace (WORKSPACE_ID + OWNER_USER_ID)
+- **Dual-Track Encryption** — Documented split between `connection_crypto` (local file encryption) and `DB_CRYPTO` (database-side encryption)
+- **Multi-Agent Key Sharing** — Documented how agents sharing the same database automatically share `DB_CRYPTO` keys
+
+### Changed - Enterprise Edition Only
+
+- **ldap_auth_api.py:configure_ldap()** — Now uses `DB_CRYPTO.encrypt()` for BIND_CREDENTIAL instead of `encrypt_section()`
+- **ldap_auth_api.py:_get_active_config()** — Now uses `DB_CRYPTO.decrypt()` instead of `decrypt_section()`
+- **ldap_auth_api.py** — Removed `connection_crypto` import dependency for database-side encryption
+
+### Security Impact
+
+- **Before v3.1.0**: Database encrypted data (LDAP bind credentials, agent credentials) depended on local `~/.oracle-infra/master.key` — if the file was lost or the server migrated, encrypted data became unrecoverable
+- **After v3.1.0**: All database-side encryption uses `DBMS_CRYPTO` with keys stored in `SYSTEM_CONFIG` — fully self-contained within the database, portable across server migrations
+- **config.json encryption** (`connection_crypto.py`) remains unchanged — this is for local file encryption only, which correctly depends on the local master key
+
+---
+
 ## [3.0.0] - 2026-05-30
 
 ### Summary
@@ -37,7 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added - Community Edition Only
 
-(none — all v3.0.0 additions are shared between editions; LDAP, SKILL_ACCESS_TOKEN, and CONTEXT_AUDIT are Enterprise-only features not included in Community Edition)
+(none — all v3.1.0 additions are shared between editions; LDAP, SKILL_ACCESS_TOKEN, and CONTEXT_AUDIT are Enterprise-only features not included in Community Edition)
 
 ### Changed - Both Editions
 

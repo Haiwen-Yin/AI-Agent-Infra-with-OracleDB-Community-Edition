@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.0.0
+# AI Agent Infra with OracleDB - Community Edition v3.1.0
 
-[![Version](https://img.shields.io/badge/version-v3.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Portal user system, Skill storage with direct resource distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.0.0: Portal user system, encrypted credentials, inline detail expansion.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.1.0: Portal user system, encrypted credentials, inline detail expansion.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.0.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.1.0.md)**
 
 ---
 
@@ -215,6 +215,7 @@ The `1_schema.sql` script now includes built-in protection: it auto-aborts if `S
 - Oracle Database 23ai+ (tested on 26ai)
 - Python 3.8+ with `oracledb` and `ldap3` packages
 - SQLcl 26.1+ (for SQL script deployment)
+- `GRANT EXECUTE ON SYS.DBMS_CRYPTO` (required for DB_CRYPTO in-database encryption)
 
 ### 1. Deploy Schema
 
@@ -303,7 +304,7 @@ ai-agent-infra-enterprise/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.0.0
+      server.py                 # HTTP server v3.1.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.0.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.1.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api
 from lib import security, config, user_api
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -42,7 +42,6 @@ PAGE_ROUTES = {
     '/specs': 'specs.html',
     '/collab': 'collab.html',
     '/skills': 'skills.html',
-    '/audit': 'audit.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login'}
@@ -107,7 +106,7 @@ def _authenticate_local(username, password):
     if stored_hash and stored_hash.startswith('SHA256:'):
         expected = stored_hash[7:]
         actual = hashlib.sha256(password.encode()).hexdigest()
-        if actual == expected:
+        if actual.upper() == expected.upper():
             return row
     return None
 
@@ -393,10 +392,6 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_skill_create_route()
             return
 
-        if path.startswith('/api/skill/token/'):
-            self._handle_skill_token_consume(path)
-            return
-
         if path.startswith('/api/skill/'):
             self._handle_skill_post(path)
             return
@@ -489,12 +484,8 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_agent_acquire_skill(path)
             elif path == '/api/skills':
                 self._api_skills()
-            elif path.startswith('/api/skill/dl/'):
-                self._handle_skill_download(path)
             elif path.startswith('/api/skill/'):
                 self._handle_skill_get(path)
-            elif path == '/api/audit':
-                self._api_audit()
             elif path == '/api/stats':
                 self._api_stats()
             elif path == '/api/graph/neighbors':
@@ -679,7 +670,7 @@ class VisHandler(BaseHTTPRequestHandler):
     def _handle_skill_post(self, path):
         if self._require_auth() is None:
             return
-        from lib import skill_api, skill_token_api
+        from lib import skill_api
         parts = path.split('/')
         if len(parts) < 4:
             self._send_error(400, 'Invalid skill path')
@@ -688,8 +679,6 @@ class VisHandler(BaseHTTPRequestHandler):
         action = parts[4] if len(parts) > 4 else ''
         if action == 'upload':
             self._handle_skill_upload(skill_id)
-        elif action == 'request-access':
-            self._handle_skill_request_access(skill_id)
         elif action == 'update':
             self._handle_skill_update(skill_id)
         elif action == 'delete':
@@ -838,24 +827,6 @@ class VisHandler(BaseHTTPRequestHandler):
             return
         self._send_json({'success': True, 'resource': result})
 
-    def _handle_skill_request_access(self, skill_id):
-        body = self._read_body()
-        try:
-            data = json.loads(body) if body else {}
-        except Exception:
-            data = {}
-        agent_id = data.get('agent_id', '')
-        session_id = data.get('session_id', '')
-        if not agent_id:
-            self._send_error(400, 'agent_id required')
-            return
-        from lib import skill_token_api
-        result = skill_token_api.request_skill_access(agent_id, session_id, skill_id)
-        if result is None:
-            self._send_error(403, 'Access denied or skill/agent not active')
-            return
-        self._send_json(result)
-
     def _handle_skill_update(self, skill_id):
         body = self._read_body()
         try:
@@ -872,46 +843,6 @@ class VisHandler(BaseHTTPRequestHandler):
         success = skill_api.delete_skill(skill_id)
         self._send_json({'success': success})
 
-    def _handle_skill_token_consume(self, path):
-        parts = path.split('/')
-        if len(parts) < 6 or parts[5] != 'consume':
-            self._send_error(400, 'Invalid token path')
-            return
-        token_id = parts[4]
-        from lib import skill_token_api
-        result = skill_token_api.consume_skill_token(token_id)
-        if result is None:
-            self._send_error(403, 'Token invalid, expired, or already consumed')
-            return
-        self._send_json(result)
-
-    def _handle_skill_download(self, path):
-        parts = path.split('/')
-        if len(parts) < 5:
-            self._send_error(400, 'Invalid download path')
-            return
-        download_token = parts[4]
-        from lib import skill_token_api
-        result = skill_token_api.get_skill_resource_for_download(download_token)
-        if result is None:
-            self._send_error(403, 'Download token invalid or expired')
-            return
-        content = result['content']
-        mime_type = result['mime_type']
-        fname = result['filename']
-        self.send_response(200)
-        self.send_header('Content-Type', mime_type)
-        self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
-        self.send_header('Content-Length', str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def _api_audit(self):
-        from lib import audit_api
-        events = audit_api.get_audit_events(limit=200)
-        stats = audit_api.get_audit_stats()
-        self._send_json({'events': [_clean_row(e) for e in events], 'stats': stats})
-
     def _api_stats(self):
         entity_counts = {}
         type_rows = connection.execute_query(
@@ -925,7 +856,6 @@ class VisHandler(BaseHTTPRequestHandler):
         spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SPEC'")
         collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
         skill_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SKILL'")
-        audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM context_audit_log WHERE resolution_status = 'OPEN'")
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
@@ -934,7 +864,7 @@ class VisHandler(BaseHTTPRequestHandler):
             'spec_count': spec_row['cnt'] if spec_row else 0,
             'collab_count': collab_row['cnt'] if collab_row else 0,
             'skill_count': skill_row['cnt'] if skill_row else 0,
-            'audit_open_count': audit_row['cnt'] if audit_row else 0,
+            'audit_open_count': 0,
         })
 
     def _handle_portal_register(self):
@@ -951,21 +881,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 {"v_uname": username},
             )
             if db_exists:
-                if db_exists.get('auth_source') == 'LDAP':
-                    self._send_json({'success': False, 'error': 'This username belongs to an LDAP user, please use LDAP login'}, 409)
-                else:
-                    self._send_json({'success': False, 'error': 'Username already exists'}, 409)
-                return
-            ldap_exists = False
-            try:
-                from lib import ldap_auth_api
-                ldap_info = ldap_auth_api.get_ldap_user_info(username)
-                if ldap_info:
-                    ldap_exists = True
-            except Exception:
-                pass
-            if ldap_exists:
-                self._send_json({'success': False, 'error': 'Username exists in LDAP, please use LDAP login'}, 409)
+                self._send_json({'success': False, 'error': 'Username already exists'}, 409)
                 return
             result = user_api.register_user(username, password)
             if not result:
@@ -988,12 +904,8 @@ class VisHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             username = data.get('username', '')
             password = data.get('password', '')
-            auth_mode = data.get('auth_mode', 'local')
 
-            if auth_mode == 'ldap':
-                user = self._authenticate_portal_ldap(username, password)
-            else:
-                user = _authenticate_local(username, password)
+            user = _authenticate_local(username, password)
 
             if not user:
                 self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
@@ -1035,35 +947,6 @@ class VisHandler(BaseHTTPRequestHandler):
             self.wfile.write(body_out)
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
-
-    def _authenticate_portal_ldap(self, username, password):
-        try:
-            from lib import ldap_auth_api
-            ldap_result = ldap_auth_api.authenticate_via_ldap(username, password)
-            if not ldap_result:
-                return None
-            user_dn = ldap_result.get('dn', '')
-            existing = connection.execute_query_one(
-                "SELECT USER_ID, USERNAME, ROLE, STATUS FROM SYSTEM_USERS WHERE USERNAME = :v_uname AND AUTH_SOURCE = 'LDAP'",
-                {"v_uname": username},
-            )
-            if existing:
-                connection.execute(
-                    "UPDATE SYSTEM_USERS SET LDAP_DN = :v_dn, UPDATED_AT = SYSTIMESTAMP WHERE USER_ID = :v_uid",
-                    {"v_dn": user_dn, "v_uid": existing['user_id']},
-                )
-                return {
-                    'user_id': existing['user_id'],
-                    'username': existing['username'],
-                    'role': existing.get('role', 'USER'),
-                    'status': existing.get('status', 'ACTIVE'),
-                    'auth_source': 'LDAP',
-                }
-            result = user_api.register_ldap_user(username, user_dn)
-            return result
-        except Exception as e:
-            logger.error("Portal LDAP auth failed: %s", e)
-            return None
 
     def _handle_portal_chat_send(self):
         session_data = _get_session(self)
