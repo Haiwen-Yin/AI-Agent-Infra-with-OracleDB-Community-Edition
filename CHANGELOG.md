@@ -45,6 +45,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **ldap_auth_api.py:_get_active_config()** — Now uses `DB_CRYPTO.decrypt()` instead of `decrypt_section()`
 - **ldap_auth_api.py** — Removed `connection_crypto` import dependency for database-side encryption
 
+### Fixed - Both Editions
+
+- **SHA256 password comparison** — `actual == expected` changed to `actual.upper() == expected.upper()` in `_authenticate_local()` to handle hex case mismatch between Python `hexdigest()` (lowercase) and Oracle `RAWTOHEX()` (uppercase)
+
+### Fixed - Community Edition Only
+
+- **Removed enterprise-only code** — Deleted `skill_token_api.py`, audit/LDAP/skill-token routes from `server.py`, `context_audit_log` query from `_api_stats()`, LDAP mode from `portal_login.html`, `requestAccess()` from `skills.html`
+- **Added `directDownload()`** to COM `skills.html` for direct resource download (no token flow)
+
+### Other Changes - Both Editions
+
+- **`introduction_zh_v3.0.0.md` → `introduction_zh_v3.1.0.md`** — Renamed to match current version
+
 ### Security Impact
 
 - **Before v3.1.0**: Database encrypted data (LDAP bind credentials, agent credentials) depended on local `~/.oracle-infra/master.key` — if the file was lost or the server migrated, encrypted data became unrecoverable

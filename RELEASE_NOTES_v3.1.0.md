@@ -60,8 +60,15 @@ Visibility query pattern: `WHERE VISIBILITY='SHARED' OR VISIBILITY='PUBLIC' OR O
 
 - `ldap_auth_api.py` — Uses `DB_CRYPTO.encrypt/decrypt` instead of `connection_crypto.encrypt_section/decrypt_section` for `BIND_CREDENTIAL`
 - `agent_api.py` — Uses `DB_CRYPTO.encrypt/decrypt` instead of Python-side encryption for `CREDENTIAL_VALUE`
-- `2_api.sql` — Added `DB_CRYPTO` PL/SQL package definition
+- `2_api.sql` — Added `DB_CRYPTO` PL/SQL package definition (concurrent-safe `get_db_key()` with `DUP_VAL_ON_INDEX` handler)
 - Deployment prerequisite: `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <db_user>`
+- `server.py` — SHA256 password comparison now case-insensitive (`actual.upper() == expected.upper()`) to handle DB hex case differences
+- `introduction_zh_v3.0.0.md` → `introduction_zh_v3.1.0.md` — renamed to match version
+- Removed `skill_token_api.py` (Enterprise-only one-time token flow)
+- Removed audit/LDAP/skill-token routes from `server.py` (`/api/audit`, `/audit`, `/api/skill/dl/`, `/api/skill/token/`, `request-access` action)
+- Removed `context_audit_log` query and `audit_open_count` from `_api_stats()`
+- Removed LDAP auth mode from `portal_login.html` (no `authMode`, `switchAuthMode()`, LDAP dropdown)
+- Removed `requestAccess()` from `skills.html`, added `directDownload()` for direct resource download
 
 ---
 
