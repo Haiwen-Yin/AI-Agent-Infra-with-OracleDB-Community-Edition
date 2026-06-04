@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Collaboration Group API
+"""AI Agent Infra v3.2.0 - Community Edition - Collaboration Group API
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, and group memory sharing.
@@ -48,6 +48,8 @@ def create_collab_group(
     description: Optional[str] = None,
     sharing_policy: str = "OPEN",
     metadata: Optional[Any] = None,
+    branch_id: Optional[str] = None,
+    spec_id: Optional[str] = None,
 ) -> str:
     ws_id = create_workspace(
         name=f"CollabGroup: {name}",
@@ -61,9 +63,9 @@ def create_collab_group(
     sql = f"""
         INSERT INTO COLLAB_GROUPS (GROUP_ID, GROUP_NAME, GROUP_TYPE, DESCRIPTION,
                                    WORKSPACE_ID, COORDINATOR_AGENT_ID, SHARING_POLICY,
-                                   STATUS, METADATA, CREATED_AT, UPDATED_AT)
+                                   STATUS, METADATA, BRANCH_ID, SPEC_ID, CREATED_AT, UPDATED_AT)
         VALUES ({group_id_sql}, :name, :gtype, :descr, :wsid, :coord, :policy,
-                'ACTIVE', :meta, SYSTIMESTAMP, SYSTIMESTAMP)
+                'ACTIVE', :meta, :vbrid, :vsid, SYSTIMESTAMP, SYSTIMESTAMP)
         RETURNING GROUP_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -74,6 +76,8 @@ def create_collab_group(
         "coord": coordinator_agent_id,
         "policy": sharing_policy,
         "meta": meta_val,
+        "vbrid": branch_id,
+        "vsid": spec_id,
     })
 
 
@@ -81,7 +85,7 @@ def get_collab_group(group_id: str) -> Optional[Dict[str, Any]]:
     sql = """
         SELECT GROUP_ID, GROUP_NAME, GROUP_TYPE, DESCRIPTION,
                WORKSPACE_ID, COORDINATOR_AGENT_ID, SHARING_POLICY,
-               STATUS, METADATA,
+               STATUS, METADATA, BRANCH_ID, SPEC_ID,
                TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
                TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT
         FROM COLLAB_GROUPS
@@ -121,6 +125,7 @@ def add_group_member(
     group_id: str,
     agent_id: str,
     role: str = "MEMBER",
+    branch_id: Optional[str] = None,
 ) -> str:
     personal_workspace_id = None
     if role in ("LEAD", "CONTRIBUTOR"):
@@ -134,8 +139,8 @@ def add_group_member(
     member_id_sql = "'CGM_' || RAWTOHEX(SYS_GUID())"
     sql = f"""
         INSERT INTO COLLAB_GROUP_MEMBERS (MEMBER_ID, GROUP_ID, AGENT_ID, ROLE,
-                                          PERSONAL_WORKSPACE_ID, JOINED_AT, STATUS)
-        VALUES ({member_id_sql}, :gid, :aid, :role, :pwid, SYSTIMESTAMP, 'ACTIVE')
+                                          PERSONAL_WORKSPACE_ID, BRANCH_ID, JOINED_AT, STATUS)
+        VALUES ({member_id_sql}, :gid, :aid, :role, :pwid, :vmbrid, SYSTIMESTAMP, 'ACTIVE')
         RETURNING MEMBER_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -143,6 +148,7 @@ def add_group_member(
         "aid": agent_id,
         "role": role,
         "pwid": personal_workspace_id,
+        "vmbrid": branch_id,
     })
 
 
@@ -158,7 +164,7 @@ def remove_group_member(group_id: str, agent_id: str) -> bool:
 def list_group_members(group_id: str) -> List[Dict[str, Any]]:
     sql = """
         SELECT MEMBER_ID, GROUP_ID, AGENT_ID, ROLE,
-               PERSONAL_WORKSPACE_ID, STATUS,
+               PERSONAL_WORKSPACE_ID, BRANCH_ID, STATUS,
                TO_CHAR(JOINED_AT, 'YYYY-MM-DD HH24:MI:SS') AS JOINED_AT
         FROM COLLAB_GROUP_MEMBERS
         WHERE GROUP_ID = :gid
@@ -227,3 +233,116 @@ def delete_collab_group(group_id: str) -> bool:
     execute("DELETE FROM COLLAB_GROUP_MEMBERS WHERE GROUP_ID = :gid", {"gid": group_id})
     sql = "DELETE FROM COLLAB_GROUPS WHERE GROUP_ID = :gid"
     return execute(sql, {"gid": group_id}) > 0
+
+def get_member_branches(group_id: str) -> List[Dict[str, Any]]:
+    """Return all members with their branch info for a collaboration group."""
+    members = list_group_members(group_id)
+    result = []
+    from . import branch_api
+    for m in members:
+        agent_id = m.get("agent_id")
+        member_branch_id = m.get("branch_id")
+        branch_info = None
+        if member_branch_id:
+            branch_info = branch_api.get_branch(member_branch_id)
+        elif m.get("personal_workspace_id"):
+            try:
+                branches = branch_api.list_branches(
+                    workspace_id=m["personal_workspace_id"],
+                    status="ACTIVE"
+                )
+                if branches:
+                    branch_info = branches[0]
+                    member_branch_id = branch_info.get("branch_id")
+            except Exception:
+                pass
+        result.append({
+            "member_id": m.get("member_id"),
+            "agent_id": agent_id,
+            "role": m.get("role"),
+            "branch_id": member_branch_id,
+            "branch_info": branch_info,
+        })
+    return result
+
+
+def validate_group_against_spec(group_id: str, spec_id: Optional[str] = None) -> Dict[str, Any]:
+    """Validate a collaboration group progress against its associated spec.
+
+    If spec_id is not provided, uses the group's SPEC_ID.
+    Returns aggregate validation across all member branches.
+    """
+    group = get_collab_group(group_id)
+    if group is None:
+        raise ValueError(f"Collaboration group {group_id} not found")
+    
+    effective_spec_id = spec_id or group.get("spec_id")
+    if not effective_spec_id:
+        return {"pass_rate": 0.0, "total": 0, "passed": 0, "failed": 0, "details": [], "message": "No spec associated"}
+    
+    members = get_member_branches(group_id)
+    from . import spec_api
+    
+    all_results = []
+    total_passed = 0
+    total_criteria = 0
+    
+    for m in members:
+        bid = m.get("branch_id")
+        if bid:
+            try:
+                val = spec_api.validate_branch_against_spec(bid, effective_spec_id)
+                total_passed += val.get("passed", 0)
+                total_criteria = max(total_criteria, val.get("total", 0))
+                all_results.append({"agent_id": m["agent_id"], "branch_id": bid, **val})
+            except Exception as e:
+                all_results.append({"agent_id": m["agent_id"], "branch_id": bid, "error": str(e)})
+    
+    return {
+        "pass_rate": round(total_passed / total_criteria, 2) if total_criteria > 0 else 0.0,
+        "total": total_criteria,
+        "passed": total_passed,
+        "failed": total_criteria - total_passed,
+        "member_results": all_results,
+    }
+
+
+def sync_group_context(group_id: str) -> Dict[str, Any]:
+    """Sync key context from member branches to the shared workspace.
+
+    Copies the latest SUMMARY context from each member's branch into the
+    group's shared workspace for cross-agent visibility.
+    """
+    group = get_collab_group(group_id)
+    if group is None:
+        raise ValueError(f"Collaboration group {group_id} not found")
+    
+    ws_id = group.get("workspace_id")
+    members = list_group_members(group_id)
+    from . import workspace_api, branch_api
+    
+    synced = 0
+    for m in members:
+        bid = m.get("branch_id")
+        if not bid:
+            continue
+        try:
+            chain = branch_api.get_branch_context_chain(bid)
+            for ctx in chain:
+                if ctx.get("context_type") == "SUMMARY":
+                    workspace_api.save_context(
+                        workspace_id=ws_id,
+                        agent_id=m["agent_id"],
+                        context_type="AUTO_SAVE",
+                        context_data={
+                            "synced_from_branch": bid,
+                            "agent_id": m["agent_id"],
+                            "summary": ctx.get("context_data"),
+                        },
+                    )
+                    synced += 1
+                    break
+        except Exception:
+            continue
+    
+    return {"group_id": group_id, "synced_count": synced}

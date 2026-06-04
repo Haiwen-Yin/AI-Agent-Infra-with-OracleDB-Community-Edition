@@ -1,4 +1,4 @@
--- AI Agent Infra v3.1.0 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.2.0 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -184,7 +184,7 @@ BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'DORMANT_AGENT_JOB',
         job_type        => 'PLSQL_BLOCK',
-        job_action      => 'DECLARE l_timeout_min NUMBER; l_count NUMBER; BEGIN SELECT NVL(TO_NUMBER(CONFIG_VALUE), 30) INTO l_timeout_min FROM SYSTEM_CONFIG WHERE CONFIG_KEY = ''dormant_timeout_min''; UPDATE AGENT_REGISTRY SET STATUS = ''POOL'', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP WHERE STATUS = ''ACTIVE'' AND LAST_ACTIVE_AT IS NOT NULL AND LAST_ACTIVE_AT < SYSTIMESTAMP - NUMTODSINTERVAL(l_timeout_min, ''MINUTE''); l_count := SQL%ROWCOUNT; COMMIT; IF l_count > 0 THEN INSERT INTO SYSTEM_LOGS (LOG_ID, LOG_LEVEL, SOURCE, MESSAGE, CREATED_AT) VALUES (SYSTEM_LOGS_SEQ.NEXTVAL, ''INFO'', ''DORMANT_AGENT_JOB'', ''Marked '' || l_count || '' agent(s) as pool (timeout: '' || l_timeout_min || '' min)'', SYSTIMESTAMP); COMMIT; END IF; END;',
+        job_action      => 'DECLARE l_timeout_min NUMBER; l_count NUMBER; BEGIN SELECT NVL(TO_NUMBER(CONFIG_VALUE), 30) INTO l_timeout_min FROM SYSTEM_CONFIG WHERE CONFIG_KEY = ''dormant_timeout_min''; UPDATE AGENT_REGISTRY SET STATUS = ''POOL'', CURRENT_USER_ID = NULL, UPDATED_AT = SYSTIMESTAMP WHERE STATUS = ''ACTIVE'' AND LAST_ACTIVE_AT IS NOT NULL AND LAST_ACTIVE_AT < SYSTIMESTAMP - NUMTODSINTERVAL(l_timeout_min, ''MINUTE''); l_count := SQL%ROWCOUNT; COMMIT; END;',
         start_date      => SYSTIMESTAMP,
         repeat_interval => 'FREQ=MINUTELY; INTERVAL=30',
         enabled         => TRUE
@@ -203,7 +203,7 @@ BEGIN
     DBMS_SCHEDULER.CREATE_JOB(
         job_name        => 'CREDENTIAL_CLEANUP_JOB',
         job_type        => 'PLSQL_BLOCK',
-        job_action      => 'DECLARE l_soft_expired NUMBER; l_deleted NUMBER; BEGIN UPDATE AGENT_CREDENTIALS SET IS_ACTIVE = ''N'', UPDATED_AT = SYSTIMESTAMP WHERE IS_ACTIVE = ''Y'' AND EXPIRES_AT IS NOT NULL AND EXPIRES_AT < SYSTIMESTAMP; l_soft_expired := SQL%ROWCOUNT; COMMIT; DELETE FROM AGENT_CREDENTIALS WHERE IS_ACTIVE = ''N'' OR (EXPIRES_AT IS NOT NULL AND EXPIRES_AT < SYSTIMESTAMP); l_deleted := SQL%ROWCOUNT; COMMIT; IF l_soft_expired > 0 OR l_deleted > 0 THEN INSERT INTO SYSTEM_LOGS (LOG_ID, LOG_LEVEL, SOURCE, MESSAGE, CREATED_AT) VALUES (SYSTEM_LOGS_SEQ.NEXTVAL, ''INFO'', ''CREDENTIAL_CLEANUP_JOB'', ''Soft-expired: '' || l_soft_expired || '', Deleted: '' || l_deleted, SYSTIMESTAMP); COMMIT; END IF; END;',
+        job_action      => 'DECLARE l_soft_expired NUMBER; l_deleted NUMBER; BEGIN UPDATE AGENT_CREDENTIALS SET IS_ACTIVE = ''N'', UPDATED_AT = SYSTIMESTAMP WHERE IS_ACTIVE = ''Y'' AND EXPIRES_AT IS NOT NULL AND EXPIRES_AT < SYSTIMESTAMP; l_soft_expired := SQL%ROWCOUNT; COMMIT; DELETE FROM AGENT_CREDENTIALS WHERE IS_ACTIVE = ''N'' OR (EXPIRES_AT IS NOT NULL AND EXPIRES_AT < SYSTIMESTAMP); l_deleted := SQL%ROWCOUNT; COMMIT; END;',
         start_date      => SYSTIMESTAMP,
         repeat_interval => 'FREQ=DAILY; BYHOUR=2; BYMINUTE=0; BYSECOND=0',
         enabled         => TRUE
@@ -242,4 +242,25 @@ WHERE JOB_NAME IN (
 )
 ORDER BY JOB_NAME;
 
-PROMPT AI Agent Infra v3.1.0 - Community Edition - Phase 3: Scheduler Jobs Complete (12 jobs)
+
+PROMPT ============================================================
+PROMPT Job: BRANCH_CLEANUP_JOB [NEW v3.2.0]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'BRANCH_CLEANUP_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN BRANCH_MANAGER.cleanup_abandoned_branches(90); END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=DAILY; BYHOUR=3',
+        enabled         => TRUE,
+        comments        => 'Daily cleanup of abandoned branches older than 90 days'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('BRANCH_CLEANUP_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT AI Agent Infra v3.2.0 - Community Edition - Phase 3: Scheduler Jobs Complete (12 jobs)

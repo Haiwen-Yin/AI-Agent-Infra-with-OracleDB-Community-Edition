@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Agent API
+"""AI Agent Infra v3.2.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -136,15 +136,16 @@ def create_session(
     owner_user_id: Optional[str] = None,
     workspace_id: Optional[str] = None,
     predecessor_session_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
 ) -> str:
     """Create a new agent session and return the session ID."""
     session_id_sql = "'SES_' || RAWTOHEX(SYS_GUID())"
     ctx_val = json.dumps(context) if isinstance(context, (dict, list)) else context
     sql = f"""
         INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WM_ENTITY_ID, 
-            OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID,
+            OWNER_USER_ID, WORKSPACE_ID, PREDECESSOR_SESSION_ID, BRANCH_ID,
             IS_ACTIVE, START_TIME, CONTEXT)
-        VALUES ({session_id_sql}, :aid, :wmid, :owner_uid, :ws_id, :pred_sid,
+        VALUES ({session_id_sql}, :aid, :wmid, :owner_uid, :ws_id, :pred_sid, :vbrid,
             'Y', SYSTIMESTAMP, :ctx)
         RETURNING SESSION_ID INTO :ret_id
     """
@@ -154,6 +155,7 @@ def create_session(
         "owner_uid": owner_user_id,
         "ws_id": workspace_id,
         "pred_sid": predecessor_session_id,
+        "vbrid": branch_id,
         "ctx": ctx_val,
     }, id_column="SESSION_ID")
 
@@ -172,8 +174,8 @@ def end_session(session_id: str) -> bool:
     return result
 
 
-def checkpoint_session(session_id: str, context_data: Any) -> bool:
-    """Save a checkpoint context for the session's workspace."""
+def checkpoint_session(session_id: str, context_data: Any) -> Optional[str]:
+    """Save a checkpoint context for the session's workspace. Returns context_id on success, None on failure."""
     sql = """
         SELECT WORKSPACE_ID, AGENT_ID
         FROM AGENT_SESSION
@@ -181,7 +183,7 @@ def checkpoint_session(session_id: str, context_data: Any) -> bool:
     """
     row = execute_query_one(sql, {"sid": session_id})
     if not row or not row.get("workspace_id"):
-        return False
+        return None
     from .workspace_api import save_context
     save_context(
         workspace_id=row["workspace_id"],
@@ -190,7 +192,12 @@ def checkpoint_session(session_id: str, context_data: Any) -> bool:
         context_data=context_data,
         session_id=session_id,
     )
-    return True
+    ctx_row = execute_query_one("""
+        SELECT CONTEXT_ID FROM WORKSPACE_CONTEXT
+        WHERE SESSION_ID = :vsid AND CONTEXT_TYPE = 'CHECKPOINT'
+        ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY
+    """, {"vsid": session_id})
+    return ctx_row["context_id"] if ctx_row else None
 
 
 def get_session_chain(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:

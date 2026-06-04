@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Task Plan API
+"""AI Agent Infra v3.2.0 - Community Edition - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.
@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "CANCELLED"})
 _STEP_TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "SKIPPED"})
-_ALLOWED_PLAN_UPDATES = frozenset({"goal", "priority", "strategy", "result_summary", "status"})
-_ALLOWED_STEP_UPDATES = frozenset({"description", "tool_name", "tool_input", "tool_output", "status"})
+_ALLOWED_PLAN_UPDATES = frozenset({"goal", "priority", "strategy", "result_summary", "status", "branch_id"})
+_ALLOWED_STEP_UPDATES = frozenset({"description", "tool_name", "tool_input", "tool_output", "status", "assigned_agent_id"})
 
 
 def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,11 +35,12 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def create_plan(agent_id: str, goal: str, priority: int = 5,
-                strategy: Optional[str] = None) -> str:
+                strategy: Optional[str] = None,
+                branch_id: Optional[str] = None) -> str:
     """Create a new task plan and return its PLAN_ID."""
     sql = """
-        INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY)
-        VALUES ('PLAN_' || RAWTOHEX(SYS_GUID()), :agent_id, :goal, 'PENDING', :priority, :strategy)
+        INSERT INTO TASK_PLANS (PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, BRANCH_ID)
+        VALUES ('PLAN_' || RAWTOHEX(SYS_GUID()), :agent_id, :goal, 'PENDING', :priority, :strategy, :branch_id)
         RETURNING PLAN_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -47,13 +48,14 @@ def create_plan(agent_id: str, goal: str, priority: int = 5,
         "goal": goal,
         "priority": priority,
         "strategy": strategy,
+        "branch_id": branch_id,
     })
 
 
 def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a plan by PLAN_ID."""
     sql = """
-        SELECT PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, RESULT_SUMMARY,
+        SELECT PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, RESULT_SUMMARY, BRANCH_ID,
                TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
                TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT,
                TO_CHAR(COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
@@ -93,13 +95,14 @@ def update_plan(plan_id: str, **kwargs: Any) -> bool:
 
 
 def add_step(plan_id: str, plan_status: str, description: str, step_order: int,
-             tool_name: Optional[str] = None, tool_input: Optional[Any] = None) -> str:
+             tool_name: Optional[str] = None, tool_input: Optional[Any] = None,
+             assigned_agent_id: Optional[str] = None) -> str:
     """Add a step to a plan and return its STEP_ID."""
     sql = """
         INSERT INTO TASK_STEPS (STEP_ID, PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
-                                TOOL_NAME, TOOL_INPUT, STATUS)
+                                TOOL_NAME, TOOL_INPUT, ASSIGNED_AGENT_ID, STATUS)
         VALUES ('STEP_' || RAWTOHEX(SYS_GUID()), :plan_id, :plan_status, :step_order,
-                :description, :tool_name, :tool_input, 'PENDING')
+                :description, :tool_name, :tool_input, :vaaid, 'PENDING')
         RETURNING STEP_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -109,6 +112,7 @@ def add_step(plan_id: str, plan_status: str, description: str, step_order: int,
         "description": description,
         "tool_name": tool_name,
         "tool_input": json.dumps(tool_input) if tool_input is not None else None,
+        "vaaid": assigned_agent_id,
     })
 
 
@@ -142,7 +146,7 @@ def get_plan_steps(plan_id: str) -> List[Dict[str, Any]]:
     """Return all steps for a plan ordered by STEP_ORDER."""
     sql = """
         SELECT STEP_ID, PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
-               TOOL_NAME, TOOL_INPUT, TOOL_OUTPUT, STATUS,
+               TOOL_NAME, TOOL_INPUT, TOOL_OUTPUT, ASSIGNED_AGENT_ID, STATUS,
                TO_CHAR(STARTED_AT, 'YYYY-MM-DD HH24:MI:SS') AS STARTED_AT,
                TO_CHAR(COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
         FROM TASK_STEPS
@@ -232,7 +236,7 @@ def list_plans(agent_id: Optional[str] = None, status: Optional[str] = None,
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
-        SELECT PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, RESULT_SUMMARY,
+        SELECT PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, RESULT_SUMMARY, BRANCH_ID,
                TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
                TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT,
                TO_CHAR(COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
@@ -252,3 +256,37 @@ def delete_plan(plan_id: str) -> bool:
     execute("DELETE FROM TASK_DEPENDENCIES WHERE SOURCE_PLAN_ID = :plan_id OR TARGET_PLAN_ID = :plan_id",
             {"plan_id": plan_id})
     return execute("DELETE FROM TASK_PLANS WHERE PLAN_ID = :plan_id", {"plan_id": plan_id}) > 0
+
+
+def get_branch_plans(branch_id: str) -> List[Dict[str, Any]]:
+    """Return all plans associated with a branch."""
+    sql = """
+        SELECT PLAN_ID, AGENT_ID, GOAL, STATUS, PRIORITY, STRATEGY, RESULT_SUMMARY, BRANCH_ID,
+               TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+               TO_CHAR(UPDATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS UPDATED_AT,
+               TO_CHAR(COMPLETED_AT, 'YYYY-MM-DD HH24:MI:SS') AS COMPLETED_AT
+        FROM TASK_PLANS
+        WHERE BRANCH_ID = :branch_id
+        ORDER BY CREATED_AT DESC
+    """
+    return [_row_to_dict(r) for r in execute_query(sql, {"branch_id": branch_id})]
+
+def distribute_plan_to_group(plan_id: str, group_id: str) -> Dict[str, Any]:
+    """Distribute plan steps to collaboration group members in round-robin."""
+    from . import collab_api
+    members = collab_api.list_group_members(group_id)
+    active_members = [m for m in members if m.get("status") == "ACTIVE"]
+    if not active_members:
+        return {"plan_id": plan_id, "group_id": group_id, "assigned": 0, "message": "No active members"}
+    steps = get_plan_steps(plan_id)
+    if not steps:
+        return {"plan_id": plan_id, "group_id": group_id, "assigned": 0, "message": "No steps"}
+    assigned = 0
+    for i, step in enumerate(steps):
+        if step.get("status") not in ("PENDING",):
+            continue
+        member = active_members[i % len(active_members)]
+        agent_id = member["agent_id"]
+        update_step(step["step_id"], assigned_agent_id=agent_id)
+        assigned += 1
+    return {"plan_id": plan_id, "group_id": group_id, "assigned": assigned, "member_count": len(active_members)}

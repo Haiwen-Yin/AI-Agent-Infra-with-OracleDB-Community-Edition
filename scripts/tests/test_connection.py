@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Connection Pool Tests"""
+"""AI Agent Infra v3.2.0 - Connection Pool Tests"""
 
 import sys
 import os

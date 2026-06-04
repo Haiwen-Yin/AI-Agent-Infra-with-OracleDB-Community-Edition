@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.2.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -21,10 +21,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import spec_api, collab_api
+from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -42,6 +42,7 @@ PAGE_ROUTES = {
     '/specs': 'specs.html',
     '/collab': 'collab.html',
     '/skills': 'skills.html',
+    '/branches': 'branches.html',
 }
 
 PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login'}
@@ -396,6 +397,58 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_skill_post(path)
             return
 
+        if path == '/api/branch/fork':
+            self._api_branch_fork()
+            return
+
+        if path == '/api/branch/merge':
+            self._api_branch_merge()
+            return
+
+        if path == '/api/branch/fork-for-spec':
+            self._api_branch_fork_for_spec()
+            return
+
+        if path == '/api/branch/merge-with-validation':
+            self._api_branch_merge_with_validation()
+            return
+
+        if path == '/api/branch/fork-parallel':
+            self._api_branch_fork_parallel()
+            return
+
+        if path == '/api/branch/merge-parallel':
+            self._api_branch_merge_parallel()
+            return
+
+        if path == '/api/collab/distribute-plan':
+            self._api_collab_distribute_plan()
+            return
+
+        if path == '/api/collab/sync-context':
+            self._api_collab_sync_context()
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/abandon'):
+            self._api_branch_abandon(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/pause'):
+            self._api_branch_pause(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/resume'):
+            self._api_branch_resume(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/lesson'):
+            self._api_branch_lesson(path)
+            return
+
+        if path.startswith('/api/branch/') and path.endswith('/extract-lessons'):
+            self._api_branch_extract_lessons(path)
+            return
+
         if path == '/portal/api/register':
             self._handle_portal_register()
             return
@@ -512,6 +565,26 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
+            elif path == '/api/branches':
+                self._api_branch_list(qs)
+            elif path.startswith('/api/branch/tree/'):
+                self._api_branch_tree(path)
+            elif path.startswith('/api/branch/diff/'):
+                self._api_branch_diff(path)
+            elif path.startswith('/api/branch/') and path.endswith('/chain'):
+                self._api_branch_chain(path, qs)
+            elif path.startswith('/api/branch/') and path.endswith('/stats'):
+                self._api_branch_stats(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path.startswith('/api/branch/') and '/validate-spec/' in path:
+                self._api_branch_validate_spec(path)
+            elif path.startswith('/api/branch/') and path.endswith('/plans'):
+                self._api_branch_plans(path)
+            elif path == '/api/collab/group-branches' or path == '/api/collab/group-spec-validation':
+                self._api_collab_branch(path, qs)
+            elif path.startswith('/api/branch/'):
+                self._api_branch_get(path)
             else:
                 self._send_error(404, 'API endpoint not found')
         except Exception as e:
@@ -551,6 +624,11 @@ class VisHandler(BaseHTTPRequestHandler):
                 (ws['workspace_id'],)
             )
             ws['context_count'] = ctx_count['cnt'] if ctx_count else 0
+            br_count = connection.execute_query_one(
+                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = :1",
+                (ws['workspace_id'],)
+            )
+            ws['branch_count'] = br_count['cnt'] if br_count else 0
             ctx_chain = connection.execute_query(
                 "SELECT context_id, context_type, agent_id, context_data, parent_context_id, created_at "
                 "FROM workspace_context WHERE workspace_id = :1 ORDER BY created_at DESC",
@@ -865,7 +943,372 @@ class VisHandler(BaseHTTPRequestHandler):
             'collab_count': collab_row['cnt'] if collab_row else 0,
             'skill_count': skill_row['cnt'] if skill_row else 0,
             'audit_open_count': 0,
+            'active_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches WHERE branch_status='ACTIVE'")['c'],
+            'total_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches")['c'],
         })
+
+    def _api_branch_list(self, qs):
+        workspace_id = qs.get('workspace_id', [None])[0]
+        agent_id = qs.get('agent_id', [None])[0]
+        status = qs.get('status', [None])[0]
+        branch_type = qs.get('branch_type', [None])[0]
+        result = branch_api.list_branches(
+            workspace_id=workspace_id, agent_id=agent_id,
+            status=status, branch_type=branch_type,
+        )
+        self._send_json({'branches': [_clean_row(b) for b in result]})
+
+    def _api_branch_get(self, path):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.get_branch(branch_id)
+        if result is None:
+            self._send_error(404, 'Branch not found')
+            return
+        self._send_json(_clean_row(result))
+
+    def _api_branch_chain(self, path, qs):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        limit = qs.get('limit', [None])[0]
+        limit = int(limit) if limit else None
+        result = branch_api.get_branch_context_chain(branch_id, limit=limit)
+        self._send_json({'chain': [_clean_row(c) for c in result]})
+
+    def _api_branch_stats(self, path):
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.get_branch_stats(branch_id)
+        if result is None:
+            self._send_error(404, 'Branch not found')
+            return
+        self._send_json(_clean_row(result))
+
+    def _api_branch_tree(self, path):
+        parts = path.split('/')
+        if len(parts) < 5:
+            self._send_error(400, 'Invalid branch tree path')
+            return
+        workspace_id = parts[4]
+        result = branch_api.get_branch_tree(workspace_id)
+        self._send_json(_clean_row(result))
+
+    def _api_branch_diff(self, path):
+        parts = path.split('/')
+        if len(parts) < 6:
+            self._send_error(400, 'Invalid branch diff path')
+            return
+        branch_a_id = parts[4]
+        branch_b_id = parts[5]
+        result = branch_api.diff_branches(branch_a_id, branch_b_id)
+        self._send_json(_clean_row(result))
+
+    def _api_branch_fork(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.fork_branch(
+            workspace_id=data.get('workspace_id'),
+            fork_context_id=data.get('fork_context_id'),
+            branch_name=data.get('branch_name'),
+            branch_type=data.get('branch_type'),
+            agent_id=data.get('agent_id'),
+            source_agent_id=data.get('source_agent_id'),
+            purpose=data.get('purpose'),
+            fork_session_id=data.get('fork_session_id'),
+        )
+        if isinstance(result, str):
+            self._send_json({'branch_id': result, 'success': True})
+        else:
+            self._send_json(_clean_row(result))
+
+    def _api_branch_merge(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.merge_branch(
+            source_branch_id=data.get('source_branch_id'),
+            target_branch_id=data.get('target_branch_id'),
+            merge_type=data.get('merge_type'),
+            merged_by_agent=data.get('merged_by_agent'),
+            conflict_resolutions=data.get('conflict_resolutions'),
+        )
+        self._send_json(_clean_row(result))
+
+    def _api_branch_abandon(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        result = branch_api.abandon_branch(branch_id, reason=data.get('reason'))
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'ABANDONED'})
+
+    def _api_branch_pause(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.pause_branch(branch_id)
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'PAUSED'})
+
+    def _api_branch_resume(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        result = branch_api.resume_branch(branch_id)
+        self._send_json({'success': bool(result), 'branch_id': branch_id, 'branch_status': 'ACTIVE'})
+
+    def _api_branch_lesson(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        result = branch_api.mark_as_lesson(
+            branch_id=branch_id,
+            context_id=data.get('context_id'),
+            lesson_type=data.get('lesson_type'),
+            lesson_summary=data.get('lesson_summary'),
+            lesson_detail=data.get('lesson_detail'),
+            agent_id=data.get('agent_id'),
+        )
+        if isinstance(result, dict):
+            self._send_json(_clean_row(result))
+        else:
+            self._send_json({'success': True, 'branch_id': branch_id})
+
+    def _api_branch_extract_lessons(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        if len(parts) < 4:
+            self._send_error(400, 'Invalid branch path')
+            return
+        branch_id = parts[3]
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        result = branch_api.extract_lessons_from_branch(branch_id, auto_confirm=data.get('auto_confirm', False))
+        self._send_json({'lessons': [_clean_row(l) for l in result]})
+
+    def _api_branch_plans(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        branch_id = parts[3] if len(parts) > 3 else None
+        if not branch_id:
+            self._send_error(400, 'Branch ID required')
+            return
+        result = task_plan_api.get_branch_plans(branch_id)
+        self._send_json([_clean_row(r) for r in result])
+
+    def _api_branch_validate_spec(self, path):
+        if self._require_auth() is None:
+            return
+        parts = path.split('/')
+        branch_id = parts[3] if len(parts) > 3 else None
+        spec_id = parts[5] if len(parts) > 5 else None
+        if not branch_id or not spec_id:
+            self._send_error(400, 'Branch ID and Spec ID required')
+            return
+        try:
+            from lib import spec_api
+            result = spec_api.validate_branch_against_spec(branch_id, spec_id)
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_fork_for_spec(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.fork_branch_for_spec(
+                workspace_id=data.get('workspace_id'),
+                spec_id=data.get('spec_id'),
+                branch_name=data.get('branch_name'),
+                agent_id=data.get('agent_id'),
+                source_agent_id=data.get('source_agent_id'),
+            )
+            self._send_json({'branch_id': result, 'success': True})
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_merge_with_validation(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.merge_branch_with_validation(
+                source_branch_id=data.get('source_branch_id'),
+                target_branch_id=data.get('target_branch_id'),
+                spec_id=data.get('spec_id'),
+                merged_by_agent=data.get('merged_by_agent'),
+                conflict_resolutions=data.get('conflict_resolutions'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_branch(self, path, qs):
+        if self._require_auth() is None:
+            return
+        try:
+            from lib import collab_api
+            if path.endswith('group-branches'):
+                group_id = qs.get('group_id', [None])[0]
+                if not group_id:
+                    self._send_error(400, 'group_id required')
+                    return
+                result = collab_api.get_member_branches(group_id)
+                self._send_json([_clean_row(r) for r in result])
+            elif path.endswith('group-spec-validation'):
+                group_id = qs.get('group_id', [None])[0]
+                spec_id = qs.get('spec_id', [None])[0]
+                if not group_id:
+                    self._send_error(400, 'group_id required')
+                    return
+                result = collab_api.validate_group_against_spec(group_id, spec_id)
+                self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_fork_parallel(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            agent_ids = data.get('agent_ids', [])
+            if not agent_ids:
+                self._send_error(400, 'agent_ids required')
+                return
+            result = branch_api.fork_parallel_branches(
+                workspace_id=data.get('workspace_id'),
+                agent_ids=agent_ids,
+                branch_name_prefix=data.get('branch_name_prefix', 'parallel'),
+                spec_id=data.get('spec_id'),
+                purpose=data.get('purpose'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_branch_merge_parallel(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import branch_api
+            result = branch_api.merge_parallel_branches(
+                source_branch_ids=data.get('source_branch_ids', []),
+                target_branch_id=data.get('target_branch_id'),
+                merged_by_agent=data.get('merged_by_agent'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_distribute_plan(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import task_plan_api
+            result = task_plan_api.distribute_plan_to_group(
+                plan_id=data.get('plan_id'),
+                group_id=data.get('group_id'),
+            )
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
+
+    def _api_collab_sync_context(self):
+        if self._require_auth() is None:
+            return
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_error(400, 'Invalid JSON')
+            return
+        try:
+            from lib import collab_api
+            result = collab_api.sync_group_context(data.get('group_id'))
+            self._send_json(result)
+        except Exception as e:
+            self._send_error(500, str(e))
 
     def _handle_portal_register(self):
         try:
@@ -981,8 +1424,9 @@ class VisHandler(BaseHTTPRequestHandler):
                 return
             import datetime
             ts = datetime.datetime.now().isoformat()
+            user_context_id = None
             if workspace_id:
-                workspace_api.save_context(
+                user_context_id = workspace_api.save_context(
                     workspace_id=workspace_id,
                     context_type='CHAT_MESSAGE',
                     context_data=json.dumps({'role': 'user', 'content': message, 'timestamp': ts}),
@@ -1008,7 +1452,7 @@ class VisHandler(BaseHTTPRequestHandler):
                     "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = SYSTIMESTAMP WHERE WORKSPACE_ID = :v_wid",
                     {"v_name": summary, "v_wid": workspace_id},
                 )
-            self._send_json({'success': True, 'reply': reply, 'timestamp': ts})
+            self._send_json({'success': True, 'reply': reply, 'timestamp': ts, 'user_context_id': user_context_id})
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
@@ -1046,6 +1490,9 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
             return
         try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            fork_context_id = data.get('fork_context_id', '')
             agent_session_id = sess.get('agent_session_id', '')
             if agent_session_id:
                 agent_api.end_session(agent_session_id)
@@ -1053,6 +1500,14 @@ class VisHandler(BaseHTTPRequestHandler):
             sess['agent_session_id'] = new_session
             ws = workspace_api.create_workspace(owner_user_id=user_id, name='New Chat', workspace_type='CONVERSATION')
             sess['workspace_id'] = ws
+            if fork_context_id:
+                branch = branch_api.fork_branch(
+                    workspace_id=ws,
+                    fork_context_id=fork_context_id,
+                    branch_type='EXPLORATION',
+                    agent_id=agent_id,
+                )
+                sess['branch_id'] = branch.get('branch_id', '')
             self._send_json({'success': True})
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
@@ -1166,7 +1621,7 @@ class VisHandler(BaseHTTPRequestHandler):
                     workspace_id = session_data[1].get('workspace_id', '')
                     if workspace_id:
                         rows = connection.execute_query("""
-                            SELECT CONTEXT_DATA FROM WORKSPACE_CONTEXT
+                            SELECT CONTEXT_ID, CONTEXT_DATA FROM WORKSPACE_CONTEXT
                             WHERE CONTEXT_TYPE = 'CHAT_MESSAGE' AND WORKSPACE_ID = :v_wid
                             ORDER BY CREATED_AT ASC
                         """, {"v_wid": workspace_id})
@@ -1175,6 +1630,7 @@ class VisHandler(BaseHTTPRequestHandler):
                             try:
                                 cd = r.get('context_data', '{}')
                                 d = cd if isinstance(cd, dict) else json.loads(cd)
+                                d['context_id'] = r.get('context_id', '')
                                 messages.append(d)
                             except Exception:
                                 pass

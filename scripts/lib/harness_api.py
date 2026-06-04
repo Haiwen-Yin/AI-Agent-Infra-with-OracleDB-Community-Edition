@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Harness API
+"""AI Agent Infra v3.2.0 - Community Edition - Harness API
 
 Templates are reusable agent execution blueprints stored as ENTITIES
 with ENTITY_TYPE='HARNESS_TEMPLATE' and extended via HARNESS_META.
@@ -260,3 +260,62 @@ def count_harness_templates(category: Optional[str] = None) -> int:
     if row is None:
         return 0
     return int(row.get("cnt", 0))
+
+def instantiate_harness_in_branch(entity_id: str, variable_values: Dict[str, str],
+                                   agent_id: str, branch_id: str) -> str:
+    """Instantiate a harness template within a branch context. Returns instance ENTITY_ID."""
+    instance_id = instantiate_harness_template(entity_id, variable_values, agent_id)
+    if instance_id and branch_id:
+        from . import workspace_api
+        branch = None
+        from . import branch_api
+        branch = branch_api.get_branch(branch_id)
+        if branch:
+            workspace_api.save_context(
+                workspace_id=branch.get("workspace_id"),
+                agent_id=agent_id,
+                context_type="CHECKPOINT",
+                context_data={"harness_instance_id": instance_id, "template_id": entity_id},
+                branch_id=branch_id,
+            )
+    return instance_id
+
+def share_harness_to_group(entity_id: str, group_id: str) -> Dict[str, Any]:
+    """Share a harness template to a collaboration group workspace."""
+    from . import collab_api
+    group = collab_api.get_collab_group(group_id)
+    if group is None:
+        raise ValueError(f"Collaboration group {group_id} not found")
+    tpl = get_harness_template(entity_id)
+    if tpl is None:
+        raise ValueError(f"Harness template {entity_id} not found")
+    from . import workspace_api
+    workspace_api.save_context(
+        workspace_id=group["workspace_id"],
+        agent_id=group.get("coordinator_agent_id", "SYSTEM"),
+        context_type="AUTO_SAVE",
+        context_data={
+            "shared_harness": entity_id,
+            "template_title": tpl.get("title"),
+            "execution_mode": tpl.get("execution_mode"),
+        },
+    )
+    return {"entity_id": entity_id, "group_id": group_id, "shared": True}
+
+
+def instantiate_harness_for_member(entity_id: str, member_agent_id: str,
+                                   variable_values: Dict[str, str],
+                                   group_id: str) -> str:
+    """Instantiate a harness for a specific group member in their branch."""
+    from . import collab_api
+    members = collab_api.get_member_branches(group_id)
+    branch_id = None
+    for m in members:
+        if m["agent_id"] == member_agent_id:
+            branch_id = m.get("branch_id")
+            break
+    if not branch_id:
+        instance_id = instantiate_harness_template(entity_id, variable_values, member_agent_id)
+    else:
+        instance_id = instantiate_harness_in_branch(entity_id, variable_values, member_agent_id, branch_id)
+    return instance_id

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Spec API
+"""AI Agent Infra v3.2.0 - Community Edition - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """
@@ -29,6 +29,7 @@ def create_spec(
     acceptance_criteria: Optional[Any] = None,
     constraints: Optional[Any] = None,
     parent_spec_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
 ) -> str:
     """Create a specification document. Returns ENTITY_ID."""
     entity_sql = """
@@ -57,8 +58,8 @@ def create_spec(
     meta_sql = """
         INSERT INTO SPEC_META (ENTITY_ID, ENTITY_TYPE, SPEC_VERSION, SPEC_STATUS,
                                ACCEPTANCE_CRITERIA, "CONSTRAINTS", SPEC_SCOPE,
-                               COMPLEXITY, PARENT_SPEC_ID)
-        VALUES (:eid, 'SPEC', 1, 'DRAFT', :ac, :cs, :scope, :complexity, :parent_id)
+                               COMPLEXITY, PARENT_SPEC_ID, BRANCH_ID)
+        VALUES (:eid, 'SPEC', 1, 'DRAFT', :ac, :cs, :scope, :complexity, :parent_id, :branch_id)
     """
     execute(meta_sql, {
         "eid": entity_id,
@@ -67,6 +68,7 @@ def create_spec(
         "scope": spec_scope,
         "complexity": complexity,
         "parent_id": parent_spec_id,
+        "branch_id": branch_id,
     })
 
     return entity_id
@@ -343,3 +345,96 @@ def delete_spec(entity_id: str) -> bool:
         return affected > 0
     except Exception:
         return False
+
+def create_plan_from_spec_in_branch(spec_id: str, branch_id: str, agent_id: str) -> str:
+    """Generate a Task Plan from spec acceptance criteria within a branch. Returns PLAN_ID."""
+    spec = get_spec(spec_id)
+    if spec is None:
+        raise ValueError(f"Spec {spec_id} not found")
+
+    from . import task_plan_api
+
+    goal = spec.get("title", "Unnamed spec")
+    plan_id = task_plan_api.create_plan(agent_id=agent_id, goal=goal, branch_id=branch_id)
+
+    ac = spec.get("acceptance_criteria")
+    if ac:
+        if isinstance(ac, str):
+            try:
+                ac = json.loads(ac)
+            except (json.JSONDecodeError, TypeError):
+                ac = None
+        if isinstance(ac, list):
+            status = _get_plan_status(plan_id)
+            for i, criterion in enumerate(ac, 1):
+                desc = criterion if isinstance(criterion, str) else json.dumps(criterion)
+                task_plan_api.add_step(plan_id, status, desc, i)
+
+    link_spec_to_plan(spec_id, plan_id, "DRIVES")
+    return plan_id
+
+
+def validate_branch_against_spec(branch_id: str, spec_id: str) -> Dict[str, Any]:
+    """Validate a branch context chain against a spec acceptance criteria."""
+    from . import branch_api
+
+    spec = get_spec(spec_id)
+    if spec is None:
+        raise ValueError(f"Spec {spec_id} not found")
+
+    ac = spec.get("acceptance_criteria")
+    if not ac:
+        return {"pass_rate": 1.0, "total": 0, "passed": 0, "failed": 0, "details": []}
+    if isinstance(ac, str):
+        try:
+            ac = json.loads(ac)
+        except (json.JSONDecodeError, TypeError):
+            ac = None
+    if not isinstance(ac, list):
+        return {"pass_rate": 0.0, "total": 0, "passed": 0, "failed": 0, "details": []}
+
+    chain = branch_api.get_branch_context_chain(branch_id)
+    context_text = " ".join(
+        str(ctx.get("context_data", "")) for ctx in chain if ctx.get("context_data")
+    ).lower()
+
+    results = []
+    passed = 0
+    for criterion in ac:
+        desc = criterion if isinstance(criterion, str) else json.dumps(criterion)
+        keywords = [w.lower() for w in desc.split() if len(w) > 3]
+        match = any(kw in context_text for kw in keywords) if keywords else desc.lower() in context_text
+        if match:
+            passed += 1
+        results.append({"criterion": desc, "matched": match})
+
+    total = len(ac)
+    return {
+        "pass_rate": round(passed / total, 2) if total > 0 else 1.0,
+        "total": total,
+        "passed": passed,
+        "failed": total - passed,
+        "details": results,
+    }
+
+def create_spec_for_group(title: str, group_id: str, **kwargs: Any) -> str:
+    """Create a spec associated with a collaboration group. Returns ENTITY_ID."""
+    from . import collab_api
+    group = collab_api.get_collab_group(group_id)
+    if group is None:
+        raise ValueError(f"Collaboration group {group_id} not found")
+    ws_id = group.get("workspace_id")
+    branch_id = group.get("branch_id")
+    spec_id = create_spec(
+        title=title,
+        workspace_id=ws_id,
+        branch_id=branch_id,
+        **kwargs,
+    )
+    return spec_id
+
+
+def validate_group_progress(spec_id: str, group_id: str) -> Dict[str, Any]:
+    """Validate a collaboration group's overall progress against a spec."""
+    from . import collab_api
+    return collab_api.validate_group_against_spec(group_id, spec_id)

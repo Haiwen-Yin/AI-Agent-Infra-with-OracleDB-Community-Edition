@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.1.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.2.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1330,9 +1330,22 @@ COMMIT;
 PROMPT ============================================================
 
 PROMPT ============================================================
-PROMPT Package: DB_CRYPTO [NEW v3.1.0]
 PROMPT ============================================================
 
+
+/
+
+
+/
+
+PROMPT AI Agent Infra v3.2.0 API Deployment Complete
+PROMPT ============================================================
+
+
+PROMPT ============================================================
+
+
+PROMPT Package: DB_CRYPTO
 CREATE OR REPLACE PACKAGE DB_CRYPTO AS
     FUNCTION encrypt(p_plaintext VARCHAR2) RETURN VARCHAR2;
     FUNCTION decrypt(p_ciphertext VARCHAR2) RETURN VARCHAR2;
@@ -1340,13 +1353,9 @@ CREATE OR REPLACE PACKAGE DB_CRYPTO AS
     FUNCTION decrypt_raw(p_ciphertext RAW) RETURN RAW;
     PROCEDURE rotate_key;
 END DB_CRYPTO;
-/
+
 
 CREATE OR REPLACE PACKAGE BODY DB_CRYPTO AS
-    CK_KEY VARCHAR2(128) := 'db_crypto_master_key';
-    CK_SALT VARCHAR2(128) := 'db_crypto_key_salt';
-    C_ALG PLS_INTEGER := DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5;
-
     CK_KEY VARCHAR2(128) := 'db_crypto_master_key';
     CK_SALT VARCHAR2(128) := 'db_crypto_key_salt';
     C_ALG PLS_INTEGER := DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5;
@@ -1443,7 +1452,627 @@ CREATE OR REPLACE PACKAGE BODY DB_CRYPTO AS
         COMMIT;
     END rotate_key;
 END DB_CRYPTO;
+
+PROMPT Package: BRANCH_MANAGER [NEW v3.2.0]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE BRANCH_MANAGER AS
+
+    FUNCTION fork_branch(
+        p_workspace_id    VARCHAR2,
+        p_fork_context_id VARCHAR2,
+        p_branch_name     VARCHAR2,
+        p_branch_type     VARCHAR2,
+        p_agent_id        VARCHAR2,
+        p_source_agent_id VARCHAR2 DEFAULT NULL,
+        p_purpose         VARCHAR2 DEFAULT NULL,
+        p_fork_session_id VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2;
+
+    FUNCTION get_branch(p_branch_id VARCHAR2) RETURN JSON;
+
+    FUNCTION get_branch_tree(p_workspace_id VARCHAR2) RETURN SYS_REFCURSOR;
+
+    FUNCTION get_branch_chain(
+        p_branch_id VARCHAR2,
+        p_limit     NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR;
+
+    FUNCTION diff_branches(
+        p_branch_a_id VARCHAR2,
+        p_branch_b_id VARCHAR2
+    ) RETURN SYS_REFCURSOR;
+
+    FUNCTION detect_conflicts(
+        p_source_branch_id VARCHAR2,
+        p_target_branch_id VARCHAR2
+    ) RETURN JSON;
+
+    PROCEDURE merge_branch(
+        p_source_branch_id VARCHAR2,
+        p_target_branch_id VARCHAR2,
+        p_merge_type       VARCHAR2 DEFAULT 'MERGE',
+        p_merged_by_agent  VARCHAR2,
+        p_conflict_resolutions JSON DEFAULT NULL
+    );
+
+    PROCEDURE abandon_branch(
+        p_branch_id VARCHAR2,
+        p_reason    VARCHAR2 DEFAULT NULL
+    );
+
+    PROCEDURE pause_branch(p_branch_id VARCHAR2);
+
+    PROCEDURE resume_branch(p_branch_id VARCHAR2);
+
+    FUNCTION get_agent_branches(
+        p_agent_id VARCHAR2,
+        p_status   VARCHAR2 DEFAULT 'ACTIVE'
+    ) RETURN SYS_REFCURSOR;
+
+    FUNCTION get_branch_stats(p_branch_id VARCHAR2) RETURN JSON;
+
+    FUNCTION mark_as_lesson(
+        p_branch_id       VARCHAR2,
+        p_context_id      VARCHAR2,
+        p_lesson_type     VARCHAR2,
+        p_lesson_summary  VARCHAR2,
+        p_lesson_detail   VARCHAR2 DEFAULT NULL,
+        p_agent_id        VARCHAR2
+    ) RETURN VARCHAR2;
+
+    FUNCTION extract_lessons(
+        p_branch_id    VARCHAR2,
+        p_auto_confirm VARCHAR2 DEFAULT 'N'
+    ) RETURN JSON;
+
+    PROCEDURE cleanup_abandoned_branches(
+        p_days_threshold NUMBER DEFAULT 90
+    );
+
+    FUNCTION fork_branch_for_spec(
+        p_workspace_id    VARCHAR2,
+        p_spec_id         VARCHAR2,
+        p_branch_name     VARCHAR2,
+        p_agent_id        VARCHAR2,
+        p_source_agent_id VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2;
+
+    FUNCTION validate_branch_for_spec(
+        p_branch_id VARCHAR2,
+        p_spec_id   VARCHAR2
+    ) RETURN JSON;
+
+    FUNCTION fork_parallel_branches(
+        p_workspace_id      VARCHAR2,
+        p_agent_ids         VARCHAR2,
+        p_branch_name_prefix VARCHAR2 DEFAULT 'parallel',
+        p_purpose           VARCHAR2 DEFAULT NULL
+    ) RETURN SYS_REFCURSOR;
+
+END BRANCH_MANAGER;
+/
+CREATE OR REPLACE PACKAGE BODY BRANCH_MANAGER AS
+
+    FUNCTION fork_branch(
+        p_workspace_id    VARCHAR2,
+        p_fork_context_id VARCHAR2,
+        p_branch_name     VARCHAR2,
+        p_branch_type     VARCHAR2,
+        p_agent_id        VARCHAR2,
+        p_source_agent_id VARCHAR2 DEFAULT NULL,
+        p_purpose         VARCHAR2 DEFAULT NULL,
+        p_fork_session_id VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2 IS
+        v_branch_id VARCHAR2(64);
+        v_parent_branch_id VARCHAR2(64);
+    BEGIN
+        v_branch_id := 'BR_' || RAWTOHEX(SYS_GUID());
+
+        SELECT MAX(b.BRANCH_ID) INTO v_parent_branch_id
+        FROM CONTEXT_BRANCHES b
+        WHERE b.WORKSPACE_ID = p_workspace_id
+          AND b.BRANCH_STATUS = 'ACTIVE'
+          AND b.AGENT_ID = p_agent_id;
+
+        INSERT INTO CONTEXT_BRANCHES (
+            BRANCH_ID, WORKSPACE_ID, PARENT_BRANCH_ID, FORK_CONTEXT_ID,
+            FORK_SESSION_ID, BRANCH_NAME, BRANCH_TYPE, BRANCH_STATUS,
+            AGENT_ID, SOURCE_AGENT_ID, BRANCH_PURPOSE
+        ) VALUES (
+            v_branch_id, p_workspace_id, v_parent_branch_id, p_fork_context_id,
+            p_fork_session_id, p_branch_name, p_branch_type, 'ACTIVE',
+            p_agent_id, p_source_agent_id, p_purpose
+        );
+
+        INSERT INTO WORKSPACE_CONTEXT (
+            CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
+            CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID, BRANCH_ID
+        ) VALUES (
+            'CTX_' || RAWTOHEX(SYS_GUID()),
+            p_workspace_id, p_agent_id, p_fork_session_id,
+            'BRANCH_POINT',
+            JSON_OBJECT(
+                'branch_id' VALUE v_branch_id,
+                'branch_name' VALUE p_branch_name,
+                'branch_type' VALUE p_branch_type,
+                'fork_context_id' VALUE p_fork_context_id
+            ),
+            p_fork_context_id,
+            v_branch_id
+        );
+
+        COMMIT;
+        RETURN v_branch_id;
+    END fork_branch;
+
+    FUNCTION get_branch(p_branch_id VARCHAR2) RETURN JSON IS
+        v_clob CLOB;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'branch_id' VALUE BRANCH_ID,
+            'workspace_id' VALUE WORKSPACE_ID,
+            'parent_branch_id' VALUE PARENT_BRANCH_ID,
+            'fork_context_id' VALUE FORK_CONTEXT_ID,
+            'fork_session_id' VALUE FORK_SESSION_ID,
+            'branch_name' VALUE BRANCH_NAME,
+            'branch_type' VALUE BRANCH_TYPE,
+            'branch_status' VALUE BRANCH_STATUS,
+            'agent_id' VALUE AGENT_ID,
+            'source_agent_id' VALUE SOURCE_AGENT_ID,
+            'branch_purpose' VALUE BRANCH_PURPOSE,
+            'created_at' VALUE TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS'),
+            'closed_at' VALUE TO_CHAR(CLOSED_AT, 'YYYY-MM-DD HH24:MI:SS')
+        ) INTO v_clob FROM CONTEXT_BRANCHES WHERE BRANCH_ID = p_branch_id;
+        RETURN JSON(v_clob);
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RETURN NULL;
+    END get_branch;
+
+    FUNCTION get_branch_tree(p_workspace_id VARCHAR2) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT BRANCH_ID, PARENT_BRANCH_ID, BRANCH_NAME, BRANCH_TYPE,
+                   BRANCH_STATUS, AGENT_ID, FORK_CONTEXT_ID,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                   TO_CHAR(CLOSED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CLOSED_AT
+            FROM CONTEXT_BRANCHES
+            WHERE WORKSPACE_ID = p_workspace_id
+            ORDER BY CREATED_AT ASC;
+        RETURN v_cur;
+    END get_branch_tree;
+
+    FUNCTION get_branch_chain(
+        p_branch_id VARCHAR2,
+        p_limit     NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
+                   CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID, BRANCH_ID,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            FROM WORKSPACE_CONTEXT
+            WHERE BRANCH_ID = p_branch_id
+            ORDER BY CREATED_AT ASC
+            FETCH FIRST p_limit ROWS ONLY;
+        RETURN v_cur;
+    END get_branch_chain;
+
+    FUNCTION diff_branches(
+        p_branch_a_id VARCHAR2,
+        p_branch_b_id VARCHAR2
+    ) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT 'ONLY_IN_A' AS diff_side, wc.CONTEXT_ID, wc.CONTEXT_TYPE,
+                   wc.CONTEXT_DATA, wc.AGENT_ID,
+                   TO_CHAR(wc.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            FROM WORKSPACE_CONTEXT wc
+            WHERE wc.BRANCH_ID = p_branch_a_id
+              AND wc.CONTEXT_TYPE != 'BRANCH_POINT'
+            UNION ALL
+            SELECT 'ONLY_IN_B' AS diff_side, wc.CONTEXT_ID, wc.CONTEXT_TYPE,
+                   wc.CONTEXT_DATA, wc.AGENT_ID,
+                   TO_CHAR(wc.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            FROM WORKSPACE_CONTEXT wc
+            WHERE wc.BRANCH_ID = p_branch_b_id
+              AND wc.CONTEXT_TYPE != 'BRANCH_POINT'
+            ORDER BY diff_side, CREATED_AT ASC;
+        RETURN v_cur;
+    END diff_branches;
+
+    FUNCTION detect_conflicts(
+        p_source_branch_id VARCHAR2,
+        p_target_branch_id VARCHAR2
+    ) RETURN JSON IS
+        v_count NUMBER;
+        v_clob CLOB;
+    BEGIN
+        SELECT COUNT(*) INTO v_count
+        FROM (
+            SELECT e.ENTITY_ID
+            FROM ENTITIES e
+            WHERE e.ENTITY_ID IN (
+                SELECT wc_ref.ENTITY_ID
+                FROM WORKSPACE_CONTEXT wc,
+                JSON_TABLE(wc.CONTEXT_DATA, '$.entity_ids[*]' COLUMNS(ENTITY_ID VARCHAR2(64) PATH '$')) wc_ref
+                WHERE wc.BRANCH_ID = p_source_branch_id
+            )
+            INTERSECT
+            SELECT e2.ENTITY_ID
+            FROM ENTITIES e2
+            WHERE e2.ENTITY_ID IN (
+                SELECT wc_ref2.ENTITY_ID
+                FROM WORKSPACE_CONTEXT wc2,
+                JSON_TABLE(wc2.CONTEXT_DATA, '$.entity_ids[*]' COLUMNS(ENTITY_ID VARCHAR2(64) PATH '$')) wc_ref2
+                WHERE wc2.BRANCH_ID = p_target_branch_id
+            )
+        );
+
+        SELECT JSON_OBJECT(
+            'total_conflicts' VALUE v_count,
+            'entity_conflicts' VALUE v_count,
+            'auto_resolvable' VALUE 0,
+            'source_branch_id' VALUE p_source_branch_id,
+            'target_branch_id' VALUE p_target_branch_id
+        ) INTO v_clob FROM DUAL;
+        RETURN JSON(v_clob);
+    END detect_conflicts;
+
+    PROCEDURE merge_branch(
+        p_source_branch_id VARCHAR2,
+        p_target_branch_id VARCHAR2,
+        p_merge_type       VARCHAR2 DEFAULT 'MERGE',
+        p_merged_by_agent  VARCHAR2,
+        p_conflict_resolutions JSON DEFAULT NULL
+    ) IS
+        v_merge_id VARCHAR2(64);
+        v_conflicts JSON;
+        v_result VARCHAR2(32) := 'SUCCESS';
+        v_source_ws VARCHAR2(64);
+        v_conflict_count NUMBER;
+    BEGIN
+        v_merge_id := 'MRG_' || RAWTOHEX(SYS_GUID());
+        v_conflicts := detect_conflicts(p_source_branch_id, p_target_branch_id);
+
+        SELECT jt.cv INTO v_conflict_count
+        FROM JSON_TABLE(v_conflicts, '$' COLUMNS(cv NUMBER PATH '$.total_conflicts')) jt;
+
+        IF v_conflict_count > 0 AND p_conflict_resolutions IS NULL THEN
+            v_result := 'CONFLICT';
+        ELSIF v_conflict_count > 0 THEN
+            v_result := 'PARTIAL';
+        END IF;
+
+        SELECT WORKSPACE_ID INTO v_source_ws
+        FROM CONTEXT_BRANCHES WHERE BRANCH_ID = p_source_branch_id;
+
+        INSERT INTO BRANCH_MERGE_LOG (
+            MERGE_ID, SOURCE_BRANCH_ID, TARGET_BRANCH_ID, MERGE_TYPE,
+            MERGED_BY_AGENT, CONFLICTS, MERGE_RESULT
+        ) VALUES (
+            v_merge_id, p_source_branch_id, p_target_branch_id, p_merge_type,
+            p_merged_by_agent, v_conflicts, v_result
+        );
+
+        UPDATE CONTEXT_BRANCHES
+        SET BRANCH_STATUS = 'MERGED', CLOSED_AT = SYSTIMESTAMP
+        WHERE BRANCH_ID = p_source_branch_id;
+
+        INSERT INTO WORKSPACE_CONTEXT (
+            CONTEXT_ID, WORKSPACE_ID, AGENT_ID, CONTEXT_TYPE, CONTEXT_DATA, BRANCH_ID
+        ) VALUES (
+            'CTX_' || RAWTOHEX(SYS_GUID()),
+            v_source_ws, p_merged_by_agent, 'SUMMARY',
+            JSON_OBJECT(
+                'merge_id' VALUE v_merge_id,
+                'source_branch' VALUE p_source_branch_id,
+                'target_branch' VALUE p_target_branch_id,
+                'merge_type' VALUE p_merge_type,
+                'result' VALUE v_result
+            ),
+            p_target_branch_id
+        );
+
+        COMMIT;
+    END merge_branch;
+
+    PROCEDURE abandon_branch(
+        p_branch_id VARCHAR2,
+        p_reason    VARCHAR2 DEFAULT NULL
+    ) IS
+    BEGIN
+        UPDATE CONTEXT_BRANCHES
+        SET BRANCH_STATUS = 'ABANDONED',
+            CLOSED_AT = SYSTIMESTAMP,
+            BRANCH_PURPOSE = COALESCE(BRANCH_PURPOSE || ' | ABANDONED: ' || p_reason, 'ABANDONED: ' || p_reason)
+        WHERE BRANCH_ID = p_branch_id;
+
+        UPDATE AGENT_SESSION
+        SET IS_ACTIVE = 'N', END_TIME = SYSTIMESTAMP
+        WHERE BRANCH_ID = p_branch_id AND IS_ACTIVE = 'Y';
+
+        COMMIT;
+    END abandon_branch;
+
+    PROCEDURE pause_branch(p_branch_id VARCHAR2) IS
+    BEGIN
+        UPDATE CONTEXT_BRANCHES
+        SET BRANCH_STATUS = 'PAUSED'
+        WHERE BRANCH_ID = p_branch_id;
+
+        UPDATE AGENT_SESSION
+        SET IS_ACTIVE = 'N', END_TIME = SYSTIMESTAMP
+        WHERE BRANCH_ID = p_branch_id AND IS_ACTIVE = 'Y';
+
+        COMMIT;
+    END pause_branch;
+
+    PROCEDURE resume_branch(p_branch_id VARCHAR2) IS
+        v_agent_id VARCHAR2(64);
+        v_workspace_id VARCHAR2(64);
+    BEGIN
+        UPDATE CONTEXT_BRANCHES
+        SET BRANCH_STATUS = 'ACTIVE'
+        WHERE BRANCH_ID = p_branch_id;
+
+        SELECT AGENT_ID, WORKSPACE_ID INTO v_agent_id, v_workspace_id
+        FROM CONTEXT_BRANCHES WHERE BRANCH_ID = p_branch_id;
+
+        INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WORKSPACE_ID, BRANCH_ID, IS_ACTIVE, START_TIME)
+        VALUES ('SES_' || RAWTOHEX(SYS_GUID()), v_agent_id, v_workspace_id, p_branch_id, 'Y', SYSTIMESTAMP);
+
+        COMMIT;
+    END resume_branch;
+
+    FUNCTION get_agent_branches(
+        p_agent_id VARCHAR2,
+        p_status   VARCHAR2 DEFAULT 'ACTIVE'
+    ) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT BRANCH_ID, WORKSPACE_ID, PARENT_BRANCH_ID, BRANCH_NAME,
+                   BRANCH_TYPE, BRANCH_STATUS, FORK_CONTEXT_ID,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
+                   TO_CHAR(CLOSED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CLOSED_AT
+            FROM CONTEXT_BRANCHES
+            WHERE AGENT_ID = p_agent_id
+              AND (p_status IS NULL OR BRANCH_STATUS = p_status)
+            ORDER BY CREATED_AT DESC;
+        RETURN v_cur;
+    END get_agent_branches;
+
+    FUNCTION get_branch_stats(p_branch_id VARCHAR2) RETURN JSON IS
+        v_ctx_count NUMBER;
+        v_session_count NUMBER;
+        v_duration_min NUMBER;
+        v_clob CLOB;
+    BEGIN
+        SELECT COUNT(*) INTO v_ctx_count
+        FROM WORKSPACE_CONTEXT WHERE BRANCH_ID = p_branch_id;
+
+        SELECT COUNT(*) INTO v_session_count
+        FROM AGENT_SESSION WHERE BRANCH_ID = p_branch_id;
+
+        SELECT NVL(ROUND(EXTRACT(DAY FROM(SYSTIMESTAMP - MIN(START_TIME)))*24*60 + EXTRACT(HOUR FROM(SYSTIMESTAMP - MIN(START_TIME)))*60 + EXTRACT(MINUTE FROM(SYSTIMESTAMP - MIN(START_TIME))), 0), 0) INTO v_duration_min
+        FROM AGENT_SESSION WHERE BRANCH_ID = p_branch_id;
+
+        SELECT JSON_OBJECT(
+            'branch_id' VALUE p_branch_id,
+            'context_count' VALUE v_ctx_count,
+            'session_count' VALUE v_session_count,
+            'duration_minutes' VALUE v_duration_min
+        ) INTO v_clob FROM DUAL;
+        RETURN JSON(v_clob);
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            SELECT JSON_OBJECT('branch_id' VALUE p_branch_id, 'error' VALUE 'not found') INTO v_clob FROM DUAL;
+            RETURN JSON(v_clob);
+    END get_branch_stats;
+
+    FUNCTION mark_as_lesson(
+        p_branch_id       VARCHAR2,
+        p_context_id      VARCHAR2,
+        p_lesson_type     VARCHAR2,
+        p_lesson_summary  VARCHAR2,
+        p_lesson_detail   VARCHAR2 DEFAULT NULL,
+        p_agent_id        VARCHAR2
+    ) RETURN VARCHAR2 IS
+        v_entity_id VARCHAR2(64);
+        v_workspace_id VARCHAR2(64);
+    BEGIN
+        v_entity_id := 'ENT_' || RAWTOHEX(SYS_GUID());
+
+        SELECT WORKSPACE_ID INTO v_workspace_id
+        FROM CONTEXT_BRANCHES WHERE BRANCH_ID = p_branch_id;
+
+        INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, CATEGORY, STATUS,
+                              OWNED_BY_AGENT, VISIBILITY, WORKSPACE_ID)
+        VALUES (v_entity_id, 'KNOWLEDGE',
+                '[' || p_lesson_type || '] ' || p_lesson_summary,
+                p_lesson_detail, 'LESSON_LEARNED', 'ACTIVE',
+                p_agent_id, 'SHARED', v_workspace_id);
+
+        INSERT INTO KNOWLEDGE_META (ENTITY_ID, ENTITY_TYPE, DOMAIN, TOPIC, DIFFICULTY)
+        VALUES (v_entity_id, 'KNOWLEDGE', 'BRANCH_EXPERIENCE',
+                SUBSTR(p_lesson_summary, 1, 50), 'INTERMEDIATE');
+
+        IF p_context_id IS NOT NULL THEN
+            INSERT INTO ENTITY_EDGES (EDGE_ID, SOURCE_ID, SOURCE_TYPE, TARGET_ID, EDGE_TYPE, STRENGTH)
+            VALUES ('EDG_' || RAWTOHEX(SYS_GUID()), v_entity_id, 'KNOWLEDGE',
+                    p_context_id, 'DERIVED_FROM', 1.0);
+        END IF;
+
+        COMMIT;
+        RETURN v_entity_id;
+    END mark_as_lesson;
+
+    FUNCTION extract_lessons(
+        p_branch_id    VARCHAR2,
+        p_auto_confirm VARCHAR2 DEFAULT 'N'
+    ) RETURN JSON IS
+        v_clob CLOB;
+        v_error_count NUMBER := 0;
+        v_summary_count NUMBER := 0;
+        v_workspace_id VARCHAR2(64);
+        v_agent_id VARCHAR2(64);
+        CURSOR c_errors IS
+            SELECT CONTEXT_ID, CONTEXT_DATA
+            FROM WORKSPACE_CONTEXT
+            WHERE BRANCH_ID = p_branch_id AND CONTEXT_TYPE = 'ERROR_STATE';
+        CURSOR c_summary IS
+            SELECT CONTEXT_ID, CONTEXT_DATA
+            FROM WORKSPACE_CONTEXT
+            WHERE BRANCH_ID = p_branch_id AND CONTEXT_TYPE = 'SUMMARY'
+            ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY;
+    BEGIN
+        SELECT WORKSPACE_ID, AGENT_ID INTO v_workspace_id, v_agent_id
+        FROM CONTEXT_BRANCHES WHERE BRANCH_ID = p_branch_id;
+
+        FOR r IN c_errors LOOP
+            v_error_count := v_error_count + 1;
+            IF p_auto_confirm = 'Y' THEN
+                v_clob := NULL;
+                SELECT mark_as_lesson(
+                    p_branch_id, r.CONTEXT_ID, 'MISTAKE',
+                    'Error in abandoned branch', NULL, v_agent_id
+                ) INTO v_clob FROM DUAL;
+            END IF;
+        END LOOP;
+
+        FOR r IN c_summary LOOP
+            v_summary_count := v_summary_count + 1;
+            IF p_auto_confirm = 'Y' THEN
+                v_clob := NULL;
+                SELECT mark_as_lesson(
+                    p_branch_id, r.CONTEXT_ID, 'INSIGHT',
+                    'Branch summary', NULL, v_agent_id
+                ) INTO v_clob FROM DUAL;
+            END IF;
+        END LOOP;
+
+        SELECT JSON_OBJECT(
+            'branch_id' VALUE p_branch_id,
+            'error_states_found' VALUE v_error_count,
+            'summaries_found' VALUE v_summary_count,
+            'auto_confirmed' VALUE p_auto_confirm
+        ) INTO v_clob FROM DUAL;
+        COMMIT;
+        RETURN JSON(v_clob);
+    END extract_lessons;
+
+    PROCEDURE cleanup_abandoned_branches(
+        p_days_threshold NUMBER DEFAULT 90
+    ) IS
+    BEGIN
+        DELETE FROM BRANCH_MERGE_LOG
+        WHERE SOURCE_BRANCH_ID IN (
+            SELECT BRANCH_ID FROM CONTEXT_BRANCHES
+            WHERE BRANCH_STATUS = 'ABANDONED'
+              AND CLOSED_AT < SYSTIMESTAMP - NUMTODSINTERVAL(p_days_threshold, 'DAY')
+        );
+
+        DELETE FROM WORKSPACE_CONTEXT
+        WHERE BRANCH_ID IN (
+            SELECT BRANCH_ID FROM CONTEXT_BRANCHES
+            WHERE BRANCH_STATUS = 'ABANDONED'
+              AND CLOSED_AT < SYSTIMESTAMP - NUMTODSINTERVAL(p_days_threshold, 'DAY')
+        );
+
+        DELETE FROM AGENT_SESSION
+        WHERE BRANCH_ID IN (
+            SELECT BRANCH_ID FROM CONTEXT_BRANCHES
+            WHERE BRANCH_STATUS = 'ABANDONED'
+              AND CLOSED_AT < SYSTIMESTAMP - NUMTODSINTERVAL(p_days_threshold, 'DAY')
+        );
+
+        DELETE FROM CONTEXT_BRANCHES
+        WHERE BRANCH_STATUS = 'ABANDONED'
+          AND CLOSED_AT < SYSTIMESTAMP - NUMTODSINTERVAL(p_days_threshold, 'DAY');
+
+        COMMIT;
+    END cleanup_abandoned_branches;
+
+
+    FUNCTION fork_branch_for_spec(
+        p_workspace_id    VARCHAR2,
+        p_spec_id         VARCHAR2,
+        p_branch_name     VARCHAR2,
+        p_agent_id        VARCHAR2,
+        p_source_agent_id VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2 IS
+        v_branch_id VARCHAR2(64);
+        v_purpose VARCHAR2(1000);
+    BEGIN
+        SELECT '[' || ENTITY_TYPE || '] ' || TITLE INTO v_purpose
+        FROM ENTITIES WHERE ENTITY_ID = p_spec_id AND ENTITY_TYPE = 'SPEC';
+        v_purpose := 'Implement spec: ' || v_purpose;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_purpose := 'Implement spec: ' || p_spec_id;
+
+        v_branch_id := fork_branch(
+            p_workspace_id    => p_workspace_id,
+            p_fork_context_id => NULL,
+            p_branch_name     => p_branch_name,
+            p_branch_type     => 'EXPLORATION',
+            p_agent_id        => p_agent_id,
+            p_source_agent_id => p_source_agent_id,
+            p_purpose         => v_purpose
+        );
+        RETURN v_branch_id;
+    END fork_branch_for_spec;
+
+    FUNCTION validate_branch_for_spec(
+        p_branch_id VARCHAR2,
+        p_spec_id   VARCHAR2
+    ) RETURN JSON IS
+        v_ac CLOB;
+        v_ctx_count NUMBER;
+        v_result JSON;
+    BEGIN
+        SELECT ACCEPTANCE_CRITERIA INTO v_ac
+        FROM SPEC_META WHERE ENTITY_ID = p_spec_id;
+
+        SELECT COUNT(*) INTO v_ctx_count
+        FROM WORKSPACE_CONTEXT
+        WHERE BRANCH_ID = p_branch_id;
+
+        SELECT JSON_OBJECT(
+            'spec_id' VALUE p_spec_id,
+            'branch_id' VALUE p_branch_id,
+            'context_count' VALUE v_ctx_count,
+            'has_acceptance_criteria' VALUE CASE WHEN v_ac IS NOT NULL THEN 'Y' ELSE 'N' END
+        ) INTO v_result FROM DUAL;
+        RETURN v_result;
+    END validate_branch_for_spec;
+
+
+    FUNCTION fork_parallel_branches(
+        p_workspace_id      VARCHAR2,
+        p_agent_ids         VARCHAR2,
+        p_branch_name_prefix VARCHAR2 DEFAULT 'parallel',
+        p_purpose           VARCHAR2 DEFAULT NULL
+    ) RETURN SYS_REFCURSOR IS
+        v_cursor SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cursor FOR
+            SELECT b.BRANCH_ID, b.AGENT_ID, b.BRANCH_NAME, b.BRANCH_STATUS
+            FROM CONTEXT_BRANCHES b
+            WHERE b.WORKSPACE_ID = p_workspace_id
+              AND b.BRANCH_TYPE = 'PARALLEL'
+              AND b.BRANCH_STATUS = 'ACTIVE'
+            ORDER BY b.CREATED_AT;
+        RETURN v_cursor;
+    END fork_parallel_branches;
+
+END BRANCH_MANAGER;
 /
 
-PROMPT AI Agent Infra v3.1.0 API Deployment Complete
+
+PROMPT ============================================================
+PROMPT AI Agent Infra v3.2.0 - Community Edition API Deployment Complete
 PROMPT ============================================================

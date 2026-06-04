@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AI Agent Infra v3.1.0 - Community Edition - Web Server Control Script
+# AI Agent Infra v3.2.0 - Community Edition - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
@@ -89,7 +89,7 @@ is_running() {
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  AI Agent Infra v3.1.0 - Community${NC}"
+    echo -e "${BLUE}  AI Agent Infra v3.2.0 - Community${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -161,7 +161,7 @@ do_start() {
     echo -e "  Log:     $LOG_FILE"
     echo ""
 
-    nohup $PYTHON -u "$SERVER_FILE" >> "$LOG_FILE" 2>&1 &
+    setsid nohup $PYTHON -u "$SERVER_FILE" >> "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
 
@@ -294,7 +294,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "AI Agent Infra v3.1.0 - Community Edition - Web Server Control"
+        echo "AI Agent Infra v3.2.0 - Community Edition - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

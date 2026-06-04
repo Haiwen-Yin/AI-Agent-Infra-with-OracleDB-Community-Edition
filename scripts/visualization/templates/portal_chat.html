@@ -47,6 +47,8 @@ body{background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe U
 .msg.agent .bubble{background:var(--agent-bubble);border-bottom-left-radius:4px}
 .msg.user .bubble{background:var(--user-bubble);border-bottom-right-radius:4px}
 .msg .bubble .time{font-size:.7rem;color:var(--text-secondary);margin-top:4px}
+.restart-btn{opacity:0;transition:opacity .2s;background:rgba(233,69,96,.12);color:#e94560;border:1px solid rgba(233,69,96,.25);border-radius:4px;padding:2px 8px;font-size:.72rem;cursor:pointer;margin-left:8px}
+.msg:hover .restart-btn{opacity:1}
 .welcome-msg{text-align:center;padding:40px 20px;color:var(--text-secondary)}
 .welcome-msg h4{color:var(--accent);font-size:1.1rem;margin-bottom:8px}
 .welcome-msg p{font-size:.85rem}
@@ -149,7 +151,7 @@ function loadHistory(){
     container.innerHTML='';
     if(d.messages&&d.messages.length){
       d.messages.forEach(function(m){
-        appendMessage(m.role,m.content,m.timestamp);
+        appendMessage(m.role,m.content,m.timestamp,m.context_id);
       });
     }else{
       container.innerHTML='<div class="welcome-msg"><h4><span data-zh>开始新对话</span><span data-en>Start a conversation</span></h4><p><span data-zh>输入消息开始与你的 Agent 对话</span><span data-en>Type a message to start chatting with your Agent</span></p></div>';
@@ -158,14 +160,19 @@ function loadHistory(){
   loadSessions();
 }
 
-function appendMessage(role,content,ts){
+function appendMessage(role,content,ts,messageId){
   var container=document.getElementById('messages');
   var welcome=container.querySelector('.welcome-msg');
   if(welcome)welcome.remove();
   var div=document.createElement('div');
   div.className='msg '+(role==='user'?'user':'agent');
   var avatarText=role==='user'?'U':'A';
-  div.innerHTML='<div class="avatar">'+avatarText+'</div><div class="bubble">'+escapeHtml(content)+'<div class="time">'+escapeHtml(formatTime(ts))+'</div></div>';
+  var restartBtn='';
+  if(role==='user'&&messageId){
+    var isZh=document.documentElement.getAttribute('data-lang')==='zh';
+    restartBtn='<button class="restart-btn" onclick="forkFromMessage(\''+escapeHtml(messageId).replace(/'/g,"\\'")+'\')">'+(isZh?'↺ 重新开始':'↺ Restart')+'</button>';
+  }
+  div.innerHTML='<div class="avatar">'+avatarText+'</div><div class="bubble">'+escapeHtml(content)+restartBtn+'<div class="time">'+escapeHtml(formatTime(ts))+'</div></div>';
   container.appendChild(div);
   container.scrollTop=container.scrollHeight;
 }
@@ -186,6 +193,20 @@ function sendMessage(){
     document.getElementById('typingIndicator').style.display='none';
     if(d.success){
       appendMessage('agent',d.reply,d.timestamp);
+      if(d.user_context_id){
+        var userMsgs=document.querySelectorAll('.msg.user .bubble');
+        if(userMsgs.length){
+          var lastBubble=userMsgs[userMsgs.length-1];
+          if(!lastBubble.querySelector('.restart-btn')){
+            var isZh=document.documentElement.getAttribute('data-lang')==='zh';
+            var btn=document.createElement('button');
+            btn.className='restart-btn';
+            btn.textContent=isZh?'↺ 重新开始':'↺ Restart';
+            btn.onclick=function(){forkFromMessage(d.user_context_id)};
+            lastBubble.insertBefore(btn,lastBubble.querySelector('.time'));
+          }
+        }
+      }
       loadSessions();
     }else{
       appendMessage('agent','Error: '+(d.error||'Unknown error'),new Date().toISOString());
@@ -213,6 +234,21 @@ function newChat(){
       loadSessions();
     }
   }).catch(function(){});
+}
+
+function forkFromMessage(contextId){
+  var isZh=document.documentElement.getAttribute('data-lang')==='zh';
+  if(!confirm(isZh?'从此处开始新的探索分支？':'Start a new exploration branch from this point?'))return;
+  fetch('/portal/api/chat/new',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fork_context_id:contextId})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.success){
+      loadHistory();
+      loadSessions();
+    }
+  }).catch(function(e){alert('Error: '+e.message)});
 }
 
 function switchSession(wsId){

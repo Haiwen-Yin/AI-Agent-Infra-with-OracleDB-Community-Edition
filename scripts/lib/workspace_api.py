@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Workspace API
+"""AI Agent Infra v3.2.0 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.
@@ -137,6 +137,7 @@ def save_context(
     context_data: Any,
     session_id: Optional[str] = None,
     parent_context_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
 ) -> str:
     """Save a context entry to the workspace context chain."""
     ctx_id_sql = "'CTX_' || RAWTOHEX(SYS_GUID())"
@@ -144,8 +145,8 @@ def save_context(
     sql = f"""
         INSERT INTO WORKSPACE_CONTEXT (CONTEXT_ID, WORKSPACE_ID, AGENT_ID,
                                        SESSION_ID, CONTEXT_TYPE, CONTEXT_DATA,
-                                       PARENT_CONTEXT_ID, CREATED_AT)
-        VALUES ({ctx_id_sql}, :wid, :aid, :sid, :ctype, :cdata, :pcid, SYSTIMESTAMP)
+                                       PARENT_CONTEXT_ID, BRANCH_ID, CREATED_AT)
+        VALUES ({ctx_id_sql}, :wid, :aid, :sid, :ctype, :cdata, :pcid, :vbrid, SYSTIMESTAMP)
         RETURNING CONTEXT_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -155,24 +156,38 @@ def save_context(
         "ctype": context_type,
         "cdata": data_val,
         "pcid": parent_context_id,
+        "vbrid": branch_id,
     }, id_column="CONTEXT_ID")
 
 
 def get_context_chain(
     workspace_id: str,
     limit: int = 10,
+    branch_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Return the latest context entries for a workspace."""
-    sql = """
-        SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
-               CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
-               TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
-        FROM WORKSPACE_CONTEXT
-        WHERE WORKSPACE_ID = :wid
-        ORDER BY CREATED_AT DESC
-        FETCH FIRST :lim ROWS ONLY
-    """
-    rows = execute_query(sql, {"wid": workspace_id, "lim": limit})
+    if branch_id:
+        sql = """
+            SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
+                   CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            FROM WORKSPACE_CONTEXT
+            WHERE WORKSPACE_ID = :wid AND BRANCH_ID = :vbrid
+            ORDER BY CREATED_AT DESC
+            FETCH FIRST :lim ROWS ONLY
+        """
+        rows = execute_query(sql, {"wid": workspace_id, "lim": limit, "vbrid": branch_id})
+    else:
+        sql = """
+            SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
+                   CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
+                   TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
+            FROM WORKSPACE_CONTEXT
+            WHERE WORKSPACE_ID = :wid
+            ORDER BY CREATED_AT DESC
+            FETCH FIRST :lim ROWS ONLY
+        """
+        rows = execute_query(sql, {"wid": workspace_id, "lim": limit})
     return [_row_to_dict(r) for r in rows]
 
 
@@ -206,6 +221,8 @@ def create_handoff_session(
 
     Returns the new session_id.
     """
+    from .branch_api import fork_branch
+
     ws = get_workspace(workspace_id)
     if ws is None:
         raise ValueError(f"Workspace not found: {workspace_id}")
@@ -213,13 +230,24 @@ def create_handoff_session(
     latest_ctx = get_latest_context(workspace_id)
     current_session_id = ws.get("current_session_id")
 
+    branch_id = fork_branch(
+        workspace_id=workspace_id,
+        fork_context_id=latest_ctx["context_id"] if latest_ctx else None,
+        branch_name=f"handoff-to-{new_agent_id}",
+        branch_type="HANDOFF",
+        agent_id=new_agent_id,
+        source_agent_id=ws.get("current_agent_id"),
+        purpose=f"Handoff from {ws.get('current_agent_id', '?')} to {new_agent_id}",
+        fork_session_id=current_session_id,
+    )
+
     session_id_sql = "'SES_' || RAWTOHEX(SYS_GUID())"
     sql = f"""
         INSERT INTO AGENT_SESSION (SESSION_ID, AGENT_ID, WORKSPACE_ID,
                                    PREDECESSOR_SESSION_ID, OWNER_USER_ID,
-                                   IS_ACTIVE, START_TIME, CONTEXT)
+                                   IS_ACTIVE, START_TIME, CONTEXT, BRANCH_ID)
         VALUES ({session_id_sql}, :aid, :wid, :pred, :owner,
-                'Y', SYSTIMESTAMP, :ctx)
+                'Y', SYSTIMESTAMP, :ctx, :vbrid)
         RETURNING SESSION_ID INTO :ret_id
     """
     new_session_id = execute_insert_returning_id(sql, {
@@ -228,6 +256,7 @@ def create_handoff_session(
         "pred": current_session_id,
         "owner": ws.get("owner_user_id"),
         "ctx": json.dumps(handoff_data) if isinstance(handoff_data, (dict, list)) else handoff_data,
+        "vbrid": branch_id,
     }, id_column="SESSION_ID")
 
     save_context(
@@ -237,6 +266,7 @@ def create_handoff_session(
         context_data=handoff_data or {},
         session_id=new_session_id,
         parent_context_id=latest_ctx.get("context_id") if latest_ctx else None,
+        branch_id=branch_id,
     )
 
     update_workspace(

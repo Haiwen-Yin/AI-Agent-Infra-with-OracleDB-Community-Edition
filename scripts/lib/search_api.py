@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Community Edition - Unified Search API
+"""AI Agent Infra v3.2.0 - Community Edition - Unified Search API
 
 Single entry point for AI agents to search across all data types and modalities.
 Agents choose search strategy based on scenario:

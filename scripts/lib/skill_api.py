@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.1.0 - Skill Storage & Distribution API"""
+"""AI Agent Infra v3.2.0 - Skill Storage & Distribution API"""
 
 import json
 from typing import Any, Dict, List, Optional
@@ -191,10 +191,6 @@ def update_skill(skill_id: str, **kwargs: Any) -> bool:
 
 def delete_skill(skill_id: str) -> bool:
     delete_resource(skill_id)
-    execute(
-        "DELETE FROM SKILL_ACCESS_TOKEN WHERE SKILL_ID = :veid",
-        {"veid": skill_id},
-    )
     affected = execute(
         "DELETE FROM ENTITIES WHERE ENTITY_ID = :veid AND ENTITY_TYPE = 'SKILL'",
         {"veid": skill_id},

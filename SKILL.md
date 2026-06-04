@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.1.0
+version: v3.2.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.1.0 - AI Agent的基础设施架构"
-tags: [oracle, ai-agent, infrastructure, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, jrd, duality-view, spec-driven, elastic-agent, collaboration, skill]
+description: "AI Agent Infra with OracleDB - Community Edition v3.2.0 - AI Agent的基础设施架构"
+tags: [oracle, ai-agent, infrastructure, community, skill-distribution, encrypted-config, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.1.0
+# AI Agent Infra with OracleDB - Community Edition v3.2.0
 
 **Author:** Haiwen Yin
-**Version:** v3.1.0 - 2026-05-28
+**Version:** v3.2.0 - 2026-06-03
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -18,7 +18,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ```
 +-----------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                     |
-|                   Community Edition v3.0.0                      |
+|                   Enterprise Edition v3.2.0                     |
 +-----------------------------------------------------------------+
 |                                                                 |
 |  +-----------------------------------------------------------+  |
@@ -52,21 +52,245 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 +-----------------------------------------------------------------+
 ```
 
-## v3.1.0 Key Addition: Skill Storage & Distribution
+## Community Edition Features (v3.2.0)
+
+### 2. Skill Storage & Distribution
+
+Database-backed Skill registry with resource distribution.
 
 | Component | Description |
 |-----------|-------------|
 | **SKILL_META** | Reference-partitioned from ENTITIES subtype `SKILL`; stores text content, resource URI, runtime, parameters, dependencies |
 | **SKILL_DV** | JRD updatable duality view for Skill entities |
 | **skill_api.py** | 8 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate |
-| **SKILL_MANAGER** PL/SQL | 6 subprograms: create, get, update, resolve_dependencies, validate, deprecate |
-| **Skills page** | `/skills` web visualization with list/detail view |
+| **SKILL_MANAGER** PL/SQL | 6 subprograms: CRUD, dependency resolution, validation |
 
-**Community Skill Access Flow:**
-1. `get_skill(skill_id)` → text content + `resource_uri` (directly accessible shared address)
-2. Download resource from `resource_uri` directly
+**Community Edition** Skill access provides `resource_uri` directly for download.
 
-**Enterprise Edition** additionally offers one-time token secure distribution via `skill_token_api.py`.
+### 3. Encrypted Database Credentials
+
+Local database connection information is encrypted at rest in config.json.
+
+| Component | Description |
+|-----------|-------------|
+| **connection_crypto.py** | 5 functions: encrypt/decrypt section, rotate key, auto-encrypt, get master key |
+| **ConfigEncryption** class | PBKDF2-HMAC-SHA512 key derivation + AES-256-GCM authenticated encryption |
+| **config.py** | Auto-detects encrypted `_encrypted` field; decrypts transparently; auto-upgrades plaintext |
+| **Master key source** | `MASTER_DB_KEY` env var > `~/.oracle-infra/master.key` file > auto-generate on first run |
+
+### 4. Workspace Context Audit
+
+Detect agent idle patterns, context similarity violations, data leaks, access anomalies, and cross-boundary breaches.
+
+| Component | Description |
+|-----------|-------------|
+| **IDLE_PATTERN_DETECT_JOB** | Hourly, detect idle agents beyond configurable timeout |
+| **compute_context_similarity** | Embedding-based cosine similarity between entity pairs |
+| **/audit web page** | Overview stats + event list + event detail with resolution status badges |
+
+**Audit Types:** RULE_VIOLATION, CONTEXT_SIMILARITY, IDLE_PATTERN, ACCESS_ANOMALY, DATA_LEAK
+
+**Resolution Statuses:** OPEN, ACKNOWLEDGED, RESOLVED, FALSE_POSITIVE, ESCALATED
+
+## Context Branching
+
+Context Branching enables forking, merging, abandoning, and resuming conversation context branches within a workspace. This supports two core scenarios:
+
+### Branch Lifecycle
+
+```
+fork → work → merge (success) → branch merged into target
+fork → work → abandon (failure) → branch preserved as lesson reference
+fork → work → pause → resume → continue work
+```
+
+### Key APIs
+
+| API | Description |
+|-----|-------------|
+| `fork_branch(workspace_id, fork_context_id, branch_type, branch_name)` | Create a new branch from an existing context point |
+| `merge_branch(source_branch_id, target_branch_id)` | Merge source branch into target; auto-detect conflicts |
+| `abandon_branch(branch_id)` | Mark branch as ABANDONED (read-only, preserved as lesson) |
+| `pause_branch(branch_id)` | Temporarily suspend work on a branch |
+| `resume_branch(branch_id)` | Resume a paused branch |
+| `diff_branches(branch_id_1, branch_id_2)` | Compare two branches and return differences |
+| `detect_conflicts(source_branch_id, target_branch_id)` | Auto-detect entity conflicts between branches |
+| `mark_as_lesson(branch_id)` | Manually mark a branch as a lesson reference |
+| `extract_lessons(workspace_id)` | Automatically extract learnings from abandoned branches |
+
+### Branch Types
+
+| Type | Use Case |
+|------|----------|
+| EXPLORATION | Try a new approach or direction |
+| ROLLBACK | Roll back to a prior context point and try again |
+| HANDOFF | Hand off work from one agent to another |
+| PARALLEL | Multiple agents working on different branches simultaneously |
+
+### BRANCH_POINT Context Type
+
+When a branch is forked, a `BRANCH_POINT` context entry is created in `WORKSPACE_CONTEXT` at the fork point. This marks the exact position where the branch diverged from the parent. The `WORKSPACE_CONTEXT.BRANCH_ID` column links all subsequent context entries to their branch.
+
+### Usage: Single-Agent Rollback
+
+```python
+from lib.branch_api import fork_branch, merge_branch, abandon_branch, mark_as_lesson
+
+# Agent hits a dead end — fork from a prior checkpoint
+branch = fork_branch(
+    workspace_id="WS_001",
+    fork_context_id="CTX_042",  # The checkpoint to fork from
+    branch_type="ROLLBACK",
+    branch_name="try-alternative-approach"
+)
+
+# ... agent works on the branch ...
+
+# If successful, merge back
+merge_branch(source_branch_id=branch["branch_id"], target_branch_id="main")
+
+# If failed, abandon and preserve as lesson
+abandon_branch(branch_id=branch["branch_id"])
+mark_as_lesson(branch_id=branch["branch_id"])
+```
+
+### Usage: Multi-Agent Handoff
+
+```python
+from lib.branch_api import fork_branch, merge_branch
+
+# Agent A forks a branch for Agent B
+branch_b = fork_branch(
+    workspace_id="WS_001",
+    fork_context_id="CTX_050",
+    branch_type="HANDOFF",
+    branch_name="agent-b-task"
+)
+
+# Agent B works on branch_b, Agent A continues on main
+# ... later, Agent B completes and merges back
+merge_branch(source_branch_id=branch_b["branch_id"], target_branch_id="main")
+```
+
+### Lesson Extraction from Abandoned Branches
+
+```python
+from lib.branch_api import extract_lessons
+
+# Automatically extract learnings from all abandoned branches in a workspace
+lessons = extract_lessons(workspace_id="WS_001")
+# Returns: list of lesson objects with failure reasons, attempted paths, key decision points
+```
+
+### Components
+
+| Component | Description |
+|-----------|-------------|
+| **CONTEXT_BRANCHES** table | Branch metadata and lifecycle (type, status, fork point, parent relationship) |
+| **BRANCH_MERGE_LOG** table | Merge history with conflict details (COMPLETED/CONFLICT/ROLLED_BACK) |
+| **BRANCH_COMPARISON** view | Unified comparison of two branches |
+| **BRANCH_MANAGER** PL/SQL | 11 subprograms: fork/merge/abandon/pause/resume/diff/conflicts/lesson/fork-for-spec/validate-for-spec/fork-parallel |
+| **branch_api.py** | Python API for full branch lifecycle + parallel branch operations |
+| **/api/branch/*** | 17+ HTTP endpoints for branch operations |
+| **/branches** | Dashboard page for branch management |
+| **Portal "Restart from here"** | Fork from any chat message |
+| **BRANCH_CLEANUP_JOB** | Daily cleanup of abandoned branches and orphaned references |
+
+## Multi-Agent Collaboration
+
+Multi-Agent Collaboration integrates Collaboration Groups with Branches, SDD (Spec), Task Plans, and Harness for coordinated multi-agent workflows. Five layers work together: **Spec** defines the goal, **Collaboration Group** organizes agents, **Branch** isolates exploration, **Task Plan** distributes execution, and **Harness** provides tools.
+
+### Key APIs
+
+| API | Module | Description |
+|-----|--------|-------------|
+| `create_collab_group(branch_id, spec_id)` | collab_api | Create group associated with a branch and spec |
+| `add_group_member(branch_id)` | collab_api | Add member with their branch |
+| `get_member_branches(group_id)` | collab_api | Get all members' branch info |
+| `validate_group_against_spec(group_id)` | collab_api | Validate group progress against spec |
+| `sync_group_context(group_id)` | collab_api | Sync member branch summaries to shared workspace |
+| `fork_parallel_branches(workspace_id, agent_ids)` | branch_api | Create PARALLEL branches for multiple agents |
+| `merge_parallel_branches(source_branch_ids, target_branch_id)` | branch_api | Merge multiple parallel branches with conflict detection |
+| `get_parallel_diff(branch_ids)` | branch_api | Pairwise diff of parallel branches |
+| `add_step(assigned_agent_id)` | task_plan_api | Assign a plan step to a specific agent |
+| `distribute_plan_to_group(plan_id, group_id)` | task_plan_api | Distribute steps to group members round-robin |
+| `create_spec_for_group(title, group_id)` | spec_api | Create a spec for a collaboration group |
+| `validate_group_progress(spec_id, group_id)` | spec_api | Validate group's overall spec progress |
+| `share_harness_to_group(entity_id, group_id)` | harness_api | Share a harness template to a group |
+| `instantiate_harness_for_member(entity_id, member_agent_id, group_id)` | harness_api | Instantiate harness for a group member |
+
+### Schema Additions
+
+| Table | Column | Description |
+|-------|--------|-------------|
+| COLLAB_GROUPS | BRANCH_ID | Links group to its branch context |
+| COLLAB_GROUPS | SPEC_ID | Links group to its spec |
+| COLLAB_GROUP_MEMBERS | BRANCH_ID | Links member to their branch |
+| TASK_STEPS | ASSIGNED_AGENT_ID | Assigns step to specific agent |
+| TASK_PLANS | BRANCH_ID | Links plan to its branch |
+| SPEC_META | BRANCH_ID | Links spec to its branch |
+
+### Usage: Multi-Agent Parallel Exploration
+
+```python
+from lib import branch_api, collab_api, spec_api, task_plan_api
+
+# 1. Create spec defining the goal
+spec_id = spec_api.create_spec(title="API Design", acceptance_criteria=["design","implement","test"])
+
+# 2. Create collaboration group (coordinator + spec)
+group_id = collab_api.create_collab_group(
+    name="API Team", group_type="TEAM",
+    coordinator_agent_id="agent_lead", spec_id=spec_id
+)
+
+# 3. Fork parallel branches for each agent
+result = branch_api.fork_parallel_branches(
+    workspace_id="WS_001",
+    agent_ids=["agent_a", "agent_b", "agent_c"],
+    spec_id=spec_id
+)
+
+# 4. Add members with their branches
+for b in result["branches"]:
+    collab_api.add_group_member(group_id, b["agent_id"], branch_id=b["branch_id"])
+
+# 5. Create plan and distribute to group
+plan_id = task_plan_api.create_plan(agent_id="agent_lead", goal="Implement API")
+status = task_plan_api.get_plan(plan_id)["status"]
+task_plan_api.add_step(plan_id, status, "Design", 1, assigned_agent_id="agent_a")
+task_plan_api.add_step(plan_id, status, "Implement", 2, assigned_agent_id="agent_b")
+task_plan_api.add_step(plan_id, status, "Test", 3, assigned_agent_id="agent_c")
+
+# 6. Monitor: validate group against spec
+validation = collab_api.validate_group_against_spec(group_id)
+print(f"Pass rate: {validation['pass_rate']}")
+
+# 7. Merge successful branches
+branch_ids = [b["branch_id"] for b in result["branches"]]
+merge_result = branch_api.merge_parallel_branches(
+    source_branch_ids=branch_ids,
+    target_branch_id="trunk_branch_id"
+)
+```
+
+## Community vs Enterprise Feature Matrix
+
+| Feature | Community | Enterprise |
+|---------|-----------|------------|
+| Memory & Knowledge System | Yes | Yes |
+| 5-Signal Unified Search | Yes | Yes |
+| Spec Driven Development | Yes | Yes |
+| Agent Elastic Management | Yes | Yes |
+| Collaboration Groups | Yes | Yes |
+| Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
+| Workspace & Context | Yes | Yes |
+| Skill Storage & Distribution | Yes | Yes (secure token) |
+| Encrypted DB Credentials | No | Yes |
+| Workspace Context Audit | No | Yes |
+| License | Apache 2.0 | Apache 2.0 |
+
+---
 
 ## v2.3.2 Key Addition: Web UI Optimization
 
@@ -132,7 +356,7 @@ In-db embedding generation and vector search capabilities were omitted during th
 
 All agents connecting to the **same database** automatically share the same `DB_CRYPTO` encryption key (stored in `SYSTEM_CONFIG`). This means:
 
-- **Agent A** encrypts LDAP bind credential → `DB_CRYPTO.encrypt('ldap_password')`
+- **Agent A** encrypts credential value → `DB_CRYPTO.encrypt('secret_value')`
 - **Agent B** on a different server can decrypt it → `DB_CRYPTO.decrypt(ciphertext)`
 - No key files to copy, no environment variables to sync
 
@@ -150,7 +374,6 @@ All agents connecting to the **same database** automatically share the same `DB_
 | Data | Encryption | Key Location | Shared? |
 |------|-----------|--------------|---------|
 | `config.json` database credentials | `connection_crypto.py` | `~/.oracle-infra/master.key` or `MASTER_DB_KEY` env | No (per-server) |
-| `LDAP_CONFIG.BIND_CREDENTIAL` | `DB_CRYPTO` | `SYSTEM_CONFIG` table | Yes (all DB connections) |
 | `AGENT_CREDENTIALS.CREDENTIAL_VALUE` | `DB_CRYPTO` | `SYSTEM_CONFIG` table | Yes (all DB connections) |
 | `SYSTEM_USERS` password hash | PBKDF2-HMAC-SHA256 (one-way) | Salt stored in `SYSTEM_USERS` row | N/A (verify only) |
 
@@ -167,10 +390,8 @@ DECLARE
     v_plain VARCHAR2(4000);
     v_new_cipher VARCHAR2(4000);
 BEGIN
-    SELECT DB_CRYPTO.decrypt(BIND_CREDENTIAL) INTO v_plain FROM LDAP_CONFIG WHERE CONFIG_ID = 'LDAP_001';
     DB_CRYPTO.rotate_key();
     SELECT DB_CRYPTO.encrypt(v_plain) INTO v_new_cipher FROM DUAL;
-    UPDATE LDAP_CONFIG SET BIND_CREDENTIAL = v_new_cipher WHERE CONFIG_ID = 'LDAP_001';
     COMMIT;
 END;
 /
@@ -276,7 +497,6 @@ results = search("partition*", strategy="auto")
 | ENTITY_EMBEDDINGS | REFERENCE from ENTITIES |
 | SPEC_META | REFERENCE from ENTITIES [NEW v2.3.0] |
 | HARNESS_META | REFERENCE from ENTITIES |
-| SKILL_META | REFERENCE from ENTITIES [NEW v3.1.0] |
 | ENTITY_TAGS | REFERENCE from ENTITIES |
 | TASK_PLANS | RANGE by STATUS |
 | TASK_STEPS | REFERENCE from TASK_PLANS |
@@ -328,7 +548,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.1.0" or None,
+#   "schema_version": "3.2.0" or None,
 #   "table_count": 33,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -356,11 +576,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.1.0",
+  "schema_version": "3.2.0",
   "table_count": 33,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.1.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.2.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -369,8 +589,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.1.0
-Deployment aborted: existing deployment found. Schema version: 3.1.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.2.0
+Deployment aborted: existing deployment found. Schema version: 3.2.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -395,16 +615,42 @@ Agent receives Skill → check_deployment() → deployed?
 
 ## Quick Start
 
+### Prerequisites: Database User Authorization
+
+**CRITICAL: Database user authorization must be completed BEFORE deploying schema. Connect to the database as SYSDBA using sqlplus on the database server directly. DO NOT use SQLcl MCP or any remote client to connect as SYS — doing so can corrupt the PDB process state and cause ORA-00600 errors.**
+
+```sql
+-- Run on the database server as SYSDBA via sqlplus:
+-- sqlplus / as sysdba
+-- ALTER SESSION SET CONTAINER=<PDB_NAME>;
+
+GRANT CREATE JOB TO <db_user>;
+GRANT UNLIMITED TABLESPACE TO <db_user>;
+GRANT EXECUTE ON CTXSYS.CTX_DDL TO <db_user>;
+GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <db_user>;
+```
+
+| Privilege | Purpose |
+|-----------|---------|
+| `CREATE JOB` | Required by `3_jobs.sql` to create scheduler jobs |
+| `UNLIMITED TABLESPACE` | Required for partitioned tables and LOB storage |
+| `EXECUTE ON CTXSYS.CTX_DDL` | Required by `1_schema.sql` for Oracle Text CONTEXT index |
+
+**WARNING:**
+- Never use SQLcl MCP to connect as SYS or execute GRANT statements. This has been empirically shown to cause PDB process corruption (ORA-00600 [13272]).
+- All SYS-level operations must be performed via sqlplus on the database server.
+- SQLcl MCP is safe for schema deployment (`1_schema.sql`, `2_api.sql`, `3_jobs.sql`) and query/DML operations under the application user.
+
 ### Deploy Schema (3 Phases)
 
 ```sql
--- Phase 1: Schema (27 tables, 6 JRD views, indexes, property graph, seed data)
+-- Phase 1: Schema (tables, views, indexes, property graph, seed data)
 @scripts/deploy/1_schema.sql
 
--- Phase 2: PL/SQL Packages (8 packages: MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
+-- Phase 2: PL/SQL Packages
 @scripts/deploy/2_api.sql
 
--- Phase 3: Scheduler Jobs (12 jobs including DORMANT_AGENT_JOB, CREDENTIAL_CLEANUP_JOB, EMBEDDING_GENERATION_JOB)
+-- Phase 3: Scheduler Jobs
 @scripts/deploy/3_jobs.sql
 ```
 

@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.1.0
+# AI Agent Infra with OracleDB - Community Edition v3.2.0
 
-[![Version](https://img.shields.io/badge/version-v3.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.2.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-BSL_1.1-orange.svg)](LICENSE_ENTERPRISE)
 
-**AI Agent的基础设施架构 — Community Edition with Portal user system, Skill storage with direct resource distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
+**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Portal user system, LDAP authentication with auto-registration, Skill storage with secure token distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.1.0: Portal user system, encrypted credentials, inline detail expansion.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.2.0: Context Branching & Multi-Agent Collaboration — fork/merge/abandon/resume branches; coordinate multi-agent workflows with Branch+Spec+TaskPlan+Harness integration.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.1.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.2.0.md)**
 
 ---
 
@@ -54,8 +54,9 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 
 ### Portal Login (`/portal/login`)
 
-- Register/login dual-tab (local system user authentication)
-- Registration checks SYSTEM_USERS (case-insensitive) for duplicates
+- Register/login dual-tab with auth mode dropdown: "系统用户" / "LDAP 统一认证"
+- LDAP mode: authenticates via LDAP bind, auto-registers new users to SYSTEM_USERS
+- Registration checks SYSTEM_USERS (case-insensitive) + LDAP directory for duplicates
 - "进入管理页面" button in top-right corner
 
 ### Portal Chat (`/portal/chat`)
@@ -71,6 +72,7 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 | Config Key | Default | Description |
 |------------|---------|-------------|
 | `dormant_timeout_min` | 30 min | Agent idle beyond this → auto-recalled to POOL via `DORMANT_AGENT_JOB` |
+| `audit_idle_timeout_min` | 60 min | Idle beyond this → `IDLE_PATTERN` audit event (ENT) |
 | `session_timeout_min` | 60 min | Portal session timeout |
 
 Core logic: `LAST_ACTIVE_AT` older than `dormant_timeout_min` → `STATUS='POOL'`, `CURRENT_USER_ID=NULL`.
@@ -83,7 +85,7 @@ COMMIT;
 
 ### Admin Dashboard (`/login`)
 
-- Only LOCAL users can access admin Dashboard
+- Only LOCAL users can access admin Dashboard; LDAP users are rejected
 - All existing data management pages unchanged
 
 ### Encrypted Credentials
@@ -96,26 +98,34 @@ COMMIT;
 
 ### 2. Skill Storage & Distribution
 
-Database-backed Skill registry with direct resource access (no token flow).
+Database-backed Skill registry with secure one-time-token resource distribution (Enterprise) or direct access (Community).
 
 - **SKILL_META** — Reference-partitioned from ENTITIES subtype `SKILL`; includes `SKILL_DESCRIPTION`, `RESOURCE_SERVER_HOST` (hostname + IP)
 - **skill_api.py** — 9 functions: register, get, list, update (supports title+description), delete, resolve, validate, deprecate, upload_resource
 - **skill_parser.py** — ZIP package parser: `_meta.json` > YAML frontmatter > `## Metadata` section priority
 - **skill_storage.py** — File storage abstraction with server hostname+IP tracking, ZIP repack for download
 - **SKILL_DV** — JSON Relational Duality View for skill data (updatable)
+- **SKILL_MANAGER** PL/SQL — 6 subprograms with `RESOURCE_SERVER_HOST`/`SKILL_DESCRIPTION` params
+
+Skill creation flow (Dashboard):
+1. Upload ZIP → auto-parse metadata → editable form → confirm create
+2. Resource download: Dashboard direct download (no token); Agent API uses token flow
+
 Agent Skill Acquisition API (Python + HTTP):
 - `discover_skills()` → find relevant skills
 - `acquire_skill_text()` → get SKILL.md content (no token needed)
-- `acquire_skill_resource()` → get resource ZIP (direct download)
+- `acquire_skill_resource()` → get resource ZIP (COM: direct; ENT: token flow)
 - `acquire_skill_full()` → complete skill package
 
 HTTP endpoints (no auth required):
 - `GET /api/agent/skills?keyword=X&type=CUSTOM` → discover
 - `GET /api/agent/skill/{id}/acquire` → acquire text metadata
 
-Skill creation flow (Dashboard):
-1. Upload ZIP → auto-parse metadata → editable form → confirm create
-2. Resource download: Dashboard direct download (repack as `{skill_name}-{version}.zip`)
+Enterprise Skill access flow (Agent API):
+1. `get_skill(skill_id)` → text + generic resource_uri
+2. `request_skill_access(agent_id, session_id, skill_id)` → one-time token
+3. `consume_skill_token(token_id)` → HTTP presigned URL
+4. Download from presigned URL
 
 ### 3. Encrypted Database Credentials
 
@@ -123,23 +133,41 @@ Database connection info encrypted at rest in config.json with auto-upgrade from
 
 - **connection_crypto.py** — Encrypt/decrypt config sections, rotate key, auto-encrypt
 - **ConfigEncryption** — PBKDF2-HMAC-SHA512 + authenticated encryption (AES-256-GCM style)
-- **encrypt_config.py** — CLI: encrypt, decrypt, rotate-key, verify
 - **Master key** — env var > keyfile > auto-generate
 
-### 4. Workspace Context Audit
+### 5. Context Branching
 
-Detect agent inefficiency: idle patterns, token waste, off-topic context, anomalies.
+Fork, merge, abandon, and resume conversation context branches within a workspace.
 
-- **CONTEXT_AUDIT_LOG** — RANGE-partitioned (monthly); audit types: EFFICIENCY, RELEVANCE, TOKEN_WASTE, ANOMALY, IDLE, OFF_TOPIC
-- **audit_api.py** — 7 functions: audit, report, resolve, flagged, metrics, export
-- **CONTEXT_AUDIT_MANAGER** PL/SQL — 5 subprograms
-- **Detection** — Rule engine + embedding semantic analysis
+- **CONTEXT_BRANCHES** — Branch metadata and lifecycle (EXPLORATION/ROLLBACK/HANDOFF/PARALLEL types)
+- **BRANCH_MERGE_LOG** — Merge history with conflict details (COMPLETED/CONFLICT/ROLLED_BACK)
+- **BRANCH_COMPARISON** — View for comparing two branches
+- **BRANCH_MANAGER** PL/SQL — 11 subprograms: fork/merge/abandon/pause/resume/diff/conflicts/lesson/fork-for-spec/validate-for-spec/fork-parallel
+- **branch_api.py** — Python API for full branch lifecycle + parallel branch operations
+- **/api/branch/*** — 17+ HTTP endpoints
+- **/branches** — Dashboard branch management page
+- **Portal "Restart from here"** — Fork from any chat message
+- **BRANCH_CLEANUP_JOB** — Daily cleanup of abandoned branches
+
+### 6. Multi-Agent Collaboration
+
+Collaboration groups integrated with Branches, SDD (Spec), Task Plans, and Harness for coordinated multi-agent workflows.
+
+- **COLLAB_GROUPS.BRANCH_ID / SPEC_ID** — Groups associated with a branch and spec
+- **COLLAB_GROUP_MEMBERS.BRANCH_ID** — Members linked to their branch
+- **TASK_STEPS.ASSIGNED_AGENT_ID** — Plan steps assigned to specific agents
+- **fork_parallel_branches()** — Create PARALLEL branches for multiple agents simultaneously
+- **merge_parallel_branches()** — Merge multiple parallel branches with conflict detection
+- **distribute_plan_to_group()** — Assign plan steps to group members round-robin
+- **validate_group_against_spec()** — Validate group's overall progress against spec acceptance criteria
+- **sync_group_context()** — Sync member branch summaries to shared workspace
+- **share_harness_to_group() / instantiate_harness_for_member()** — Share and instantiate harness within group
 
 ---
 
 ## Editions
 
-| Feature | Community Edition | Enterprise Edition |
+| Feature | Community Edition | Community Edition |
 |---------|------------------|-------------------|
 | **Core Infrastructure** | | |
 | Memory System & Knowledge Graph | Yes | Yes |
@@ -147,7 +175,9 @@ Detect agent inefficiency: idle patterns, token waste, off-topic context, anomal
 | Spec Driven Development | Yes | Yes |
 | Agent Elastic Management | Yes | Yes |
 | Collaboration Groups | Yes | Yes |
+| Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
 | Workspace & Context Continuity | Yes | Yes |
+| Context Branching | Yes | Yes |
 | Property Graph API | Yes | Yes |
 | Harness Templates | Yes | Yes |
 | Web Visualization Dashboard | Yes | Yes |
@@ -158,31 +188,24 @@ Detect agent inefficiency: idle patterns, token waste, off-topic context, anomal
 | Agent Pool Assignment | Yes | Yes |
 | **Identity & Authentication** | | |
 | Local System User Auth | Yes | Yes |
-| LDAP Unified Authentication | No | Yes |
-| LDAP Auto-Registration | No | Yes |
-| LDAP Sync Job | No | Yes |
 | Admin Dashboard Isolation (LOCAL only) | Yes | Yes |
 | **Skill System** | | |
 | Skill CRUD (skill_api.py) | Yes | Yes |
-| Direct Resource Download | Yes | Yes |
-| Secure Token Distribution (skill_token_api.py) | No | Yes |
 | SKILL_TOKEN_CLEANUP_JOB | No | Yes |
 | **Security & Encryption** | | |
 | Encrypted config.json (DB credentials) | Yes | Yes |
-| Encrypted LDAP BIND_CREDENTIAL | N/A | Yes |
 | Encrypted AGENT_CREDENTIALS | Yes | Yes |
 | Master Key Management | Yes | Yes |
 | Data Masking | Yes | Yes |
 | **Audit & Compliance** | | |
-| Workspace Context Audit | No | Yes |
 | CONTEXT_AUDIT_LOG | No | Yes |
 | Audit Rule Engine + Embedding Detection | No | Yes |
 | IDLE_PATTERN_DETECT_JOB | No | Yes |
 | **Database** | | |
-| Tables | 28 | 33 |
-| PL/SQL Packages | 9 | 11 |
-| Scheduler Jobs | 12 | 16 |
-| **License** | Apache 2.0 | BSL 1.1 |
+| Tables | 37 | 42 |
+| PL/SQL Packages | 10 | 13 |
+| Scheduler Jobs | 13 | 17 |
+| **License** | Apache 2.0 | Apache 2.0 |
 
 ---
 
@@ -280,7 +303,7 @@ ai-agent-infra-enterprise/
       3_jobs.sql                # 12+ scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in templates
     lib/
-      config.py                 # Unified Config with encrypted DB + Enterprise
+      config.py                 # Unified Config with encrypted DB + LDAP + Enterprise
       connection.py             # oracledb connection pool (decrypts config)
       connection_crypto.py      # Config encryption/decryption/key rotation [ENT]
       memory_api.py             # Memory CRUD (8 functions)
@@ -297,18 +320,18 @@ ai-agent-infra-enterprise/
       search_api.py             # Unified search (3 functions)
       skill_api.py              # Skill CRUD [shared] (Phase 3)
       skill_acquire_api.py   # Agent skill discovery & acquisition [shared] (Phase 3)
-      audit_api.py              # Context audit [ENT] (Phase 4)
+      skill_acquire_api.py   # Agent skill acquisition [shared] (Phase 3)
+      branch_api.py            # Context branching lifecycle (9 functions)
     tools/
-      encrypt_config.py         # CLI config encryption tool [ENT]
     tests/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.1.0
+      server.py                 # HTTP server v3.2.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/
-  config.json                  # Encrypted database + Enterprise config
+  config.json                  # Encrypted database + LDAP + Enterprise config
   LICENSE_ENTERPRISE           # Apache 2.0
   SKILL.md
   README.md
@@ -318,7 +341,9 @@ ai-agent-infra-enterprise/
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE)
+Apache License 2.0 — see [LICENSE_ENTERPRISE](LICENSE_ENTERPRISE)
+
+Non-production use is free.
 
 ## Author
 
