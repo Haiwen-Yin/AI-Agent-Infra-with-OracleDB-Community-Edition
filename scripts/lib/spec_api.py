@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Spec API
+"""AI Agent Infra v3.3.0 - Community Edition - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """
@@ -164,7 +164,8 @@ def list_specs(
     where = " AND ".join(conditions)
     sql = f"""
         SELECT e.ENTITY_ID, e.TITLE, e.CATEGORY, e.STATUS, e.IMPORTANCE,
-               sm.SPEC_VERSION, sm.SPEC_STATUS, sm.SPEC_SCOPE, sm.COMPLEXITY
+               sm.SPEC_VERSION, sm.SPEC_STATUS, sm.SPEC_SCOPE, sm.COMPLEXITY,
+               sm.BRANCH_ID
         FROM ENTITIES e
         JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID
                           AND sm.ENTITY_TYPE = e.ENTITY_TYPE

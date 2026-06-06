@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Agent API
+"""AI Agent Infra v3.3.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.

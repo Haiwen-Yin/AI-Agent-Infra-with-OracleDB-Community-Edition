@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.3.0 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -54,6 +54,15 @@ def get_connection():
     finally:
         pool.release(conn)
 
+
+_current_agent_id: Optional[str] = None
+
+def set_agent_context(agent_id: str) -> None:
+    global _current_agent_id
+    _current_agent_id = agent_id
+
+def get_current_agent_id() -> Optional[str]:
+    return _current_agent_id
 
 def close_pool():
     global _pool

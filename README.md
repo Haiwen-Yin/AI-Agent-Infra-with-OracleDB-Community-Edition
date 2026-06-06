@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.2.0
+# AI Agent Infra with OracleDB - Community Edition v3.3.0
 
-[![Version](https://img.shields.io/badge/version-v3.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.3.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-BSL_1.1-orange.svg)](LICENSE_ENTERPRISE)
 
 **AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Portal user system, LDAP authentication with auto-registration, Skill storage with secure token distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.2.0: Context Branching & Multi-Agent Collaboration — fork/merge/abandon/resume branches; coordinate multi-agent workflows with Branch+Spec+TaskPlan+Harness integration.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.3.0: Context Branching & Multi-Agent Collaboration — fork/merge/abandon/resume branches; coordinate multi-agent workflows with Branch+Spec+TaskPlan+Harness integration.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.2.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.3.0.md)**
 
 ---
 
@@ -272,7 +272,7 @@ export MEMORY_DB_DSN=<db_host>:<db_port>/<db_service>
 Or encrypt manually:
 
 ```bash
-cd scripts && python -m tools.encrypt_config encrypt
+cd scripts && python -c "from lib.connection_crypto import auto_encrypt_config; auto_encrypt_config()"
 ```
 
 ### 4. Run Tests
@@ -327,7 +327,7 @@ ai-agent-infra-enterprise/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.2.0
+      server.py                 # HTTP server v3.3.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

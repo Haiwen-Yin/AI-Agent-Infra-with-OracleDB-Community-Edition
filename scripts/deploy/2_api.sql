@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.2.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.3.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1338,7 +1338,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.2.0 API Deployment Complete
+PROMPT AI Agent Infra v3.3.0 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -1453,7 +1453,7 @@ CREATE OR REPLACE PACKAGE BODY DB_CRYPTO AS
     END rotate_key;
 END DB_CRYPTO;
 
-PROMPT Package: BRANCH_MANAGER [NEW v3.2.0]
+PROMPT Package: BRANCH_MANAGER [NEW v3.3.0]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE BRANCH_MANAGER AS
@@ -2074,5 +2074,5 @@ END BRANCH_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.2.0 - Community Edition API Deployment Complete
+PROMPT AI Agent Infra v3.3.0 - Community Edition API Deployment Complete
 PROMPT ============================================================

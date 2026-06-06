@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Workspace API
+"""AI Agent Infra v3.3.0 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.
@@ -130,6 +130,27 @@ def update_workspace(workspace_id: str, **kwargs: Any) -> bool:
     return execute(sql, params) > 0
 
 
+def _sanitize_context_data(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    sensitive_keys = {
+        'password', 'passwd', 'secret', 'credential', 'token',
+        'api_key', 'apikey', 'private_key', 'access_key',
+        'dsn', 'connection_string', 'db_url', 'database_url',
+        'master_key', 'encryption_key', 'auth_header',
+    }
+    sanitized = {}
+    for k, v in data.items():
+        kl = k.lower()
+        if any(sk in kl for sk in sensitive_keys):
+            sanitized[k] = '[REDACTED]'
+        elif isinstance(v, dict):
+            sanitized[k] = _sanitize_context_data(v)
+        else:
+            sanitized[k] = v
+    return sanitized
+
+
 def save_context(
     workspace_id: str,
     agent_id: str,
@@ -139,7 +160,12 @@ def save_context(
     parent_context_id: Optional[str] = None,
     branch_id: Optional[str] = None,
 ) -> str:
-    """Save a context entry to the workspace context chain."""
+    """Save a context entry to the workspace context chain.
+
+    Sensitive fields in context_data (password, token, credential, dsn, etc.)
+    are automatically redacted to prevent credential leakage into the database.
+    """
+    context_data = _sanitize_context_data(context_data)
     ctx_id_sql = "'CTX_' || RAWTOHEX(SYS_GUID())"
     data_val = json.dumps(context_data) if isinstance(context_data, (dict, list)) else context_data
     sql = f"""

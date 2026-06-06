@@ -1,4 +1,4 @@
--- AI Agent Infra v3.2.0 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.3.0 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -238,13 +238,14 @@ WHERE JOB_NAME IN (
     'MEMORY_FUSION_JOB', 'KNOWLEDGE_EXTRACTION_JOB', 'KNOWLEDGE_REVIEW_JOB',
     'SESSION_CLEANUP_JOB', 'ACCESS_LOG_PURGE_JOB', 'ENTITY_ARCHIVE_JOB', 'COLLAB_EXPIRY_JOB',
     'WORKSPACE_CLEANUP_JOB', 'STALE_WORKSPACE_DETECT_JOB',
-    'DORMANT_AGENT_JOB', 'CREDENTIAL_CLEANUP_JOB', 'EMBEDDING_GENERATION_JOB'
+    'DORMANT_AGENT_JOB', 'CREDENTIAL_CLEANUP_JOB', 'EMBEDDING_GENERATION_JOB',
+    'BRANCH_CLEANUP_JOB'
 )
 ORDER BY JOB_NAME;
 
 
 PROMPT ============================================================
-PROMPT Job: BRANCH_CLEANUP_JOB [NEW v3.2.0]
+PROMPT Job: BRANCH_CLEANUP_JOB [NEW v3.3.0]
 PROMPT ============================================================
 
 BEGIN
@@ -263,4 +264,4 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.2.0 - Community Edition - Phase 3: Scheduler Jobs Complete (12 jobs)
+PROMPT AI Agent Infra v3.3.0 - Community Edition - Phase 3: Scheduler Jobs Complete (13 jobs)

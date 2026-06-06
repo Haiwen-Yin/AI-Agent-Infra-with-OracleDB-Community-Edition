@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Knowledge API
+"""AI Agent Infra v3.3.0 - Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.

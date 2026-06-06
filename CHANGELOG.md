@@ -10,6 +10,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.0] - 2026-06-05
+
+### Summary
+
+**Database Access Security & UI Visualization** — Five-plus-one-layer database access security model (Skill Policy, Restricted DB User, AUTHID DEFINER, VPD Row-Level Security, Unified Auditing, Credential Sanitization). Enhanced UI visualization with linked Spec/Plan/Branch info across Branches, Specs, and Collab pages. Multi-Agent Collaboration model completed with full integration across Spec, Collab Group, Branch, Task Plan, and Harness layers.
+
+### Security - Both Editions
+
+- **SKILL.md Database Access Policy** — Explicit policy prohibiting direct SQL/DML/DDL operations except during initial deployment; all data operations must go through Python API or PL/SQL packages
+- **`_sanitize_context_data()`** — `save_context()` now automatically redacts sensitive fields (password, token, credential, dsn, api_key, secret, private_key, etc.) from context_data before storing in WORKSPACE_CONTEXT; supports nested dicts
+- **`4_grants.sql`** — New deployment script creating restricted `AGENT_API` database user with EXECUTE-only on PL/SQL packages and SELECT-only on tables (no direct DML/DDL)
+- **`5_audit_policy.sql`** — New deployment script creating Unified Auditing policy `DIRECT_DML_BYPASS_DETECTION` that audits direct DML on critical tables by non-schema-owner users
+- **`6_vpd_policy.sql`** — New deployment script creating VPD (DBMS_RLS) row-level security policies: `WS_CTX_AGENT_VPD` restricts WORKSPACE_CONTEXT to agent's workspaces; `ENTITIES_VISIBILITY_VPD` enforces PRIVATE/SHARED/PUBLIC visibility; includes `SET_AGENT_CONTEXT` package for session-level agent identification
+- **All PL/SQL packages verified AUTHID DEFINER** — Ensures restricted users execute package logic with schema owner privileges, enforcing business rules
+- **`connection.py`** — Added `set_agent_context()`/`get_current_agent_id()` for VPD session context
+
+### UI Visualization - Both Editions
+
+- **Branches page** — Detail rows show linked Spec and Plan info (fetched via `/api/branch/{id}/spec` and `/api/branch/{id}/plans`); `loadBranchSpecPlan()` auto-loads on detail expand
+- **Specs page** — New Branch column showing linked branch ID for specs with branch context
+- **Collab page** — New Branch/Spec columns showing group's associated branch and spec
+- **`/api/branch/{id}/spec`** — New GET endpoint returning specs linked to a branch (JOINs ENTITIES for TITLE)
+
+### Fixed - Both Editions
+
+- **`loadBranches()` missing `async`** — Function used `await` but was not declared `async`, causing JS error and infinite spinner
+- **`buildDetail()` undefined `i` variable** — Changed to `buildDetail(b,idx)` with explicit index parameter
+- **`/api/branch/{id}/spec` SQL error ORA-00904** — TITLE column does not exist in SPEC_META; changed to JOIN ENTITIES table
+- **4_grants.sql** — Removed bogus `GRANT EXECUTE ON AIADMIN.BODY` and `CREATE SYNONYM AGENT_API.BODY` lines (BODY is not a valid package)
+- **DB_CRYPTO PL/SQL** — Removed duplicate variable declarations (CK_KEY, CK_SALT, C_ALG) that would cause PLS-00371 compilation error
+- **3_jobs.sql** — Removed INSERT INTO SYSTEM_LOGS references (table doesn't exist) from DORMANT_AGENT_JOB and CREDENTIAL_CLEANUP_JOB
+- **1_schema.sql** — Moved CONTEXT_BRANCHES table definition before SPEC_META and WORKSPACE_CONTEXT (was causing ORA-00942 on FK references)
+- **SPEC_META** — Added missing BRANCH_ID column (FK constraint existed but column was missing)
+- **TASK_STEPS** — Added missing ASSIGNED_AGENT_ID column (FK constraint existed but column was missing)
+- **COM agent_api.py** — Restored DB_CRYPTO.encrypt/decrypt (was incorrectly removed)
+- **COM config.py/security.py** — Restored connection_crypto imports (shared between editions)
+- **COM connection_crypto.py** — Restored (shared between editions, NOT ENT-only)
+- **COM 2_api.sql** — Restored DB_CRYPTO package (shared between editions)
+- **COM branches.html** — Fixed "Enterprise Edition" label to "Community Edition"; removed /audit link (ENT-only)
+
+### Removed - Both Editions
+
+- **__pycache__ and .pyc files** — Cleaned from all directories
+
+---
+
 ## [3.2.0] - 2026-06-03
 
 ### Summary
@@ -56,16 +102,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **1_schema.sql** — Moved CONTEXT_BRANCHES table definition before SPEC_META and WORKSPACE_CONTEXT (was causing ORA-00942 on FK references)
 - **SPEC_META** — Added missing BRANCH_ID column (FK constraint existed but column was missing)
 - **TASK_STEPS** — Added missing ASSIGNED_AGENT_ID column (FK constraint existed but column was missing)
-- **RELEASE_NOTES_v3.0.0.md** — Fixed header showing v3.1.0 instead of v3.0.0
 - **Branch Overview stats bar** — Changed background to transparent to visually separate from table header
 
 ### Removed - Both Editions
 
 - **Old v3.1.0 documentation** — Removed docs/introduction_zh_v3.1.0.md (superseded by v3.2.0 version)
-- **__pycache__ and .pyc files** — Cleaned from all directories
 
 ### Removed - Community Edition Only
 
+- **SKILL_ACCESS_TOKEN reference** — Removed from COM skill_api.py (table doesn't exist in COM schema)
 
 ---
 

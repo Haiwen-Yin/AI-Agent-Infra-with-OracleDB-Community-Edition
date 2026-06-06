@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.3.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -575,6 +575,8 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_branch_chain(path, qs)
             elif path.startswith('/api/branch/') and path.endswith('/stats'):
                 self._api_branch_stats(path)
+            elif path.startswith('/api/branch/') and path.endswith('/spec'):
+                self._api_branch_spec(path)
             elif path.startswith('/api/branch/') and path.endswith('/plans'):
                 self._api_branch_plans(path)
             elif path.startswith('/api/branch/') and '/validate-spec/' in path:
@@ -655,7 +657,7 @@ class VisHandler(BaseHTTPRequestHandler):
         groups = connection.execute_query(
             "SELECT g.group_id, g.group_name, g.group_type, g.description, "
             "g.workspace_id, g.coordinator_agent_id, g.sharing_policy, g.status, "
-            "g.metadata, g.created_at, g.updated_at, "
+            "g.metadata, g.created_at, g.updated_at, g.branch_id, g.spec_id, "
             "(SELECT COUNT(*) FROM collab_group_members cgm WHERE cgm.group_id = g.group_id AND cgm.status = 'ACTIVE') AS member_count "
             "FROM collab_groups g ORDER BY g.updated_at DESC"
         )
@@ -1134,6 +1136,24 @@ class VisHandler(BaseHTTPRequestHandler):
             data = {}
         result = branch_api.extract_lessons_from_branch(branch_id, auto_confirm=data.get('auto_confirm', False))
         self._send_json({'lessons': [_clean_row(l) for l in result]})
+
+    def _api_branch_spec(self, path):
+        if self._require_auth() is None:
+            return
+        try:
+            branch_id = path.split('/api/branch/')[1].replace('/spec', '')
+            if not branch_id:
+                self._send_error(400, 'Branch ID required')
+                return
+            from lib import spec_api
+            from lib.connection import execute_query
+            specs = execute_query(
+                'SELECT S.ENTITY_ID, E.TITLE, S.SPEC_STATUS FROM SPEC_META S JOIN ENTITIES E ON S.ENTITY_ID=E.ENTITY_ID AND S.ENTITY_TYPE=E.ENTITY_TYPE WHERE S.BRANCH_ID = :vbid',
+                {'vbid': branch_id}
+            )
+            self._send_json([_clean_row(r) for r in specs])
+        except Exception as e:
+            self._send_error(500, str(e))
 
     def _api_branch_plans(self, path):
         if self._require_auth() is None:

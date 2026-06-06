@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.2.0 - Credential & Pool Agent Tests"""
+"""AI Agent Infra v3.3.0 - Credential & Pool Agent Tests"""
 
 import sys
 import os

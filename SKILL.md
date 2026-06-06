@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.2.0
+version: v3.3.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.2.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.3.0 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, skill-distribution, encrypted-config, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.2.0
+# AI Agent Infra with OracleDB - Community Edition v3.3.0
 
 **Author:** Haiwen Yin
-**Version:** v3.2.0 - 2026-06-03
+**Version:** v3.3.0 - 2026-06-03
 **License:** Apache License 2.0
 
 ## Architecture Overview
@@ -18,7 +18,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ```
 +-----------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                     |
-|                   Enterprise Edition v3.2.0                     |
+|                   Community Edition v3.3.0                      |
 +-----------------------------------------------------------------+
 |                                                                 |
 |  +-----------------------------------------------------------+  |
@@ -52,7 +52,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 +-----------------------------------------------------------------+
 ```
 
-## Community Edition Features (v3.2.0)
+## Community Edition Features (v3.3.0)
 
 ### 2. Skill Storage & Distribution
 
@@ -78,19 +78,18 @@ Local database connection information is encrypted at rest in config.json.
 | **config.py** | Auto-detects encrypted `_encrypted` field; decrypts transparently; auto-upgrades plaintext |
 | **Master key source** | `MASTER_DB_KEY` env var > `~/.oracle-infra/master.key` file > auto-generate on first run |
 
-### 4. Workspace Context Audit
+### 4. Database Access Security
 
-Detect agent idle patterns, context similarity violations, data leaks, access anomalies, and cross-boundary breaches.
+Five-plus-one-layer database access security model:
 
-| Component | Description |
-|-----------|-------------|
-| **IDLE_PATTERN_DETECT_JOB** | Hourly, detect idle agents beyond configurable timeout |
-| **compute_context_similarity** | Embedding-based cosine similarity between entity pairs |
-| **/audit web page** | Overview stats + event list + event detail with resolution status badges |
-
-**Audit Types:** RULE_VIOLATION, CONTEXT_SIMILARITY, IDLE_PATTERN, ACCESS_ANOMALY, DATA_LEAK
-
-**Resolution Statuses:** OPEN, ACKNOWLEDGED, RESOLVED, FALSE_POSITIVE, ESCALATED
+| Layer | Component | Description |
+|-------|-----------|-------------|
+| L1 | **SKILL.md Policy** | Prohibits direct SQL/DML/DDL except during initial deployment |
+| L2 | **4_grants.sql** | Restricted `AGENT_API` user: EXECUTE on packages + SELECT on tables only |
+| L3 | **AUTHID DEFINER** | All PL/SQL packages execute with schema owner privileges |
+| L4 | **6_vpd_policy.sql** | VPD row-level security: `WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD` |
+| L5 | **5_audit_policy.sql** | Unified Auditing `DIRECT_DML_BYPASS_DETECTION` for direct DML bypass |
+| L6 | **`_sanitize_context_data()`** | Auto-redacts sensitive fields in `save_context()` |
 
 ## Context Branching
 
@@ -286,7 +285,7 @@ merge_result = branch_api.merge_parallel_branches(
 | Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
 | Workspace & Context | Yes | Yes |
 | Skill Storage & Distribution | Yes | Yes (secure token) |
-| Encrypted DB Credentials | No | Yes |
+| Encrypted DB Credentials | Yes | Yes |
 | Workspace Context Audit | No | Yes |
 | License | Apache 2.0 | Apache 2.0 |
 
@@ -536,6 +535,41 @@ results = search("partition*", strategy="auto")
 - JRD views must include all PK columns of root table
 - CONTEXT_DV is read-only (no 26ai write annotations)
 
+## ⚠️ CRITICAL: Database Access Policy
+
+### 1. NEVER Bypass the API Layer
+
+**All data operations MUST go through the Python API layer (`scripts/lib/*.py`) or PL/SQL packages. Direct SQL/DML/DDL operations on database tables are STRICTLY PROHIBITED except during initial schema deployment (`scripts/deploy/*.sql`).**
+
+Why this matters:
+- **Business logic bypass**: Direct INSERT/UPDATE/DELETE skips permission checks, audit logging, branch context tracking, and data validation enforced by the API layer
+- **Data corruption**: The API layer maintains invariants (e.g., WORKSPACE_CONTEXT append-only, ENTITY_EDGES referential integrity, BRANCH_MERGE_LOG consistency) that direct SQL would violate
+- **Security breach**: AGENT_PERMISSION_MANAGER.check_entity_access() is bypassed by direct SELECT, exposing PRIVATE memories from other agents
+- **Audit gap**: Direct operations bypass CONTEXT_AUDIT logging, making actions untraceable
+
+### 2. Database Connection Credentials Must Not Be Injected into Agent Context
+
+When saving context via `save_context()`, any context_data containing keys like `password`, `dsn`, `connection`, `credential`, `secret`, `key`, or `token` will be automatically masked by `DataMaskingService`. Agents MUST NOT store database connection strings or credentials in WORKSPACE_CONTEXT.
+
+### 3. Use the Restricted Database User for Agent Connections
+
+A restricted `agent_api` database user should be used for runtime connections. This user:
+- Has **EXECUTE only** on PL/SQL API packages (no direct table DML)
+- Has **SELECT only** on tables needed for read operations
+- **Cannot** CREATE TABLE, CREATE VIEW, ALTER, DROP, INSERT, UPDATE, DELETE directly on tables
+- All writes go through `AUTHID DEFINER` PL/SQL packages which execute with schema owner privileges while enforcing business rules
+
+See `scripts/deploy/4_grants.sql` for the restricted user setup.
+
+### 4. Deployment Scripts Are the Only Exception
+
+The `scripts/deploy/*.sql` scripts are the ONLY authorized direct SQL operations, and they MUST only be run:
+- During initial deployment on an empty schema
+- By a human administrator (not by an Agent)
+- After verifying no existing deployment exists (see Pre-Deployment Safety Check below)
+
+---
+
 ## ⚠️ CRITICAL: Pre-Deployment Safety Check
 
 **Before running ANY deploy script, an Agent MUST check whether the database already has an existing deployment. Re-running deploy scripts on an existing database will DESTROY all data (agents, sessions, knowledge, workspaces, skills).**
@@ -548,7 +582,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.2.0" or None,
+#   "schema_version": "3.3.0" or None,
 #   "table_count": 33,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -576,11 +610,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.2.0",
+  "schema_version": "3.3.0",
   "table_count": 33,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.2.0, 33 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.3.0, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -589,8 +623,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.2.0
-Deployment aborted: existing deployment found. Schema version: 3.2.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.3.0
+Deployment aborted: existing deployment found. Schema version: 3.3.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -689,8 +723,8 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
-      2_api.sql                 # 8 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
+      1_schema.sql              # 30 tables, 6 JRD views, indexes, property graph, seed data
+      2_api.sql                 # 10 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER, DB_CRYPTO, BRANCH_MANAGER)
       3_jobs.sql                # 12 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
     lib/
@@ -741,7 +775,7 @@ ai-agent-infra-community/
         vis-network.min.js      # Vis.js network visualization library
 ```
 
-## Database Schema (27 Tables)
+## Database Schema (30 Tables)
 
 ### Core Tables (7)
 
@@ -805,7 +839,7 @@ ai-agent-infra-community/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-## PL/SQL Packages (8 Packages)
+## PL/SQL Packages (10 Packages)
 
 | Package | Function Count | Key Functions |
 |---------|---------------|---------------|
@@ -817,6 +851,8 @@ ai-agent-infra-community/
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 | EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
+| DB_CRYPTO [NEW v3.1.0] | 5 | encrypt, decrypt, encrypt_raw, decrypt_raw, rotate_key |
+| BRANCH_MANAGER [NEW v3.2.0] | 11 | fork_branch, merge_branch, abandon_branch, pause_branch, resume_branch, diff_branches, detect_conflicts, mark_as_lesson, extract_lessons, fork_branch_for_spec, fork_parallel_branches |
 
 ## Python API (15 Modules, 131+ Functions)
 

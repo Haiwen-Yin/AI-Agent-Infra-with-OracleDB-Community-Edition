@@ -1,8 +1,7 @@
-"""AI Agent Infra v3.2.0 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v3.3.0 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Community Edition: direct access, no token required
-- Enterprise Edition: token-gated resource access
 """
 
 import io
@@ -95,7 +94,6 @@ def acquire_skill_resource(skill_id: str, agent_id: Optional[str] = None, sessio
     """Acquire a skill's resource files as a ZIP archive.
     
     Community Edition: Direct access, no token required.
-    Enterprise Edition: Uses token flow internally for audit.
     
     Args:
         skill_id: The skill entity ID

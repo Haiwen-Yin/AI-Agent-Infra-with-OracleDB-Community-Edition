@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.2.0 - Community Edition - Schema Deployment
+PROMPT AI Agent Infra v3.3.0 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -216,7 +216,7 @@ CREATE TABLE HARNESS_META (
 
 
 PROMPT ============================================================
-PROMPT 11b. CONTEXT_BRANCHES (Non-Partitioned) [NEW v3.2.0]
+PROMPT 11b. CONTEXT_BRANCHES (Non-Partitioned) [NEW v3.3.0]
 PROMPT ============================================================
 
 CREATE TABLE CONTEXT_BRANCHES (
@@ -442,7 +442,7 @@ CREATE TABLE WORKSPACE_CONTEXT (
 );
 
 PROMPT ============================================================
-PROMPT 11c. BRANCH_MERGE_LOG (Non-Partitioned) [NEW v3.2.0]
+PROMPT 11c. BRANCH_MERGE_LOG (Non-Partitioned) [NEW v3.3.0]
 PROMPT ============================================================
 
 CREATE TABLE BRANCH_MERGE_LOG (
@@ -944,7 +944,7 @@ CREATE PROPERTY GRAPH ORACLE_MEMORY_GRAPH
   );
 
 PROMPT ============================================================
-PROMPT View: BRANCH_COMPARISON [NEW v3.2.0]
+PROMPT View: BRANCH_COMPARISON [NEW v3.3.0]
 PROMPT ============================================================
 
 CREATE OR REPLACE VIEW BRANCH_COMPARISON AS
@@ -1250,7 +1250,7 @@ PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.2.0', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.3.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1536', 'Default embedding dimension');
@@ -1296,7 +1296,7 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.2.0 - Community Edition Schema Deployment Complete
+PROMPT AI Agent Infra v3.3.0 - Community Edition Schema Deployment Complete
 PROMPT ============================================================
 
 -- Grant DBMS_CRYPTO for DB_CRYPTO package
