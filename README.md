@@ -5,9 +5,9 @@
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Portal user system, LDAP authentication with auto-registration, Skill storage with secure token distribution, encrypted credentials at rest, workspace context audit, and Agent pool management — built on Oracle 26ai.**
+**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, encrypted credentials at rest, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.3.0: Context Branching & Multi-Agent Collaboration — fork/merge/abandon/resume branches; coordinate multi-agent workflows with Branch+Spec+TaskPlan+Harness integration.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.3.0: Database Access Security & UI Visualization — 5+1-layer security model (Skill Policy, Restricted User, AUTHID DEFINER, VPD, Auditing, Sanitization); enhanced Branch/Spec/Collab pages with linked info.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
 📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.3.0.md)**
 
@@ -54,9 +54,7 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 
 ### Portal Login (`/portal/login`)
 
-- Register/login dual-tab with auth mode dropdown: "系统用户" / "LDAP 统一认证"
-- LDAP mode: authenticates via LDAP bind, auto-registers new users to SYSTEM_USERS
-- Registration checks SYSTEM_USERS (case-insensitive) + LDAP directory for duplicates
+- Register/login dual-tab with auth mode dropdown: "系统用户" only
 - "进入管理页面" button in top-right corner
 
 ### Portal Chat (`/portal/chat`)
@@ -72,7 +70,7 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 | Config Key | Default | Description |
 |------------|---------|-------------|
 | `dormant_timeout_min` | 30 min | Agent idle beyond this → auto-recalled to POOL via `DORMANT_AGENT_JOB` |
-| `audit_idle_timeout_min` | 60 min | Idle beyond this → `IDLE_PATTERN` audit event (ENT) |
+| `audit_idle_timeout_min` | 60 min | Idle beyond this → `IDLE_PATTERN` audit event (Enterprise only) |
 | `session_timeout_min` | 60 min | Portal session timeout |
 
 Core logic: `LAST_ACTIVE_AT` older than `dormant_timeout_min` → `STATUS='POOL'`, `CURRENT_USER_ID=NULL`.
@@ -85,7 +83,6 @@ COMMIT;
 
 ### Admin Dashboard (`/login`)
 
-- Only LOCAL users can access admin Dashboard; LDAP users are rejected
 - All existing data management pages unchanged
 
 ### Encrypted Credentials
@@ -98,7 +95,7 @@ COMMIT;
 
 ### 2. Skill Storage & Distribution
 
-Database-backed Skill registry with secure one-time-token resource distribution (Enterprise) or direct access (Community).
+Database-backed Skill registry with direct resource access.
 
 - **SKILL_META** — Reference-partitioned from ENTITIES subtype `SKILL`; includes `SKILL_DESCRIPTION`, `RESOURCE_SERVER_HOST` (hostname + IP)
 - **skill_api.py** — 9 functions: register, get, list, update (supports title+description), delete, resolve, validate, deprecate, upload_resource
@@ -167,7 +164,7 @@ Collaboration groups integrated with Branches, SDD (Spec), Task Plans, and Harne
 
 ## Editions
 
-| Feature | Community Edition | Community Edition |
+| Feature | Community Edition | Enterprise Edition |
 |---------|------------------|-------------------|
 | **Core Infrastructure** | | |
 | Memory System & Knowledge Graph | Yes | Yes |
@@ -202,10 +199,10 @@ Collaboration groups integrated with Branches, SDD (Spec), Task Plans, and Harne
 | Audit Rule Engine + Embedding Detection | No | Yes |
 | IDLE_PATTERN_DETECT_JOB | No | Yes |
 | **Database** | | |
-| Tables | 37 | 42 |
+| Tables | 30 | 35 |
 | PL/SQL Packages | 10 | 13 |
 | Scheduler Jobs | 13 | 17 |
-| **License** | Apache 2.0 | Apache 2.0 |
+| **License** | Apache 2.0 | BSL 1.1 |
 
 ---
 
@@ -303,7 +300,7 @@ ai-agent-infra-enterprise/
       3_jobs.sql                # 12+ scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in templates
     lib/
-      config.py                 # Unified Config with encrypted DB + LDAP + Enterprise
+      config.py                 # Unified Config with encrypted DB credentials
       connection.py             # oracledb connection pool (decrypts config)
       connection_crypto.py      # Config encryption/decryption/key rotation [ENT]
       memory_api.py             # Memory CRUD (8 functions)
@@ -331,8 +328,8 @@ ai-agent-infra-enterprise/
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/
-  config.json                  # Encrypted database + LDAP + Enterprise config
-  LICENSE_ENTERPRISE           # Apache 2.0
+  config.json                  # Encrypted database credentials + server config
+  LICENSE                       # Apache 2.0
   SKILL.md
   README.md
 ```
@@ -341,7 +338,7 @@ ai-agent-infra-enterprise/
 
 ## License
 
-Apache License 2.0 — see [LICENSE_ENTERPRISE](LICENSE_ENTERPRISE)
+Apache License 2.0 — see [LICENSE](LICENSE)
 
 Non-production use is free.
 
