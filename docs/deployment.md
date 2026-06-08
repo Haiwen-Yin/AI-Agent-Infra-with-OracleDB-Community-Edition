@@ -1,12 +1,12 @@
-# Deployment Guide - Oracle Memory System v2.2.1
+# Deployment Guide - AI Agent Infra v3.4.0 - Community Edition
 
 ## Prerequisites
 
-- Oracle Database 23ai+ (tested on 23.26.1.0.0)
-- Python 3.8+ with oracledb package
+- Oracle AI Database 26ai version 23.26.2.0.0 or later
+- Python 3.8+ with oracledb 4.0.1+
 - SQLcl 26.1+ (for SQL script deployment)
 
-**Important**: v2.2.0 is NOT backward-compatible with v2.1.0. Requires clean re-deploy (same approach as v2.1.0).
+**Important**: v3.4.0 is NOT backward-compatible with v3.3.0. Requires clean re-deploy.
 
 ## 4-Phase Deployment
 
@@ -16,17 +16,17 @@ Creates all tables, partitions, indexes, property graph, and JSON duality views.
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/1_schema.sql
 ```
 - **Destructive**: Drops all existing tables before creating new ones (`CASCADE CONSTRAINTS PURGE`)
-- Creates 22 tables (6 partitioned, 5 reference-partitioned, 11 non-partitioned)
+- Creates 30 tables (6 partitioned, 5 reference-partitioned, 19 non-partitioned)
 - Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS
 - Partitioning: LIST+RANGE on ENTITIES (6×7), AGENT_SESSION (2×7), TASK_PLANS (2×7); RANGE+HASH on ENTITY_ACCESS_LOG; REFERENCE on 5 child tables
 - ROW MOVEMENT enabled on AGENT_SESSION, TASK_PLANS, TASK_STEPS
 - Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
 - ~25 local indexes + global indexes on non-partitioned tables
 - 1 property graph, 4 duality views
-- Seeds SYSTEM_CONFIG with version 2.2.0
+- Seeds SYSTEM_CONFIG with version 3.4.0
 
 ### Phase 2: API Packages (2_api.sql)
-Creates 5 PL/SQL packages.
+Creates 13 PL/SQL packages (10 in 2_api.sql + 3 in 6_deep_sec_policy.sql).
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/2_api.sql
 ```
@@ -37,7 +37,7 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 - WORKSPACE_MANAGER (workspace lifecycle, context chain management, cleanup)
 
 ### Phase 3: Scheduler Jobs (3_jobs.sql)
-Creates 9 automated scheduler jobs.
+Creates 13 automated scheduler jobs.
 ```bash
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/3_jobs.sql
 ```
@@ -53,6 +53,10 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 | COLLAB_EXPIRY_JOB | Daily 00:30 | Process collaboration requests |
 | WORKSPACE_CLEANUP_JOB | Daily 01:00 | Clean stale workspaces and paused sessions |
 | CONTEXT_ARCHIVE_JOB | Weekly Sun 03:00 | Archive old context entries |
+| STALE_WORKSPACE_DETECT_JOB | Daily 04:00 | Detect stale workspaces |
+| DORMANT_AGENT_JOB | Daily 05:00 | Hibernate dormant agents |
+| CREDENTIAL_CLEANUP_JOB | Daily 06:30 | Clean expired credentials |
+| BRANCH_CLEANUP_JOB | Weekly Sat 02:00 | Archive abandoned branches |
 
 ### Phase 4: Harness Templates (4_harness_templates.sql)
 Seeds 5 built-in harness templates with HARNESS_META (INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE).
@@ -60,6 +64,25 @@ Seeds 5 built-in harness templates with HARNESS_META (INPUT_SCHEMA, OUTPUT_SCHEM
 JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/4_harness_templates.sql
 ```
 Uses MERGE for idempotent re-runs. Templates: Research Analyst, Code Assistant, Data Analyst, Task Planner, Security Auditor.
+
+### Phase 5: Grants & Deep Sec (4_grants.sql + 6_deep_sec_policy.sql)
+```bash
+# Step 1: Grant Deep Sec system privileges (run as SYSDBA)
+sql sys/password@//host:port/service as sysdba @scripts/deploy/4_grants.sql
+
+# Step 2: Create DEEP_SEC_SESSION_ROLE (run as SYSDBA)
+sql sys/password@//host:port/service as sysdba
+CREATE ROLE DEEP_SEC_SESSION_ROLE;
+GRANT CREATE SESSION TO DEEP_SEC_SESSION_ROLE;
+GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
+
+# Step 3: Deploy Deep Sec policy (run as AIADMIN)
+sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
+```
+- 4_grants.sql: DEEP_SEC_SESSION_ROLE, Deep Sec system privileges for AIADMIN
+- 6_deep_sec_policy.sql: 20 Data Grants, MAC on 7 tables, 3 PL/SQL packages (SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER), End User Context, Data Roles (admin_data_role, agent_data_role, pool_agent_data_role)
+
+**Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
 
 ## Python Setup
 
@@ -88,7 +111,7 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
-v2.2.0 test suite: 61 tests across 8 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12 — new).
+v3.4.0 test suite: 61 tests across 8 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
 
 ## Starting the Web Server
 

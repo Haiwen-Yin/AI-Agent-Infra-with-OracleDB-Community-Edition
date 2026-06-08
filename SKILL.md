@@ -1,24 +1,54 @@
 ---
 name: ai-agent-infra-community
-version: v3.3.0
+version: v3.4.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.3.0 - AI Agent的基础设施架构"
-tags: [oracle, ai-agent, infrastructure, community, skill-distribution, encrypted-config, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
+description: "AI Agent Infra with OracleDB - Community Edition v3.4.0 - AI Agent的基础设施架构"
+tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.3.0
+# AI Agent Infra with OracleDB - Community Edition v3.4.0
 
 **Author:** Haiwen Yin
-**Version:** v3.3.0 - 2026-06-03
-**License:** Apache License 2.0
+**Version:** v3.4.0 - 2026-06-08
+**License:** Apache License 2.0 (Community Edition)
+
+## ⚠️ CRITICAL: Database & Driver Requirements
+
+### Oracle AI Database 26ai Version
+
+**Minimum required version: 23.26.2.0.0**
+
+v3.4.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+
+```sql
+-- Check your database version
+SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
+-- Must return: 23.26.2.0.0 or higher
+```
+
+### Python oracledb Driver
+
+**Required version: oracledb 4.0.1**
+
+v3.4.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+
+```bash
+pip install oracledb>=4.0.1
+```
+
+**Known limitations (awaiting upstream fixes):**
+- **Thin mode TCPS**: oracledb thin mode has ORA-29019 protocol version incompatibility with Oracle 26ai on TCPS connections. Use TCP port 1521 instead.
+- **Thick mode `set_end_user_security_context`**: Not yet implemented in thick mode. Use Method A (PL/SQL callback) instead.
+
+**Future driver updates**: Oracle plans to release oracledb 4.1.0+ with full Deep Sec TCPS support. Monitor the [oracledb releases](https://github.com/oracle/python-oracledb/releases) for updates.
 
 ## Architecture Overview
 
 ```
 +-----------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                     |
-|                   Community Edition v3.3.0                      |
+|                   Community Edition v3.4.0                      |
 +-----------------------------------------------------------------+
 |                                                                 |
 |  +-----------------------------------------------------------+  |
@@ -52,11 +82,11 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 +-----------------------------------------------------------------+
 ```
 
-## Community Edition Features (v3.3.0)
+## Enterprise Edition Features (v3.4.0)
 
-### 2. Skill Storage & Distribution
+### 1. Skill Storage & Distribution
 
-Database-backed Skill registry with resource distribution.
+Database-backed Skill registry with secure one-time-token resource distribution.
 
 | Component | Description |
 |-----------|-------------|
@@ -64,8 +94,15 @@ Database-backed Skill registry with resource distribution.
 | **SKILL_DV** | JRD updatable duality view for Skill entities |
 | **skill_api.py** | 8 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate |
 | **SKILL_MANAGER** PL/SQL | 6 subprograms: CRUD, dependency resolution, validation |
+| **SKILL_TOKEN_CLEANUP_JOB** | Every 10 minutes, purge expired/consumed tokens |
 
-**Community Edition** Skill access provides `resource_uri` directly for download.
+**Enterprise Skill Access Flow:**
+1. `get_skill(skill_id)` -> text content + generic `resource_uri`
+2. `request_skill_access(agent_id, session_id, skill_id)` -> one-time token
+3. `consume_skill_token(token_id)` -> HTTP presigned URL (single use)
+4. Download resource from presigned URL
+
+**Community Edition** Skill access skips steps 2-3; `resource_uri` is directly accessible.
 
 ### 3. Encrypted Database Credentials
 
@@ -78,18 +115,143 @@ Local database connection information is encrypted at rest in config.json.
 | **config.py** | Auto-detects encrypted `_encrypted` field; decrypts transparently; auto-upgrades plaintext |
 | **Master key source** | `MASTER_DB_KEY` env var > `~/.oracle-infra/master.key` file > auto-generate on first run |
 
-### 4. Database Access Security
+### 3. Database Access Security
 
-Five-plus-one-layer database access security model:
+Five-plus-one-layer database access security model with Deep Data Security:
 
 | Layer | Component | Description |
 |-------|-----------|-------------|
 | L1 | **SKILL.md Policy** | Prohibits direct SQL/DML/DDL except during initial deployment |
 | L2 | **4_grants.sql** | Restricted `AGENT_API` user: EXECUTE on packages + SELECT on tables only |
 | L3 | **AUTHID DEFINER** | All PL/SQL packages execute with schema owner privileges |
-| L4 | **6_vpd_policy.sql** | VPD row-level security: `WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD` |
+| L4 | **6_deep_sec_policy.sql** | Deep Data Security (Data Grants + MAC): declarative row/column/cell-level access control, Mandatory Access Control, zero-trust (no context = no data) |
 | L5 | **5_audit_policy.sql** | Unified Auditing `DIRECT_DML_BYPASS_DETECTION` for direct DML bypass |
 | L6 | **`_sanitize_context_data()`** | Auto-redacts sensitive fields in `save_context()` |
+
+### 3b. Deep Data Security — Agent Usage Guide
+
+v3.4.0 replaces VPD with Oracle Deep Data Security. **The v3.3.0 VPD (Virtual Private Database / DBMS_RLS) security policy is DEPRECATED and has been removed.** The old `6_vpd_policy.sql` script no longer exists. All VPD policies (`WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD`) and VPD predicate functions (`vpd_ws_ctx_agent`, `vpd_entities_visibility`) are superseded by Deep Sec Data Grants. Agents MUST understand how Deep Sec works to operate correctly.
+
+#### How Deep Sec Works
+
+Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory Access Control) + **End User Context** to enforce row-level, column-level, and cell-level security. When an Agent connects, the Python API layer automatically sets the agent's identity via `SET_AGENT_CONTEXT.set_agent_id()`, which populates `ORA_END_USER_CONTEXT` through an `o:onFirstRead` callback. Data Grants then filter query results based on this context.
+
+**Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
+
+#### Current Enforcement Status (v3.4.0)
+
+**Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
+
+| Security Mechanism | Deployed? | Enforcing? | Details |
+|---|---|---|---|
+| 20 Data Grants | ✅ Yes | ✅ Yes | End User queries filtered by `ORA_END_USER_CONTEXT.username` predicates |
+| MAC (7 tables) | ✅ Yes | ✅ Yes | `SET USE DATA GRANTS ONLY` prevents view bypass for End Users |
+| 3 Data Roles | ✅ Yes | ✅ Yes | Each End User has `agent_data_role` + `pool_agent_data_role` |
+| End User Context + o:onFirstRead | ✅ Yes | ✅ Yes | Callback available for fallback AIADMIN path |
+| Direct Logon End Users | ✅ Yes | ✅ Yes | One End User per agent; `ORA_END_USER_CONTEXT.username` = mapped agent ID |
+| DEEP_SEC_SESSION_ROLE | ✅ Yes | ✅ Yes | CREATE SESSION granted to Data Roles for End User login |
+| END_USER_MANAGER package | ✅ Yes | ✅ Yes | PL/SQL manages End User lifecycle (create/drop/get password) |
+| Portal End User routing | ✅ Yes | ✅ Yes | `connection.py` auto-routes: agent context → End User; no context → AIADMIN |
+| AUTHID DEFINER (AGENT_API) | ✅ Yes | ✅ Yes | AGENT_API can only access data through PL/SQL packages |
+| Minimum-privilege user (AGENT_API) | ✅ Yes | ✅ Yes | No DML/DDL, EXECUTE-only on packages |
+| Unified Audit | ✅ Yes | ✅ Yes | Audits direct DML on protected tables |
+
+**Architecture**:
+- Portal users connect as Deep Sec End User (Direct Logon, no IAM/TCPS/tokens)
+- End User name = `UPPER(REPLACE(agent_id, '-', '_'))` (hyphens → underscores, uppercase)
+- `connection.py`: `set_agent_context(agent_id)` → `get_end_user_connection()` → Data Grant auto-filtering
+- Admin Dashboard uses AIADMIN pool (schema owner, unrestricted by Data Grants — correct Oracle behavior)
+- Passwords stored in `SYSTEM_CONFIG` with key `end_user_pwd.{agent_id}` (readable only by AIADMIN)
+
+#### What Agents Need to Know
+
+1. **Agent identity is automatic**: `connection.py` calls `SET_AGENT_CONTEXT.set_agent_id()` on every connection acquired via `get_connection()`. Agents do NOT need to call this manually.
+
+2. **Data visibility is scoped**: Each agent can only see:
+   - Its own row in `AGENT_REGISTRY`
+   - Workspaces where it is the current agent OR a collaboration group member
+   - Entities that are PUBLIC, or PRIVATE/SHARED owned by the agent
+   - Its own credentials (CREDENTIAL_VALUE column is **masked** — returns NULL)
+   - Task plans owned by the agent or in collaboration branches
+   - All skills (read-only for agents)
+   - `SYSTEM_CONFIG` is **admin-only** — agents cannot SELECT it directly
+
+3. **Column masking**: `AGENT_CREDENTIALS.CREDENTIAL_VALUE` is hidden from `agent_data_role`. Use `verify_credential()` or `issue_credential()` API functions instead.
+
+4. **MAC prevents bypass**: `SET USE DATA GRANTS ONLY` is enabled on 7 tables. Even creating a view cannot bypass Data Grant policies.
+
+5. **Admin role has full access**: `admin_data_role` sees all data. The admin dashboard login uses this role.
+
+#### Data Grant Summary for Agents
+
+| Table | Agent Can See | Agent Cannot See |
+|-------|--------------|-----------------|
+| AGENT_REGISTRY | Own row only | Other agents' rows |
+| WORKSPACE_CONTEXT | Own workspaces + collab groups | Other agents' workspaces |
+| ENTITIES | PUBLIC + own PRIVATE + shared in workspace | Other agents' PRIVATE entities |
+| AGENT_CREDENTIALS | Own rows (CREDENTIAL_VALUE masked) | Other agents' credentials |
+| SYSTEM_CONFIG | Nothing (admin only) | All rows |
+| SKILL_META | All skills (read-only) | Cannot modify |
+| CONTEXT_BRANCHES | Own workspaces + collab groups | Other agents' branches |
+| TASK_PLANS | Own tasks + collab branches | Other agents' tasks |
+
+#### Deploying Deep Sec
+
+```sql
+-- Step 1: Grant Deep Sec privileges (as SYSDBA on DB server via sqlplus)
+-- See 4_grants.sql for full list; key privileges:
+GRANT CREATE DATA ROLE TO AIADMIN;
+GRANT CREATE DATA GRANT TO AIADMIN;
+GRANT CREATE ANY DATA GRANT TO AIADMIN;
+GRANT ADMINISTER ANY DATA GRANT TO AIADMIN;
+GRANT GRANT ANY DATA ROLE TO AIADMIN;
+GRANT SET USE DATA GRANTS ONLY TO AIADMIN;
+GRANT CREATE END USER TO AIADMIN;
+GRANT CREATE END USER CONTEXT TO AIADMIN;
+GRANT CREATE ANY END USER CONTEXT TO AIADMIN;
+GRANT CREATE END USER SECURITY CONTEXT TO AIADMIN;
+GRANT CREATE ANY CONTEXT TO AIADMIN;
+
+-- Step 2: Deploy Deep Sec policy (as AIADMIN)
+@scripts/deploy/6_deep_sec_policy.sql
+```
+
+#### Portal Agent Context — Data Isolation
+
+The server has two access paths with different Deep Sec behavior:
+
+| Path | DB Identity | Data Scope | Mechanism |
+|------|-------------|------------|-----------|
+| **Admin Dashboard** (`/login`) | AIADMIN (schema owner) | All data | Schema owner bypasses Data Grants |
+| **Portal** (`/portal/login`) | Deep Sec End User | Agent-specific only | Data Grants + MAC auto-filter |
+
+**How Portal isolation works:**
+1. Each HTTP request calls `_set_context_from_session()` — sets agent context from session data
+2. Portal session with `agent_id` → `connection.set_agent_context(agent_id)` → `get_end_user_connection()` → Data Grant auto-filtering
+3. Admin session (no `agent_id`) → `connection.set_agent_context(None)` → AIADMIN pool → full access
+4. Portal login: AIADMIN operations (create_session, create_workspace) run BEFORE setting agent context, then `_set_context_from_session()` switches to End User
+5. Portal API operations that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN (Data Grant predicates on WORKSPACES use CURRENT_AGENT_ID which is NULL for most workspaces), then restore End User context after completion
+6. This ensures Admin and Portal requests never interfere even on the same server process
+
+**How new agents get Deep Sec:**
+1. `agent_api.register_agent(agent_id, ...)` → inserts into `AGENT_REGISTRY` + calls `_ensure_end_user(agent_id)`
+2. `_ensure_end_user` → `END_USER_MANAGER.ensure_end_user(agent_id)` → creates End User + grants data roles + stores password
+3. End User name = `UPPER(REPLACE(agent_id, '-', '_'))` (hyphens → underscores, uppercase)
+4. Password stored in `SYSTEM_CONFIG` key `end_user_pwd.{agent_id}` (readable only by AIADMIN)
+5. Next Portal login with this agent → `get_end_user_connection()` → Deep Sec auto-filtering
+
+#### Migrating from v3.3.0 VPD
+
+```sql
+-- Drop old VPD policies first
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'WORKSPACE_CONTEXT', 'WS_CTX_AGENT_VPD');
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
+-- ... drop all VPD policies ...
+
+-- Then deploy 4_grants.sql (adds Deep Sec privileges, removes SYSTEM_CONFIG grant)
+-- Then deploy 6_deep_sec_policy.sql
+-- Restart application server
+```
 
 ## Context Branching
 
@@ -284,10 +446,11 @@ merge_result = branch_api.merge_parallel_branches(
 | Collaboration Groups | Yes | Yes |
 | Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
 | Workspace & Context | Yes | Yes |
-| Skill Storage & Distribution | Yes | Yes (secure token) |
+| Skill Storage & Distribution | Yes (basic) | Yes (secure token) |
+| LDAP Authentication | No | Yes |
 | Encrypted DB Credentials | Yes | Yes |
 | Workspace Context Audit | No | Yes |
-| License | Apache 2.0 | Apache 2.0 |
+| License | Apache 2.0 | BSL 1.1 |
 
 ---
 
@@ -355,7 +518,7 @@ In-db embedding generation and vector search capabilities were omitted during th
 
 All agents connecting to the **same database** automatically share the same `DB_CRYPTO` encryption key (stored in `SYSTEM_CONFIG`). This means:
 
-- **Agent A** encrypts credential value → `DB_CRYPTO.encrypt('secret_value')`
+| **Agent A** encrypts agent credential → `DB_CRYPTO.encrypt('agent_api_key')`
 - **Agent B** on a different server can decrypt it → `DB_CRYPTO.decrypt(ciphertext)`
 - No key files to copy, no environment variables to sync
 
@@ -384,13 +547,15 @@ All agents connecting to the **same database** automatically share the same `DB_
 -- 2. EXEC DB_CRYPTO.rotate_key();
 -- 3. Re-encrypt all data with new key
 
--- Example: Rotate and re-encrypt LDAP bind credential
+-- Example: Rotate and re-encrypt agent credential
 DECLARE
     v_plain VARCHAR2(4000);
     v_new_cipher VARCHAR2(4000);
 BEGIN
+    SELECT DB_CRYPTO.decrypt(CREDENTIAL_VALUE) INTO v_plain FROM AGENT_CREDENTIALS WHERE CREDENTIAL_ID = 'CRED_001';
     DB_CRYPTO.rotate_key();
     SELECT DB_CRYPTO.encrypt(v_plain) INTO v_new_cipher FROM DUAL;
+    UPDATE AGENT_CREDENTIALS SET CREDENTIAL_VALUE = v_new_cipher WHERE CREDENTIAL_ID = 'CRED_001';
     COMMIT;
 END;
 /
@@ -582,7 +747,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.3.0" or None,
+#   "schema_version": "3.4.0" or None,
 #   "table_count": 33,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -610,11 +775,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.3.0",
+  "schema_version": "3.4.0",
   "table_count": 33,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.3.0, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.4.0, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -623,8 +788,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.3.0
-Deployment aborted: existing deployment found. Schema version: 3.3.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.4.0
+Deployment aborted: existing deployment found. Schema version: 3.4.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -723,8 +888,8 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 30 tables, 6 JRD views, indexes, property graph, seed data
-      2_api.sql                 # 10 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER, DB_CRYPTO, BRANCH_MANAGER)
+      1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
+      2_api.sql                 # 8 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
       3_jobs.sql                # 12 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
     lib/
@@ -839,7 +1004,7 @@ ai-agent-infra-community/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-## PL/SQL Packages (10 Packages)
+## PL/SQL Packages (13 Packages)
 
 | Package | Function Count | Key Functions |
 |---------|---------------|---------------|
@@ -851,8 +1016,6 @@ ai-agent-infra-community/
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 | EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
-| DB_CRYPTO [NEW v3.1.0] | 5 | encrypt, decrypt, encrypt_raw, decrypt_raw, rotate_key |
-| BRANCH_MANAGER [NEW v3.2.0] | 11 | fork_branch, merge_branch, abandon_branch, pause_branch, resume_branch, diff_branches, detect_conflicts, mark_as_lesson, extract_lessons, fork_branch_for_spec, fork_parallel_branches |
 
 ## Python API (15 Modules, 131+ Functions)
 
@@ -1064,7 +1227,7 @@ def describe_search_strategy(strategy: str) -> dict | None
 
 Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → fulltext; `%`/`_` → keyword; domain/tags kwargs → unified; graph_seed_entity_id → unified; ≤2 words → fulltext; ≥5 words → unified; else → hybrid.
 
-## Scheduler Jobs (12 Jobs)
+## Scheduler Jobs (13 Jobs)
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
@@ -1192,5 +1355,5 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 |-----------|-------|
 | DSN | `//<db_host>:<db_port>/<db_service>` |
 | User | `<db_user>` / `<db_password>` |
-| Python | 3.14+ / oracledb 4.0.0 thin mode |
+| Python | 3.14+ / oracledb 4.0.1+ thin mode (4.0.0 has TCPS/Deep Sec issues; 4.1.0+ recommended when available) |
 | Server | `http://<web_host>:<web_port>` |

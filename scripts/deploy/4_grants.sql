@@ -1,6 +1,6 @@
 -- ============================================================
 -- 4_grants.sql — Restricted Database User & Access Control
--- AI Agent Infra with OracleDB v3.3.0
+-- AI Agent Infra with OracleDB v3.4.0
 -- ============================================================
 -- 
 -- This script creates a restricted database user (AGENT_API) that
@@ -78,7 +78,8 @@ GRANT SELECT ON AIADMIN.TASK_TOOL_CALLS TO AGENT_API;
 GRANT SELECT ON AIADMIN.TASK_DEPENDENCIES TO AGENT_API;
 GRANT SELECT ON AIADMIN.SPEC_PLAN_LINKS TO AGENT_API;
 GRANT SELECT ON AIADMIN.WORKSPACE_TASKS TO AGENT_API;
-GRANT SELECT ON AIADMIN.SYSTEM_CONFIG TO AGENT_API;
+-- SYSTEM_CONFIG: NOT granted — protected by Deep Sec Data Grant (admin_data_role only)
+-- Agents must access config through PL/SQL packages (DB_CRYPTO)
 
 PROMPT ============================================================
 PROMPT Granting SELECT on views
@@ -131,7 +132,7 @@ CREATE SYNONYM AGENT_API.TASK_TOOL_CALLS FOR AIADMIN.TASK_TOOL_CALLS;
 CREATE SYNONYM AGENT_API.TASK_DEPENDENCIES FOR AIADMIN.TASK_DEPENDENCIES;
 CREATE SYNONYM AGENT_API.SPEC_PLAN_LINKS FOR AIADMIN.SPEC_PLAN_LINKS;
 CREATE SYNONYM AGENT_API.WORKSPACE_TASKS FOR AIADMIN.WORKSPACE_TASKS;
-CREATE SYNONYM AGENT_API.SYSTEM_CONFIG FOR AIADMIN.SYSTEM_CONFIG;
+-- SYSTEM_CONFIG synonym intentionally NOT created (protected by Deep Sec)
 
 CREATE SYNONYM AGENT_API.BRANCH_COMPARISON FOR AIADMIN.BRANCH_COMPARISON;
 
@@ -152,6 +153,36 @@ REVOKE DROP ANY TABLE FROM AGENT_API;
 REVOKE INSERT ANY TABLE FROM AGENT_API;
 REVOKE UPDATE ANY TABLE FROM AGENT_API;
 REVOKE DELETE ANY TABLE FROM AGENT_API;
+
+PROMPT ============================================================
+PROMPT Granting Deep Data Security privileges to AIADMIN
+PROMPT ============================================================
+
+GRANT CREATE END USER TO AIADMIN;
+GRANT CREATE END USER CONTEXT TO AIADMIN;
+GRANT CREATE ANY END USER CONTEXT TO AIADMIN;
+GRANT CREATE END USER SECURITY CONTEXT TO AIADMIN;
+GRANT CREATE DATA GRANT TO AIADMIN;
+GRANT CREATE ANY DATA GRANT TO AIADMIN;
+GRANT ADMINISTER ANY DATA GRANT TO AIADMIN;
+GRANT CREATE DATA ROLE TO AIADMIN;
+GRANT DROP DATA ROLE TO AIADMIN;
+GRANT GRANT ANY DATA ROLE TO AIADMIN;
+GRANT SET USE DATA GRANTS ONLY TO AIADMIN;
+GRANT ALTER END USER TO AIADMIN;
+GRANT DROP END USER TO AIADMIN;
+GRANT CREATE ANY CONTEXT TO AIADMIN;
+
+PROMPT ============================================================
+PROMPT Creating DEEP_SEC_SESSION_ROLE for End User login
+PROMPT ============================================================
+-- This role carries CREATE SESSION for Deep Sec End Users.
+-- End Users connect via Direct Logon with this role granted
+-- through their Data Role (agent_data_role / admin_data_role / pool_agent_data_role).
+
+CREATE ROLE DEEP_SEC_SESSION_ROLE;
+GRANT CREATE SESSION TO DEEP_SEC_SESSION_ROLE;
+GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
 
 PROMPT ============================================================
 PROMPT AGENT_API user setup complete

@@ -10,6 +10,83 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.4.0] - 2026-06-08
+
+### Summary
+
+**Oracle Deep Data Security (Deep Sec)** — Replaces VPD (DBMS_RLS) with Oracle 26ai Deep Data Security: declarative Data Grants for row/column/cell-level access control, Mandatory Access Control (MAC) preventing view bypass, End User Context with `o:onFirstRead` callback for zero-trust agent identification. Fixes critical VPD vulnerability where unset context exposed all data (`1=1` → zero trust). Column-level masking hides sensitive fields (CREDENTIAL_VALUE) from non-admin users. SYSTEM_CONFIG fully restricted to admin role only.
+
+### ⚠️ Critical Requirements
+
+- **Oracle AI Database 26ai version 23.26.2.0.0 or later** — Earlier versions (23.26.1) have incomplete Deep Data Security support. Verify: `SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';`
+- **Python oracledb 4.0.1 or later** — Version 4.0.0 has TCPS protocol incompatibility (ORA-29019) with Oracle 26ai and lacks `create_end_user_security_context` API. Install: `pip install oracledb>=4.0.1`. Full TCPS/Deep Sec driver support expected in oracledb 4.1.0+.
+
+### Deep Data Security - Both Editions
+
+- **`6_deep_sec_policy.sql`** — New deployment script replacing `6_vpd_policy.sql`:
+  - **Data Roles**: `admin_data_role`, `agent_data_role`, `pool_agent_data_role`
+  - **End User Context**: `agent_context` with `o:onFirstRead` callback from `SYS_CONTEXT('AGENT_CTX', 'AGENT_ID')`
+  - **agent_auth_pkg**: PL/SQL callback package for lazy-loading agent identity into Deep Sec context
+  - **Data Grants**: 20 declarative policies covering row-level (WORKSPACE_CONTEXT, ENTITIES, TASK_PLANS, CONTEXT_BRANCHES), column-level (AGENT_CREDENTIALS hides CREDENTIAL_VALUE), admin-only (SYSTEM_CONFIG), public-read (SKILL_META), and pool minimum (AGENT_REGISTRY, SKILL_META)
+  - **MAC**: `SET USE DATA GRANTS ONLY` on 7 tables — prevents view-based bypass of row-level policies
+  - **End User**: `deep_sec_agent` created for Deep Sec testing
+- **`4_grants.sql`** — SYSTEM_CONFIG SELECT grant removed (protected by Data Grant, admin_data_role only). Deep Sec system privileges granted to AIADMIN (13 privileges)
+- **`connection.py`** — Fixed critical bug: `set_agent_context()` now actually calls PL/SQL `SET_AGENT_CONTEXT.set_agent_id()` per connection. Added `apply_agent_context()` / `clear_agent_context()` for automatic session context management in `get_connection()`. Added `try/except` with `_logger.debug()` for graceful fallback when Deep Sec not deployed.
+- **`server.py`** — Portal agent context integration: `_set_portal_agent_context()` / `_clear_portal_agent_context()` automatically set agent identity during Portal operations (login, chat, new chat) and clear on agent release. Admin Dashboard operates without agent context (schema owner full access). All Portal users follow the same context flow.
+- **`2_api.sql`** — EMBEDDING_MANAGER now reads `embedding_url`, `embedding_model`, `embedding_dim` from SYSTEM_CONFIG instead of hardcoding values. Added `get_config()` helper function.
+- **`1_schema.sql`** — Added `embedding_url` and `embedding_model` to SYSTEM_CONFIG defaults. Changed `embedding_dim` from 1536 to 1024 (matching actual model). Updated `schema_version` to 3.4.0.
+- **`5_audit_policy.sql`** — Added ACL setup instructions for EMBEDDING_MANAGER UTL_HTTP access (requires SYSDBA execution).
+- **`embedding_api.py`** — Fixed `compute_context_similarity()`: changed column reference from `EMBEDDING_VECTOR` (non-existent) to `EMBEDDING`, fixed bind variable syntax from positional `:1` to named `:eid`.
+- **`agent_api.py`** — Fixed `issue_credential()`: changed bind variables from positional `:1,:2,:3...` to named `:cid,:aid,:uid...` (oracledb thin mode does not support numeric bind names).
+- **`server.py`** — Fixed 5 positional bind variables `:1` → named `:wsid`/`:gid` in workspace/collab detail queries (oracledb thin mode incompatible with numeric binds).
+- **SQL deploy scripts** — Updated all file headers and completion banners from v3.3.0 to v3.4.0 (1_schema.sql, 2_api.sql, 3_jobs.sql, 4_harness_templates.sql).
+- **`start_web_server.sh`** — Updated from v3.2.0 to v3.4.0 (was two versions behind).
+- **`docs/*.md`** — Updated all doc titles from "Oracle Memory System v2.1.0/v2.2.1" to "AI Agent Infra v3.4.0".
+- **`test_skill.py`/`test_credential.py`** — Fixed positional bind variables `:1,:2,:3` → named `:eid,:uid,:uname,:aid` (oracledb thin mode compatibility).
+
+### Deep Sec Enforcement Status (v3.4.0)
+
+**Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
+
+- Each Pool Agent has a corresponding Deep Sec End User (name = `UPPER(REPLACE(agent_id, '-', '_'))`)
+- Portal users connect as End User → Data Grants auto-filter via `ORA_END_USER_CONTEXT.username`
+- Admin Dashboard uses AIADMIN connection pool (schema owner, unrestricted by Data Grants)
+- No external IAM, no TCPS, no tokens required — uses Oracle's Direct Logon mode
+- `connection.py` automatically routes: `set_agent_context()` → End User connection with Data Grant filtering; no context → AIADMIN pool with full access
+- `END_USER_MANAGER` PL/SQL package manages End User lifecycle (create/drop/get password)
+- `DEEP_SEC_SESSION_ROLE` (CREATE SESSION) granted to Data Roles for End User login
+
+Verified enforcement (Community DB):
+| Table | AIADMIN (all) | AGENT_001 (Deep Sec) | Filter |
+|-------|---------------|---------------------|--------|
+| AGENT_REGISTRY | 17 | 1 | 94% |
+| ENTITIES | 182 | 41 | 77% |
+| TASK_PLANS | 18 | 5 | 72% |
+| SYSTEM_CONFIG | 43 | BLOCKED | 100% |
+
+### Bug Fixes (E2E Testing) - Both Editions
+
+- **Portal login context timing** — `_set_portal_agent_context()` was called before `create_session()`/`create_workspace()`, causing these operations to use End User connection (no INSERT permission). Fixed: moved context setting after all AIADMIN-requiring operations.
+- **Missing WORKSPACE_CONTEXT INSERT Data Grant** — Portal chat inserts messages into WORKSPACE_CONTEXT, but End Users lacked INSERT privilege. Added `ws_ctx_agent_insert` Data Grant (WHERE 1=1) for `agent_data_role`.
+- **WORKSPACE_CONTEXT SELECT predicate incompatible with INSERT** — MAC "with check" requires new rows to satisfy SELECT predicate, but new rows' workspaces may not have CURRENT_AGENT_ID set. Fixed: added `OR UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username` to SELECT predicate.
+- **Missing WORKSPACES SELECT Data Grant** — End Users could not read WORKSPACES table. Added `ws_agent_access` (SELECT) and `ws_agent_update` (UPDATE) Data Grants for `agent_data_role`.
+- **Global agent context causing request interference** — Portal login set global `_current_agent_id`, affecting subsequent Admin Dashboard requests (using wrong connection). Fixed: added `_set_context_from_session()` called at start of each HTTP request to set context based on session's agent_id. Public APIs (register/login) force AIADMIN context.
+- **`_current_agent_id` thread safety** — Global variable `_current_agent_id` caused cross-thread interference in multi-threaded HTTP server (e.g. Portal user's agent context leaking into concurrent register request, causing ORA-00942 on SYSTEM_USERS). Fixed: changed to `threading.local()` so each thread has its own agent context.
+- **COM server.py referencing ENT-only table** — `CONTEXT_AUDIT_LOG` query in stats API caused ORA-00942 on Community Edition. Fixed: wrapped in try/except.
+- **Portal API End User context blocking** — Portal GET APIs (user/profile, chat/sessions, chat/history, user/workspaces, user/memories) and POST APIs (chat/new, chat/send, chat/rename, chat/delete, chat/switch, agent/release) were routed through End User connections with Data Grant filtering, but WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows. Fixed: Portal APIs now use `connection.set_agent_context(None)` to switch to AIADMIN connection for operations requiring access to WORKSPACES/SYSTEM_USERS tables, then restore End User context after completion.
+
+### Security Fixes - Both Editions
+
+- **VPD NULL context vulnerability (CRITICAL)** — Old VPD policy returned `1=1` (expose all) when `SYS_CONTEXT('AGENT_CTX', 'AGENT_ID')` was NULL. Deep Sec replaces this with zero-trust: no context = no data
+- **SYSTEM_CONFIG exposure** — `GRANT SELECT ON SYSTEM_CONFIG TO AGENT_API` removed; Data Grant restricts to `admin_data_role` only
+- **Python VPD bypass** — `set_agent_context()` only set Python global variable, never called PL/SQL. Now calls `SET_AGENT_CONTEXT.set_agent_id()` on every connection
+
+### Removed - Both Editions
+
+- **`6_vpd_policy.sql`** — Replaced by `6_deep_sec_policy.sql`. VPD functions `vpd_ws_ctx_agent` and `vpd_entities_visibility` no longer needed
+
+---
+
 ## [3.3.0] - 2026-06-05
 
 ### Summary
@@ -48,7 +125,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **COM config.py/security.py** — Restored connection_crypto imports (shared between editions)
 - **COM connection_crypto.py** — Restored (shared between editions, NOT ENT-only)
 - **COM 2_api.sql** — Restored DB_CRYPTO package (shared between editions)
-- **COM branches.html** — Fixed "Enterprise Edition" label to "Community Edition"; removed /audit link (ENT-only)
 
 ### Removed - Both Editions
 
@@ -102,6 +178,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **1_schema.sql** — Moved CONTEXT_BRANCHES table definition before SPEC_META and WORKSPACE_CONTEXT (was causing ORA-00942 on FK references)
 - **SPEC_META** — Added missing BRANCH_ID column (FK constraint existed but column was missing)
 - **TASK_STEPS** — Added missing ASSIGNED_AGENT_ID column (FK constraint existed but column was missing)
+- **RELEASE_NOTES_v3.0.0.md** — Fixed header showing v3.1.0 instead of v3.0.0
 - **Branch Overview stats bar** — Changed background to transparent to visually separate from table header
 
 ### Removed - Both Editions
@@ -118,6 +195,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Summary
 
+**Database-Side Encryption with DB_CRYPTO** — Moved all in-database encryption (LDAP BIND_CREDENTIAL, AGENT CREDENTIALS) from Python-side `encrypt_section()`/`decrypt_section()` (which depended on a local `master.key` file) to Oracle `DBMS_CRYPTO` via a new `DB_CRYPTO` PL/SQL package. Database-side encryption keys are stored in `SYSTEM_CONFIG` and fully managed by the database — no dependency on external files.
 
 ### Added - Both Editions
 
@@ -142,6 +220,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Dual-Track Encryption** — Documented split between `connection_crypto` (local file encryption) and `DB_CRYPTO` (database-side encryption)
 - **Multi-Agent Key Sharing** — Documented how agents sharing the same database automatically share `DB_CRYPTO` keys
 
+### Changed - Enterprise Edition Only
+
+- **ldap_auth_api.py:configure_ldap()** — Now uses `DB_CRYPTO.encrypt()` for BIND_CREDENTIAL instead of `encrypt_section()`
+- **ldap_auth_api.py:_get_active_config()** — Now uses `DB_CRYPTO.decrypt()` instead of `decrypt_section()`
+- **ldap_auth_api.py** — Removed `connection_crypto` import dependency for database-side encryption
 
 ### Fixed - Both Editions
 
@@ -149,6 +232,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed - Community Edition Only
 
+- **Removed enterprise-only code** — Deleted `skill_token_api.py`, audit/LDAP/skill-token routes from `server.py`, `context_audit_log` query from `_api_stats()`, LDAP mode from `portal_login.html`, `requestAccess()` from `skills.html`
 - **Added `directDownload()`** to COM `skills.html` for direct resource download (no token flow)
 
 ### Other Changes - Both Editions
@@ -183,12 +267,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Encrypted config.json** — DB credentials stored as `_encrypted` blob; plaintext keys removed; auto-encrypt on first run
 - **connection_crypto.py** — Master key resolution (env > keyfile > auto-generate); encrypt/decrypt sections; auto_encrypt_config()
 - **config.py** — `_decrypt_database_section()` for transparent credential decryption
+- **LDAP Unified Identity Authentication** — Agent Pool users can authenticate against LDAP directories in addition to local SYSTEM_USERS. New `LDAP_CONFIG` table, `LDAP_SYNC_LOG` table, `SYSTEM_USERS.AUTH_SOURCE`/`LDAP_DN` columns, `ldap_auth_api.py` (8 functions), `LDAP_AUTH_MANAGER` PL/SQL (6 subprograms), `LDAP_SYNC_JOB` (hourly)
+- **Skill Storage & Distribution** — Database-backed Skill registry with secure one-time-token resource distribution. New `SKILL_META` table (reference-partitioned, with `SKILL_DESCRIPTION`, `RESOURCE_SERVER_HOST` columns), `SKILL_DV` JRD view, `skill_api.py` (9 functions, update_skill supports title + description), `skill_acquire_api.py` (4 functions: discover, acquire_text, acquire_resource, acquire_full — no auth required), `skill_parser.py` (ZIP package parser with `_meta.json`/YAML frontmatter/`## Metadata` priority), `skill_storage.py` (file storage with server hostname+IP tracking), `SKILL_ACCESS_TOKEN` table (enterprise-only, with `DOWNLOAD_TOKEN`/`DOWNLOAD_EXPIRES_AT`), `skill_token_api.py` (4 functions, enterprise-only, one-time download token flow), `SKILL_MANAGER` PL/SQL (6 subprograms with `RESOURCE_SERVER_HOST`/`SKILL_DESCRIPTION` params). Two-step skill creation: upload ZIP → auto-parse → editable form → confirm. Dashboard resource download (repack as ZIP with `{skill_name}-{version}.zip` naming).
+- **Encrypted Database Credentials** — Database connection info encrypted at rest in config.json. New `connection_crypto.py` (5 functions), `ConfigEncryption` class in security.py, `encrypt_config.py` CLI tool, auto-encrypt on first run, master key from env var/keyfile/auto-generate
+- **Workspace Context Audit** — Rule engine + embedding semantic analysis for idle patterns, context similarity, data leaks, access anomalies, cross-boundary breaches. New `CONTEXT_AUDIT_LOG` table (RANGE yearly), `CONTEXT_AUDIT_RULES` table (5 seed rules), `audit_api.py` (7 functions), `CONTEXT_AUDIT_MANAGER` PL/SQL (7 subprograms), `compute_context_similarity` in embedding_api.py, `CONTEXT_AUDIT_JOB` (daily purge), `IDLE_PATTERN_DETECT_JOB` (hourly), `/audit` web page with overview stats + event list + detail view
 - **Enterprise Configuration** — `config.json` now supports `ldap` section (LDAP server config), `enterprise` section (license_type, skill_token_ttl_min, audit_threshold_score, presigned_url_ttl_sec), and encrypted `database._encrypted` field
 - **BSL 1.1 License** — Enterprise Edition uses Business Source License 1.1; Community Edition remains Apache 2.0
 
 ### Added - Enterprise Edition Only
 
 - **Portal LDAP login** — auth mode dropdown with "LDAP 统一认证" option; authenticates via LDAP bind; auto-registers new users to SYSTEM_USERS with AUTH_SOURCE='LDAP'; syncs LDAP_DN on re-login
+- **LDAP BIND_CREDENTIAL encryption** — `configure_ldap()` encrypts before DB write; `_get_active_config()` decrypts on read
 - **AGENT_CREDENTIALS encryption** — `issue_credential()` / `verify_credential()` now use `encrypt_section()`/`decrypt_section()` with master key (was broken `ReversibleEncryption` with random key)
 - **Registration duplicate check** — Checks SYSTEM_USERS (case-insensitive) then LDAP directory; distinct error messages for each case
 - **LDAP test user passwords** — zhangsan:zhangsan123, lisi:lisi123, wangwu:wangwu123, agent_ops:agent_ops123, dev_engineer:dev_engineer123
@@ -209,6 +298,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **security.py** — New `ConfigEncryption` class with PBKDF2-HMAC-SHA512 key derivation + authenticated encryption
 - **connection.py** — Transparent decryption of database credentials from config
 - **NOTICE** — Updated product name for both editions
+
+### Changed - Enterprise Edition Only
+
+- **Admin Dashboard auth** — `/api/login` uses `_authenticate_local()` — only LOCAL users; LDAP users rejected
+- **Portal login** — System User mode uses `_authenticate_local()`; LDAP mode uses `_authenticate_portal_ldap()`
 
 ### Fixed
 

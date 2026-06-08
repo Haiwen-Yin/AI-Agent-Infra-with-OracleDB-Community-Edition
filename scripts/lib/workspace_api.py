@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Community Edition - Workspace API
+"""AI Agent Infra v3.4.0 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.

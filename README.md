@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.3.0
+# AI Agent Infra with OracleDB - Community Edition v3.4.0
 
-[![Version](https://img.shields.io/badge/version-v3.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.4.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, encrypted credentials at rest, and Agent pool management — built on Oracle 26ai.**
+**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.3.0: Database Access Security & UI Visualization — 5+1-layer security model (Skill Policy, Restricted User, AUTHID DEFINER, VPD, Auditing, Sanitization); enhanced Branch/Spec/Collab pages with linked info.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.4.0: Deep Data Security — fully enforcing via Direct Logon with Local End Users; 5+1-layer security model (Constraint, Restricted User, AUTHID DEFINER, Deep Data Security (Data Grants + MAC), Sanitization) replacing VPD; Portal agent context integration for data isolation.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.3.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.4.0.md)**
 
 ---
 
@@ -54,7 +54,8 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 
 ### Portal Login (`/portal/login`)
 
-- Register/login dual-tab with auth mode dropdown: "系统用户" only
+- Register/login with local system user authentication
+- Registration checks SYSTEM_USERS (case-insensitive) for duplicates
 - "进入管理页面" button in top-right corner
 
 ### Portal Chat (`/portal/chat`)
@@ -70,7 +71,6 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 | Config Key | Default | Description |
 |------------|---------|-------------|
 | `dormant_timeout_min` | 30 min | Agent idle beyond this → auto-recalled to POOL via `DORMANT_AGENT_JOB` |
-| `audit_idle_timeout_min` | 60 min | Idle beyond this → `IDLE_PATTERN` audit event (Enterprise only) |
 | `session_timeout_min` | 60 min | Portal session timeout |
 
 Core logic: `LAST_ACTIVE_AT` older than `dormant_timeout_min` → `STATUS='POOL'`, `CURRENT_USER_ID=NULL`.
@@ -83,6 +83,7 @@ COMMIT;
 
 ### Admin Dashboard (`/login`)
 
+- Only LOCAL users can access admin Dashboard
 - All existing data management pages unchanged
 
 ### Encrypted Credentials
@@ -91,74 +92,7 @@ COMMIT;
 - `AGENT_CREDENTIALS.CREDENTIAL_VALUE`: encrypted with master key (fixed from broken random-key encryption)
 - Master key: env `MASTER_DB_KEY` > `~/.oracle-infra/master.key` > auto-generate
 
-## Community Edition Features
-
-### 2. Skill Storage & Distribution
-
-Database-backed Skill registry with direct resource access.
-
-- **SKILL_META** — Reference-partitioned from ENTITIES subtype `SKILL`; includes `SKILL_DESCRIPTION`, `RESOURCE_SERVER_HOST` (hostname + IP)
-- **skill_api.py** — 9 functions: register, get, list, update (supports title+description), delete, resolve, validate, deprecate, upload_resource
-- **skill_parser.py** — ZIP package parser: `_meta.json` > YAML frontmatter > `## Metadata` section priority
-- **skill_storage.py** — File storage abstraction with server hostname+IP tracking, ZIP repack for download
-- **SKILL_DV** — JSON Relational Duality View for skill data (updatable)
-- **SKILL_MANAGER** PL/SQL — 6 subprograms with `RESOURCE_SERVER_HOST`/`SKILL_DESCRIPTION` params
-
-Skill creation flow (Dashboard):
-1. Upload ZIP → auto-parse metadata → editable form → confirm create
-2. Resource download: Dashboard direct download (no token); Agent API uses token flow
-
-Agent Skill Acquisition API (Python + HTTP):
-- `discover_skills()` → find relevant skills
-- `acquire_skill_text()` → get SKILL.md content (no token needed)
-- `acquire_skill_resource()` → get resource ZIP (COM: direct; ENT: token flow)
-- `acquire_skill_full()` → complete skill package
-
-HTTP endpoints (no auth required):
-- `GET /api/agent/skills?keyword=X&type=CUSTOM` → discover
-- `GET /api/agent/skill/{id}/acquire` → acquire text metadata
-
-Enterprise Skill access flow (Agent API):
-1. `get_skill(skill_id)` → text + generic resource_uri
-2. `request_skill_access(agent_id, session_id, skill_id)` → one-time token
-3. `consume_skill_token(token_id)` → HTTP presigned URL
-4. Download from presigned URL
-
-### 3. Encrypted Database Credentials
-
-Database connection info encrypted at rest in config.json with auto-upgrade from plaintext.
-
-- **connection_crypto.py** — Encrypt/decrypt config sections, rotate key, auto-encrypt
-- **ConfigEncryption** — PBKDF2-HMAC-SHA512 + authenticated encryption (AES-256-GCM style)
-- **Master key** — env var > keyfile > auto-generate
-
-### 5. Context Branching
-
-Fork, merge, abandon, and resume conversation context branches within a workspace.
-
-- **CONTEXT_BRANCHES** — Branch metadata and lifecycle (EXPLORATION/ROLLBACK/HANDOFF/PARALLEL types)
-- **BRANCH_MERGE_LOG** — Merge history with conflict details (COMPLETED/CONFLICT/ROLLED_BACK)
-- **BRANCH_COMPARISON** — View for comparing two branches
-- **BRANCH_MANAGER** PL/SQL — 11 subprograms: fork/merge/abandon/pause/resume/diff/conflicts/lesson/fork-for-spec/validate-for-spec/fork-parallel
-- **branch_api.py** — Python API for full branch lifecycle + parallel branch operations
-- **/api/branch/*** — 17+ HTTP endpoints
-- **/branches** — Dashboard branch management page
-- **Portal "Restart from here"** — Fork from any chat message
-- **BRANCH_CLEANUP_JOB** — Daily cleanup of abandoned branches
-
-### 6. Multi-Agent Collaboration
-
-Collaboration groups integrated with Branches, SDD (Spec), Task Plans, and Harness for coordinated multi-agent workflows.
-
-- **COLLAB_GROUPS.BRANCH_ID / SPEC_ID** — Groups associated with a branch and spec
-- **COLLAB_GROUP_MEMBERS.BRANCH_ID** — Members linked to their branch
-- **TASK_STEPS.ASSIGNED_AGENT_ID** — Plan steps assigned to specific agents
-- **fork_parallel_branches()** — Create PARALLEL branches for multiple agents simultaneously
-- **merge_parallel_branches()** — Merge multiple parallel branches with conflict detection
-- **distribute_plan_to_group()** — Assign plan steps to group members round-robin
-- **validate_group_against_spec()** — Validate group's overall progress against spec acceptance criteria
-- **sync_group_context()** — Sync member branch summaries to shared workspace
-- **share_harness_to_group() / instantiate_harness_for_member()** — Share and instantiate harness within group
+> **For Enterprise Edition features (LDAP, Skill Tokens, Encrypted Config CLI, Context Audit), see the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-OracleDB-Enterprise-Edition).**
 
 ---
 
@@ -185,19 +119,18 @@ Collaboration groups integrated with Branches, SDD (Spec), Task Plans, and Harne
 | Agent Pool Assignment | Yes | Yes |
 | **Identity & Authentication** | | |
 | Local System User Auth | Yes | Yes |
+| LDAP Unified Authentication | No | Yes |
+| LDAP Auto-Registration | No | Yes |
+| LDAP Sync Job | No | Yes |
 | Admin Dashboard Isolation (LOCAL only) | Yes | Yes |
 | **Skill System** | | |
 | Skill CRUD (skill_api.py) | Yes | Yes |
-| SKILL_TOKEN_CLEANUP_JOB | No | Yes |
+| Secure Token Distribution (skill_token_api.py) | No | Yes |
 | **Security & Encryption** | | |
 | Encrypted config.json (DB credentials) | Yes | Yes |
 | Encrypted AGENT_CREDENTIALS | Yes | Yes |
 | Master Key Management | Yes | Yes |
 | Data Masking | Yes | Yes |
-| **Audit & Compliance** | | |
-| CONTEXT_AUDIT_LOG | No | Yes |
-| Audit Rule Engine + Embedding Detection | No | Yes |
-| IDLE_PATTERN_DETECT_JOB | No | Yes |
 | **Database** | | |
 | Tables | 30 | 35 |
 | PL/SQL Packages | 10 | 13 |
@@ -232,10 +165,14 @@ The `1_schema.sql` script now includes built-in protection: it auto-aborts if `S
 
 ### Prerequisites
 
-- Oracle Database 23ai+ (tested on 26ai)
-- Python 3.8+ with `oracledb` and `ldap3` packages
+- **Oracle AI Database 26ai version 23.26.2.0.0 or later** (required for Deep Data Security)
+- **Python 3.8+ with `oracledb 4.0.1+`** (4.0.0 has TCPS/Deep Sec issues; 4.1.0+ recommended when available)
 - SQLcl 26.1+ (for SQL script deployment)
 - `GRANT EXECUTE ON SYS.DBMS_CRYPTO` (required for DB_CRYPTO in-database encryption)
+
+> ⚠️ **Critical**: Oracle AI Database 26ai must be version **23.26.2** or later. Earlier versions (23.26.1) have incomplete Deep Data Security support. Check with: `SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';`
+
+> ⚠️ **Critical**: Python `oracledb` must be version **4.0.1** or later. Install with: `pip install oracledb>=4.0.1`
 
 ### 1. Deploy Schema
 
@@ -249,7 +186,7 @@ sql user/password@//host:port/service @scripts/deploy/4_harness_templates.sql
 ### 2. Install Python Dependencies
 
 ```bash
-pip install oracledb ldap3
+pip install oracledb>=4.0.1
 ```
 
 ### 3. Configure
@@ -264,12 +201,6 @@ export MEMORY_DB_PASSWORD=<db_password>
 export MEMORY_DB_DSN=<db_host>:<db_port>/<db_service>
 
 # Option B: Edit config.json (will auto-encrypt on first run)
-```
-
-Or encrypt manually:
-
-```bash
-cd scripts && python -c "from lib.connection_crypto import auto_encrypt_config; auto_encrypt_config()"
 ```
 
 ### 4. Run Tests
@@ -292,7 +223,7 @@ cd scripts && python -m tests.test_all
 ## Project Structure
 
 ```
-ai-agent-infra-enterprise/
+ai-agent-infra-community/
   scripts/
     deploy/
       1_schema.sql              # 27+ tables, JRD views, indexes, property graph, seed data
@@ -302,12 +233,12 @@ ai-agent-infra-enterprise/
     lib/
       config.py                 # Unified Config with encrypted DB credentials
       connection.py             # oracledb connection pool (decrypts config)
-      connection_crypto.py      # Config encryption/decryption/key rotation [ENT]
+      connection_crypto.py      # Config encryption/decryption/key rotation
       memory_api.py             # Memory CRUD (8 functions)
       knowledge_api.py          # Knowledge CRUD + graph (7 functions)
       agent_api.py              # Agent, sessions, credentials (17+ functions)
       task_plan_api.py          # Task plans, steps (6 functions)
-      security.py               # Data masking, encryption, ConfigEncryption [ENT]
+      security.py               # Data masking, encryption, ConfigEncryption
       harness_api.py            # Harness template CRUD (6 functions)
       graph_api.py              # Property Graph API (9 functions)
       workspace_api.py          # Workspace lifecycle (14 functions)
@@ -317,19 +248,17 @@ ai-agent-infra-enterprise/
       search_api.py             # Unified search (3 functions)
       skill_api.py              # Skill CRUD [shared] (Phase 3)
       skill_acquire_api.py   # Agent skill discovery & acquisition [shared] (Phase 3)
-      skill_acquire_api.py   # Agent skill acquisition [shared] (Phase 3)
       branch_api.py            # Context branching lifecycle (9 functions)
-    tools/
     tests/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.3.0
+      server.py                 # HTTP server v3.4.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/
-  config.json                  # Encrypted database credentials + server config
-  LICENSE                       # Apache 2.0
+  config.json                  # Database connection config (auto-encrypted)
+  LICENSE           # Apache 2.0
   SKILL.md
   README.md
 ```

@@ -1,4 +1,4 @@
-# Minimum Database Privileges - Oracle Memory System v2.1.0
+# Minimum Database Privileges - AI Agent Infra v3.4.0 - Community Edition
 
 ## Current State (openclaw user)
 
@@ -18,7 +18,7 @@
 | Privilege | Reason |
 |-----------|--------|
 | CREATE SESSION | Connect to database |
-| CREATE TABLE | Create 19 tables (6 partitioned, 5 reference-partitioned, 8 non-partitioned) |
+| CREATE TABLE | Create 30 tables (6 partitioned, 5 reference-partitioned, 19 non-partitioned) |
 | CREATE SEQUENCE | Create sequences (IDENTITY columns on TAGS, TASK_CONTEXT_SNAPSHOTS, etc.) |
 | CREATE VIEW | Create JSON Duality Views (MEMORY_DV, KNOWLEDGE_DV) |
 | CREATE PROCEDURE | Create safe_ddl, safe_idx helper procedures |
@@ -33,18 +33,35 @@
 ### Phase 2: API Packages (2_api.sql)
 | Privilege | Reason |
 |-----------|--------|
-| CREATE PROCEDURE | Create 4 PL/SQL packages |
+| CREATE PROCEDURE | Create 13 PL/SQL packages |
 | CREATE TYPE | JSON_OBJECT, JSON_ARRAYAGG etc. (usually available by default in 23ai) |
 
 ### Phase 3: Scheduler Jobs (3_jobs.sql)
 | Privilege | Reason |
 |-----------|--------|
-| CREATE JOB | Create 7 DBMS_SCHEDULER jobs |
+| CREATE JOB | Create 13 DBMS_SCHEDULER jobs |
 
 ### Phase 4: Harness Templates (4_harness_templates.sql)
 | Privilege | Reason |
 |-----------|--------|
 | *(none beyond Phase 1)* | MERGE and INSERT on existing tables |
+
+### Phase 5: Deep Sec (4_grants.sql + 6_deep_sec_policy.sql)
+| Privilege | Reason |
+|-----------|--------|
+| CREATE DATA GRANT | Create 20 Data Grants for Deep Sec |
+| CREATE DATA ROLE | Create admin_data_role, agent_data_role, pool_agent_data_role |
+| CREATE END USER SECURITY CONTEXT | Create agent_context End User Context |
+| ALTER END USER SECURITY CONTEXT | Enable End User Context |
+| CREATE USER | Create Deep Sec End Users (by END_USER_MANAGER) |
+| DROP USER | Drop End Users (by END_USER_MANAGER) |
+| CREATE ROLE | Create DEEP_SEC_SESSION_ROLE |
+| GRANT ANY ROLE | Grant data roles to End Users |
+| ALTER USER | Set End User passwords (by END_USER_MANAGER) |
+| CREATE PROCEDURE | Create SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER packages |
+| SET USE DATA GRANTS ONLY | Enable MAC on 7 tables |
+
+**Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
 
 ### Runtime (Python oracledb driver)
 | Privilege | Reason |

@@ -1,4 +1,4 @@
-# Security - Oracle Memory System v2.1.0
+# Security - AI Agent Infra v3.4.0 - Community Edition
 
 ## Data Masking
 
@@ -86,3 +86,16 @@ AGENT_COLLABORATION tracks cross-agent sharing requests:
 `AGENT_PERMISSION_MANAGER.check_entity_access(agent_id, entity_id)`:
 - Returns 'GRANTED' if entity is SHARED/PUBLIC or owner matches
 - Returns 'DENIED' for PRIVATE entities not owned by the requesting agent
+
+## Deep Data Security (v3.4.0)
+
+v3.4.0 replaces VPD with Oracle Deep Data Security:
+
+- **20 Data Grants** enforce row-level, column-level, and cell-level access control
+- **MAC** on 7 tables prevents view-based bypass of row-level policies
+- **End User Context** with `o:onFirstRead` callback for zero-trust agent identification
+- **3 Data Roles**: `admin_data_role` (full), `agent_data_role` (filtered by agent), `pool_agent_data_role` (minimum)
+- **Per-agent End Users** with Direct Logon — Data Grants auto-filter via `ORA_END_USER_CONTEXT.username`
+- **SYSTEM_CONFIG** fully restricted to `admin_data_role` only
+
+**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.

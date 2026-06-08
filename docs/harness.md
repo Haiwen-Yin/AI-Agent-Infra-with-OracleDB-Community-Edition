@@ -1,4 +1,4 @@
-# Harness Template System - Oracle Memory System v2.1.0
+# Harness Template System - AI Agent Infra v3.4.0 - Community Edition
 
 ## Overview
 

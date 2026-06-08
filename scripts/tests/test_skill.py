@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Community Edition - Skill Tests"""
+"""AI Agent Infra v3.4.0 - Community Edition - Skill Tests"""
 
 import sys
 import os
@@ -17,14 +17,14 @@ SUFFIX = "sktest"
 def test_register_skill():
     eid = register_skill("Skill Test", f"test_skill_{SUFFIX}", skill_type="CUSTOM", runtime="PYTHON")
     assert eid.startswith("ENT_")
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_register_skill (id={eid})")
 
 
 def test_register_skill_minimal():
     eid = register_skill("Minimal Skill", f"minimal_skill_{SUFFIX}")
     assert eid.startswith("ENT_")
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_register_skill_minimal (id={eid})")
 
 
@@ -40,7 +40,7 @@ def test_get_skill():
     assert "skill_status" in skill
     assert "created_at" in skill
     assert "updated_at" in skill
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_get_skill (id={eid})")
 
 
@@ -50,8 +50,8 @@ def test_list_skills():
     skills = list_skills(skill_status="ACTIVE")
     count_before = len(skills)
     assert count_before >= 2
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid1,))
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid2,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid1})
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid2})
     print(f"PASS: test_list_skills (count={count_before})")
 
 
@@ -62,8 +62,8 @@ def test_list_skills_filter_type():
     assert all(s["skill_type"] == "BUILTIN" for s in builtin_skills)
     custom_skills = list_skills(skill_type="CUSTOM", skill_status="ACTIVE")
     assert all(s["skill_type"] == "CUSTOM" for s in custom_skills)
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid1,))
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid2,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid1})
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid2})
     print("PASS: test_list_skills_filter_type")
 
 
@@ -73,7 +73,7 @@ def test_update_skill():
     assert ok
     skill = get_skill(eid)
     assert skill["skill_name"] == f"updated_skill_{SUFFIX}"
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_update_skill (id={eid})")
 
 
@@ -90,7 +90,7 @@ def test_validate_skill_valid():
     eid = register_skill("Valid Skill", f"valid_skill_{SUFFIX}")
     result = validate_skill(eid)
     assert result["valid"] is True
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_validate_skill_valid (valid={result['valid']})")
 
 
@@ -106,7 +106,7 @@ def test_deprecate_skill():
     assert ok
     skill = get_skill(eid)
     assert skill["skill_status"] == "DEPRECATED"
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_deprecate_skill (status={skill['skill_status']})")
 
 
@@ -115,7 +115,7 @@ def test_skill_with_dependencies():
     eid = register_skill("Dep Skill", f"dep_skill_{SUFFIX}", dependencies=deps)
     skill = get_skill(eid)
     assert skill["dependencies"] == deps
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_skill_with_dependencies (deps={skill['dependencies']})")
 
 
@@ -124,7 +124,7 @@ def test_skill_with_parameters():
     eid = register_skill("Param Skill", f"param_skill_{SUFFIX}", parameters=params)
     skill = get_skill(eid)
     assert skill["parameters"] == params
-    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :1", (eid,))
+    execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid", {"eid": eid})
     print(f"PASS: test_skill_with_parameters (params={skill['parameters']})")
 
 

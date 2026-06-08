@@ -1,4 +1,4 @@
-# API Reference - Oracle Memory System v2.2.1
+# API Reference - AI Agent Infra v3.4.0 - Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -182,7 +182,7 @@ get_workspace_tasks(workspace_id) -> list
 - `update_workspace` allowed fields: workspace_name, status, isolation_mode, current_agent_id, current_session_id, summary, metadata
 - `save_context` auto-serializes dict/list CONTEXT_DATA to JSON
 
-## PL/SQL API (packages)
+## PL/SQL API (13 packages: 10 in 2_api.sql + 3 in 6_deep_sec_policy.sql)
 
 ### MEMORY_FUSION_ENGINE
 - `fuse_similar_memories(category, min_similarity, dry_run)` — Merge similar memories, inserts SIMILAR_TO edges with `RAWTOHEX(SYS_GUID())` IDs, uses `JSON_OBJECT('key' VALUE val)` syntax
@@ -207,3 +207,12 @@ get_workspace_tasks(workspace_id) -> list
 - `purge_inactive_sessions(days_to_keep)` — Delete old closed sessions
 - `archive_old_entities(days_threshold)` — Archive low-importance memories (IMPORTANCE <= 1)
 - `update_tag_counts()` — Reserved for tag count updates
+
+## Deep Sec Connection Functions
+
+- `set_agent_context(agent_id)` — Set agent identity for Deep Sec End User routing. `None` switches to AIADMIN pool.
+- `get_current_agent_id()` — Get current agent context from thread-local storage
+- `get_end_user_connection(agent_id)` — Get End User connection with Data Grant filtering
+- `get_connection()` — Get AIADMIN pool connection (unrestricted by Data Grants)
+
+**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.

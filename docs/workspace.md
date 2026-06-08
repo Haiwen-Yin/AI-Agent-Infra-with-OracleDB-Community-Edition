@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - Oracle Memory System v2.2.1
+# Workspace & Context Continuity - AI Agent Infra v3.4.0 - Community Edition
 
 ## Design Philosophy: JRD vs Native JSON
 

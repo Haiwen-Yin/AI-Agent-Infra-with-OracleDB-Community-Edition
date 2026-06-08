@@ -1,4 +1,4 @@
-# Web Visualization - Oracle Memory System v2.1.0
+# Web Visualization - AI Agent Infra v3.4.0 - Community Edition
 
 ## Server
 

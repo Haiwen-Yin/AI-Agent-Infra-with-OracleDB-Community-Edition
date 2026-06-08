@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.4.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -71,6 +71,16 @@ def _create_session(username, user_id, role):
         'created_at': time.time(),
     }
     return session_id
+
+
+def _set_portal_agent_context(sess):
+    agent_id = sess.get('agent_id', '')
+    if agent_id:
+        connection.set_agent_context(agent_id)
+
+
+def _clear_portal_agent_context():
+    connection.set_agent_context(None)
 
 
 def _get_session(request_handler):
@@ -304,8 +314,23 @@ class VisHandler(BaseHTTPRequestHandler):
             return self.rfile.read(length)
         return b''
 
+    def _set_context_from_session(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip('/') or '/'
+        if path in ('/portal/api/register', '/portal/api/login', '/api/login', '/api/health'):
+            connection.set_agent_context(None)
+            return
+        result = _get_session(self)
+        if result and isinstance(result, tuple) and len(result) == 2:
+            sess = result[1]
+            if sess and sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
+                return
+        connection.set_agent_context(None)
+
     def do_GET(self):
         try:
+            self._set_context_from_session()
             self._do_GET_impl()
         except Exception as e:
             import traceback
@@ -372,6 +397,7 @@ class VisHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            self._set_context_from_session()
             self._do_POST_impl()
         except Exception as e:
             import traceback
@@ -622,26 +648,26 @@ class VisHandler(BaseHTTPRequestHandler):
         )
         for ws in workspaces:
             ctx_count = connection.execute_query_one(
-                "SELECT COUNT(*) AS cnt FROM workspace_context WHERE workspace_id = :1",
-                (ws['workspace_id'],)
+                "SELECT COUNT(*) AS cnt FROM workspace_context WHERE workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['context_count'] = ctx_count['cnt'] if ctx_count else 0
             br_count = connection.execute_query_one(
-                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = :1",
-                (ws['workspace_id'],)
+                "SELECT COUNT(*) AS cnt FROM context_branches WHERE workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['branch_count'] = br_count['cnt'] if br_count else 0
             ctx_chain = connection.execute_query(
                 "SELECT context_id, context_type, agent_id, context_data, parent_context_id, created_at "
-                "FROM workspace_context WHERE workspace_id = :1 ORDER BY created_at DESC",
-                (ws['workspace_id'],)
+                "FROM workspace_context WHERE workspace_id = :wsid ORDER BY created_at DESC",
+                {"wsid": ws['workspace_id']}
             )
             ws['context_chain'] = [_clean_row(c) for c in ctx_chain]
             linked = connection.execute_query(
                 "SELECT wt.plan_id, tp.goal, tp.status FROM workspace_tasks wt "
                 "JOIN task_plans tp ON wt.plan_id = tp.plan_id "
-                "WHERE wt.workspace_id = :1",
-                (ws['workspace_id'],)
+                "WHERE wt.workspace_id = :wsid",
+                {"wsid": ws['workspace_id']}
             )
             ws['linked_tasks'] = [_clean_row(t) for t in linked]
             ws['task_count'] = len(linked)
@@ -664,8 +690,8 @@ class VisHandler(BaseHTTPRequestHandler):
         for g in groups:
             members = connection.execute_query(
                 "SELECT member_id, agent_id, role, personal_workspace_id, joined_at, status "
-                "FROM collab_group_members WHERE group_id = :1 ORDER BY joined_at",
-                (g['group_id'],)
+                "FROM collab_group_members WHERE group_id = :gid ORDER BY joined_at",
+                {"gid": g['group_id']}
             )
             g['members'] = [_clean_row(m) for m in members]
         self._send_json({'groups': [_clean_row(g) for g in groups]})
@@ -936,6 +962,10 @@ class VisHandler(BaseHTTPRequestHandler):
         spec_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SPEC'")
         collab_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM collab_groups")
         skill_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM entities WHERE entity_type = 'SKILL'")
+        try:
+            audit_row = connection.execute_query_one("SELECT COUNT(*) AS cnt FROM context_audit_log WHERE resolution_status = 'OPEN'")
+        except Exception:
+            audit_row = None
         self._send_json({
             'entity_counts': entity_counts,
             'edge_count': edge_row['cnt'] if edge_row else 0,
@@ -944,7 +974,7 @@ class VisHandler(BaseHTTPRequestHandler):
             'spec_count': spec_row['cnt'] if spec_row else 0,
             'collab_count': collab_row['cnt'] if collab_row else 0,
             'skill_count': skill_row['cnt'] if skill_row else 0,
-            'audit_open_count': 0,
+            'audit_open_count': audit_row['cnt'] if audit_row else 0,
             'active_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches WHERE branch_status='ACTIVE'")['c'],
             'total_branches': connection.execute_query_one("SELECT COUNT(*) AS c FROM context_branches")['c'],
         })
@@ -1332,6 +1362,7 @@ class VisHandler(BaseHTTPRequestHandler):
 
     def _handle_portal_register(self):
         try:
+            connection.set_agent_context(None)
             body = self._read_body()
             data = json.loads(body)
             username = data.get('username', '').strip()
@@ -1344,7 +1375,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 {"v_uname": username},
             )
             if db_exists:
-                self._send_json({'success': False, 'error': 'Username already exists'}, 409)
+                if db_exists.get('auth_source') == 'LDAP':
+                    self._send_json({'success': False, 'error': 'This username belongs to an LDAP user, please use LDAP login'}, 409)
+                else:
+                    self._send_json({'success': False, 'error': 'Username already exists'}, 409)
                 return
             result = user_api.register_user(username, password)
             if not result:
@@ -1392,6 +1426,7 @@ class VisHandler(BaseHTTPRequestHandler):
                     ws = workspace_api.create_workspace(owner_user_id=str(user['user_id']),
                                                          name='New Chat', workspace_type='CONVERSATION')
                 sess['workspace_id'] = ws
+                _set_portal_agent_context(sess)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
@@ -1424,17 +1459,6 @@ class VisHandler(BaseHTTPRequestHandler):
         if not agent_id:
             self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
             return
-        if not workspace_id:
-            existing_ws = connection.execute_query(
-                "SELECT WORKSPACE_ID FROM WORKSPACES WHERE OWNER_USER_ID = :v_uid AND WORKSPACE_TYPE = 'CONVERSATION' AND STATUS = 'ACTIVE' ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY",
-                {"v_uid": user_id},
-            )
-            if existing_ws:
-                workspace_id = existing_ws[0]['workspace_id']
-                sess['workspace_id'] = workspace_id
-            else:
-                workspace_id = workspace_api.create_workspace(owner_user_id=user_id, name='New Chat', workspace_type='CONVERSATION')
-                sess['workspace_id'] = workspace_id
         try:
             body = self._read_body()
             data = json.loads(body)
@@ -1445,6 +1469,7 @@ class VisHandler(BaseHTTPRequestHandler):
             import datetime
             ts = datetime.datetime.now().isoformat()
             user_context_id = None
+            connection.set_agent_context(None)
             if workspace_id:
                 user_context_id = workspace_api.save_context(
                     workspace_id=workspace_id,
@@ -1488,9 +1513,11 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
             return
         try:
+            connection.set_agent_context(None)
             if agent_session_id:
                 agent_api.end_session(agent_session_id)
             agent_api.hibernate_agent(agent_id)
+            connection.set_agent_context(None)
             sess.pop('agent_id', None)
             sess.pop('agent_name', None)
             sess.pop('agent_session_id', None)
@@ -1514,6 +1541,7 @@ class VisHandler(BaseHTTPRequestHandler):
             data = json.loads(body) if body else {}
             fork_context_id = data.get('fork_context_id', '')
             agent_session_id = sess.get('agent_session_id', '')
+            connection.set_agent_context(None)
             if agent_session_id:
                 agent_api.end_session(agent_session_id)
             new_session = agent_api.create_session(agent_id, owner_user_id=user_id)
@@ -1528,6 +1556,7 @@ class VisHandler(BaseHTTPRequestHandler):
                     agent_id=agent_id,
                 )
                 sess['branch_id'] = branch.get('branch_id', '')
+            _set_portal_agent_context(sess)
             self._send_json({'success': True})
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
@@ -1545,10 +1574,13 @@ class VisHandler(BaseHTTPRequestHandler):
             if not ws_id or not new_name:
                 self._send_json({'success': False, 'error': 'workspace_id and name required'}, 400)
                 return
+            connection.set_agent_context(None)
             connection.execute(
                 "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = SYSTIMESTAMP WHERE WORKSPACE_ID = :v_wid",
                 {"v_name": new_name, "v_wid": ws_id},
             )
+            if session_data[1].get('agent_id'):
+                connection.set_agent_context(session_data[1]['agent_id'])
             self._send_json({'success': True})
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
@@ -1567,15 +1599,20 @@ class VisHandler(BaseHTTPRequestHandler):
             if not ws_id:
                 self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
                 return
+            connection.set_agent_context(None)
             ws = connection.execute_query_one(
                 "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid",
                 {"v_wid": ws_id, "v_uid": user_id},
             )
             if not ws:
+                if sess.get('agent_id'):
+                    connection.set_agent_context(sess['agent_id'])
                 self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
                 return
             connection.execute("DELETE FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
             connection.execute("DELETE FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
             if sess.get('workspace_id') == ws_id:
                 sess.pop('workspace_id', None)
             self._send_json({'success': True})
@@ -1596,13 +1633,18 @@ class VisHandler(BaseHTTPRequestHandler):
             if not ws_id:
                 self._send_json({'success': False, 'error': 'workspace_id required'}, 400)
                 return
+            connection.set_agent_context(None)
             ws = connection.execute_query_one(
                 "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid AND OWNER_USER_ID = :v_uid AND STATUS = 'ACTIVE'",
                 {"v_wid": ws_id, "v_uid": user_id},
             )
             if not ws:
+                if sess.get('agent_id'):
+                    connection.set_agent_context(sess['agent_id'])
                 self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
                 return
+            if sess.get('agent_id'):
+                connection.set_agent_context(sess['agent_id'])
             sess['workspace_id'] = ws_id
             self._send_json({'success': True})
         except Exception as e:
@@ -1619,7 +1661,10 @@ class VisHandler(BaseHTTPRequestHandler):
             if path == '/portal/api/user/profile':
                 session_data = _get_session(self)
                 if session_data:
+                    connection.set_agent_context(None)
                     profile = user_api.get_user_profile(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
                     self._send_json(_clean_row(profile) if profile else {'error': 'User not found'})
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)
@@ -1640,6 +1685,7 @@ class VisHandler(BaseHTTPRequestHandler):
                     user_id = session_data[1].get('user_id', '')
                     workspace_id = session_data[1].get('workspace_id', '')
                     if workspace_id:
+                        connection.set_agent_context(None)
                         rows = connection.execute_query("""
                             SELECT CONTEXT_ID, CONTEXT_DATA FROM WORKSPACE_CONTEXT
                             WHERE CONTEXT_TYPE = 'CHAT_MESSAGE' AND WORKSPACE_ID = :v_wid
@@ -1654,6 +1700,8 @@ class VisHandler(BaseHTTPRequestHandler):
                                 messages.append(d)
                             except Exception:
                                 pass
+                        if session_data[1].get('agent_id'):
+                            connection.set_agent_context(session_data[1]['agent_id'])
                         self._send_json({'messages': messages, 'workspace_id': workspace_id})
                     else:
                         self._send_json({'messages': []})
@@ -1664,6 +1712,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 if session_data:
                     user_id = session_data[1].get('user_id', '')
                     current_ws = session_data[1].get('workspace_id', '')
+                    connection.set_agent_context(None)
                     rows = connection.execute_query("""
                         SELECT w.WORKSPACE_ID, w.WORKSPACE_NAME, w.WORKSPACE_ALIAS,
                                TO_CHAR(w.CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT,
@@ -1681,20 +1730,28 @@ class VisHandler(BaseHTTPRequestHandler):
                             'msg_count': r.get('msg_count', 0),
                             'is_current': r['workspace_id'] == current_ws,
                         })
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
                     self._send_json({'sessions': sessions_list})
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)
             elif path == '/portal/api/user/workspaces':
                 session_data = _get_session(self)
                 if session_data:
+                    connection.set_agent_context(None)
                     wss = user_api.get_user_workspaces(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
                     self._send_json({'workspaces': [_clean_row(w) for w in wss]})
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)
             elif path == '/portal/api/user/memories':
                 session_data = _get_session(self)
                 if session_data:
+                    connection.set_agent_context(None)
                     mems = user_api.get_user_memories(session_data[1].get('user_id', ''))
+                    if session_data[1].get('agent_id'):
+                        connection.set_agent_context(session_data[1]['agent_id'])
                     self._send_json({'memories': [_clean_row(m) for m in mems]})
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)

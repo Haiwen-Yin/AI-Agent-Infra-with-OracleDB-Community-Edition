@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Credential & Pool Agent Tests"""
+"""AI Agent Infra v3.4.0 - Credential & Pool Agent Tests"""
 
 import sys
 import os
@@ -27,7 +27,7 @@ def test_register_agents():
     register_agent(POOL_AGENT, "Pool Test Agent", agent_type="test")
     try:
         from lib.connection import execute
-        execute("INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, STATUS) VALUES (:1, :2, 'SHA256:placeholder', 'ACTIVE')", {"1": USER, "2": "cred_test_user"})
+        execute("INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, STATUS) VALUES (:uid, :uname, 'SHA256:placeholder', 'ACTIVE')", {"uid": USER, "uname": "cred_test_user"})
     except Exception:
         pass
     print("PASS: test_register_agents")
@@ -65,7 +65,7 @@ def test_revoke_credential():
 
 def test_hibernate_agent():
     from lib.connection import execute
-    execute("UPDATE AGENT_REGISTRY SET STATUS = 'ACTIVE' WHERE AGENT_ID = :1", (AGENT,))
+    execute("UPDATE AGENT_REGISTRY SET STATUS = 'ACTIVE' WHERE AGENT_ID = :aid", {"aid": AGENT}))
     ok = hibernate_agent(AGENT)
     assert ok
     agent = get_agent(AGENT)

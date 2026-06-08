@@ -1,4 +1,4 @@
-# Architecture - Oracle Memory System v2.2.1
+# Architecture - AI Agent Infra v3.4.0 - Community Edition
 
 ## Unified Entity Model
 
@@ -283,3 +283,24 @@ v2.2 uses a layered JSON approach:
 3. **JSON_TRANSFORM for partial updates** — Updatable JRD views use `JSON_TRANSFORM` under the hood for atomic partial JSON updates without full document replacement
 
 This strategy balances: (a) relational integrity for FK constraints and partitioning, (b) document convenience for API consumers, and (c) partial update efficiency for large JSON payloads.
+
+## Deep Data Security Architecture
+
+v3.4.0 replaces VPD (Virtual Private Database) with Oracle Deep Data Security (Deep Sec):
+
+- **Data Grants**: 20 declarative access policies for row-level, column-level, and cell-level security
+- **MAC (Mandatory Access Control)**: `SET USE DATA GRANTS ONLY` on 7 tables prevents view-based bypass
+- **End User Context**: `agent_context` with `o:onFirstRead` callback populates `ORA_END_USER_CONTEXT.username`
+- **Zero Trust**: No context = no data (unlike old VPD which returned `1=1`)
+- **Data Roles**: `admin_data_role` (full access), `agent_data_role` (filtered), `pool_agent_data_role` (minimum)
+- **End Users**: One per Pool Agent, connects directly with Data Grant filtering
+- **DEEP_SEC_SESSION_ROLE**: CREATE SESSION for End User login
+
+| Connection Type | User | Access Method | Data Scope |
+|----------------|------|--------------|------------|
+| Portal | End User | Direct logon | Filtered by Data Grants |
+| Admin | AIADMIN | Pool connection | Unrestricted (no Data Grants) |
+
+Portal requests use End User connections with Data Grant filtering. Admin/management operations use the AIADMIN pool connection with unrestricted access.
+
+**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End users. After the operation completes, the End User context is restored.

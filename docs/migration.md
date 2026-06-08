@@ -1,4 +1,4 @@
-# Migration Guide - Oracle Memory System v2.1.0
+# Migration Guide - AI Agent Infra v3.4.0 - Community Edition
 
 ## Version Compatibility
 
@@ -187,4 +187,72 @@ create_memory(..., tags=["tag1", "tag2"])
 mid = create_memory(title="test", content="content")
 add_memory_tags(mid, ["tag1", "tag2"])
 tags = get_memory_tags(mid)
+```
+
+## v3.3.0 → v3.4.0 Migration
+
+This migration replaces VPD policies with Deep Data Security (Data Grants + MAC + End User Context).
+
+### Step 1: Drop VPD Policies
+
+Remove existing VPD policies that are replaced by Data Grants:
+
+```sql
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'WORKSPACE_CONTEXT', 'WS_CTX_AGENT_VPD');
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_AGENT_VPD');
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'AGENT_SESSION', 'SESSION_AGENT_VPD');
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'TASK_PLANS', 'PLANS_AGENT_VPD');
+EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITY_ACCESS_LOG', 'ACCESS_LOG_AGENT_VPD');
+```
+
+### Step 2: Run 4_grants.sql as SYSDBA
+
+This script adds Deep Sec system privileges, removes the SYSTEM_CONFIG grant, and creates DEEP_SEC_SESSION_ROLE:
+
+```bash
+sql sys/password@//host:port/service AS SYSDBA @scripts/deploy/4_grants.sql
+```
+
+### Step 3: Create DEEP_SEC_SESSION_ROLE
+
+If not already created by 4_grants.sql:
+
+```sql
+CREATE ROLE DEEP_SEC_SESSION_ROLE;
+GRANT CREATE SESSION TO DEEP_SEC_SESSION_ROLE;
+GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
+```
+
+### Step 4: Run 6_deep_sec_policy.sql as AIADMIN
+
+This script creates Data Grants, Data Roles, MAC policies, End User Context, END_USER_MANAGER package, and End Users for existing agents:
+
+```bash
+sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
+```
+
+### Step 5: Restart Application Server
+
+Restart the application server to pick up the new connection routing logic. Portal APIs that access WORKSPACES/SYSTEM_USERS tables now use `connection.set_agent_context(None)` to temporarily switch to AIADMIN connection (WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users).
+
+### Step 6: Verify Deep Sec
+
+Connect as an End User and confirm Data Grant filtering works:
+
+```sql
+-- Connect as an End User (e.g., AGENT_POOL_01)
+CONNECT AGENT_POOL_01/password@//host:port/service
+ALTER SESSION SET CURRENT_SCHEMA = AIADMIN;
+
+-- Should see only own agents
+SELECT COUNT(*) FROM AGENT_REGISTRY;
+-- Expected: 1 (own agent only)
+
+-- Should see only own/public entities
+SELECT COUNT(*) FROM ENTITIES;
+-- Expected: filtered by ownership + visibility
+
+-- Should NOT see SYSTEM_CONFIG
+SELECT COUNT(*) FROM SYSTEM_CONFIG;
+-- Expected: 0 (blocked by Data Grant predicate 1=0)
 ```

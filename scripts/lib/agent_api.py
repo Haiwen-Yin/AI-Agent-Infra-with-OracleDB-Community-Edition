@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Community Edition - Agent API
+"""AI Agent Infra v3.4.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -6,9 +6,10 @@ and collaboration tracking.
 
 import json
 import logging
+import oracledb
 from typing import Any, Dict, List, Optional
 
-from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id, sanitize_row, get_connection
+from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id, sanitize_row, get_connection, execute_plsql
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,8 @@ def register_agent(
     capabilities: Optional[Any] = None,
     config: Optional[Any] = None,
 ) -> str:
-    """Register a new agent or update an existing one via MERGE."""
+    """Register a new agent or update an existing one via MERGE.
+    Also creates a Deep Sec End User for Data Grant enforcement."""
     sql = """
         MERGE INTO AGENT_REGISTRY t
         USING (SELECT :aid AS AGENT_ID FROM DUAL) s
@@ -68,7 +70,27 @@ def register_agent(
         "caps": caps_val,
         "cfg": cfg_val,
     })
+    _ensure_end_user(agent_id)
     return agent_id
+
+
+def _ensure_end_user(agent_id: str) -> None:
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                result_var = cur.var(oracledb.STRING)
+                cur.execute(
+                    "BEGIN :r := AIADMIN.END_USER_MANAGER.ensure_end_user(:aid); END;",
+                    {"r": result_var, "aid": agent_id},
+                )
+                result = result_var.getvalue()
+                if result and not str(result).startswith('ERROR'):
+                    conn.commit()
+                    logger.info("Deep Sec End User ensured for %s", agent_id)
+                else:
+                    logger.debug("End User for %s: %s", agent_id, result)
+    except Exception as e:
+        logger.debug("End User creation skipped for %s: %s", agent_id, e)
 
 
 def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
@@ -368,12 +390,12 @@ def issue_credential(agent_id, user_id, scope, credential_type='ACCESS_TOKEN', e
     sql = """
         INSERT INTO AGENT_CREDENTIALS (CREDENTIAL_ID, AGENT_ID, USER_ID,
             CREDENTIAL_TYPE, CREDENTIAL_VALUE, SCOPE, IS_ACTIVE, CREATED_AT, EXPIRES_AT)
-        VALUES (:1, :2, :3, :4, :5, :6, 'Y', SYSTIMESTAMP, :7)
+        VALUES (:cid, :aid, :uid, :ctype, :cval, :cscope, 'Y', SYSTIMESTAMP, :exp)
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (cred_id, agent_id, user_id, credential_type,
-                              encrypted_value, json.dumps(scope), expires_at))
+            cur.execute(sql, {"cid": cred_id, "aid": agent_id, "uid": user_id, "ctype": credential_type,
+                              "cval": encrypted_value, "cscope": json.dumps(scope), "exp": expires_at})
             conn.commit()
     return cred_id
 

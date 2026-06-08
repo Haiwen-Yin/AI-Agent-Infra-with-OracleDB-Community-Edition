@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.3.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.4.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1217,8 +1217,17 @@ END EMBEDDING_MANAGER;
 
 CREATE OR REPLACE PACKAGE BODY EMBEDDING_MANAGER AS
 
+    FUNCTION get_config(p_key IN VARCHAR2, p_default IN VARCHAR2) RETURN VARCHAR2 IS
+        l_val VARCHAR2(4000);
+    BEGIN
+        SELECT CONFIG_VALUE INTO l_val FROM SYSTEM_CONFIG WHERE CONFIG_KEY = p_key;
+        RETURN l_val;
+    EXCEPTION WHEN NO_DATA_FOUND THEN RETURN p_default;
+    END get_config;
+
     FUNCTION generate_embedding(p_text IN VARCHAR2) RETURN CLOB IS
-        l_url   VARCHAR2(4000) := 'http://10.10.10.1:12345/v1/embeddings';
+        l_url   VARCHAR2(4000) := get_config('embedding_url', 'http://10.10.10.1:12345/v1/embeddings');
+        l_model VARCHAR2(200)  := get_config('embedding_model', 'text-embedding-bge-m3');
         l_body  VARCHAR2(32767);
         l_req   UTL_HTTP.REQ;
         l_resp  UTL_HTTP.RESP;
@@ -1226,7 +1235,7 @@ CREATE OR REPLACE PACKAGE BODY EMBEDDING_MANAGER AS
         l_result CLOB;
         l_done  BOOLEAN := FALSE;
     BEGIN
-        l_body := '{"model":"text-embedding-bge-m3","input":"' || REPLACE(REPLACE(p_text, '"', '\"'), CHR(10), ' ') || '"}';
+        l_body := '{"model":"' || l_model || '","input":"' || REPLACE(REPLACE(p_text, '"', '\"'), CHR(10), ' ') || '"}';
         l_req := UTL_HTTP.BEGIN_REQUEST(l_url, 'POST');
         UTL_HTTP.SET_HEADER(l_req, 'Content-Type', 'application/json');
         UTL_HTTP.SET_HEADER(l_req, 'Content-Length', LENGTHB(l_body));
@@ -1251,6 +1260,8 @@ CREATE OR REPLACE PACKAGE BODY EMBEDDING_MANAGER AS
         l_vec   CLOB;
         l_emb   VECTOR;
         l_cnt   NUMBER;
+        l_model VARCHAR2(200) := get_config('embedding_model', 'text-embedding-bge-m3');
+        l_dim   NUMBER := TO_NUMBER(get_config('embedding_dim', '1024'));
     BEGIN
         l_json := generate_embedding(p_text);
         l_vec := JSON_QUERY(l_json, '$.data[0].embedding' WITH WRAPPER);
@@ -1259,11 +1270,11 @@ CREATE OR REPLACE PACKAGE BODY EMBEDDING_MANAGER AS
 
         SELECT COUNT(*) INTO l_cnt FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = p_entity_id AND ENTITY_TYPE = p_entity_type;
         IF l_cnt > 0 THEN
-            UPDATE ENTITY_EMBEDDINGS SET EMBEDDING = l_emb, EMBEDDING_MODEL = 'text-embedding-bge-m3', EMBEDDING_DIM = 1024
+            UPDATE ENTITY_EMBEDDINGS SET EMBEDDING = l_emb, EMBEDDING_MODEL = l_model, EMBEDDING_DIM = l_dim
             WHERE ENTITY_ID = p_entity_id AND ENTITY_TYPE = p_entity_type;
         ELSE
             INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
-            VALUES (p_entity_id, p_entity_type, l_emb, 'text-embedding-bge-m3', 1024, SYSTIMESTAMP);
+            VALUES (p_entity_id, p_entity_type, l_emb, l_model, l_dim, SYSTIMESTAMP);
         END IF;
         COMMIT;
         RETURN 1;
@@ -1338,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.3.0 API Deployment Complete
+PROMPT AI Agent Infra v3.4.0 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2074,5 +2085,5 @@ END BRANCH_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.3.0 - Community Edition API Deployment Complete
+PROMPT AI Agent Infra v3.4.0 - Community Edition API Deployment Complete
 PROMPT ============================================================

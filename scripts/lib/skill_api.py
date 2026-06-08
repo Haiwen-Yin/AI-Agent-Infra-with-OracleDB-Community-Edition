@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.3.0 - Skill Storage & Distribution API"""
+"""AI Agent Infra v3.4.0 - Skill Storage & Distribution API"""
 
 import json
 from typing import Any, Dict, List, Optional

@@ -1,6 +1,6 @@
 -- ============================================================
 -- 5_audit_policy.sql — Unified Auditing for Direct DML Detection
--- AI Agent Infra with OracleDB v3.3.0
+-- AI Agent Infra with OracleDB v3.4.0
 -- ============================================================
 --
 -- This script creates audit policies that detect direct DML
@@ -149,4 +149,29 @@ PROMPT To check for bypass attempts:
 PROMPT   SELECT * FROM UNIFIED_AUDIT_TRAIL 
 PROMPT   WHERE AUDIT_POLICY_NAME = 'DIRECT_DML_BYPASS_DETECTION'
 PROMPT   ORDER BY EVENT_TIMESTAMP DESC;
+PROMPT ============================================================
+
+PROMPT ============================================================
+PROMPT Network ACL for EMBEDDING_MANAGER (requires SYSDBA)
+PROMPT ============================================================
+PROMPT
+PROMPT The EMBEDDING_MANAGER package uses UTL_HTTP to call the
+PROMPT embedding API. Run the following as SYSDBA to grant access:
+PROMPT
+PROMPT   BEGIN
+PROMPT     DBMS_NETWORK_ACL_ADMIN.APPEND_HOST_ACE(
+PROMPT       host => '<embedding_host>',
+PROMPT       lower_port => <embedding_port>,
+PROMPT       upper_port => <embedding_port>,
+PROMPT       ace => xs$ace_type(
+PROMPT         privilege_list => xs$name_list('http'),
+PROMPT         principal_name => 'AIADMIN',
+PROMPT         principal_type => xs_acl.ptype_db
+PROMPT       )
+PROMPT     );
+PROMPT   END;
+PROMPT /
+PROMPT
+PROMPT Default values (from SYSTEM_CONFIG embedding_url):
+PROMPT   host: 10.10.10.1, port: 12345
 PROMPT ============================================================
