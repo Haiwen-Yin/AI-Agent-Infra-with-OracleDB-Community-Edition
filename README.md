@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.4.0
+# AI Agent Infra with OracleDB - Community Edition v3.5.0
 
-[![Version](https://img.shields.io/badge/version-v3.4.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.5.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.4.0: Deep Data Security — fully enforcing via Direct Logon with Local End Users; 5+1-layer security model (Constraint, Restricted User, AUTHID DEFINER, Deep Data Security (Data Grants + MAC), Sanitization) replacing VPD; Portal agent context integration for data isolation.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.5.0 (2026-06-11): Deep Sec Multi-Agent Collaboration Fix — SHARED entities now correctly visible to End Users via ENTITIES_AGENT_OWN predicate fix; 2 new Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS access (Data Grants 20→22); WORKSPACE_CONTEXT VISIBILITY isolation for collaboration groups.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.4.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.5.0.md)**
 
 ---
 
@@ -253,7 +253,7 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.4.0
+      server.py                 # HTTP server v3.5.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

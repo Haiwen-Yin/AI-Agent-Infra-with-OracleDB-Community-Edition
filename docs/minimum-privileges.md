@@ -1,4 +1,4 @@
-# Minimum Database Privileges - AI Agent Infra v3.4.0 - Community Edition
+# Minimum Database Privileges - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Current State (openclaw user)
 
@@ -49,7 +49,7 @@
 ### Phase 5: Deep Sec (4_grants.sql + 6_deep_sec_policy.sql)
 | Privilege | Reason |
 |-----------|--------|
-| CREATE DATA GRANT | Create 20 Data Grants for Deep Sec |
+| CREATE DATA GRANT | Create 22 Data Grants for Deep Sec |
 | CREATE DATA ROLE | Create admin_data_role, agent_data_role, pool_agent_data_role |
 | CREATE END USER SECURITY CONTEXT | Create agent_context End User Context |
 | ALTER END USER SECURITY CONTEXT | Enable End User Context |

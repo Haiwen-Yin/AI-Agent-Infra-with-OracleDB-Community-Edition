@@ -1,6 +1,6 @@
 -- ============================================================
 -- 6_deep_sec_policy.sql — Oracle Deep Data Security (Deep Sec)
--- AI Agent Infra with OracleDB v3.4.0
+-- AI Agent Infra with OracleDB v3.5.0
 -- ============================================================
 --
 -- Deep Sec enforcement via Direct Logon with Local End Users.
@@ -147,23 +147,25 @@ CREATE OR REPLACE DATA GRANT ws_ctx_admin_access
 CREATE OR REPLACE DATA GRANT ws_ctx_agent_access
   AS SELECT
   ON AIADMIN.WORKSPACE_CONTEXT
-  WHERE WORKSPACE_ID IN (
-      SELECT WORKSPACE_ID FROM AIADMIN.WORKSPACES
-      WHERE UPPER(REPLACE(CURRENT_AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
-      UNION
-      SELECT cg.WORKSPACE_ID FROM AIADMIN.COLLAB_GROUPS cg
-      JOIN AIADMIN.COLLAB_GROUP_MEMBERS cgm ON cg.GROUP_ID = cgm.GROUP_ID
-      WHERE UPPER(REPLACE(cgm.AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
-        AND cgm.STATUS = 'ACTIVE'
-  )
-  OR UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+  WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+         OR (VISIBILITY = 'PUBLIC')
+         OR (VISIBILITY = 'SHARED' AND WORKSPACE_ID IN (
+             SELECT WORKSPACE_ID FROM AIADMIN.WORKSPACES
+             WHERE UPPER(REPLACE(CURRENT_AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+             UNION
+             SELECT cg.WORKSPACE_ID FROM AIADMIN.COLLAB_GROUPS cg
+             JOIN AIADMIN.COLLAB_GROUP_MEMBERS cgm ON cg.GROUP_ID = cgm.GROUP_ID
+             WHERE UPPER(REPLACE(cgm.AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+               AND cgm.STATUS = 'ACTIVE'
+         ))
   TO agent_data_role;
 /
 
 CREATE OR REPLACE DATA GRANT ws_ctx_agent_insert
   AS INSERT
   ON AIADMIN.WORKSPACE_CONTEXT
-  WHERE 1=1
+  WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+         OR VISIBILITY IN ('SHARED', 'PUBLIC')
   TO agent_data_role;
 /
 
@@ -211,6 +213,11 @@ CREATE OR REPLACE DATA GRANT entities_agent_own
      OR (VISIBILITY = 'SHARED' AND WORKSPACE_ID IN (
          SELECT WORKSPACE_ID FROM AIADMIN.WORKSPACES
          WHERE UPPER(REPLACE(CURRENT_AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+         UNION
+         SELECT cg.WORKSPACE_ID FROM AIADMIN.COLLAB_GROUPS cg
+         JOIN AIADMIN.COLLAB_GROUP_MEMBERS cgm ON cg.GROUP_ID = cgm.GROUP_ID
+         WHERE UPPER(REPLACE(cgm.AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+           AND cgm.STATUS = 'ACTIVE'
      ))
   TO agent_data_role;
 /
@@ -343,11 +350,36 @@ CREATE OR REPLACE DATA GRANT task_agent_access
                AND cgm.STATUS = 'ACTIVE'
          )
      )
+   TO agent_data_role;
+/
+
+PROMPT ============================================================
+PROMPT Step 16: Creating Data Grants — COLLAB_GROUPS + COLLAB_GROUP_MEMBERS
+PROMPT ============================================================
+-- Required for Data Grant predicates that reference COLLAB tables in subqueries.
+-- Without these, End Users cannot access COLLAB tables, causing predicates to
+-- silently fail and SHARED entities to become invisible.
+
+CREATE OR REPLACE DATA GRANT collab_member_own
+  AS SELECT
+  ON AIADMIN.COLLAB_GROUP_MEMBERS
+  WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+  TO agent_data_role;
+/
+
+CREATE OR REPLACE DATA GRANT collab_group_member_access
+  AS SELECT
+  ON AIADMIN.COLLAB_GROUPS
+  WHERE GROUP_ID IN (
+      SELECT GROUP_ID FROM AIADMIN.COLLAB_GROUP_MEMBERS
+      WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+        AND STATUS = 'ACTIVE'
+  )
   TO agent_data_role;
 /
 
 PROMPT ============================================================
-PROMPT Step 16: Enabling MAC (Mandatory Access Control)
+PROMPT Step 18: Enabling MAC (Mandatory Access Control)
 PROMPT ============================================================
 
 BEGIN
@@ -364,7 +396,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Step 17: Creating END_USER_MANAGER package
+PROMPT Step 19: Creating END_USER_MANAGER package
 PROMPT ============================================================
 -- Manages Deep Sec End User lifecycle: create, drop, get password
 -- Key: ensure_end_user(agent_id) handles name mapping automatically
@@ -470,7 +502,7 @@ END END_USER_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT Step 18: Creating End Users for existing agents
+PROMPT Step 20: Creating End Users for existing agents
 PROMPT ============================================================
 
 DECLARE
@@ -512,7 +544,7 @@ PROMPT   Package:          agent_auth_pkg (callback)
 PROMPT   Package:          END_USER_MANAGER (End User lifecycle)
 PROMPT   Data Roles:       admin_data_role, agent_data_role, pool_agent_data_role
 PROMPT   Session Role:     DEEP_SEC_SESSION_ROLE (CREATE SESSION)
-PROMPT   Data Grants:      17 grants (row, column, cell level)
+PROMPT   Data Grants:      22 grants (row, column, cell level, collab access)
 PROMPT   MAC:              7 tables protected
 PROMPT   End Users:        One per agent (Direct Logon mode)
 PROMPT

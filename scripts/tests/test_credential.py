@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Credential & Pool Agent Tests"""
+"""AI Agent Infra v3.5.0 - Credential & Pool Agent Tests"""
 
 import sys
 import os
@@ -65,7 +65,7 @@ def test_revoke_credential():
 
 def test_hibernate_agent():
     from lib.connection import execute
-    execute("UPDATE AGENT_REGISTRY SET STATUS = 'ACTIVE' WHERE AGENT_ID = :aid", {"aid": AGENT}))
+    execute("UPDATE AGENT_REGISTRY SET STATUS = 'ACTIVE' WHERE AGENT_ID = :aid", {"aid": AGENT})
     ok = hibernate_agent(AGENT)
     assert ok
     agent = get_agent(AGENT)

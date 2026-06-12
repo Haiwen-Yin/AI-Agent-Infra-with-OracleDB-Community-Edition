@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Memory API Tests"""
+"""AI Agent Infra v3.5.0 - Memory API Tests"""
 
 import sys
 import os
@@ -12,7 +12,7 @@ from lib.memory_api import (
 from lib.connection import close_pool
 
 
-def test_create_memory():
+def _test_create_memory():
     entity_id = create_memory(
         title="Test Memory",
         content="test content",
@@ -22,47 +22,47 @@ def test_create_memory():
     )
     assert isinstance(entity_id, str)
     assert len(entity_id) > 0
-    print(f"PASS: test_create_memory (id={entity_id})")
+    print(f"PASS: _test_create_memory (id={entity_id})")
     return entity_id
 
 
-def test_get_memory(entity_id):
+def _test_get_memory(entity_id):
     mem = get_memory(entity_id)
     assert mem is not None
     assert mem["title"] == "Test Memory"
     assert mem["category"] == "test"
     assert mem["importance"] == 7
-    print(f"PASS: test_get_memory (title={mem['title']})")
+    print(f"PASS: _test_get_memory (title={mem['title']})")
 
 
-def test_update_memory(entity_id):
+def _test_update_memory(entity_id):
     ok = update_memory(entity_id, title="Updated Memory", importance=3)
     assert ok
     mem = get_memory(entity_id)
     assert mem["title"] == "Updated Memory"
     assert mem["importance"] == 3
-    print("PASS: test_update_memory")
+    print("PASS: _test_update_memory")
 
 
-def test_search_memories():
+def _test_search_memories():
     results = search_memories(keyword="Memory", category="test")
     assert len(results) >= 1
-    print(f"PASS: test_search_memories (found={len(results)})")
+    print(f"PASS: _test_search_memories (found={len(results)})")
 
 
-def test_get_agent_memories():
+def _test_get_agent_memories():
     results = get_agent_memories("test-agent")
     assert len(results) >= 1
-    print(f"PASS: test_get_agent_memories (found={len(results)})")
+    print(f"PASS: _test_get_agent_memories (found={len(results)})")
 
 
-def test_count_memories():
+def _test_count_memories():
     count = count_memories(category="test")
     assert count >= 1
-    print(f"PASS: test_count_memories (count={count})")
+    print(f"PASS: _test_count_memories (count={count})")
 
 
-def test_memory_tags(entity_id):
+def _test_memory_tags(entity_id):
     added = add_memory_tags(entity_id, ["unit-test", "v2.1"])
     assert added == 2
     tags = get_memory_tags(entity_id)
@@ -72,15 +72,15 @@ def test_memory_tags(entity_id):
     assert ok
     tags = get_memory_tags(entity_id)
     assert len(tags) == 1
-    print("PASS: test_memory_tags")
+    print("PASS: _test_memory_tags")
 
 
-def test_delete_memory(entity_id):
+def _test_delete_memory(entity_id):
     ok = delete_memory(entity_id)
     assert ok
     mem = get_memory(entity_id)
     assert mem is None
-    print("PASS: test_delete_memory")
+    print("PASS: _test_delete_memory")
 
 
 def run_all():
@@ -88,22 +88,22 @@ def run_all():
     failed = 0
     entity_id = None
     try:
-        entity_id = test_create_memory()
+        entity_id = _test_create_memory()
         passed += 1
     except Exception as e:
-        print(f"FAIL: test_create_memory - {e}")
+        print(f"FAIL: _test_create_memory - {e}")
         failed += 1
         close_pool()
         return False
 
     for test_fn in [
-        lambda: test_get_memory(entity_id),
-        lambda: test_update_memory(entity_id),
-        test_search_memories,
-        test_get_agent_memories,
-        test_count_memories,
-        lambda: test_memory_tags(entity_id),
-        lambda: test_delete_memory(entity_id),
+        lambda: _test_get_memory(entity_id),
+        lambda: _test_update_memory(entity_id),
+        _test_search_memories,
+        _test_get_agent_memories,
+        _test_count_memories,
+        lambda: _test_memory_tags(entity_id),
+        lambda: _test_delete_memory(entity_id),
     ]:
         try:
             test_fn()

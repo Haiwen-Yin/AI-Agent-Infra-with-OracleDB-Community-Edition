@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Community Edition - Agent API
+"""AI Agent Infra v3.5.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 and collaboration tracking.
@@ -390,11 +390,11 @@ def issue_credential(agent_id, user_id, scope, credential_type='ACCESS_TOKEN', e
     sql = """
         INSERT INTO AGENT_CREDENTIALS (CREDENTIAL_ID, AGENT_ID, USER_ID,
             CREDENTIAL_TYPE, CREDENTIAL_VALUE, SCOPE, IS_ACTIVE, CREATED_AT, EXPIRES_AT)
-        VALUES (:cid, :aid, :uid, :ctype, :cval, :cscope, 'Y', SYSTIMESTAMP, :exp)
+        VALUES (:cid, :aid, :vuid, :ctype, :cval, :cscope, 'Y', SYSTIMESTAMP, :exp)
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, {"cid": cred_id, "aid": agent_id, "uid": user_id, "ctype": credential_type,
+            cur.execute(sql, {"cid": cred_id, "aid": agent_id, "vuid": user_id, "ctype": credential_type,
                               "cval": encrypted_value, "cscope": json.dumps(scope), "exp": expires_at})
             conn.commit()
     return cred_id

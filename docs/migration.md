@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.4.0 - Community Edition
+# Migration Guide - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Version Compatibility
 
@@ -255,4 +255,67 @@ SELECT COUNT(*) FROM ENTITIES;
 -- Should NOT see SYSTEM_CONFIG
 SELECT COUNT(*) FROM SYSTEM_CONFIG;
 -- Expected: 0 (blocked by Data Grant predicate 1=0)
+```
+
+## v3.4.0 → v3.5.0 Migration
+
+This migration fixes three Deep Sec bugs: ENTITIES_AGENT_OWN predicate missing COLLAB subquery (SHARED entities invisible), missing Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS (End Users cannot access COLLAB tables), and missing WORKSPACE_CONTEXT VISIBILITY column (no isolation for private context in collab workspaces).
+
+### Step 1: Add VISIBILITY Column to WORKSPACE_CONTEXT
+
+The WORKSPACE_CONTEXT table needs a VISIBILITY column for collaboration isolation. Existing rows default to SHARED (backward compatible):
+
+```sql
+ALTER TABLE WORKSPACE_CONTEXT ADD VISIBILITY VARCHAR2(16) DEFAULT 'SHARED';
+UPDATE WORKSPACE_CONTEXT SET VISIBILITY = 'SHARED' WHERE VISIBILITY IS NULL;
+ALTER TABLE WORKSPACE_CONTEXT ADD CONSTRAINT CK_WC_VISIBILITY CHECK (VISIBILITY IN ('PRIVATE','SHARED','PUBLIC'));
+```
+
+### Step 2: Drop Old ENTITIES_AGENT_OWN Data Grant
+
+The old predicate is missing the COLLAB subquery. It must be dropped and recreated:
+
+```sql
+DROP DATA GRANT entities_agent_own;
+```
+
+### Step 3: Drop Old WS_CTX Data Grants
+
+The WS_CTX_AGENT_ACCESS and WS_CTX_AGENT_INSERT predicates must be updated for visibility-aware filtering:
+
+```sql
+DROP DATA GRANT ws_ctx_agent_access;
+DROP DATA GRANT ws_ctx_agent_insert;
+```
+
+### Step 4: Re-run 6_deep_sec_policy.sql
+
+The script is idempotent — it recreates all 22 Data Grants including the fixed `entities_agent_own`, 2 new COLLAB Data Grants (`collab_member_own`, `collab_group_member_access`), and updated `ws_ctx_agent_access`/`ws_ctx_agent_insert` with visibility-aware predicates:
+
+```bash
+sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
+```
+
+### Verification
+
+Connect as an End User and confirm SHARED entities and COLLAB tables are now accessible:
+
+```sql
+-- Connect as an End User
+CONNECT AGENT_001/password@//host:port/service
+ALTER SESSION SET CURRENT_SCHEMA = AIADMIN;
+
+-- SHARED entities should now be visible (were invisible in v3.4.0)
+SELECT COUNT(*) FROM ENTITIES WHERE VISIBILITY = 'SHARED';
+-- Expected: > 0 (if SHARED entities exist)
+
+-- COLLAB tables should be accessible (were ORA-00942 in v3.4.0)
+SELECT COUNT(*) FROM COLLAB_GROUP_MEMBERS;
+-- Expected: own membership rows
+
+SELECT COUNT(*) FROM COLLAB_GROUPS;
+-- Expected: groups where agent is a member
+
+-- Count Data Grants (should be 22)
+SELECT COUNT(*) FROM USER_DATA_GRANTS;
 ```

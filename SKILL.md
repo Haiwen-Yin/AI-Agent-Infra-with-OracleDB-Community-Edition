@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.4.0
+version: v3.5.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.4.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.5.0 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.4.0
+# AI Agent Infra with OracleDB - Community Edition v3.5.0
 
 **Author:** Haiwen Yin
-**Version:** v3.4.0 - 2026-06-08
+**Version:** v3.5.0 - 2026-06-11
 **License:** Apache License 2.0 (Community Edition)
 
 ## ⚠️ CRITICAL: Database & Driver Requirements
@@ -19,7 +19,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.4.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.5.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -31,7 +31,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.4.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.5.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -46,43 +46,43 @@ pip install oracledb>=4.0.1
 ## Architecture Overview
 
 ```
-+-----------------------------------------------------------------+
-|                AI Agent Infra with OracleDB                     |
-|                   Community Edition v3.4.0                      |
-+-----------------------------------------------------------------+
-|                                                                 |
-|  +-----------------------------------------------------------+  |
-|  |  ENTITIES (unified, RANGE partitioned)                    |  |
-|  |  +----------+----------+----------+--------+--------------+  |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |  |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE     |  |
-|  |  +----------+----------+----------+--------+--------------+  |
-|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |  |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                          |  |
-|  +-----------------------------------------------------------+  |
-|                         |                                       |
-|  +----------------------------------------------+               |
-|  |  ENTITY_EDGES (REFERENCE partitioned)        |               |
-|  |  PK: (EDGE_ID, SOURCE_ID)                    |               |
-|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |               |
-|  |  + 4 other reference-partitioned children    |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-|  +----------------------------------------------+               |
-|  |  WORKSPACES                                  |               |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |               |
-|  |  +-- WORKSPACE_TASKS (JRD updatable)         |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-|  +----------------------------------------------+               |
-|  |  AGENT_SESSION (handoff chain)               |               |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)      |               |
-|  +----------------------------------------------+               |
-|                                                                 |
-+-----------------------------------------------------------------+
++--------------------------------------------------------------------+
+|                AI Agent Infra with OracleDB                        |
+|                   Community Edition v3.5.0                         |
++--------------------------------------------------------------------+
+|                                                                    |
+|  +-----------------------------------------------------------+     |
+|  |  ENTITIES (unified, RANGE partitioned)                    |     |
+|  |  +----------+----------+----------+--------+--------------+     |
+|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |     |
+|  |  |          |          |PUT       |ENCE    | TEMPLATE     |     |
+|  |  +----------+----------+----------+--------+--------------+     |
+|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |     |
+|  |  COL: WORKSPACE_ID -> WORKSPACES                          |     |
+|  +-----------------------------------------------------------+     |
+|                         |                                          |
+|  +----------------------------------------------+                  |
+|  |  ENTITY_EDGES (REFERENCE partitioned)        |                  |
+|  |  PK: (EDGE_ID, SOURCE_ID)                    |                  |
+|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |                  |
+|  |  + 4 other reference-partitioned children    |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
+|  +----------------------------------------------+                  |
+|  |  WORKSPACES                                  |                  |
+|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |                  |
+|  |  +-- WORKSPACE_TASKS (JRD updatable)         |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
+|  +----------------------------------------------+                  |
+|  |  AGENT_SESSION (handoff chain)               |                  |
+|  |  PREDECESSOR_SESSION_ID -> self (chain)      |                  |
+|  +----------------------------------------------+                  |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
-## Enterprise Edition Features (v3.4.0)
+## Enterprise Edition Features (v3.5.0)
 
 ### 1. Skill Storage & Distribution
 
@@ -130,7 +130,7 @@ Five-plus-one-layer database access security model with Deep Data Security:
 
 ### 3b. Deep Data Security — Agent Usage Guide
 
-v3.4.0 replaces VPD with Oracle Deep Data Security. **The v3.3.0 VPD (Virtual Private Database / DBMS_RLS) security policy is DEPRECATED and has been removed.** The old `6_vpd_policy.sql` script no longer exists. All VPD policies (`WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD`) and VPD predicate functions (`vpd_ws_ctx_agent`, `vpd_entities_visibility`) are superseded by Deep Sec Data Grants. Agents MUST understand how Deep Sec works to operate correctly.
+v3.5.0 replaces VPD with Oracle Deep Data Security. **The v3.3.0 VPD (Virtual Private Database / DBMS_RLS) security policy is DEPRECATED and has been removed.** The old `6_vpd_policy.sql` script no longer exists. All VPD policies (`WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD`) and VPD predicate functions (`vpd_ws_ctx_agent`, `vpd_entities_visibility`) are superseded by Deep Sec Data Grants. Agents MUST understand how Deep Sec works to operate correctly.
 
 #### How Deep Sec Works
 
@@ -138,13 +138,13 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.4.0)
+#### Current Enforcement Status (v3.5.0)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
-| 20 Data Grants | ✅ Yes | ✅ Yes | End User queries filtered by `ORA_END_USER_CONTEXT.username` predicates |
+| 22 Data Grants | ✅ Yes | ✅ Yes | End User queries filtered by `ORA_END_USER_CONTEXT.username` predicates (includes collab_member_own and collab_group_member_access for COLLAB table access) |
 | MAC (7 tables) | ✅ Yes | ✅ Yes | `SET USE DATA GRANTS ONLY` prevents view bypass for End Users |
 | 3 Data Roles | ✅ Yes | ✅ Yes | Each End User has `agent_data_role` + `pool_agent_data_role` |
 | End User Context + o:onFirstRead | ✅ Yes | ✅ Yes | Callback available for fallback AIADMIN path |
@@ -180,20 +180,24 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 4. **MAC prevents bypass**: `SET USE DATA GRANTS ONLY` is enabled on 7 tables. Even creating a view cannot bypass Data Grant policies.
 
-5. **Admin role has full access**: `admin_data_role` sees all data. The admin dashboard login uses this role.
+5. **WORKSPACE_CONTEXT VISIBILITY**: The WORKSPACE_CONTEXT table has a VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED). The `WS_CTX_AGENT_ACCESS` Data Grant predicate enforces: (1) agent always sees own context regardless of VISIBILITY, (2) agent sees other agents' SHARED/PUBLIC context in collab group workspaces, (3) agent cannot see other agents' PRIVATE context even in the same collab group. This prevents one agent's private thoughts from being exposed to other agents in shared workspaces.
+
+6. **Admin role has full access**: `admin_data_role` sees all data. The admin dashboard login uses this role.
 
 #### Data Grant Summary for Agents
 
 | Table | Agent Can See | Agent Cannot See |
 |-------|--------------|-----------------|
 | AGENT_REGISTRY | Own row only | Other agents' rows |
-| WORKSPACE_CONTEXT | Own workspaces + collab groups | Other agents' workspaces |
+| WORKSPACE_CONTEXT | Own workspaces + collab groups; own context always visible; other agents' SHARED/PUBLIC context visible in collab workspaces; other agents' PRIVATE context blocked | Other agents' PRIVATE context in collab workspaces |
 | ENTITIES | PUBLIC + own PRIVATE + shared in workspace | Other agents' PRIVATE entities |
 | AGENT_CREDENTIALS | Own rows (CREDENTIAL_VALUE masked) | Other agents' credentials |
 | SYSTEM_CONFIG | Nothing (admin only) | All rows |
 | SKILL_META | All skills (read-only) | Cannot modify |
 | CONTEXT_BRANCHES | Own workspaces + collab groups | Other agents' branches |
 | TASK_PLANS | Own tasks + collab branches | Other agents' tasks |
+| COLLAB_GROUP_MEMBERS | Own membership rows | Other agents' membership rows |
+| COLLAB_GROUPS | Groups where member belongs | Groups without membership |
 
 #### Deploying Deep Sec
 
@@ -747,7 +751,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.4.0" or None,
+#   "schema_version": "3.5.0" or None,
 #   "table_count": 33,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -775,11 +779,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.4.0",
+  "schema_version": "3.5.0",
   "table_count": 33,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.4.0, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.5.0, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -788,8 +792,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.4.0
-Deployment aborted: existing deployment found. Schema version: 3.4.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.5.0
+Deployment aborted: existing deployment found. Schema version: 3.5.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):

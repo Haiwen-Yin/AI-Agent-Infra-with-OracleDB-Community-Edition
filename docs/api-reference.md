@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.4.0 - Community Edition
+# API Reference - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -163,7 +163,7 @@ create_workspace(owner_user_id, name, workspace_type, isolation_mode, metadata) 
 get_workspace(workspace_id) -> dict | None
 get_user_workspaces(user_id, status) -> list
 update_workspace(workspace_id, **kwargs) -> bool
-save_context(workspace_id, agent_id, context_type, context_data, session_id, parent_context_id) -> str
+save_context(workspace_id, agent_id, context_type, context_data, session_id, parent_context_id, visibility) -> str
 get_context_chain(workspace_id, limit) -> list
 get_latest_context(workspace_id) -> dict | None
 create_handoff_session(workspace_id, new_agent_id, handoff_data) -> str
@@ -181,6 +181,7 @@ get_workspace_tasks(workspace_id) -> list
 - `recover_workspace`: Returns the complete recoverable state — workspace metadata, context chain (latest 5), active tasks, recent sessions, and scoped entities (ISOLATED mode only)
 - `update_workspace` allowed fields: workspace_name, status, isolation_mode, current_agent_id, current_session_id, summary, metadata
 - `save_context` auto-serializes dict/list CONTEXT_DATA to JSON
+- `save_context` visibility parameter: PRIVATE/SHARED/PUBLIC (default SHARED). Controls cross-agent visibility in collab workspaces: PRIVATE blocks other agents from seeing this context, SHARED allows collab group members to see it, PUBLIC allows all agents to see it. The WS_CTX_AGENT_ACCESS Data Grant enforces this at the database level — agents always see their own context regardless of VISIBILITY.
 
 ## PL/SQL API (13 packages: 10 in 2_api.sql + 3 in 6_deep_sec_policy.sql)
 

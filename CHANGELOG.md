@@ -10,7 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [3.4.0] - 2026-06-08
+## [3.5.0] - 2026-06-11
+
+### Summary
+
+**Deep Sec Multi-Agent Collaboration Fix** — SHARED entities and collaboration group data now correctly visible to End Users via Data Grant predicate fix and 2 new Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS access.
+
+### Bug Fixes
+
+- **SHARED entities invisible to End Users** — ENTITIES_AGENT_OWN Data Grant predicate was missing COLLAB subquery. SHARED visibility condition only checked WORKSPACES.CURRENT_AGENT_ID (which is NULL for most workspaces), ignoring collaboration group membership. Fixed: added UNION with COLLAB_GROUPS + COLLAB_GROUP_MEMBERS subquery to match the pattern used by BRANCH_AGENT_ACCESS, WS_AGENT_ACCESS, WS_CTX_AGENT_ACCESS, and TASK_AGENT_ACCESS.
+- **End Users cannot access COLLAB tables** — Data Grant predicates for WORKSPACES, WORKSPACE_CONTEXT, CONTEXT_BRANCHES, and TASK_PLANS reference COLLAB_GROUPS and COLLAB_GROUP_MEMBERS in subqueries, but these tables had no Data Grants. End User subquery execution failed silently (ORA-00942), causing the entire predicate to return FALSE. Fixed: added `collab_member_own` (SELECT on COLLAB_GROUP_MEMBERS WHERE agent matches) and `collab_group_member_access` (SELECT on COLLAB_GROUPS WHERE group_id in member's groups).
+- **WORKSPACE_CONTEXT collaboration isolation** — Added VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED) to WORKSPACE_CONTEXT. Previously, all context in a shared workspace was visible to all members, including other agents' private thoughts. Now agents see: (1) own context always, (2) other agents' SHARED/PUBLIC context in collab group workspaces, (3) other agents' PRIVATE context is blocked. Updated WS_CTX_AGENT_ACCESS and WS_CTX_AGENT_INSERT Data Grant predicates to enforce visibility-aware filtering.
+
+### Data Grant Changes
+
+- Data Grant count: 20 → 22
+- New Data Grants: `collab_member_own` (COLLAB_GROUP_MEMBERS), `collab_group_member_access` (COLLAB_GROUPS)
+
+---
+
+## [3.4.0] - 2026-06-11
 
 ### Summary
 

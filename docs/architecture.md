@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra v3.4.0 - Community Edition
+# Architecture - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Unified Entity Model
 
@@ -223,6 +223,7 @@ Version chain of context entries enabling continuity across sessions and agent h
 | CONTEXT_TYPE | VARCHAR2(30) | SNAPSHOT, CHECKPOINT, HANDOFF, SUMMARY, RECOVERY |
 | CONTEXT_DATA | JSON | Structured context payload |
 | PARENT_CONTEXT_ID | VARCHAR2(64) | FK to parent context (version chain) |
+| VISIBILITY | VARCHAR2(16) | PRIVATE/SHARED/PUBLIC (default SHARED). Controls cross-agent visibility in collab workspaces: PRIVATE blocks other agents, SHARED visible to collab group members, PUBLIC visible to all |
 | CREATED_AT | TIMESTAMP | Creation timestamp |
 
 The `PARENT_CONTEXT_ID` column forms a linked list (version chain) — each context entry points to its predecessor, enabling full history traversal. CONTEXT_TYPE determines the structure of CONTEXT_DATA:
@@ -288,7 +289,7 @@ This strategy balances: (a) relational integrity for FK constraints and partitio
 
 v3.4.0 replaces VPD (Virtual Private Database) with Oracle Deep Data Security (Deep Sec):
 
-- **Data Grants**: 20 declarative access policies for row-level, column-level, and cell-level security
+- **Data Grants**: 22 declarative access policies for row-level, column-level, and cell-level security (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
 - **MAC (Mandatory Access Control)**: `SET USE DATA GRANTS ONLY` on 7 tables prevents view-based bypass
 - **End User Context**: `agent_context` with `o:onFirstRead` callback populates `ORA_END_USER_CONTEXT.username`
 - **Zero Trust**: No context = no data (unlike old VPD which returned `1=1`)

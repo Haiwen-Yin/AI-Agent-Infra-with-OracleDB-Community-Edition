@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra v3.4.0 - Community Edition
+# Web Visualization - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Server
 

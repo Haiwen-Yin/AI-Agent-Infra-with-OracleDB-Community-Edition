@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Context Branching API
+"""AI Agent Infra v3.5.0 - Context Branching API
 
 Context branch lifecycle management: fork, merge, abandon, pause, resume,
 branch comparison, conflict detection, and lesson extraction from abandoned branches.

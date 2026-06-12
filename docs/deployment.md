@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.4.0 - Community Edition
+# Deployment Guide - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Prerequisites
 
@@ -18,12 +18,13 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 - **Destructive**: Drops all existing tables before creating new ones (`CASCADE CONSTRAINTS PURGE`)
 - Creates 30 tables (6 partitioned, 5 reference-partitioned, 19 non-partitioned)
 - Composite primary keys on ENTITIES, ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, HARNESS_META, ENTITY_TAGS, TASK_PLANS, TASK_STEPS, AGENT_SESSION, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS
+- WORKSPACE_CONTEXT includes VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED) for cross-agent context isolation in collab workspaces
 - Partitioning: LIST+RANGE on ENTITIES (6×7), AGENT_SESSION (2×7), TASK_PLANS (2×7); RANGE+HASH on ENTITY_ACCESS_LOG; REFERENCE on 5 child tables
 - ROW MOVEMENT enabled on AGENT_SESSION, TASK_PLANS, TASK_STEPS
 - Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
 - ~25 local indexes + global indexes on non-partitioned tables
 - 1 property graph, 4 duality views
-- Seeds SYSTEM_CONFIG with version 3.4.0
+- Seeds SYSTEM_CONFIG with version 3.5.0
 
 ### Phase 2: API Packages (2_api.sql)
 Creates 13 PL/SQL packages (10 in 2_api.sql + 3 in 6_deep_sec_policy.sql).
@@ -80,7 +81,7 @@ GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
 sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
 ```
 - 4_grants.sql: DEEP_SEC_SESSION_ROLE, Deep Sec system privileges for AIADMIN
-- 6_deep_sec_policy.sql: 20 Data Grants, MAC on 7 tables, 3 PL/SQL packages (SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER), End User Context, Data Roles (admin_data_role, agent_data_role, pool_agent_data_role)
+- 6_deep_sec_policy.sql: 22 Data Grants, MAC on 7 tables, 3 PL/SQL packages (SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER), End User Context, Data Roles (admin_data_role, agent_data_role, pool_agent_data_role)
 
 **Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
 

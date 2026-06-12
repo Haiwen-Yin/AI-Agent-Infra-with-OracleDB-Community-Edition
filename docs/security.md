@@ -1,4 +1,4 @@
-# Security - AI Agent Infra v3.4.0 - Community Edition
+# Security - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
 
 ## Data Masking
 
@@ -87,11 +87,11 @@ AGENT_COLLABORATION tracks cross-agent sharing requests:
 - Returns 'GRANTED' if entity is SHARED/PUBLIC or owner matches
 - Returns 'DENIED' for PRIVATE entities not owned by the requesting agent
 
-## Deep Data Security (v3.4.0)
+## Deep Data Security (v3.5.0)
 
-v3.4.0 replaces VPD with Oracle Deep Data Security:
+v3.5.0 replaces VPD with Oracle Deep Data Security:
 
-- **20 Data Grants** enforce row-level, column-level, and cell-level access control
+- **22 Data Grants** enforce row-level, column-level, and cell-level access control (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
 - **MAC** on 7 tables prevents view-based bypass of row-level policies
 - **End User Context** with `o:onFirstRead` callback for zero-trust agent identification
 - **3 Data Roles**: `admin_data_role` (full), `agent_data_role` (filtered by agent), `pool_agent_data_role` (minimum)
@@ -99,3 +99,20 @@ v3.4.0 replaces VPD with Oracle Deep Data Security:
 - **SYSTEM_CONFIG** fully restricted to `admin_data_role` only
 
 **Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
+
+### WORKSPACE_CONTEXT VISIBILITY
+
+WORKSPACE_CONTEXT has a VISIBILITY column (PRIVATE/SHARED/PUBLIC, default SHARED) that controls cross-agent context visibility in collaboration group workspaces:
+
+| VISIBILITY | Agent sees own context? | Other agents in collab group see it? |
+|------------|------------------------|--------------------------------------|
+| PRIVATE | Yes (always) | No — blocked by Data Grant predicate |
+| SHARED | Yes (always) | Yes — visible to collab group members |
+| PUBLIC | Yes (always) | Yes — visible to all |
+
+The `WS_CTX_AGENT_ACCESS` Data Grant predicate enforces these rules:
+- Agent always sees its own context (AGENT_ID matches own End User) regardless of VISIBILITY
+- Agent sees other agents' SHARED/PUBLIC context only in collab group workspaces (via COLLAB_GROUPS + COLLAB_GROUP_MEMBERS subquery)
+- Agent CANNOT see other agents' PRIVATE context even in the same collab group workspace
+
+This prevents one agent's private thoughts, internal reasoning, or sensitive intermediate results from being exposed to other agents sharing the same workspace.

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Community Edition - Workspace API
+"""AI Agent Infra v3.5.0 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.
@@ -159,11 +159,14 @@ def save_context(
     session_id: Optional[str] = None,
     parent_context_id: Optional[str] = None,
     branch_id: Optional[str] = None,
+    visibility: str = "SHARED",
 ) -> str:
     """Save a context entry to the workspace context chain.
 
     Sensitive fields in context_data (password, token, credential, dsn, etc.)
     are automatically redacted to prevent credential leakage into the database.
+
+    visibility: 'PRIVATE' (only creating agent can see) or 'SHARED' (collab group members can see)
     """
     context_data = _sanitize_context_data(context_data)
     ctx_id_sql = "'CTX_' || RAWTOHEX(SYS_GUID())"
@@ -171,8 +174,8 @@ def save_context(
     sql = f"""
         INSERT INTO WORKSPACE_CONTEXT (CONTEXT_ID, WORKSPACE_ID, AGENT_ID,
                                        SESSION_ID, CONTEXT_TYPE, CONTEXT_DATA,
-                                       PARENT_CONTEXT_ID, BRANCH_ID, CREATED_AT)
-        VALUES ({ctx_id_sql}, :wid, :aid, :sid, :ctype, :cdata, :pcid, :vbrid, SYSTIMESTAMP)
+                                       PARENT_CONTEXT_ID, BRANCH_ID, VISIBILITY, CREATED_AT)
+        VALUES ({ctx_id_sql}, :wid, :aid, :sid, :ctype, :cdata, :pcid, :vbrid, :vis, SYSTIMESTAMP)
         RETURNING CONTEXT_ID INTO :ret_id
     """
     return execute_insert_returning_id(sql, {
@@ -183,6 +186,7 @@ def save_context(
         "cdata": data_val,
         "pcid": parent_context_id,
         "vbrid": branch_id,
+        "vis": visibility,
     }, id_column="CONTEXT_ID")
 
 

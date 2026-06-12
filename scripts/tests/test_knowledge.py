@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.4.0 - Knowledge API Tests"""
+"""AI Agent Infra v3.5.0 - Knowledge API Tests"""
 
 import sys
 import os
@@ -13,7 +13,7 @@ from lib.knowledge_api import (
 from lib.connection import close_pool
 
 
-def test_create_knowledge():
+def _test_create_knowledge():
     entity_id = create_knowledge(
         title="Python Decorators",
         content="Decorators are a powerful feature in Python",
@@ -23,29 +23,29 @@ def test_create_knowledge():
     )
     assert isinstance(entity_id, str)
     assert len(entity_id) > 0
-    print(f"PASS: test_create_knowledge (id={entity_id})")
+    print(f"PASS: _test_create_knowledge (id={entity_id})")
     return entity_id
 
 
-def test_get_knowledge(entity_id):
+def _test_get_knowledge(entity_id):
     k = get_knowledge(entity_id)
     assert k is not None
     assert k["domain"] == "programming"
     assert k["topic"] == "python"
     assert k["difficulty"] == "ADVANCED"
-    print(f"PASS: test_get_knowledge (domain={k['domain']})")
+    print(f"PASS: _test_get_knowledge (domain={k['domain']})")
 
 
-def test_update_knowledge(entity_id):
+def _test_update_knowledge(entity_id):
     ok = update_knowledge(entity_id, domain="software", topic="decorators")
     assert ok
     k = get_knowledge(entity_id)
     assert k["domain"] == "software"
     assert k["topic"] == "decorators"
-    print("PASS: test_update_knowledge")
+    print("PASS: _test_update_knowledge")
 
 
-def test_knowledge_tags(entity_id):
+def _test_knowledge_tags(entity_id):
     added = add_knowledge_tags(entity_id, ["python", "v2.1"])
     assert added == 2
     tags = get_knowledge_tags(entity_id)
@@ -55,20 +55,20 @@ def test_knowledge_tags(entity_id):
     assert ok
     tags = get_knowledge_tags(entity_id)
     assert len(tags) == 1
-    print("PASS: test_knowledge_tags")
+    print("PASS: _test_knowledge_tags")
 
 
-def test_record_review(entity_id):
+def _test_record_review(entity_id):
     k = get_knowledge(entity_id)
     count_before = k["review_count"]
     ok = record_review(entity_id)
     assert ok
     k = get_knowledge(entity_id)
     assert k["review_count"] > count_before
-    print(f"PASS: test_record_review (count={k['review_count']})")
+    print(f"PASS: _test_record_review (count={k['review_count']})")
 
 
-def test_knowledge_edges(entity_id):
+def _test_knowledge_edges(entity_id):
     target_id = create_knowledge(
         title="Python Generators",
         content="Generators produce items lazily",
@@ -88,22 +88,22 @@ def test_knowledge_edges(entity_id):
     assert len(edge_id) > 0
     edges = get_edges(entity_id, direction="outgoing")
     assert len(edges) >= 1
-    print(f"PASS: test_knowledge_edges (edges={len(edges)})")
+    print(f"PASS: _test_knowledge_edges (edges={len(edges)})")
     delete_knowledge(target_id)
 
 
-def test_search_knowledge():
+def _test_search_knowledge():
     results = search_knowledge(domain="software")
     assert len(results) >= 1
-    print(f"PASS: test_search_knowledge (found={len(results)})")
+    print(f"PASS: _test_search_knowledge (found={len(results)})")
 
 
-def test_delete_knowledge(entity_id):
+def _test_delete_knowledge(entity_id):
     ok = delete_knowledge(entity_id)
     assert ok
     k = get_knowledge(entity_id)
     assert k is None
-    print("PASS: test_delete_knowledge")
+    print("PASS: _test_delete_knowledge")
 
 
 def run_all():
@@ -111,22 +111,22 @@ def run_all():
     failed = 0
     entity_id = None
     try:
-        entity_id = test_create_knowledge()
+        entity_id = _test_create_knowledge()
         passed += 1
     except Exception as e:
-        print(f"FAIL: test_create_knowledge - {e}")
+        print(f"FAIL: _test_create_knowledge - {e}")
         failed += 1
         close_pool()
         return False
 
     for test_fn in [
-        lambda: test_get_knowledge(entity_id),
-        lambda: test_update_knowledge(entity_id),
-        lambda: test_knowledge_tags(entity_id),
-        lambda: test_record_review(entity_id),
-        lambda: test_knowledge_edges(entity_id),
-        test_search_knowledge,
-        lambda: test_delete_knowledge(entity_id),
+        lambda: _test_get_knowledge(entity_id),
+        lambda: _test_update_knowledge(entity_id),
+        lambda: _test_knowledge_tags(entity_id),
+        lambda: _test_record_review(entity_id),
+        lambda: _test_knowledge_edges(entity_id),
+        _test_search_knowledge,
+        lambda: _test_delete_knowledge(entity_id),
     ]:
         try:
             test_fn()
