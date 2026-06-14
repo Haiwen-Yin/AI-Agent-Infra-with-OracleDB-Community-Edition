@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
+# API Reference - AI Agent Infra v3.6.1 (2026-06-14) - Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -218,7 +218,7 @@ get_workspace_tasks(workspace_id) -> list
 
 **Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
 
-## Admin API (v3.6.0)
+## Admin API (v3.6.1)
 
 Admin API endpoints for Admin/Agent Separation Architecture. Only available in `admin` or `standalone` mode.
 
@@ -255,7 +255,7 @@ Generate a new admin registration token. Requires AIADMIN session.
 ```json
 {
   "admin_token": "<new-base64-token>",
-  "expires_at": "2026-06-13T13:00:00Z"
+  "expires_at": "2026-06-14T13:00:00Z"
 }
 ```
 
@@ -350,7 +350,7 @@ Rotate the admin token. Existing Business Agents must re-register with the new t
 ```json
 {
   "admin_token": "<rotated-base64-token>",
-  "expires_at": "2026-06-13T14:00:00Z",
+  "expires_at": "2026-06-14T14:00:00Z",
   "previous_token_invalidated": true
 }
 ```

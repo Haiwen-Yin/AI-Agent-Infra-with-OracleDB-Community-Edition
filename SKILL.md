@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.6.0
+version: v3.6.1
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.6.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.6.1 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.6.0
+# AI Agent Infra with OracleDB - Community Edition v3.6.1
 
 **Author:** Haiwen Yin
-**Version:** v3.6.0 - 2026-06-13
+**Version:** v3.6.1 - 2026-06-14
 **License:** Apache License 2.0 (Community Edition)
 
 ## ⚠️ CRITICAL: Database & Driver Requirements
@@ -19,7 +19,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.6.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.6.1 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -31,7 +31,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.6.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.6.1 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -48,7 +48,7 @@ pip install oracledb>=4.0.1
 ```
 +-----------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                     |
-|                   Community Edition v3.6.0                      |
+|                   Community Edition v3.6.1                      |
 +-----------------------------------------------------------------+
 |                                                                 |
 |  +-----------------------------------------------------------+  |
@@ -82,7 +82,7 @@ pip install oracledb>=4.0.1
 +-----------------------------------------------------------------+
 ```
 
-## Edition Comparison (v3.6.0)
+## Edition Comparison (v3.6.1)
 
 ### 1. Skill Storage & Distribution
 
@@ -144,7 +144,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.6.0)
+#### Current Enforcement Status (v3.6.1)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
@@ -265,7 +265,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 
 ## Admin/Agent Separation Architecture
 
-v3.6.0 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+v3.6.1 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
 
 ### Modes
 
@@ -278,29 +278,29 @@ v3.6.0 introduces a mode system that separates Admin Agent (runs Web Portal, hol
 ### Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│              Admin Agent (mode=admin)            │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
-│  │ Web      │  │ AIADMIN  │  │ Admin Token   │   │
-│  │ Portal   │  │ Pool     │  │ Generator     │   │
-│  └──────────┘  └──────────┘  └───────────────┘   │
-│       │                              │           │
-│       │   admin_token (secure)       │           │
-│       │   ┌──────────────────┐       │           │
-│       │   │  Encrypted Cred  │       │           │
-│       │   │  Distribution    │       │           │
-│       │   └──────────────────┘       │           │
-└───────│──────────────────────────────│───────────┘
-        │                              │
-        ▼                              ▼
-┌──────────────────────────────────────────────────┐
-│              Business Agent (mode=agent)         │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
-│  │ Agent    │  │ End User │  │ agent_config  │   │
-│  │ Bootstrap│  │ Pool     │  │ .json (enc)   │   │
-│  └──────────┘  └──────────┘  └───────────────┘   │
-│  ✗ No AIADMIN  ✓ Data Grants enforced            │
-└──────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│                  Admin Agent (mode=admin)       │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│  │ Web      │  │ AIADMIN  │  │ Admin Token   │  │
+│  │ Portal   │  │ Pool     │  │ Generator     │  │
+│  └──────────┘  └──────────┘  └───────────────┘  │
+│       │                             │           │
+│       │   admin_token (secure)      │           │
+│       │   ┌──────────────────┐      │           │
+│       │   │  Encrypted Cred  │      │           │
+│       │   │  Distribution    │      │           │
+│       │   └──────────────────┘      │           │
+└───────│─────────────────────────────│───────────┘
+        │                             │
+        ▼                             ▼
+┌─────────────────────────────────────────────────┐
+│              Business Agent (mode=agent)        │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
+│  │ Agent    │  │ End User │  │ agent_config  │  │
+│  │ Bootstrap│  │ Pool     │  │ .json (enc)   │  │
+│  └──────────┘  └──────────┘  └───────────────┘  │
+│  ✗ No AIADMIN  ✓ Data Grants enforced     	  │
+└─────────────────────────────────────────────────┘
 ```
 
 ### Key APIs
@@ -870,7 +870,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.6.0" or None,
+#   "schema_version": "3.6.1" or None,
 #   "table_count": 30,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -898,11 +898,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.6.0",
+  "schema_version": "3.6.1",
   "table_count": 30,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.6.0, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.6.1, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -911,8 +911,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.6.0
-Deployment aborted: existing deployment found. Schema version: 3.6.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.6.1
+Deployment aborted: existing deployment found. Schema version: 3.6.1
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):

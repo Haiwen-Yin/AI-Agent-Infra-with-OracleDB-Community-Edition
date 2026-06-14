@@ -5,10 +5,40 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
+## [3.6.1] - 2026-06-14
+
+### Summary
+
+Bug fix release — fixes Portal login error (`_handle_portal_login` method missing), corrects documentation inconsistencies, and adds graph node highlight interaction improvements.
+
+### Fixed - Both Editions
+
+- **Portal Login** — Added missing `_handle_portal_login()` method; Portal users can now log in and be automatically assigned a Pool Agent
+- **Portal Register** — Added `has_agent` field to registration response for consistent frontend handling
+- **Deep Sec version reference** — Corrected "v3.5.0 introduced Deep Data Security" → "v3.4.0" in SKILL.md
+- **PBKDF2 description** — Fixed incorrect "SHA256/100K iterations" → "SHA512/210K iterations" in RELEASE_NOTES
+- **Admin Token description** — Fixed token format description to `AT_` + 32hex (persistent, rotatable)
+- **Port numbers** — Corrected all `localhost:8000` references to COM=18080/ENT=18090 in deployment.md, visualization.md, migration.md, introduction_zh, SKILL.md, RELEASE_NOTES
+- **Data Grant count** — Fixed incorrect "22" → "23" references in ENT architecture.md
+- **Test counts** — Updated stale "183" → COM 105 / ENT 135 in SKILL.md; "61" → COM 105 / ENT 135 in deployment.md
+- **ENT feature matrix** — Fixed "Encrypted DB Credentials | No | Yes" → "Yes | Yes" in SKILL.md; added missing Recovery Codes and Private Skill rows
+- **ENT api-reference** — Fixed title "Community Edition" → "Enterprise Edition"; added missing 9 Admin API endpoints
+- **ENT RELEASE_NOTES** — Added missing Skill Token API section
+- **Version display** — All page titles and sidebar version badges updated from v3.4.0 to v3.6.1
+
+### Changed - Both Editions
+
+- **Graph detail panel** — Changed to `position:fixed` overlay to prevent graph resize/pan when showing details
+- **Graph click behavior** — Click blank area now closes detail panel and resets highlight; view position preserved on all interactions
+
+---
+
 
 ## [Unreleased]
 
 ---
+---
+
 
 ## [3.6.0] - 2026-06-13
 
@@ -40,6 +70,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **1_schema.sql** — `schema_version` updated to 3.6.0, `admin.registration_token` seed added to SYSTEM_CONFIG
 
 ---
+---
+
 
 ## [3.5.0] - 2026-06-11
 
@@ -59,6 +91,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - New Data Grants: `collab_member_own` (COLLAB_GROUP_MEMBERS), `collab_group_member_access` (COLLAB_GROUPS)
 
 ---
+---
+
 
 ## [3.4.0] - 2026-06-11
 
@@ -136,6 +170,8 @@ Verified enforcement (Community DB):
 - **`6_vpd_policy.sql`** — Replaced by `6_deep_sec_policy.sql`. VPD functions `vpd_ws_ctx_agent` and `vpd_entities_visibility` no longer needed
 
 ---
+---
+
 
 ## [3.3.0] - 2026-06-05
 
@@ -181,6 +217,8 @@ Verified enforcement (Community DB):
 - **__pycache__ and .pyc files** — Cleaned from all directories
 
 ---
+---
+
 
 ## [3.2.0] - 2026-06-03
 
@@ -240,6 +278,8 @@ Verified enforcement (Community DB):
 - **SKILL_ACCESS_TOKEN reference** — Removed from COM skill_api.py (table doesn't exist in COM schema)
 
 ---
+---
+
 
 ## [3.1.0] - 2026-06-02
 
@@ -296,6 +336,8 @@ Verified enforcement (Community DB):
 - **config.json encryption** (`connection_crypto.py`) remains unchanged — this is for local file encryption only, which correctly depends on the local master key
 
 ---
+---
+
 
 ## [3.0.0] - 2026-05-30
 
@@ -361,6 +403,8 @@ Verified enforcement (Community DB):
 - `ReversibleEncryption` used random key per instance — credential encryption was irreversible; replaced with `encrypt_section()`/`decrypt_section()` using stable master key
 
 ---
+---
+
 
 ## [2.3.2] - 2026-05-27
 
@@ -390,6 +434,8 @@ Verified enforcement (Community DB):
 - `login.html` — language persistence
 
 ---
+---
+
 
 ## [2.3.1] - 2026-05-26
 
@@ -454,6 +500,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - `TO_VECTOR('0.1,0.2,...')` triggers ORA-51804 — Root cause: Oracle 23ai TO_VECTOR requires `[v1,v2,...]` bracket format, does not accept plain comma-separated
 
 ---
+---
+
 
 ## [2.3.0] - 2026-05-24
 
@@ -526,6 +574,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - **Tasks table readability** — Changed `.data-table tbody td` color to `#fff` for better contrast on dark background
 
 ---
+---
+
 
 ## [2.2.0] - 2026-05-20
 
@@ -569,6 +619,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - **KNOWLEDGE_DV now updatable** — Fixed JRD view definition to support INSERT/UPDATE/DELETE via JSON_TRANSFORM
 
 ---
+---
+
 
 ## [2.1.0] - 2026-05-19
 
@@ -615,6 +667,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - **NAME, PRIORITY, TAGS, METADATA, DESCRIPTION columns** — replaced by TITLE, IMPORTANCE, separate tag tables
 
 ---
+---
+
 
 ## [2.0.0] - 2026-05-15
 
@@ -703,6 +757,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - All v1.x release notes archived to `archive/release_notes/`
 
 ---
+---
+
 
 ## [1.1.0] - 2026-05-12
 
@@ -721,6 +777,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Enhanced node color coding by category/type
 
 ---
+---
+
 
 ## [1.0.0] - 2026-05-09
 
@@ -734,6 +792,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Session cleanup and access logging
 
 ---
+---
+
 
 ## [0.5.1] - 2026-05-09
 
@@ -747,6 +807,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Session cleanup edge cases
 
 ---
+---
+
 
 ## [0.5.0] - 2026-05-08
 
@@ -759,6 +821,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Aggregation analysis for audit queries
 
 ---
+---
+
 
 ## [0.4.2] - 2026-05-07
 
@@ -768,6 +832,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Internal cleanup of script organization
 
 ---
+---
+
 
 ## [0.4.0] - 2026-05-02
 
@@ -780,6 +846,8 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 - Inter-plan dependency graph
 
 ---
+---
+
 
 ## [0.3.x] - 2026-04-28
 

@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
+# Migration Guide - AI Agent Infra v3.6.1 (2026-06-14) - Community Edition
 
 ## Version Compatibility
 
@@ -257,7 +257,7 @@ SELECT COUNT(*) FROM SYSTEM_CONFIG;
 -- Expected: 0 (blocked by Data Grant predicate 1=0)
 ```
 
-## v3.4.0 → v3.6.0 Migration
+## v3.4.0 → v3.6.1 Migration
 
 This migration fixes three Deep Sec bugs: ENTITIES_AGENT_OWN predicate missing COLLAB subquery (SHARED entities invisible), missing Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS (End Users cannot access COLLAB tables), and missing WORKSPACE_CONTEXT VISIBILITY column (no isolation for private context in collab workspaces).
 
@@ -320,7 +320,7 @@ SELECT COUNT(*) FROM COLLAB_GROUPS;
 SELECT COUNT(*) FROM USER_DATA_GRANTS;
 ```
 
-## v3.6.0 → v3.6.0 Migration
+## v3.6.1 → v3.6.1 Migration
 
 This migration adds the Admin/Agent Separation Architecture: mode system, admin token authentication, encrypted credential distribution, and mode-aware connection management.
 
@@ -337,7 +337,7 @@ VALUES ('admin.registration_token',
 ### Step 2: Update Schema Version
 
 ```sql
-UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = '3.6.0' WHERE CONFIG_KEY = 'schema_version';
+UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = '3.6.1' WHERE CONFIG_KEY = 'schema_version';
 COMMIT;
 ```
 
@@ -381,7 +381,7 @@ python agent_bootstrap.py --admin-url http://admin-host:18080 \
 ```sql
 -- Verify schema version
 SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = 'schema_version';
--- Expected: 3.6.0
+-- Expected: 3.6.1
 
 -- Verify admin token exists
 SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = 'admin.registration_token';

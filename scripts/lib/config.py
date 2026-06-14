@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.0 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.6.1 - Community Edition - Unified Configuration Manager
 
 Reads from config.json with environment variable overrides.
 Priority: Environment Variables > config.json > Built-in defaults

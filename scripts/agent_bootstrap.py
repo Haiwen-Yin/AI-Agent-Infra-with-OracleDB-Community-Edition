@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Agent Infra v3.6.0 - Community Edition - Agent Bootstrap CLI
+"""AI Agent Infra v3.6.1 - Community Edition - Agent Bootstrap CLI
 
 Command-line tool for Business Agent registration and configuration.
 Connects to Admin Agent API, registers with admin token,

@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.6.0
+# AI Agent Infra with OracleDB - Community Edition v3.6.1
 
-[![Version](https://img.shields.io/badge/version-v3.6.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.6.1-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.6.0 (2026-06-13): Admin/Agent Separation Architecture — New mode system (standalone/admin/agent) separating Admin Agent (Web Portal + AIADMIN) from Business Agent (independent process, End User only); Admin Token authentication; encrypted credential distribution; Agent Bootstrap CLI; mode-aware connection management.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.6.1 (2026-06-14): Admin/Agent Separation Architecture — New mode system (standalone/admin/agent) separating Admin Agent (Web Portal + AIADMIN) from Business Agent (independent process, End User only); Admin Token authentication; encrypted credential distribution; Agent Bootstrap CLI; mode-aware connection management.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.1.md)**
 
 ---
 
@@ -258,7 +258,7 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.6.0
+      server.py                 # HTTP server v3.6.1
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

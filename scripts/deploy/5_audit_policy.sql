@@ -1,6 +1,6 @@
 -- ============================================================
 -- 5_audit_policy.sql — Unified Auditing for Direct DML Detection
--- AI Agent Infra with OracleDB v3.6.0
+-- AI Agent Infra with OracleDB v3.6.1
 -- ============================================================
 --
 -- This script creates audit policies that detect direct DML

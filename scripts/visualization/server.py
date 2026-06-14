@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.6.1 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 
-VERSION = "3.6.0"
+VERSION = "3.6.1"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -1421,15 +1421,55 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json({'success': False, 'error': 'Username already exists'}, 409)
                 return
             session_id = _create_session(result['username'], result['user_id'], result['role'])
+            sess = sessions[session_id]
+            pool_agent = connection.execute_query_one(
+                "SELECT AGENT_ID FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND AGENT_ID LIKE 'AGENT_POOL_%' AND ROWNUM = 1 ORDER BY AGENT_ID"
+            )
+            if pool_agent:
+                sess['agent_id'] = pool_agent['agent_id']
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
-            body_out = json.dumps({'success': True, 'session_id': session_id, 'user_id': result['user_id'], 'username': result['username']}).encode()
+            body_out = json.dumps({'success': True, 'session_id': session_id, 'user_id': result['user_id'], 'username': result['username'], 'has_agent': bool(pool_agent)}).encode()
             self.send_header('Content-Length', str(len(body_out)))
             self.end_headers()
             self.wfile.write(body_out)
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
+
+    def _handle_portal_login(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body)
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
+        except Exception:
+            self._send_json({'success': False, 'error': 'Invalid request'}, 400)
+            return
+        user = _authenticate_local(username, password)
+        if not user:
+            self._send_json({'success': False, 'error': 'Invalid username or password'}, 401)
+            return
+        session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
+        sess = sessions[session_id]
+        pool_agent = connection.execute_query_one(
+            "SELECT AGENT_ID FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND AGENT_ID LIKE 'AGENT_POOL_%' AND ROWNUM = 1 ORDER BY AGENT_ID"
+        )
+        if pool_agent:
+            sess['agent_id'] = pool_agent['agent_id']
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+        body_out = json.dumps({
+            'success': True,
+            'session_id': session_id,
+            'user_id': str(user['user_id']),
+            'username': user['username'],
+            'has_agent': bool(pool_agent),
+        }).encode()
+        self.send_header('Content-Length', str(len(body_out)))
+        self.end_headers()
+        self.wfile.write(body_out)
 
     def _handle_admin_agent_register(self):
         try:
