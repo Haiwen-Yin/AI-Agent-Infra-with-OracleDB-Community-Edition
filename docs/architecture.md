@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# Architecture - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Unified Entity Model
 
@@ -289,7 +289,7 @@ This strategy balances: (a) relational integrity for FK constraints and partitio
 
 v3.4.0 replaces VPD (Virtual Private Database) with Oracle Deep Data Security (Deep Sec):
 
-- **Data Grants**: 22 declarative access policies for row-level, column-level, and cell-level security (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
+- **Data Grants**: 23 declarative access policies for row-level, column-level, and cell-level security (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
 - **MAC (Mandatory Access Control)**: `SET USE DATA GRANTS ONLY` on 7 tables prevents view-based bypass
 - **End User Context**: `agent_context` with `o:onFirstRead` callback populates `ORA_END_USER_CONTEXT.username`
 - **Zero Trust**: No context = no data (unlike old VPD which returned `1=1`)
@@ -305,3 +305,66 @@ v3.4.0 replaces VPD (Virtual Private Database) with Oracle Deep Data Security (D
 Portal requests use End User connections with Data Grant filtering. Admin/management operations use the AIADMIN pool connection with unrestricted access.
 
 **Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End users. After the operation completes, the End User context is restored.
+
+## Admin/Agent Separation Architecture
+
+v3.6.0 introduces a mode system that separates Admin Agent from Business Agent:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Admin Agent (mode=admin)               │
+│                                                          │
+│  ┌────────────┐   ┌──────────────┐   ┌───────────────┐  │
+│  │ Web Portal │   │ AIADMIN Pool │   │ Admin Token   │  │
+│  │ server.py  │   │ (full access)│   │ Generator     │  │
+│  └────────────┘   └──────────────┘   └───────────────┘  │
+│        │                  │                  │           │
+│        │           End User Pool            │           │
+│        │           (Deep Sec)               │           │
+│        │                  │                  │           │
+│        │    ┌─────────────────────────┐     │           │
+│        │    │  Admin API Endpoints    │     │           │
+│        │    │  /api/admin/agent/*     │     │           │
+│        │    └─────────────────────────┘     │           │
+│        │                  │                  │           │
+└────────│──────────────────│──────────────────│───────────┘
+         │                  │   admin_token    │
+         │                  │   (out-of-band)  │
+         ▼                  ▼                  ▼
+┌──────────────────────────────────────────────────────────┐
+│                  Business Agent (mode=agent)              │
+│                                                          │
+│  ┌────────────┐   ┌──────────────┐   ┌───────────────┐  │
+│  │ Agent      │   │ End User     │   │ agent_config  │  │
+│  │ Bootstrap  │──▶│ Pool Only    │   │ .json (enc)   │  │
+│  │ CLI        │   │ (Deep Sec)   │   │               │  │
+│  └────────────┘   └──────────────┘   └───────────────┘  │
+│                                                          │
+│  ✗ No AIADMIN pool    ✗ No Web Portal                   │
+│  ✓ Data Grants always enforced                          │
+│  ✓ agent_config.json encrypted at rest                  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Mode Comparison
+
+| Component | standalone | admin | agent |
+|-----------|-----------|-------|-------|
+| AIADMIN pool | ✓ | ✓ | ✗ |
+| End User pool | ✓ | ✓ | ✓ |
+| Web Portal | ✓ | ✓ | ✗ |
+| agent_config.json | ✗ | ✗ | ✓ (encrypted) |
+| Admin API | ✗ | ✓ | ✗ |
+| `get_connection()` | AIADMIN or End User | AIADMIN or End User | End User only |
+| `set_agent_context()` | Switches pool | Switches pool | No-op (always End User) |
+
+### Connection Routing by Mode
+
+**standalone/admin mode:**
+- `set_agent_context(agent_id)` → End User connection (Data Grant filtered)
+- `set_agent_context(None)` → AIADMIN pool (unrestricted)
+
+**agent mode:**
+- `get_connection()` → Always returns End User connection from agent_config.json
+- No AIADMIN pool initialized
+- `set_agent_context()` is a no-op (context is always the configured End User)

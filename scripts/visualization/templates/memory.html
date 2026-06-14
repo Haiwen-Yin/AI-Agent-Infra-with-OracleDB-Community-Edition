@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Memory - AI Agent Infra Community v3.4.0</title>
+<title>Memory - AI Agent Infra Community v3.6.0</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="/static/vis-network.min.js"></script>
 <style>
@@ -55,7 +55,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .detail-content{padding:16px 20px;background:var(--bg-secondary);border-left:3px solid var(--accent)}
 .detail-content p{margin:4px 0;font-size:.85rem;color:var(--text-primary)}
 .detail-content p strong{color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px}
-.detail-panel{width:340px;min-width:340px;background:var(--bg-secondary);border-left:1px solid var(--border-color);padding:20px;overflow-y:auto;display:none;position:relative}
+.detail-panel{width:340px;background:var(--bg-secondary);border-left:1px solid var(--border-color);padding:20px;overflow-y:auto;display:none;position:fixed;right:0;top:0;height:100vh;z-index:20;box-shadow:-4px 0 16px rgba(0,0,0,.4)}
 .detail-panel h5{color:var(--accent);font-size:1rem;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between}
 .close-detail{background:none;border:none;color:var(--text-secondary);font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1;transition:color .15s}
 .close-detail:hover{color:var(--accent)}
@@ -81,7 +81,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <body>
 <div class="sidebar">
   <div class="sidebar-brand">
-    <h5>AI Agent Infra v3.4.0</h5>
+    <h5>AI Agent Infra v3.6.0</h5>
     <small>Community Edition</small>
   </div>
   <nav class="sidebar-nav">
@@ -175,8 +175,8 @@ function rebuildNetwork(){
   var ct=document.getElementById('network-container');
   if(network){network.destroy();network=null}
   var op={nodes:{shape:'dot',font:{color:'#e0e0e0'}},edges:{smooth:{type:'continuous'}},physics:{barnesHut:{gravitationalConstant:-3000,centralGravity:0.3,springLength:120,springConstant:0.04},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:200,navigationButtons:true,keyboard:true}};
-  network=new vis.Network(ct,{nodes:nodesDataset,edges:edgesDataset},op);
-  network.on('click',function(p){if(p.nodes.length>0)showDetail(p.nodes[0])});
+  var _hlActive=false;function highlightConnected(nid){if(!network||!nodesDataset||!edgesDataset)return;var cn=network.getConnectedNodes(nid),ce=network.getConnectedEdges(nid),hs=new Set([nid].concat(cn)),es=new Set(ce),aN=nodesDataset.getIds();for(var i=0;i<aN.length;i++){var id=aN[i],nd=nodesDataset.get(id);if(!nd)continue;if(!nd._oc)nd._oc=JSON.parse(JSON.stringify(nd.color));if(hs.has(id)){var o=nd._oc;nodesDataset.update({id:id,color:{background:o.highlight.background,border:'#fff',highlight:o.highlight,hover:o.hover},borderWidth:3,font:{color:'#fff',size:13}})}else{var o2=nd._oc;nodesDataset.update({id:id,color:{background:o2.background,border:o2.border,highlight:o2.highlight,hover:o2.hover,opacity:0.15},borderWidth:1,font:{color:'rgba(224,224,224,0.2)',size:11}})}}var aE=edgesDataset.getIds();for(var j=0;j<aE.length;j++){var eid=aE[j],ed=edgesDataset.get(eid);if(!ed)continue;if(!ed._oc)ed._oc=JSON.parse(JSON.stringify(ed.color));if(es.has(eid)){var oe=ed._oc;edgesDataset.update({id:eid,color:{color:'#fff',highlight:oe.highlight,hover:oe.hover},width:3,font:{color:'#fff',size:10}})}else{var oe2=ed._oc;edgesDataset.update({id:eid,color:{color:oe2.color,highlight:oe2.highlight,hover:oe2.hover,opacity:0.08},width:1,font:{color:'rgba(160,160,176,0.15)',size:9}})}}_hlActive=true}function resetHighlight(){if(!_hlActive||!nodesDataset||!edgesDataset)return;var aN=nodesDataset.getIds();for(var i=0;i<aN.length;i++){var nd=nodesDataset.get(aN[i]);if(nd&&nd._oc)nodesDataset.update({id:aN[i],color:nd._oc,borderWidth:1,font:{color:'#e0e0e0',size:11}})}var aE=edgesDataset.getIds();for(var j=0;j<aE.length;j++){var ed=edgesDataset.get(aE[j]);if(ed&&ed._oc)edgesDataset.update({id:aE[j],color:ed._oc,width:1,font:{color:'#a0a0b0',size:9}})}_hlActive=false}network=new vis.Network(ct,{nodes:nodesDataset,edges:edgesDataset},op);
+  network.on('click',function(p){var cam=network.getViewPosition(),sc=network.getScale();if(p.nodes.length>0){highlightConnected(p.nodes[0]);showDetail(p.nodes[0])}else{resetHighlight();closeGraphDetail()}network.moveTo({position:cam,scale:sc,animation:false})});
 }
 
 function renderList(){
@@ -257,7 +257,7 @@ function applyFilter(){currentPage=1;if(currentView==='list'){renderList();retur
 function buildVisNode(n){var imp=n.importance!=null?n.importance:5;var sz=5+(imp/10)*10;var cat=n.category||n.group||'General';var col=categoryColors[cat]||categoryColors.General;return{id:n.id,label:n.label||n.title||'',title:n.title||n.label||'',size:sz,color:{background:col,border:col,highlight:{background:col,border:'#fff'},hover:{background:col,border:'#fff'}},shape:'dot',font:{color:'#e0e0e0',size:11},borderWidth:1}}
 function buildVisEdge(e){var ec=edgeTypeColors[e.edge_type||e.label]||edgeTypeColors.default;if(e.label)ec=edgeTypeColors[e.label]||ec;return{from:e.from,to:e.to,label:e.label||'',arrows:e.arrows||'to',color:{color:ec,highlight:ec,hover:ec},font:{color:'#a0a0b0',size:9,strokeWidth:0},smooth:{type:'continuous'}}}
 function updateStats(c){var l=document.documentElement.getAttribute('data-lang')||'en';document.getElementById('statsBadge').innerHTML=c+(l==='zh'?' 节点':' nodes')}
-function initNetwork(data){allNodes=data.nodes||[];allEdges=data.edges||[];var vn=allNodes.map(buildVisNode);var ve=allEdges.map(buildVisEdge);nodesDataset=new vis.DataSet(vn);edgesDataset=new vis.DataSet(ve);var ct=document.getElementById('network-container');var op={nodes:{shape:'dot',font:{color:'#e0e0e0'}},edges:{smooth:{type:'continuous'}},physics:{barnesHut:{gravitationalConstant:-3000,centralGravity:0.3,springLength:120,springConstant:0.04},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:200,navigationButtons:true,keyboard:true}};network=new vis.Network(ct,{nodes:nodesDataset,edges:edgesDataset},op);network.on('click',function(p){if(p.nodes.length>0)showDetail(p.nodes[0])});updateStats(allNodes.length);applyFilterOptions();if(currentView==='list')renderList();document.getElementById('loadingOverlay').style.display='none'}
+function initNetwork(data){allNodes=data.nodes||[];allEdges=data.edges||[];var vn=allNodes.map(buildVisNode);var ve=allEdges.map(buildVisEdge);nodesDataset=new vis.DataSet(vn);edgesDataset=new vis.DataSet(ve);var ct=document.getElementById('network-container');var op={nodes:{shape:'dot',font:{color:'#e0e0e0'}},edges:{smooth:{type:'continuous'}},physics:{barnesHut:{gravitationalConstant:-3000,centralGravity:0.3,springLength:120,springConstant:0.04},stabilization:{iterations:150}},interaction:{hover:true,tooltipDelay:200,navigationButtons:true,keyboard:true}};network=new vis.Network(ct,{nodes:nodesDataset,edges:edgesDataset},op);network.on('click',function(p){var cam=network.getViewPosition(),sc=network.getScale();if(p.nodes.length>0){highlightConnected(p.nodes[0]);showDetail(p.nodes[0])}else{resetHighlight();closeGraphDetail()}network.moveTo({position:cam,scale:sc,animation:false})});updateStats(allNodes.length);applyFilterOptions();if(currentView==='list')renderList();document.getElementById('loadingOverlay').style.display='none'}
 async function loadData(){try{var r=await fetch('/api/memory');if(!r.ok)throw new Error('HTTP '+r.status);var d=await r.json();initNetwork(d)}catch(e){document.getElementById('loadingOverlay').innerHTML='<div style="text-align:center;color:var(--accent)"><div style="font-size:2rem;margin-bottom:12px">&#9888;</div><div>'+escapeHtml(e.message)+'</div></div>'}}
 
 applyLangPlaceholders();(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();

@@ -1,7 +1,8 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.6.0 - Community Edition - Unified Configuration Manager
 
 Reads from config.json with environment variable overrides.
 Priority: Environment Variables > config.json > Built-in defaults
+Supports Admin/Agent separation modes (standalone, admin, agent).
 """
 
 import json
@@ -52,11 +53,20 @@ class SecurityConfig:
 
 
 @dataclass(frozen=True)
+class AgentModeConfig:
+    mode: str = "standalone"
+    admin_token: Optional[str] = None
+    admin_api_url: Optional[str] = None
+    agent_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    agent: AgentModeConfig = field(default_factory=AgentModeConfig)
     project_root: Path = field(default_factory=lambda: _PROJECT_ROOT)
 
 
@@ -128,7 +138,15 @@ def load_config() -> Config:
         lockout_minutes=int(sec_raw.get("lockout_minutes", SecurityConfig.lockout_minutes)),
     )
 
-    return Config(database=db, server=srv, embedding=emb, security=sec, project_root=_PROJECT_ROOT)
+    agent_raw = raw.get("agent", {})
+    agt = AgentModeConfig(
+        mode=os.environ.get("AGENT_MODE", agent_raw.get("mode", AgentModeConfig.mode)),
+        admin_token=os.environ.get("AGENT_ADMIN_TOKEN", agent_raw.get("admin_token", AgentModeConfig.admin_token)),
+        admin_api_url=os.environ.get("AGENT_ADMIN_API_URL", agent_raw.get("admin_api_url", AgentModeConfig.admin_api_url)),
+        agent_id=os.environ.get("AGENT_ID", agent_raw.get("agent_id", AgentModeConfig.agent_id)),
+    )
+
+    return Config(database=db, server=srv, embedding=emb, security=sec, agent=agt, project_root=_PROJECT_ROOT)
 
 
 _config: Optional[Config] = None

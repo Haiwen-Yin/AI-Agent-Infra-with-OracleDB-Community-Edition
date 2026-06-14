@@ -1,6 +1,6 @@
 -- ============================================================
 -- 6_deep_sec_policy.sql — Oracle Deep Data Security (Deep Sec)
--- AI Agent Infra with OracleDB v3.5.0
+-- AI Agent Infra with OracleDB v3.6.0
 -- ============================================================
 --
 -- Deep Sec enforcement via Direct Logon with Local End Users.
@@ -544,7 +544,7 @@ PROMPT   Package:          agent_auth_pkg (callback)
 PROMPT   Package:          END_USER_MANAGER (End User lifecycle)
 PROMPT   Data Roles:       admin_data_role, agent_data_role, pool_agent_data_role
 PROMPT   Session Role:     DEEP_SEC_SESSION_ROLE (CREATE SESSION)
-PROMPT   Data Grants:      22 grants (row, column, cell level, collab access)
+PROMPT   Data Grants:      23 grants (row, column, cell level, collab access)
 PROMPT   MAC:              7 tables protected
 PROMPT   End Users:        One per agent (Direct Logon mode)
 PROMPT

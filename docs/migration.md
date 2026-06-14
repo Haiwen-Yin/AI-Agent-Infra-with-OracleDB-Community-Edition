@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# Migration Guide - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Version Compatibility
 
@@ -257,7 +257,7 @@ SELECT COUNT(*) FROM SYSTEM_CONFIG;
 -- Expected: 0 (blocked by Data Grant predicate 1=0)
 ```
 
-## v3.4.0 → v3.5.0 Migration
+## v3.4.0 → v3.6.0 Migration
 
 This migration fixes three Deep Sec bugs: ENTITIES_AGENT_OWN predicate missing COLLAB subquery (SHARED entities invisible), missing Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS (End Users cannot access COLLAB tables), and missing WORKSPACE_CONTEXT VISIBILITY column (no isolation for private context in collab workspaces).
 
@@ -290,7 +290,7 @@ DROP DATA GRANT ws_ctx_agent_insert;
 
 ### Step 4: Re-run 6_deep_sec_policy.sql
 
-The script is idempotent — it recreates all 22 Data Grants including the fixed `entities_agent_own`, 2 new COLLAB Data Grants (`collab_member_own`, `collab_group_member_access`), and updated `ws_ctx_agent_access`/`ws_ctx_agent_insert` with visibility-aware predicates:
+The script is idempotent — it recreates all 23 Data Grants including the fixed `entities_agent_own`, 2 new COLLAB Data Grants (`collab_member_own`, `collab_group_member_access`), and updated `ws_ctx_agent_access`/`ws_ctx_agent_insert` with visibility-aware predicates:
 
 ```bash
 sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
@@ -316,6 +316,74 @@ SELECT COUNT(*) FROM COLLAB_GROUP_MEMBERS;
 SELECT COUNT(*) FROM COLLAB_GROUPS;
 -- Expected: groups where agent is a member
 
--- Count Data Grants (should be 22)
+-- Count Data Grants (should be 23)
 SELECT COUNT(*) FROM USER_DATA_GRANTS;
+```
+
+## v3.6.0 → v3.6.0 Migration
+
+This migration adds the Admin/Agent Separation Architecture: mode system, admin token authentication, encrypted credential distribution, and mode-aware connection management.
+
+### Step 1: Add admin.registration_token Seed
+
+```sql
+-- Generate a secure admin token
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+VALUES ('admin.registration_token', 
+        UTL_RAW.CAST_TO_VARCHAR2(UTL_ENCODE.BASE64_ENCODE(DBMS_CRYPTO.RANDOMBYTES(32))),
+        'Admin token for Business Agent registration');
+```
+
+### Step 2: Update Schema Version
+
+```sql
+UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = '3.6.0' WHERE CONFIG_KEY = 'schema_version';
+COMMIT;
+```
+
+### Step 3: Update config.json (Optional)
+
+For Admin Agent deployment, add `mode` field:
+
+```json
+{
+  "mode": "admin",
+  "database": {"user": "aiadmin", "password": "...", "dsn": "//db:1521/service"},
+  "server": {"host": "0.0.0.0", "port": 18080}
+}
+```
+
+For standalone mode (default, no changes needed), `mode` defaults to `standalone`.
+
+### Step 4: Bootstrap Business Agents
+
+```bash
+# On Admin Agent node, generate an admin token
+curl -X POST http://localhost:18080/api/admin/token/generate \
+  -H "Cookie: session=<admin-session>"
+
+# On Business Agent node, run bootstrap
+python agent_bootstrap.py --admin-url http://admin-host:18080 \
+                          --admin-token <generated-token> \
+                          --agent-name "business-agent-1" \
+                          --output-dir /opt/agent
+```
+
+### Backward Compatibility
+
+- **Standalone mode** (default) preserves existing behavior exactly
+- No breaking changes to existing APIs
+- `admin.registration_token` is optional for standalone mode
+- Existing `config.json` files work without modification (mode defaults to `standalone`)
+
+### Verification
+
+```sql
+-- Verify schema version
+SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = 'schema_version';
+-- Expected: 3.6.0
+
+-- Verify admin token exists
+SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = 'admin.registration_token';
+-- Expected: Base64-encoded token string
 ```

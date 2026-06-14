@@ -1,7 +1,8 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v3.6.0 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Community Edition: direct access, no token required
+- Admin API mode: Business Agent acquires skills via Admin Agent HTTP API
 """
 
 import io
@@ -43,6 +44,7 @@ def discover_skills(
     where = " AND ".join(conditions)
     sql = f"""
         SELECT e.ENTITY_ID, e.TITLE, e.CATEGORY, e.STATUS,
+               e.VISIBILITY, e.OWNED_BY_AGENT,
                sm.SKILL_NAME, sm.SKILL_VERSION, sm.SKILL_TYPE, sm.SKILL_FORMAT,
                sm.RUNTIME, sm.SKILL_STATUS, sm.SKILL_DESCRIPTION,
                sm.RESOURCE_URI, sm.RESOURCE_FILENAME, sm.RESOURCE_SIZE
@@ -136,4 +138,60 @@ def acquire_skill_full(skill_id: str, agent_id: Optional[str] = None, session_id
         resource_zip = acquire_skill_resource(skill_id, agent_id, session_id)
 
     result = {**text_result, "resource_zip": resource_zip}
+    return result
+
+
+import json as _json
+from urllib.request import Request as _Request, urlopen as _urlopen
+from urllib.error import HTTPError as _HTTPError, URLError as _URLError
+
+
+def _admin_api_get(url: str, timeout: int = 30) -> dict:
+    req = _Request(url, headers={"Accept": "application/json"}, method="GET")
+    try:
+        with _urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8"))
+    except _HTTPError as e:
+        try:
+            return _json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"error": f"HTTP {e.code}"}
+    except _URLError as e:
+        return {"error": f"Connection failed: {e}"}
+
+
+def discover_skills_via_admin(
+    admin_url: str,
+    admin_token: str,
+    skill_type: Optional[str] = None,
+    runtime: Optional[str] = None,
+    keyword: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/list?admin_token={admin_token}"
+    if skill_type:
+        url += f"&type={skill_type}"
+    if runtime:
+        url += f"&runtime={runtime}"
+    if keyword:
+        url += f"&keyword={keyword}"
+    result = _admin_api_get(url)
+    return result.get("skills", [])
+
+
+def acquire_skill_via_admin(
+    admin_url: str,
+    admin_token: str,
+    skill_id: str,
+    include_resource: bool = False,
+) -> Optional[Dict[str, Any]]:
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/{skill_id}/acquire?admin_token={admin_token}"
+    if include_resource:
+        url += "&resource=1"
+    result = _admin_api_get(url)
+    if "error" in result:
+        return None
+    if include_resource and result.get("resource_encoding") == "base64" and result.get("resource_zip"):
+        import base64
+        result["resource_zip"] = base64.b64decode(result["resource_zip"])
+        result.pop("resource_encoding", None)
     return result

@@ -1,9 +1,10 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Agent API
+"""AI Agent Infra v3.6.0 - Enterprise Edition - Agent API
 
 Agent registration, session management, access audit logging,
-and collaboration tracking.
+collaboration tracking, and Admin/Agent separation support.
 """
 
+import secrets
 import json
 import logging
 import oracledb
@@ -556,3 +557,250 @@ def assign_random_pool_agent(user_id: str) -> Optional[Dict[str, Any]]:
         from .workspace_api import get_user_workspaces
         result["user_workspaces"] = get_user_workspaces(user_id)
     return result
+
+
+import secrets as _secrets
+
+
+def generate_admin_token() -> str:
+    token = "AT_" + _secrets.token_hex(32)
+    enc_result = execute_query_one("SELECT DB_CRYPTO.encrypt(:plain) AS ciphertext FROM DUAL", {"plain": token})
+    encrypted = enc_result['ciphertext'] if enc_result else token
+    execute("""
+        MERGE INTO SYSTEM_CONFIG sc
+        USING (SELECT 'admin.registration_token' AS k FROM DUAL) d
+        ON (sc.CONFIG_KEY = d.k)
+        WHEN MATCHED THEN UPDATE SET CONFIG_VALUE = :val, UPDATED_AT = SYSTIMESTAMP
+        WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+            VALUES ('admin.registration_token', :val, 'Admin token for Agent registration (encrypted)')
+    """, {"val": encrypted})
+    logger.info("Generated new admin registration token")
+    return token
+
+
+def verify_admin_token(token: str) -> bool:
+    if not token or not token.startswith("AT_"):
+        return False
+    row = execute_query_one(
+        "SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = 'admin.registration_token'",
+    )
+    if not row:
+        return False
+    stored = row.get("config_value", "")
+    if stored.startswith("AT_"):
+        return _secrets.compare_digest(stored, token)
+    try:
+        dec = execute_query_one("SELECT DB_CRYPTO.decrypt(:cipher) AS plaintext FROM DUAL", {"cipher": stored})
+        if dec and dec.get("plaintext"):
+            return _secrets.compare_digest(dec["plaintext"], token)
+    except Exception:
+        pass
+    return False
+
+
+def register_agent_via_admin(
+    agent_id: str,
+    agent_name: str,
+    admin_token: str,
+    agent_type: Optional[str] = None,
+    description: Optional[str] = None,
+    capabilities: Optional[Any] = None,
+    config: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    if not verify_admin_token(admin_token):
+        logger.warning("Admin token verification failed for agent registration: %s", agent_id)
+        return None
+
+    register_agent(agent_id, agent_name, agent_type=agent_type,
+                   description=description, capabilities=capabilities, config=config)
+
+    eu_name = agent_id.replace('-', '_').upper()
+    pwd = _get_end_user_password_direct(agent_id)
+    if not pwd:
+        logger.error("Failed to get End User password for %s after registration", agent_id)
+        return None
+
+    dsn = None
+    try:
+        from .config import get_config
+        dsn = get_config().database.dsn
+    except Exception:
+        dsn = "10.10.10.130:1521/ai_agent"
+
+    from .connection_crypto import encrypt_credential_for_distribution
+    credential_data = {
+        "username": eu_name,
+        "password": pwd,
+        "dsn": dsn,
+    }
+    encrypted = encrypt_credential_for_distribution(credential_data, admin_token)
+
+    recovery_codes = generate_recovery_codes(agent_id)
+
+    return {
+        "agent_id": agent_id,
+        "end_user": {
+            "credential_encrypted": encrypted["credential_encrypted"],
+            "salt": encrypted["salt"],
+        },
+        "recovery_codes": recovery_codes,
+    }
+
+
+def _get_end_user_password_direct(agent_id: str) -> Optional[str]:
+    try:
+        row = execute_query_one(
+            "SELECT config_value FROM system_config WHERE config_key = :key",
+            {"key": f"end_user_pwd.{agent_id}"},
+        )
+        return row["config_value"] if row else None
+    except Exception:
+        return None
+
+
+import hashlib as _hashlib
+
+
+def generate_recovery_codes(agent_id: str, count: int = 8) -> List[str]:
+    codes = []
+    code_records = []
+    for _ in range(count):
+        segments = [secrets.token_hex(2).upper() for _ in range(3)]
+        code = "RC-" + "-".join(segments)
+        codes.append(code)
+        h = _hashlib.sha256(code.encode()).hexdigest()
+        code_records.append({"hash": h, "used": False})
+
+    payload = json.dumps(code_records)
+    enc_result = execute_query_one("SELECT DB_CRYPTO.encrypt(:plain) AS ciphertext FROM DUAL", {"plain": payload})
+    encrypted = enc_result['ciphertext'] if enc_result else payload
+
+    execute("""
+        MERGE INTO SYSTEM_CONFIG sc
+        USING (SELECT 'recovery_codes.' || :aid AS k FROM DUAL) d
+        ON (sc.CONFIG_KEY = d.k)
+        WHEN MATCHED THEN UPDATE SET CONFIG_VALUE = :val, UPDATED_AT = SYSTIMESTAMP
+        WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+            VALUES ('recovery_codes.' || :aid, :val, 'Recovery codes for agent ' || :aid)
+    """, {"aid": agent_id, "val": encrypted})
+
+    logger.info("Generated %d recovery codes for agent %s", count, agent_id)
+    return codes
+
+
+def verify_recovery_code(agent_id: str, code: str) -> bool:
+    row = execute_query_one(
+        "SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = :key",
+        {"key": f"recovery_codes.{agent_id}"},
+    )
+    if not row:
+        return False
+
+    stored = row.get("config_value", "")
+    try:
+        dec = execute_query_one("SELECT DB_CRYPTO.decrypt(:cipher) AS plaintext FROM DUAL", {"cipher": stored})
+        payload = dec["plaintext"] if dec else stored
+    except Exception:
+        payload = stored
+
+    try:
+        code_records = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+    code_hash = _hashlib.sha256(code.encode()).hexdigest()
+    for rec in code_records:
+        if rec.get("hash") == code_hash and not rec.get("used"):
+            rec["used"] = True
+            new_payload = json.dumps(code_records)
+            enc_result = execute_query_one("SELECT DB_CRYPTO.encrypt(:plain) AS ciphertext FROM DUAL", {"plain": new_payload})
+            new_encrypted = enc_result['ciphertext'] if enc_result else new_payload
+            execute(
+                "UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = :val WHERE CONFIG_KEY = :key",
+                {"val": new_encrypted, "key": f"recovery_codes.{agent_id}"},
+            )
+            logger.info("Recovery code consumed for agent %s", agent_id)
+            return True
+
+    return False
+
+
+def recover_agent_via_admin(
+    agent_id: str,
+    recovery_code: str,
+    admin_token: str,
+) -> Optional[Dict[str, Any]]:
+    if not verify_admin_token(admin_token):
+        logger.warning("Admin token verification failed for agent recovery: %s", agent_id)
+        return None
+
+    if not verify_recovery_code(agent_id, recovery_code):
+        logger.warning("Invalid or used recovery code for agent: %s", agent_id)
+        return None
+
+    agent = execute_query_one(
+        "SELECT STATUS, LAST_SEEN_AT FROM AGENT_REGISTRY WHERE AGENT_ID = :aid",
+        {"aid": agent_id},
+    )
+    if agent is None:
+        return None
+
+    active_check = execute_query_one(
+        """SELECT CASE
+               WHEN CAST(SYSTIMESTAMP AS TIMESTAMP) - NVL(LAST_SEEN_AT, CAST(SYSTIMESTAMP AS TIMESTAMP) - NUMTOYMINTERVAL(1, 'YEAR')) < NUMTODSINTERVAL(5, 'MINUTE')
+               THEN 'ACTIVE'
+               ELSE 'INACTIVE'
+           END AS check_result
+           FROM AGENT_REGISTRY WHERE AGENT_ID = :aid""",
+        {"aid": agent_id},
+    )
+    if active_check and active_check.get("check_result") == "ACTIVE":
+        logger.warning("Recovery rejected: agent %s may still be active (LAST_SEEN_AT within 5 min)", agent_id)
+        return None
+
+    eu_name = agent_id.replace('-', '_').upper()
+    new_pwd = secrets.token_hex(8)
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'ALTER END USER "{eu_name}" IDENTIFIED BY "{new_pwd}"')
+                conn.commit()
+    except Exception as e:
+        logger.warning("Failed to reset End User password for %s: %s", agent_id, e)
+        return None
+
+    execute("""
+        UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = :pwd
+        WHERE CONFIG_KEY = :key
+    """, {"pwd": new_pwd, "key": f"end_user_pwd.{agent_id}"})
+
+    execute("""
+        UPDATE AGENT_REGISTRY SET STATUS = 'ACTIVE', UPDATED_AT = SYSTIMESTAMP
+        WHERE AGENT_ID = :aid
+    """, {"aid": agent_id})
+
+    dsn = None
+    try:
+        from .config import get_config
+        dsn = get_config().database.dsn
+    except Exception:
+        dsn = "10.10.10.130:1521/ai_agent"
+
+    from .connection_crypto import encrypt_credential_for_distribution
+    credential_data = {
+        "username": eu_name,
+        "password": new_pwd,
+        "dsn": dsn,
+    }
+    encrypted = encrypt_credential_for_distribution(credential_data, admin_token)
+
+    logger.info("Agent %s recovered successfully", agent_id)
+    return {
+        "agent_id": agent_id,
+        "recovered": True,
+        "end_user": {
+            "credential_encrypted": encrypted["credential_encrypted"],
+            "salt": encrypted["salt"],
+        },
+    }

@@ -1,4 +1,4 @@
-# Security - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# Security - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Data Masking
 
@@ -87,11 +87,11 @@ AGENT_COLLABORATION tracks cross-agent sharing requests:
 - Returns 'GRANTED' if entity is SHARED/PUBLIC or owner matches
 - Returns 'DENIED' for PRIVATE entities not owned by the requesting agent
 
-## Deep Data Security (v3.5.0)
+## Deep Data Security (v3.6.0)
 
-v3.5.0 replaces VPD with Oracle Deep Data Security:
+v3.6.0 replaces VPD with Oracle Deep Data Security:
 
-- **22 Data Grants** enforce row-level, column-level, and cell-level access control (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
+- **23 Data Grants** enforce row-level, column-level, and cell-level access control (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
 - **MAC** on 7 tables prevents view-based bypass of row-level policies
 - **End User Context** with `o:onFirstRead` callback for zero-trust agent identification
 - **3 Data Roles**: `admin_data_role` (full), `agent_data_role` (filtered by agent), `pool_agent_data_role` (minimum)
@@ -116,3 +116,53 @@ The `WS_CTX_AGENT_ACCESS` Data Grant predicate enforces these rules:
 - Agent CANNOT see other agents' PRIVATE context even in the same collab group workspace
 
 This prevents one agent's private thoughts, internal reasoning, or sensitive intermediate results from being exposed to other agents sharing the same workspace.
+
+## Admin/Agent Separation Security Model
+
+v3.6.0 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
+
+### Threat Model Comparison
+
+| Threat | Before v3.6.0 | After v3.6.0 (Agent mode) |
+|--------|--------------|--------------------------|
+| Business Agent compromised | Attacker gets AIADMIN credentials → full database access | Attacker gets End User credentials → Data Grant filtered access only |
+| Credential leakage from config.json | AIADMIN user/password exposed | Only End User credentials exposed (scoped by Data Grants) |
+| Rogue Agent process | Can bypass all Data Grants (AIADMIN bypasses) | Cannot bypass Data Grants (End User connection) |
+| Lateral movement | AIADMIN access to all tables and rows | End User access restricted to agent's own data |
+
+### Admin Token Security
+
+- **Generation**: `generate_admin_token()` creates a 32-byte random token, Base64-encoded
+- **Storage**: Stored in `SYSTEM_CONFIG` as `admin.registration_token` (admin_data_role only)
+- **Lifetime**: Time-limited (default 1 hour), configurable
+- **Rotation**: `POST /api/admin/token/rotate` invalidates old token; Business Agents must re-register
+- **Usage**: Single-use for registration; encrypted credential distribution uses it as PBKDF2 key material
+
+### Encrypted Credential Distribution
+
+End User credentials are encrypted in transit using the admin_token as key material:
+
+1. Admin Agent generates admin_token
+2. Admin_token shared with Business Agent operator over out-of-band secure channel
+3. Business Agent sends registration request with admin_token
+4. Admin Agent encrypts End User credentials with `encrypt_credential_for_distribution(credential, admin_token)`
+5. Business Agent decrypts with `decrypt_credential_from_distribution(encrypted, admin_token)`
+6. Business Agent saves to encrypted `agent_config.json` with `save_agent_config(config, admin_token, path)`
+
+**Key properties:**
+- admin_token is never stored on the Business Agent node
+- PBKDF2-HMAC-SHA256 with 100,000 iterations prevents brute-force
+- AES-256-GCM authenticated encryption prevents tampering
+- agent_config.json is encrypted at rest using derived key
+
+### Mode-Specific Security Controls
+
+| Control | standalone | admin | agent |
+|---------|-----------|-------|-------|
+| AIADMIN connection pool | Yes | Yes | **No** |
+| End User connections | Yes | Yes | Yes (only option) |
+| Web Portal | Yes | Yes | **No** |
+| admin_token stored locally | N/A | No | **No** |
+| agent_config.json | No | No | Yes (encrypted) |
+| Data Grant enforcement | Yes (with AIADMIN bypass) | Yes (with AIADMIN bypass) | **Always enforced** |
+| SYSTEM_CONFIG access | Via AIADMIN | Via AIADMIN | **Blocked** (admin_data_role only) |

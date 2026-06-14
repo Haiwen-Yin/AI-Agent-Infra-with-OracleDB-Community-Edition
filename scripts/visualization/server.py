@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.6.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -24,7 +24,7 @@ from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 
-VERSION = "3.5.0"
+VERSION = "3.6.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -45,7 +45,7 @@ PAGE_ROUTES = {
     '/branches': 'branches.html',
 }
 
-PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login'}
+PUBLIC_API = {'/api/health', '/api/login', '/portal/api/register', '/portal/api/login', '/api/admin/agent/register', '/api/admin/agent/recover', '/api/admin/token/generate', '/api/admin/token/rotate', '/api/admin/skill/list', '/api/admin/skill/acquire', '/api/admin/skill/create', '/api/admin/skill/update', '/api/admin/skill/delete', '/api/admin/skill/upload'}
 
 
 def _is_public_api(path):
@@ -507,6 +507,38 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_portal_agent_release()
             return
 
+        if path == '/api/admin/agent/register':
+            self._handle_admin_agent_register()
+            return
+
+        if path == '/api/admin/agent/recover':
+            self._handle_admin_agent_recover()
+            return
+
+        if path == '/api/admin/token/generate':
+            self._handle_admin_token_generate()
+            return
+
+        if path == '/api/admin/token/rotate':
+            self._handle_admin_token_rotate()
+            return
+
+        if path == '/api/admin/skill/create':
+            self._handle_admin_skill_create()
+            return
+
+        if path == '/api/admin/skill/update':
+            self._handle_admin_skill_update()
+            return
+
+        if path == '/api/admin/skill/delete':
+            self._handle_admin_skill_delete()
+            return
+
+        if path == '/api/admin/skill/upload':
+            self._handle_admin_skill_upload()
+            return
+
         self._send_error(404, 'Not found')
 
     def _handle_login(self):
@@ -567,6 +599,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._handle_skill_get(path)
             elif path == '/api/stats':
                 self._api_stats()
+            elif path == '/api/admin/skill/list':
+                self._handle_admin_skill_list()
+            elif path.startswith('/api/admin/skill/') and path.endswith('/acquire'):
+                self._handle_admin_skill_acquire()
             elif path == '/api/graph/neighbors':
                 entity_id = qs.get('entity_id', [None])[0]
                 if not entity_id:
@@ -1395,135 +1431,240 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
-    def _handle_portal_login(self):
+    def _handle_admin_agent_register(self):
         try:
             body = self._read_body()
-            data = json.loads(body)
-            username = data.get('username', '')
-            password = data.get('password', '')
-
-            user = _authenticate_local(username, password)
-
-            if not user:
-                self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_json({'error': 'Invalid request body'}, 400)
+            return
+        agent_id = data.get('agent_id', '')
+        agent_name = data.get('agent_name', '')
+        admin_token = data.get('admin_token', '')
+        if not agent_id or not agent_name or not admin_token:
+            self._send_json({'error': 'agent_id, agent_name, and admin_token are required'}, 400)
+            return
+        try:
+            result = agent_api.register_agent_via_admin(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                admin_token=admin_token,
+                agent_type=data.get('agent_type'),
+                description=data.get('description'),
+                capabilities=data.get('capabilities'),
+                config=data.get('config'),
+            )
+            if result is None:
+                self._send_json({'error': 'Admin token verification failed'}, 403)
                 return
-            user_api.update_last_login(str(user['user_id']))
-            session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
-            sess = sessions[session_id]
-            assigned_agent = agent_api.assign_random_pool_agent(str(user['user_id']))
-            if assigned_agent:
-                sess['agent_id'] = assigned_agent['agent_id']
-                sess['agent_name'] = assigned_agent.get('agent_name', '')
-                session_obj = agent_api.create_session(assigned_agent['agent_id'], owner_user_id=str(user['user_id']))
-                sess['agent_session_id'] = session_obj
-                existing_ws = user_api.get_user_workspaces(str(user['user_id']))
-                ws = None
-                for w in existing_ws:
-                    if w.get('workspace_type') == 'CONVERSATION' and w.get('status') == 'ACTIVE':
-                        ws = w['workspace_id']
-                        break
-                if not ws:
-                    ws = workspace_api.create_workspace(owner_user_id=str(user['user_id']),
-                                                         name='New Chat', workspace_type='CONVERSATION')
-                sess['workspace_id'] = ws
-                _set_portal_agent_context(sess)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
-            resp = {
-                'success': True,
-                'session_id': session_id,
-                'user_id': str(user['user_id']),
-                'username': user['username'],
-                'has_agent': assigned_agent is not None,
-                'agent_id': sess.get('agent_id', ''),
-                'agent_name': sess.get('agent_name', ''),
-            }
-            body_out = json.dumps(resp).encode()
-            self.send_header('Content-Length', str(len(body_out)))
-            self.end_headers()
-            self.wfile.write(body_out)
+            self._send_json(result)
         except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
+            self._send_json({'error': str(e)}, 500)
 
-    def _handle_portal_chat_send(self):
-        session_data = _get_session(self)
-        if not session_data:
-            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
-            return
-        sess = session_data[1]
-        agent_id = sess.get('agent_id', '')
-        agent_session_id = sess.get('agent_session_id', '')
-        user_id = sess.get('user_id', '')
-        workspace_id = sess.get('workspace_id', '')
-        if not agent_id:
-            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
-            return
+    def _handle_admin_agent_recover(self):
         try:
             body = self._read_body()
-            data = json.loads(body)
-            message = data.get('message', '').strip()
-            if not message:
-                self._send_json({'success': False, 'error': 'Empty message'}, 400)
-                return
-            import datetime
-            ts = datetime.datetime.now().isoformat()
-            user_context_id = None
-            connection.set_agent_context(None)
-            if workspace_id:
-                user_context_id = workspace_api.save_context(
-                    workspace_id=workspace_id,
-                    context_type='CHAT_MESSAGE',
-                    context_data=json.dumps({'role': 'user', 'content': message, 'timestamp': ts}),
-                    agent_id=agent_id,
-                )
-            reply = _generate_sim_reply(message, agent_id, sess)
-            if workspace_id:
-                workspace_api.save_context(
-                    workspace_id=workspace_id,
-                    context_type='CHAT_MESSAGE',
-                    context_data=json.dumps({'role': 'agent', 'content': reply, 'timestamp': ts}),
-                    agent_id=agent_id,
-                )
-            ws_row = connection.execute_query_one(
-                "SELECT WORKSPACE_NAME, WORKSPACE_ALIAS FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid",
-                {"v_wid": workspace_id},
-            ) if workspace_id else None
-            if ws_row and not ws_row.get('workspace_alias') and ws_row.get('workspace_name') == 'New Chat':
-                summary = message[:60].replace('\n', ' ').strip()
-                if not summary:
-                    summary = 'New Chat'
-                connection.execute(
-                    "UPDATE WORKSPACES SET WORKSPACE_ALIAS = :v_name, UPDATED_AT = SYSTIMESTAMP WHERE WORKSPACE_ID = :v_wid",
-                    {"v_name": summary, "v_wid": workspace_id},
-                )
-            self._send_json({'success': True, 'reply': reply, 'timestamp': ts, 'user_context_id': user_context_id})
-        except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
-
-    def _handle_portal_agent_release(self):
-        session_data = _get_session(self)
-        if not session_data:
-            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            data = json.loads(body) if body else {}
+        except Exception:
+            self._send_json({'error': 'Invalid request body'}, 400)
             return
-        sess = session_data[1]
-        agent_id = sess.get('agent_id', '')
-        agent_session_id = sess.get('agent_session_id', '')
-        if not agent_id:
-            self._send_json({'success': False, 'error': 'No agent assigned'}, 400)
+        agent_id = data.get('agent_id', '')
+        recovery_code = data.get('recovery_code', '')
+        admin_token = data.get('admin_token', '')
+        if not agent_id or not recovery_code or not admin_token:
+            self._send_json({'error': 'agent_id, recovery_code, and admin_token are required'}, 400)
             return
         try:
-            connection.set_agent_context(None)
-            if agent_session_id:
-                agent_api.end_session(agent_session_id)
-            agent_api.hibernate_agent(agent_id)
-            connection.set_agent_context(None)
-            sess.pop('agent_id', None)
-            sess.pop('agent_name', None)
-            sess.pop('agent_session_id', None)
-            self._send_json({'success': True})
+            result = agent_api.recover_agent_via_admin(
+                agent_id=agent_id,
+                recovery_code=recovery_code,
+                admin_token=admin_token,
+            )
+            if result is None:
+                self._send_json({'error': 'Recovery failed: invalid token, wrong recovery code, or agent still active'}, 403)
+                return
+            self._send_json(result)
         except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_token_generate(self):
+        try:
+            token = agent_api.generate_admin_token()
+            self._send_json({'admin_token': token})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_token_rotate(self):
+        try:
+            token = agent_api.generate_admin_token()
+            self._send_json({'admin_token': token})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_list(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        admin_token = qs.get('admin_token', [None])[0]
+        if not admin_token or not agent_api.verify_admin_token(admin_token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return
+        try:
+            from lib import skill_acquire_api
+            skill_type = qs.get('type', [None])[0]
+            runtime = qs.get('runtime', [None])[0]
+            keyword = qs.get('keyword', [None])[0]
+            agent_id = qs.get('agent_id', [None])[0]
+            visibility = qs.get('visibility', [None])[0]
+            results = skill_acquire_api.discover_skills(
+                skill_type=skill_type, runtime=runtime, keyword=keyword,
+            )
+            if agent_id:
+                filtered = []
+                for r in results:
+                    vis = r.get('visibility', 'SHARED')
+                    owner = r.get('owned_by_agent', '')
+                    if vis != 'PRIVATE' or owner == agent_id:
+                        filtered.append(r)
+                results = filtered
+            if visibility:
+                results = [r for r in results if r.get('visibility', 'SHARED') == visibility]
+            self._send_json({'skills': [_clean_row(r) for r in results]})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_acquire(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        admin_token = qs.get('admin_token', [None])[0]
+        if not admin_token or not agent_api.verify_admin_token(admin_token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return
+        path = parsed.path.rstrip('/')
+        parts = path.split('/')
+        try:
+            skill_id_idx = parts.index('skill') + 1
+            skill_id = parts[skill_id_idx]
+        except (ValueError, IndexError):
+            self._send_json({'error': 'Invalid skill ID'}, 400)
+            return
+        include_resource = qs.get('resource', ['0'])[0] == '1'
+        try:
+            from lib import skill_acquire_api
+            if include_resource:
+                result = skill_acquire_api.acquire_skill_full(skill_id)
+            else:
+                result = skill_acquire_api.acquire_skill_text(skill_id)
+            if result is None:
+                self._send_json({'error': 'Skill not found or not active'}, 404)
+                return
+            if include_resource and result.get('resource_zip'):
+                import base64
+                result['resource_zip'] = base64.b64encode(result['resource_zip']).decode('ascii')
+                result['resource_encoding'] = 'base64'
+            self._send_json(_clean_row(result))
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _verify_admin_token_from_body(self):
+        try:
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+        except Exception:
+            data = {}
+        token = data.get('admin_token', '')
+        if not token or not agent_api.verify_admin_token(token):
+            self._send_json({'error': 'Invalid admin token'}, 403)
+            return None
+        return data
+
+    def _handle_admin_skill_create(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        try:
+            from lib import skill_api
+            skill_id = skill_api.register_skill(
+                title=data.get('title', ''),
+                skill_name=data.get('skill_name', ''),
+                skill_version=data.get('skill_version', '1.0.0'),
+                skill_type=data.get('skill_type', 'CUSTOM'),
+                skill_format=data.get('skill_format', 'TEXT'),
+                text_content=data.get('text_content'),
+                skill_description=data.get('skill_description'),
+                runtime=data.get('runtime', 'PYTHON'),
+                parameters=data.get('parameters'),
+                dependencies=data.get('dependencies'),
+                category=data.get('category'),
+                owned_by_agent=data.get('owned_by_agent'),
+                visibility=data.get('visibility', 'SHARED'),
+            )
+            skill = skill_api.get_skill(skill_id)
+            self._send_json({'skill_id': skill_id, 'skill': _clean_row(skill)})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_update(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        try:
+            from lib import skill_api
+            update_fields = {k: v for k, v in data.items() if k not in ('admin_token', 'skill_id')}
+            ok = skill_api.update_skill(skill_id, **update_fields)
+            if ok:
+                skill = skill_api.get_skill(skill_id)
+                self._send_json({'skill_id': skill_id, 'skill': _clean_row(skill)})
+            else:
+                self._send_json({'error': 'Skill not found or no changes'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_delete(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        try:
+            from lib import skill_api
+            ok = skill_api.delete_skill(skill_id)
+            if ok:
+                self._send_json({'skill_id': skill_id, 'deleted': True})
+            else:
+                self._send_json({'error': 'Skill not found'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_skill_upload(self):
+        data = self._verify_admin_token_from_body()
+        if data is None:
+            return
+        skill_id = data.get('skill_id', '')
+        if not skill_id:
+            self._send_json({'error': 'skill_id required'}, 400)
+            return
+        filename = data.get('filename', '')
+        content_b64 = data.get('content_base64', '')
+        if not filename or not content_b64:
+            self._send_json({'error': 'filename and content_base64 required'}, 400)
+            return
+        try:
+            import base64
+            content = base64.b64decode(content_b64)
+            from lib import skill_api
+            result = skill_api.upload_skill_resource(skill_id, filename, content)
+            if result:
+                self._send_json({'skill_id': skill_id, 'upload': _clean_row(result)})
+            else:
+                self._send_json({'error': 'Skill not found'}, 404)
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
 
     def _handle_portal_chat_new(self):
         session_data = _get_session(self)

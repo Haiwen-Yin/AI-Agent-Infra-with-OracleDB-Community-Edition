@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.5.0
+version: v3.6.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.5.0 - AI Agent的基础设施架构"
-tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration]
+description: "AI Agent Infra with OracleDB - Community Edition v3.6.0 - AI Agent的基础设施架构"
+tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.5.0
+# AI Agent Infra with OracleDB - Community Edition v3.6.0
 
 **Author:** Haiwen Yin
-**Version:** v3.5.0 - 2026-06-11
+**Version:** v3.6.0 - 2026-06-13
 **License:** Apache License 2.0 (Community Edition)
 
 ## ⚠️ CRITICAL: Database & Driver Requirements
@@ -19,7 +19,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.5.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.6.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -31,7 +31,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.5.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.6.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -46,65 +46,71 @@ pip install oracledb>=4.0.1
 ## Architecture Overview
 
 ```
-+--------------------------------------------------------------------+
-|                AI Agent Infra with OracleDB                        |
-|                   Community Edition v3.5.0                         |
-+--------------------------------------------------------------------+
-|                                                                    |
-|  +-----------------------------------------------------------+     |
-|  |  ENTITIES (unified, RANGE partitioned)                    |     |
-|  |  +----------+----------+----------+--------+--------------+     |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |     |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE     |     |
-|  |  +----------+----------+----------+--------+--------------+     |
-|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |     |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                          |     |
-|  +-----------------------------------------------------------+     |
-|                         |                                          |
-|  +----------------------------------------------+                  |
-|  |  ENTITY_EDGES (REFERENCE partitioned)        |                  |
-|  |  PK: (EDGE_ID, SOURCE_ID)                    |                  |
-|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |                  |
-|  |  + 4 other reference-partitioned children    |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-|  +----------------------------------------------+                  |
-|  |  WORKSPACES                                  |                  |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |                  |
-|  |  +-- WORKSPACE_TASKS (JRD updatable)         |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-|  +----------------------------------------------+                  |
-|  |  AGENT_SESSION (handoff chain)               |                  |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)      |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-+--------------------------------------------------------------------+
++-----------------------------------------------------------------+
+|                AI Agent Infra with OracleDB                     |
+|                   Community Edition v3.6.0                      |
++-----------------------------------------------------------------+
+|                                                                 |
+|  +-----------------------------------------------------------+  |
+|  |  ENTITIES (unified, RANGE partitioned)                    |  |
+|  |  +----------+----------+----------+--------+--------------+  |
+|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |  |
+|  |  |          |          |PUT       |ENCE    | TEMPLATE     |  |
+|  |  +----------+----------+----------+--------+--------------+  |
+|  |  PK: (ENTITY_ID, ENTITY_TYPE)                             |  |
+|  |  COL: WORKSPACE_ID -> WORKSPACES                          |  |
+|  +-----------------------------------------------------------+  |
+|                         |                                       |
+|  +----------------------------------------------+               |
+|  |  ENTITY_EDGES (REFERENCE partitioned)        |               |
+|  |  PK: (EDGE_ID, SOURCE_ID)                    |               |
+|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |               |
+|  |  + 4 other reference-partitioned children    |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  WORKSPACES                                  |               |
+|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |               |
+|  |  +-- WORKSPACE_TASKS (JRD updatable)         |               |
+|  +----------------------------------------------+               |
+|                                                                 |
+|  +----------------------------------------------+               |
+|  |  AGENT_SESSION (handoff chain)               |               |
+|  |  PREDECESSOR_SESSION_ID -> self (chain)      |               |
+|  +----------------------------------------------+               |
+|                                                                 |
++-----------------------------------------------------------------+
 ```
 
-## Enterprise Edition Features (v3.5.0)
+## Edition Comparison (v3.6.0)
 
 ### 1. Skill Storage & Distribution
 
-Database-backed Skill registry with secure one-time-token resource distribution.
+Database-backed Skill registry with resource distribution.
 
 | Component | Description |
 |-----------|-------------|
 | **SKILL_META** | Reference-partitioned from ENTITIES subtype `SKILL`; stores text content, resource URI, runtime, parameters, dependencies |
 | **SKILL_DV** | JRD updatable duality view for Skill entities |
-| **skill_api.py** | 8 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate |
+| **skill_api.py** | 12 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate, + 4 admin-mode functions (register_via_admin, update_via_admin, delete_via_admin, upload_skill_resource_via_admin) |
+| **skill_acquire_api.py** | 7 functions: discover, acquire_text, acquire_resource, acquire_full, + 3 admin-mode functions (discover_via_admin, acquire_via_admin) |
 | **SKILL_MANAGER** PL/SQL | 6 subprograms: CRUD, dependency resolution, validation |
-| **SKILL_TOKEN_CLEANUP_JOB** | Every 10 minutes, purge expired/consumed tokens |
 
-**Enterprise Skill Access Flow:**
-1. `get_skill(skill_id)` -> text content + generic `resource_uri`
-2. `request_skill_access(agent_id, session_id, skill_id)` -> one-time token
-3. `consume_skill_token(token_id)` -> HTTP presigned URL (single use)
-4. Download resource from presigned URL
+**Skill Access Flow (Community Edition):**
+1. `discover_skills()` or `discover_skills_via_admin()` -> list available skills
+2. `acquire_skill_text(skill_id)` or `acquire_skill_via_admin()` -> text content + metadata
+3. `acquire_skill_resource(skill_id)` or `acquire_skill_via_admin(..., include_resource=True)` -> resource ZIP
 
-**Community Edition** Skill access skips steps 2-3; `resource_uri` is directly accessible.
+**Skill Access Flow (Enterprise Edition only):**
+1. `request_skill_access(agent_id, session_id, skill_id)` -> one-time TKN_xxx token
+2. `consume_skill_token(token_id)` -> HTTP download URL (single use)
+3. `GET /api/admin/skill/dl/{download_token}` -> download resource
 
-### 3. Encrypted Database Credentials
+**Private Skill Backup:** Skills with `visibility=PRIVATE` + `owned_by_agent=agent_id` are only visible to the owning agent. Data Grant predicate enforces isolation at DB level.
+
+**Recovery Codes:** Agent registration returns 8 one-time `RC-XXXX-XXXX-XXXX` codes (SHA-256 hashed, DB_CRYPTO encrypted). Used for agent recovery when process/host fails.
+
+### 2. Encrypted Database Credentials
 
 Local database connection information is encrypted at rest in config.json.
 
@@ -130,7 +136,7 @@ Five-plus-one-layer database access security model with Deep Data Security:
 
 ### 3b. Deep Data Security — Agent Usage Guide
 
-v3.5.0 replaces VPD with Oracle Deep Data Security. **The v3.3.0 VPD (Virtual Private Database / DBMS_RLS) security policy is DEPRECATED and has been removed.** The old `6_vpd_policy.sql` script no longer exists. All VPD policies (`WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD`) and VPD predicate functions (`vpd_ws_ctx_agent`, `vpd_entities_visibility`) are superseded by Deep Sec Data Grants. Agents MUST understand how Deep Sec works to operate correctly.
+v3.4.0 introduced Deep Data Security. **The v3.3.0 VPD (Virtual Private Database / DBMS_RLS) security policy is DEPRECATED and has been removed.** The old `6_vpd_policy.sql` script no longer exists. All VPD policies (`WS_CTX_AGENT_VPD`, `ENTITIES_VISIBILITY_VPD`) and VPD predicate functions (`vpd_ws_ctx_agent`, `vpd_entities_visibility`) are superseded by Deep Sec Data Grants. Agents MUST understand how Deep Sec works to operate correctly.
 
 #### How Deep Sec Works
 
@@ -138,13 +144,13 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.5.0)
+#### Current Enforcement Status (v3.6.0)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
 | Security Mechanism | Deployed? | Enforcing? | Details |
 |---|---|---|---|
-| 22 Data Grants | ✅ Yes | ✅ Yes | End User queries filtered by `ORA_END_USER_CONTEXT.username` predicates (includes collab_member_own and collab_group_member_access for COLLAB table access) |
+| 23 Data Grants | ✅ Yes | ✅ Yes | End User queries filtered by `ORA_END_USER_CONTEXT.username` predicates (includes collab_member_own and collab_group_member_access for COLLAB table access) |
 | MAC (7 tables) | ✅ Yes | ✅ Yes | `SET USE DATA GRANTS ONLY` prevents view bypass for End Users |
 | 3 Data Roles | ✅ Yes | ✅ Yes | Each End User has `agent_data_role` + `pool_agent_data_role` |
 | End User Context + o:onFirstRead | ✅ Yes | ✅ Yes | Callback available for fallback AIADMIN path |
@@ -256,6 +262,117 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 -- Then deploy 6_deep_sec_policy.sql
 -- Restart application server
 ```
+
+## Admin/Agent Separation Architecture
+
+v3.6.0 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+
+### Modes
+
+| Mode | Process | AIADMIN Credentials | Web Portal | Use Case |
+|------|---------|-------------------|------------|----------|
+| `standalone` | Single process | Yes | Yes | Development, single-node (default, backward compatible) |
+| `admin` | Admin Agent | Yes | Yes | Production Admin node |
+| `agent` | Business Agent | No (End User only) | No | Production Business Agent |
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│              Admin Agent (mode=admin)            │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
+│  │ Web      │  │ AIADMIN  │  │ Admin Token   │   │
+│  │ Portal   │  │ Pool     │  │ Generator     │   │
+│  └──────────┘  └──────────┘  └───────────────┘   │
+│       │                              │           │
+│       │   admin_token (secure)       │           │
+│       │   ┌──────────────────┐       │           │
+│       │   │  Encrypted Cred  │       │           │
+│       │   │  Distribution    │       │           │
+│       │   └──────────────────┘       │           │
+└───────│──────────────────────────────│───────────┘
+        │                              │
+        ▼                              ▼
+┌──────────────────────────────────────────────────┐
+│              Business Agent (mode=agent)         │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
+│  │ Agent    │  │ End User │  │ agent_config  │   │
+│  │ Bootstrap│  │ Pool     │  │ .json (enc)   │   │
+│  └──────────┘  └──────────┘  └───────────────┘   │
+│  ✗ No AIADMIN  ✓ Data Grants enforced            │
+└──────────────────────────────────────────────────┘
+```
+
+### Key APIs
+
+| API | Module | Description |
+|-----|--------|-------------|
+| `generate_admin_token()` | agent_api | Generate admin registration token (AT_ + 32hex) |
+| `verify_admin_token(token)` | agent_api | Constant-time verify admin token |
+| `register_agent_via_admin(agent_id, name, token)` | agent_api | Register agent + return encrypted credentials + recovery codes |
+| `recover_agent_via_admin(agent_id, code, token)` | agent_api | Recover agent with recovery code; resets End User password |
+| `generate_recovery_codes(agent_id)` | agent_api | Generate 8 one-time RC-XXXX-XXXX-XXXX codes |
+| `verify_recovery_code(agent_id, code)` | agent_api | Verify + consume one-time recovery code |
+| `encrypt_credential_for_distribution(cred, token)` | connection_crypto | Encrypt End User credential using admin_token via PBKDF2 |
+| `decrypt_credential_from_distribution(enc_cred, token)` | connection_crypto | Decrypt distributed credential using admin_token |
+| `save_agent_config(config, path)` | connection_crypto | Encrypt and save agent config to local file |
+| `load_agent_config(path)` | connection_crypto | Load and decrypt agent config |
+
+### Admin API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/agent/register` | POST | Register Business Agent with admin token; returns encrypted End User credentials + recovery codes |
+| `/api/admin/agent/recover` | POST | Recover agent with recovery code; resets End User password; returns new encrypted credentials |
+| `/api/admin/token/generate` | POST | Generate new admin registration token (AIADMIN session required) |
+| `/api/admin/token/rotate` | POST | Rotate admin token; Business Agents must re-register |
+| `/api/admin/skill/list` | GET | List available skills (admin_token + optional agent_id/visibility filters) |
+| `/api/admin/skill/{id}/acquire` | GET | Acquire skill content (admin_token, optional resource=1 for ZIP) |
+| `/api/admin/skill/create` | POST | Create new skill (admin_token + metadata) |
+| `/api/admin/skill/update` | POST | Update skill metadata (admin_token + skill_id + fields) |
+| `/api/admin/skill/delete` | POST | Delete skill (admin_token + skill_id) |
+| `/api/admin/skill/upload` | POST | Upload resource file (admin_token + skill_id + base64 content) |
+
+### Agent Bootstrap CLI
+
+```bash
+# Register a new Business Agent
+python agent_bootstrap.py register \
+    --agent-id my-agent --agent-name "My Agent" \
+    --admin-token AT_xxx --admin-url http://admin-host:18080
+
+# Recover an agent using recovery code
+python agent_bootstrap.py recover \
+    --agent-id my-agent --recovery-code RC-XXXX-XXXX-XXXX \
+    --admin-token AT_xxx --admin-url http://admin-host:18080
+
+# Test agent connection
+python agent_bootstrap.py test --config agent_config.json
+
+# List available skills
+python agent_bootstrap.py skill-list \
+    --admin-token AT_xxx --admin-url http://admin-host:18080
+
+# Acquire a skill
+python agent_bootstrap.py skill-acquire \
+    --skill-id ENT_xxx --admin-token AT_xxx --admin-url http://admin-host:18080
+
+# Create a private skill (owned by agent)
+python agent_bootstrap.py skill-create \
+    --title "My Skill" --skill-name my_skill \
+    --admin-token AT_xxx --admin-url http://admin-host:18080 \
+    --visibility PRIVATE --owned-by-agent my-agent
+```
+
+### Mode-Aware connection.py
+
+| Mode | AIADMIN Pool | End User Pool | agent_config.json |
+|------|-------------|---------------|-------------------|
+| standalone | Yes | Yes | No |
+| admin | Yes | Yes | No |
+| agent | No | Yes (from config) | Yes |
+
+Agent mode: `get_connection()` returns End User connections from local encrypted `agent_config.json`. No AIADMIN pool initialized. `set_agent_context()` is a no-op (always End User). Skills acquired via Admin API (`skill_acquire_api.acquire_skill_via_admin()`) rather than direct DB access.
 
 ## Context Branching
 
@@ -450,8 +567,10 @@ merge_result = branch_api.merge_parallel_branches(
 | Collaboration Groups | Yes | Yes |
 | Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
 | Workspace & Context | Yes | Yes |
+| Admin/Agent Separation | Yes | Yes |
+| Recovery Codes + Agent Recovery | Yes | Yes |
+| Private Skill Backup | Yes | Yes |
 | Skill Storage & Distribution | Yes (basic) | Yes (secure token) |
-| LDAP Authentication | No | Yes |
 | Encrypted DB Credentials | Yes | Yes |
 | Workspace Context Audit | No | Yes |
 | License | Apache 2.0 | BSL 1.1 |
@@ -669,7 +788,7 @@ results = search("partition*", strategy="auto")
 | TASK_PLANS | RANGE by STATUS |
 | TASK_STEPS | REFERENCE from TASK_PLANS |
 | AGENT_SESSION | RANGE by IS_ACTIVE |
-| AGENT_ACCESS_LOG | RANGE by CREATED_AT (monthly) |
+| ENTITY_ACCESS_LOG | RANGE by CREATED_AT (monthly) |
 
 **Note:** 6 reference-partitioned children (ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, SPEC_META, HARNESS_META, ENTITY_TAGS). Non-partitioned tables: AGENT_REGISTRY, AGENT_CREDENTIALS, AGENT_PERMISSION_LOG, AGENT_COLLABORATION, COLLAB_GROUPS, COLLAB_GROUP_MEMBERS, SPEC_PLAN_LINKS, SYSTEM_USERS, SYSTEM_CONFIG, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES, TAGS.
 
@@ -751,8 +870,8 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.5.0" or None,
-#   "table_count": 33,
+#   "schema_version": "3.6.0" or None,
+#   "table_count": 30,
 #   "agent_count": 5,
 #   "user_count": 3,
 #   "recommendation": "..."
@@ -772,18 +891,18 @@ else:
 
 ```bash
 # Public API — no authentication required
-curl http://localhost:8000/api/agent/deployment-check
+curl http://localhost:18080/api/agent/deployment-check
 ```
 
 Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.5.0",
-  "table_count": 33,
+  "schema_version": "3.6.0",
+  "table_count": 30,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.5.0, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.6.0, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -792,8 +911,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.5.0
-Deployment aborted: existing deployment found. Schema version: 3.5.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.6.0
+Deployment aborted: existing deployment found. Schema version: 3.6.0
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -892,9 +1011,9 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 27 tables, 6 JRD views, indexes, property graph, seed data
-      2_api.sql                 # 8 PL/SQL packages (MEMORY_FUSION_ENGINE, KNOWLEDGE_BASE_API, AGENT_PERMISSION_MANAGER, SESSION_CLEANUP, WORKSPACE_MANAGER, SPEC_MANAGER, COLLAB_GROUP_MANAGER, EMBEDDING_MANAGER)
-      3_jobs.sql                # 12 scheduler jobs
+      1_schema.sql              # 30 tables, 6 JRD views, indexes, property graph, seed data
+      2_api.sql                 # 13 PL/SQL packages
+      3_jobs.sql                # 13 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
     lib/
       config.py                 # Unified Config dataclass with env var overrides
@@ -926,7 +1045,7 @@ ai-agent-infra-community/
       test_embedding.py         # Embedding generation, search, hybrid, multi-type tests (19) [NEW v2.3.2]
       test_unified_search.py     # 5-signal unified hybrid search tests (20) [NEW v2.3.2]
       test_search_api.py          # Search API strategy tests (42) [NEW v2.3.2]
-      test_all.py               # Master runner (14 suites, 183 total)
+      test_all.py               # Master runner (16 suites, 105 total)
     visualization/
       server.py                 # HTTP server (session auth, page routing, JSON API, bilingual, pagination)
       templates/
@@ -976,7 +1095,7 @@ ai-agent-infra-community/
 | ENTITY_ACCESS_LOG | Audit trail of entity access | LOG_ID, SESSION_ID, ACTION_TYPE, RESOURCE_TYPE, RESOURCE_ID |
 | AGENT_PERMISSION_LOG | Agent action audit trail | LOG_ID, AGENT_ID, ACTION, STATUS_CODE, DETAILS |
 
-### Collaboration Tables (2)
+### Collaboration Tables (3)
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|

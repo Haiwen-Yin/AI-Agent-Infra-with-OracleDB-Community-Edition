@@ -1,6 +1,6 @@
 -- ============================================================
 -- 4_grants.sql — Restricted Database User & Access Control
--- AI Agent Infra with OracleDB v3.5.0
+-- AI Agent Infra with OracleDB v3.6.0
 -- ============================================================
 -- 
 -- This script creates a restricted database user (AGENT_API) that

@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.5.0 - Community Edition - Schema Deployment
+PROMPT AI Agent Infra v3.6.0 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -1253,7 +1253,7 @@ PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.5.0', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.6.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_url', 'http://10.10.10.1:12345/v1/embeddings', 'Embedding API URL for in-database generation');
@@ -1266,6 +1266,7 @@ INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('licen
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('session_timeout_min', '60', 'Session timeout in minutes');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('branch_cleanup_days', '90', 'Days before abandoned branches are auto-cleaned');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('branch_max_context_depth', '50', 'Max context nodes returned per branch chain');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('admin.registration_token', 'NOT_INITIALIZED', 'Admin token for Agent registration (run generate_admin_token to initialize)');
 
 
 INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, ROLE, STATUS, AUTH_SOURCE) VALUES ('admin', 'admin', 'SHA256:placeholder_change_me', 'ADMIN', 'ACTIVE', 'LOCAL');
@@ -1301,7 +1302,7 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.5.0 - Community Edition Schema Deployment Complete
+PROMPT AI Agent Infra v3.6.0 - Community Edition Schema Deployment Complete
 PROMPT ============================================================
 
 -- Grant DBMS_CRYPTO for DB_CRYPTO package

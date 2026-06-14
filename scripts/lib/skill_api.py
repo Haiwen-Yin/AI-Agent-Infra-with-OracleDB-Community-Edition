@@ -1,4 +1,7 @@
-"""AI Agent Infra v3.5.0 - Skill Storage & Distribution API"""
+"""AI Agent Infra v3.6.0 - Skill Storage & Distribution API
+
+Supports direct database access and Admin API mode for Business Agents.
+"""
 
 import json
 from typing import Any, Dict, List, Optional
@@ -269,3 +272,91 @@ def deprecate_skill(skill_id: str) -> bool:
         {"eid": skill_id},
     )
     return meta_affected > 0
+
+
+import json as _json
+from urllib.request import Request as _Request, urlopen as _urlopen
+from urllib.error import HTTPError as _HTTPError, URLError as _URLError
+
+
+def _admin_api_call(url: str, data: Optional[Dict] = None, timeout: int = 30) -> dict:
+    body = _json.dumps(data).encode("utf-8") if data else None
+    req = _Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST" if data else "GET")
+    try:
+        with _urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8"))
+    except _HTTPError as e:
+        try:
+            return _json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"error": f"HTTP {e.code}"}
+    except _URLError as e:
+        return {"error": f"Connection failed: {e}"}
+
+
+def register_skill_via_admin(
+    admin_url: str,
+    admin_token: str,
+    title: str,
+    skill_name: str,
+    **kwargs,
+) -> Optional[str]:
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/create"
+    payload = {
+        "admin_token": admin_token,
+        "title": title,
+        "skill_name": skill_name,
+        **kwargs,
+    }
+    result = _admin_api_call(url, payload)
+    if "error" in result:
+        return None
+    return result.get("skill_id")
+
+
+def update_skill_via_admin(
+    admin_url: str,
+    admin_token: str,
+    skill_id: str,
+    **kwargs,
+) -> bool:
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/update"
+    payload = {
+        "admin_token": admin_token,
+        "skill_id": skill_id,
+        **kwargs,
+    }
+    result = _admin_api_call(url, payload)
+    return "skill" in result
+
+
+def delete_skill_via_admin(
+    admin_url: str,
+    admin_token: str,
+    skill_id: str,
+) -> bool:
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/delete"
+    payload = {"admin_token": admin_token, "skill_id": skill_id}
+    result = _admin_api_call(url, payload)
+    return result.get("deleted", False)
+
+
+def upload_skill_resource_via_admin(
+    admin_url: str,
+    admin_token: str,
+    skill_id: str,
+    filename: str,
+    content: bytes,
+) -> Optional[Dict[str, Any]]:
+    import base64
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/upload"
+    payload = {
+        "admin_token": admin_token,
+        "skill_id": skill_id,
+        "filename": filename,
+        "content_base64": base64.b64encode(content).decode("ascii"),
+    }
+    result = _admin_api_call(url, payload)
+    if "error" in result:
+        return None
+    return result.get("upload")

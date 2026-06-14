@@ -10,6 +10,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.6.0] - 2026-06-13
+
+### Summary
+
+**Admin/Agent Separation Architecture** — New mode system (standalone/admin/agent) that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials). Introduces Admin Token authentication, encrypted credential distribution, Agent Bootstrap CLI, mode-aware connection management, Recovery Codes, Agent Recovery, Private Skill Backup, Skill Distribution & Management API.
+
+### Added - Both Editions
+
+- **Mode system** (standalone/admin/agent) — `config.json` `mode` field determines runtime behavior: `standalone` (default, single-process), `admin` (Admin Agent, runs Web Portal, holds AIADMIN credentials), `agent` (Business Agent, independent process, only holds End User credentials)
+- **Admin Token Authentication** — `generate_admin_token()` and `verify_admin_token()` for secure Business Agent registration; tokens are `AT_` + 32hex, stored DB_CRYPTO encrypted in `SYSTEM_CONFIG` as `admin.registration_token`; constant-time verification via `secrets.compare_digest`
+- **Encrypted Credential Distribution** — `encrypt_credential_for_distribution()` and `decrypt_credential_from_distribution()` using admin_token as key material via PBKDF2-HMAC-SHA512 (210000 iterations); each registration uses unique salt
+- **Agent Bootstrap CLI** — `agent_bootstrap.py` command-line tool with commands: `register`, `recover`, `test`, `skill-list`, `skill-acquire`, `skill-create`, `skill-update`, `skill-delete`
+- **Agent Config Encryption** — `save_agent_config()` and `load_agent_config()` for encrypted local storage of End User credentials in `agent_config.json`; uses existing master.key mechanism
+- **Mode-aware connection.py** — Agent mode does not initialize AIADMIN connection pool; only uses End User connections from local `agent_config.json`; Admin mode initializes both AIADMIN and End User pools
+- **Recovery Codes** — Agent registration returns 8 one-time `RC-XXXX-XXXX-XXXX` codes; SHA-256 hashed, DB_CRYPTO encrypted in `SYSTEM_CONFIG` (`recovery_codes.{agent_id}`); one-time use, verified via `verify_recovery_code()`
+- **Agent Recovery** — `POST /api/admin/agent/recover` endpoint; verifies admin_token + recovery_code; checks LAST_SEEN_AT (5-minute window); **resets End User password** to prevent dual-active; returns new encrypted credentials
+- **Private Skill Backup** — Skills with `visibility=PRIVATE` + `owned_by_agent=agent_id` are only visible to the owning agent; Data Grant predicate enforces isolation at DB level; Admin Skill API `list` endpoint supports `agent_id` + `visibility` filters
+- **Skill Distribution API** — Admin API endpoints: `GET /api/admin/skill/list` (list available skills), `GET /api/admin/skill/{id}/acquire` (acquire skill content, optional resource=1 for ZIP)
+- **Skill Management API** — Admin API endpoints: `POST /api/admin/skill/create`, `POST /api/admin/skill/update`, `POST /api/admin/skill/delete`, `POST /api/admin/skill/upload` (all with admin_token auth)
+- **Admin API Endpoints** — `POST /api/admin/agent/register` (register Business Agent + return recovery codes), `POST /api/admin/agent/recover` (recover with recovery code), `POST /api/admin/token/generate`, `POST /api/admin/token/rotate`
+- **Schema changes** — `admin.registration_token` seed in `SYSTEM_CONFIG`, `schema_version` updated to 3.6.0
+- **Test suite** — Community Edition: 105 tests; Enterprise Edition: 135 tests
+
+### Changed - Both Editions
+
+- **config.json** — New `mode` field (default: `standalone` for backward compatibility)
+- **connection.py** — `get_connection()` behavior varies by mode: standalone (AIADMIN pool + End User), admin (AIADMIN pool + End User pool), agent (End User connections only from agent_config.json)
+- **1_schema.sql** — `schema_version` updated to 3.6.0, `admin.registration_token` seed added to SYSTEM_CONFIG
+
+---
+
 ## [3.5.0] - 2026-06-11
 
 ### Summary
@@ -24,7 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Data Grant Changes
 
-- Data Grant count: 20 → 22
+- Data Grant count: 22 → 23
 - New Data Grants: `collab_member_own` (COLLAB_GROUP_MEMBERS), `collab_group_member_access` (COLLAB_GROUPS)
 
 ---

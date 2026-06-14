@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# Web Visualization - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Server
 
@@ -108,7 +108,7 @@ Applied in `_q()`, `load_entity_data()`, `load_db_stats()`.
 # Or run directly
 python3.14 viz_server_local_js.py
 
-# Open http://localhost:8000 in browser
+# Open http://localhost:18080 in browser
 # Login: admin / admin123
 ```
 

@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# Deployment Guide - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Prerequisites
 
@@ -24,7 +24,8 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 - Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
 - ~25 local indexes + global indexes on non-partitioned tables
 - 1 property graph, 4 duality views
-- Seeds SYSTEM_CONFIG with version 3.5.0
+- Seeds SYSTEM_CONFIG with version 3.6.0
+- Seeds SYSTEM_CONFIG with `admin.registration_token` for Admin/Agent separation
 
 ### Phase 2: API Packages (2_api.sql)
 Creates 13 PL/SQL packages (10 in 2_api.sql + 3 in 6_deep_sec_policy.sql).
@@ -81,7 +82,7 @@ GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
 sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
 ```
 - 4_grants.sql: DEEP_SEC_SESSION_ROLE, Deep Sec system privileges for AIADMIN
-- 6_deep_sec_policy.sql: 22 Data Grants, MAC on 7 tables, 3 PL/SQL packages (SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER), End User Context, Data Roles (admin_data_role, agent_data_role, pool_agent_data_role)
+- 6_deep_sec_policy.sql: 23 Data Grants, MAC on 7 tables, 3 PL/SQL packages (SET_AGENT_CONTEXT, agent_auth_pkg, END_USER_MANAGER), End User Context, Data Roles (admin_data_role, agent_data_role, pool_agent_data_role)
 
 **Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
 
@@ -97,7 +98,7 @@ Edit `config.json`:
 ```json
 {
   "database": {"user": "openclaw", "password": "hermes", "dsn": "10.10.10.130:1521/openclaw"},
-  "server": {"host": "0.0.0.0", "port": 8000, "session_timeout": 300},
+  "server": {"host": "0.0.0.0", "port": 18080, "session_timeout": 300},
   "embedding": {"api_url": "http://10.10.10.1:12345/v1/embeddings", "model": "text-embedding-bge-m3", "dimension": 1024},
   "security": {"masking_enabled": true, "pbkdf2_iterations": 100000, "max_login_attempts": 5, "lockout_minutes": 15}
 }
@@ -112,7 +113,7 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
-v3.4.0 test suite: 61 tests across 8 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
+v3.6.0 test suite: 105 tests across 16 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
 
 ## Starting the Web Server
 
@@ -157,6 +158,74 @@ ALTER TABLE TASK_PLANS SPLIT SUBPARTITION SP_FUTURE
 ALTER TABLE ENTITY_ACCESS_LOG SPLIT PARTITION P_MAX
   AT (TO_DATE('2026-08-01','YYYY-MM-DD'))
   INTO (PARTITION P_202607, PARTITION P_MAX);
+```
+
+## Admin Mode and Agent Mode Deployment
+
+v3.6.0 introduces mode-based deployment for Admin/Agent separation. In production, the Admin Agent runs the Web Portal with AIADMIN access, while Business Agents run independently with only End User credentials.
+
+### Admin Agent Deployment (mode=admin)
+
+**1. Configure config.json:**
+
+```json
+{
+  "mode": "admin",
+  "database": {"user": "aiadmin", "password": "...", "dsn": "//db:1521/service"},
+  "server": {"host": "0.0.0.0", "port": 18080}
+}
+```
+
+**2. Start Admin Agent:**
+
+```bash
+./start_web_server.sh start
+```
+
+**3. Generate admin token for Business Agent registration:**
+
+```bash
+curl -X POST http://localhost:18080/api/admin/token/generate \
+  -H "Cookie: session=<admin-session>"
+```
+
+**4. Share admin_token with Business Agent operator over secure out-of-band channel.**
+
+### Business Agent Deployment (mode=agent)
+
+**1. Bootstrap the Business Agent:**
+
+```bash
+python agent_bootstrap.py --admin-url http://admin-host:18080 \
+                          --admin-token <token> \
+                          --agent-name "business-agent-1" \
+                          --output-dir /opt/agent
+```
+
+This creates `/opt/agent/agent_config.json` with encrypted End User credentials.
+
+**2. Start Business Agent:**
+
+```bash
+python -m scripts.lib.agent_runner --config /opt/agent/agent_config.json
+```
+
+The Business Agent:
+- Does NOT have AIADMIN credentials
+- Connects only as End User (Data Grant enforced)
+- Does NOT run Web Portal
+- Reads connection info from encrypted `agent_config.json`
+
+### Standalone Mode (default)
+
+No configuration changes needed. `mode` defaults to `standalone`, preserving existing single-process behavior with both AIADMIN and End User connection pools.
+
+### Admin Token Rotation
+
+```bash
+# Rotate admin token (existing Business Agents must re-register)
+curl -X POST http://localhost:18080/api/admin/token/rotate \
+  -H "Cookie: session=<admin-session>"
 ```
 
 ## Troubleshooting

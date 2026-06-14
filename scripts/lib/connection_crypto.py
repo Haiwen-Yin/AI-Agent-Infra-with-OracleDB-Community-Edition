@@ -1,7 +1,8 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Connection Crypto Module
+"""AI Agent Infra v3.6.0 - Community Edition - Connection Crypto Module
 
 Encrypts and decrypts database connection information in config.json.
-Uses PBKDF2-HMAC-SHA512 key derivation and AES-256-GCM authenticated encryption.
+Uses PBKDF2-HMAC-SHA512 key derivation and stream cipher with HMAC authentication.
+Includes credential distribution functions for Admin/Agent separation.
 """
 
 import base64
@@ -138,3 +139,53 @@ def auto_encrypt_config(config_path: Path) -> bool:
     except OSError as e:
         logger.error("Failed to write encrypted config: %s", e)
         return False
+
+
+def encrypt_credential_for_distribution(credential_data: Dict[str, Any], admin_token: str) -> Dict[str, str]:
+    salt = os.urandom(SALT_SIZE)
+    token_key = _derive_key(admin_token.encode("utf-8"), salt)
+    encrypted = encrypt_section(credential_data, master_key=token_key)
+    return {
+        "credential_encrypted": encrypted,
+        "salt": base64.b64encode(salt).decode("ascii"),
+    }
+
+
+def decrypt_credential_from_distribution(encrypted_credential: str, salt_b64: str, admin_token: str) -> Dict[str, Any]:
+    salt = base64.b64decode(salt_b64)
+    token_key = _derive_key(admin_token.encode("utf-8"), salt)
+    return decrypt_section(encrypted_credential, master_key=token_key)
+
+
+def save_agent_config(agent_id: str, credential_data: Dict[str, Any], config_path) -> None:
+    config_path = Path(config_path) if not isinstance(config_path, Path) else config_path
+    encrypted = encrypt_section(credential_data)
+    config = {
+        "agent_id": agent_id,
+        "end_user": {
+            "_encrypted": encrypted,
+        },
+    }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    os.chmod(str(config_path), 0o600)
+    logger.info("Saved encrypted agent config to %s", config_path)
+
+
+def load_agent_config(config_path) -> Dict[str, Any]:
+    config_path = Path(config_path) if not isinstance(config_path, Path) else config_path
+    with open(config_path, "r") as f:
+        raw = json.load(f)
+    eu_section = raw.get("end_user", {})
+    encrypted = eu_section.get("_encrypted")
+    if encrypted:
+        creds = decrypt_section(encrypted)
+    else:
+        creds = eu_section
+    return {
+        "agent_id": raw.get("agent_id"),
+        "username": creds.get("username"),
+        "password": creds.get("password"),
+        "dsn": creds.get("dsn"),
+    }

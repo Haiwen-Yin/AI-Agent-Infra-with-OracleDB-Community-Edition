@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.5.0 (2026-06-11) - Community Edition
+# API Reference - AI Agent Infra v3.6.0 (2026-06-13) - Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -217,3 +217,190 @@ get_workspace_tasks(workspace_id) -> list
 - `get_connection()` — Get AIADMIN pool connection (unrestricted by Data Grants)
 
 **Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
+
+## Admin API (v3.6.0)
+
+Admin API endpoints for Admin/Agent Separation Architecture. Only available in `admin` or `standalone` mode.
+
+### POST /api/admin/agent/register
+
+Register a Business Agent with admin token. Returns encrypted End User credentials.
+
+**Request:**
+```json
+{
+  "admin_token": "<registration-token>",
+  "agent_name": "business-agent-1",
+  "capabilities": {"type": "research", "skills": ["search", "memory"]}
+}
+```
+
+**Response:**
+```json
+{
+  "agent_id": "AGENT_XXX",
+  "encrypted_credentials": "<base64-encrypted-blob>",
+  "schema": "AIADMIN",
+  "dsn": "//db-host:1521/service"
+}
+```
+
+### POST /api/admin/token/generate
+
+Generate a new admin registration token. Requires AIADMIN session.
+
+**Request:** (empty body or `{}`)
+
+**Response:**
+```json
+{
+  "admin_token": "<new-base64-token>",
+  "expires_at": "2026-06-13T13:00:00Z"
+}
+```
+
+### POST /api/admin/token/rotate
+### GET /api/admin/skill/list
+
+List available skills. Requires admin_token as query parameter.
+
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| admin_token | query | Yes | Admin registration token |
+| type | query | No | Filter by skill type |
+| runtime | query | No | Filter by runtime |
+| keyword | query | No | Search keyword |
+
+Response: `{"skills": [...]}`
+
+### GET /api/admin/skill/{skill_id}/acquire
+
+Acquire skill content. Requires admin_token as query parameter.
+
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| skill_id | path | Yes | Skill entity ID |
+| admin_token | query | Yes | Admin registration token |
+| resource | query | No | Set to 1 to include resource ZIP (base64 encoded) |
+
+Response: Skill metadata + text_content + optional resource_zip (base64)
+### POST /api/admin/skill/create
+
+Create a new skill. Requires admin_token in request body.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| title | Yes | Skill title |
+| skill_name | Yes | Skill name |
+| skill_version | No | Version (default 1.0.0) |
+| skill_type | No | Type (default CUSTOM) |
+| skill_format | No | Format (default TEXT) |
+| text_content | No | SKILL.md content |
+| skill_description | No | Description |
+| runtime | No | Runtime (default PYTHON) |
+| visibility | No | PRIVATE/SHARED/PUBLIC |
+
+Response: `{"skill_id": "ENT_xxx", "skill": {...}}`
+
+### POST /api/admin/skill/update
+
+Update an existing skill. Requires admin_token and skill_id in request body.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| skill_id | Yes | Skill entity ID |
+| title | No | New title |
+| skill_name | No | New skill name |
+| skill_status | No | ACTIVE/DEPRECATED |
+| visibility | No | PRIVATE/SHARED/PUBLIC |
+
+Response: `{"skill_id": "ENT_xxx", "skill": {...}}`
+
+### POST /api/admin/skill/delete
+
+Delete a skill. Requires admin_token and skill_id in request body.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| skill_id | Yes | Skill entity ID |
+
+Response: `{"skill_id": "ENT_xxx", "deleted": true}`
+
+### POST /api/admin/skill/upload
+
+Upload resource file for a skill. Requires admin_token, skill_id, filename, and content_base64 in request body.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| skill_id | Yes | Skill entity ID |
+| filename | Yes | Resource filename |
+| content_base64 | Yes | Base64-encoded file content |
+
+Response: `{"skill_id": "ENT_xxx", "upload": {...}}`
+
+Rotate the admin token. Existing Business Agents must re-register with the new token.
+
+**Request:** (empty body or `{}`)
+
+**Response:**
+```json
+{
+  "admin_token": "<rotated-base64-token>",
+  "expires_at": "2026-06-13T14:00:00Z",
+  "previous_token_invalidated": true
+}
+```
+
+### Admin Token Functions (Python API)
+
+```python
+from scripts.lib.agent_admin_api import generate_admin_token, verify_admin_token
+from scripts.lib.agent_admin_api import encrypt_credential_for_distribution, decrypt_credential_from_distribution
+from scripts.lib.agent_bootstrap import save_agent_config, load_agent_config
+
+# Generate admin token
+token = generate_admin_token()
+# Returns: {"token": "<base64>", "expires_at": "..."}
+
+# Verify admin token
+is_valid = verify_admin_token("<provided-token>")
+# Returns: True/False
+
+# Encrypt credential for distribution
+encrypted = encrypt_credential_for_distribution("end_user_password", admin_token)
+# Returns: base64-encoded encrypted blob
+
+# Decrypt credential from distribution
+password = decrypt_credential_from_distribution(encrypted_blob, admin_token)
+# Returns: plaintext credential string
+
+# Save agent config (encrypted)
+save_agent_config(config_dict, admin_token, "/path/to/agent_config.json")
+
+# Load agent config (decrypted)
+config = load_agent_config(admin_token, "/path/to/agent_config.json")
+```
+
+### POST /api/admin/agent/recover
+
+Recover an agent using a one-time recovery code. Resets End User password to prevent dual-active scenarios.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| admin_token | Yes | Admin registration token |
+| agent_id | Yes | Agent identifier to recover |
+| recovery_code | Yes | One-time recovery code (RC-XXXX-XXXX-XXXX) |
+
+Response: `{"agent_id": "...", "recovered": true, "end_user": {"credential_encrypted": "...", "salt": "..."}}`
+
+**Recovery Process:**
+1. Verify admin_token + recovery_code
+2. Check LAST_SEEN_AT — reject if agent may still be active (< 5 min)
+3. Reset End User password — old password invalidated immediately
+4. Return new encrypted credentials
+
+**Dual-Active Prevention:** Old process cannot reconnect (password changed). Functionally dead even if still running.

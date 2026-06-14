@@ -1,18 +1,21 @@
-"""AI Agent Infra v3.5.0 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.6.0 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
 Includes Deep Data Security context management.
+Supports Admin/Agent separation modes (standalone, admin, agent).
 """
 
+import json
 import oracledb
 import threading
 import logging
 from contextlib import contextmanager
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .config import get_config, DatabaseConfig
+from .config import get_config, DatabaseConfig, AgentModeConfig
 
 _logger = logging.getLogger(__name__)
 
@@ -41,10 +44,13 @@ def get_pool() -> oracledb.ConnectionPool:
     if _pool is None:
         with _lock:
             if _pool is None:
-                cfg = get_config().database
+                cfg = get_config()
+                if cfg.agent.mode == "agent":
+                    raise RuntimeError("AIADMIN pool not available in agent mode")
+                db_cfg = cfg.database
                 logger.info("Initializing connection pool: %s@%s (min=%d, max=%d)",
-                            cfg.user, cfg.dsn, cfg.pool_min, cfg.pool_max)
-                _pool = _init_pool(cfg)
+                            db_cfg.user, db_cfg.dsn, db_cfg.pool_min, db_cfg.pool_max)
+                _pool = _init_pool(db_cfg)
     return _pool
 
 
@@ -64,6 +70,25 @@ _current_agent_id = threading.local()
 
 _end_user_connections: Dict[str, oracledb.Connection] = {}
 _end_user_lock = threading.Lock()
+
+_agent_eu_creds: Optional[Dict[str, str]] = None
+_agent_eu_lock = threading.Lock()
+
+
+def _load_agent_eu_creds() -> Dict[str, str]:
+    global _agent_eu_creds
+    with _agent_eu_lock:
+        if _agent_eu_creds is not None:
+            return _agent_eu_creds
+        cfg = get_config()
+        config_path = cfg.project_root / "agent_config.json"
+        if not config_path.exists():
+            raise FileNotFoundError(f"agent_config.json not found at {config_path}")
+        from .connection_crypto import load_agent_config
+        creds = load_agent_config(config_path)
+        _agent_eu_creds = creds
+        return _agent_eu_creds
+
 
 def set_agent_context(agent_id: Optional[str]) -> None:
     _current_agent_id.value = agent_id
@@ -88,6 +113,10 @@ def _get_end_user_password(agent_id: str) -> Optional[str]:
         return None
 
 def get_end_user_connection(agent_id: str) -> Optional[oracledb.Connection]:
+    cfg = get_config()
+    if cfg.agent.mode == "agent":
+        return _get_agent_mode_end_user_connection(agent_id)
+
     with _end_user_lock:
         existing = _end_user_connections.get(agent_id)
         if existing:
@@ -108,12 +137,12 @@ def get_end_user_connection(agent_id: str) -> Optional[oracledb.Connection]:
             return None
 
         eu_name = _agent_id_to_end_user_name(agent_id)
-        cfg = get_config().database
+        db_cfg = cfg.database
         try:
             conn = oracledb.connect(
                 user=eu_name,
                 password=pwd,
-                dsn=cfg.dsn,
+                dsn=db_cfg.dsn,
             )
             with conn.cursor() as cur:
                 cur.execute("ALTER SESSION SET CURRENT_SCHEMA = AIADMIN")
@@ -123,6 +152,40 @@ def get_end_user_connection(agent_id: str) -> Optional[oracledb.Connection]:
         except oracledb.Error as e:
             _logger.debug("End User connection failed for %s (EU: %s): %s", agent_id, eu_name, e)
             return None
+
+
+def _get_agent_mode_end_user_connection(agent_id: str) -> Optional[oracledb.Connection]:
+    with _end_user_lock:
+        existing = _end_user_connections.get(agent_id)
+        if existing:
+            try:
+                with existing.cursor() as cur:
+                    cur.execute("SELECT 1 FROM DUAL")
+                return existing
+            except Exception:
+                try:
+                    existing.close()
+                except Exception:
+                    pass
+                _end_user_connections.pop(agent_id, None)
+
+    try:
+        creds = _load_agent_eu_creds()
+        conn = oracledb.connect(
+            user=creds["username"],
+            password=creds["password"],
+            dsn=creds["dsn"],
+        )
+        with conn.cursor() as cur:
+            cur.execute("ALTER SESSION SET CURRENT_SCHEMA = AIADMIN")
+        with _end_user_lock:
+            _end_user_connections[agent_id] = conn
+        _logger.info("Created Agent-mode End User connection for %s (EU: %s)", agent_id, creds["username"])
+        return conn
+    except Exception as e:
+        _logger.error("Agent-mode End User connection failed for %s: %s", agent_id, e)
+        return None
+
 
 def close_end_user_connections():
     with _end_user_lock:
@@ -144,6 +207,17 @@ def get_connection_for_agent(agent_id: Optional[str] = None):
             finally:
                 pass
             return
+    cfg = get_config()
+    if cfg.agent.mode == "agent":
+        creds = _load_agent_eu_creds()
+        eu_conn = get_end_user_connection(creds.get("agent_id") or aid or "agent")
+        if eu_conn:
+            try:
+                yield eu_conn
+            finally:
+                pass
+            return
+        raise RuntimeError("No End User connection available in agent mode")
     with get_connection() as conn:
         yield conn
 

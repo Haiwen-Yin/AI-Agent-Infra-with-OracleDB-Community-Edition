@@ -1,15 +1,15 @@
-# AI Agent Infra with OracleDB - Community Edition v3.5.0
+# AI Agent Infra with OracleDB - Community Edition v3.6.0
 
-[![Version](https://img.shields.io/badge/version-v3.5.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.6.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
+**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
 
-> **v3.5.0 (2026-06-11): Deep Sec Multi-Agent Collaboration Fix — SHARED entities now correctly visible to End Users via ENTITIES_AGENT_OWN predicate fix; 2 new Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS access (Data Grants 20→22); WORKSPACE_CONTEXT VISIBILITY isolation for collaboration groups.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.6.0 (2026-06-13): Admin/Agent Separation Architecture — New mode system (standalone/admin/agent) separating Admin Agent (Web Portal + AIADMIN) from Business Agent (independent process, End User only); Admin Token authentication; encrypted credential distribution; Agent Bootstrap CLI; mode-aware connection management.** See [CHANGELOG.md](CHANGELOG.md) for details.
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.5.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.0.md)**
 
 ---
 
@@ -92,7 +92,7 @@ COMMIT;
 - `AGENT_CREDENTIALS.CREDENTIAL_VALUE`: encrypted with master key (fixed from broken random-key encryption)
 - Master key: env `MASTER_DB_KEY` > `~/.oracle-infra/master.key` > auto-generate
 
-> **For Enterprise Edition features (LDAP, Skill Tokens, Encrypted Config CLI, Context Audit), see the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-OracleDB-Enterprise-Edition).**
+> **For Enterprise Edition features, see the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-OracleDB-Enterprise-Edition).**
 
 ---
 
@@ -113,19 +113,22 @@ COMMIT;
 | Harness Templates | Yes | Yes |
 | Web Visualization Dashboard | Yes | Yes |
 | **Portal User System** | | |
-| Portal Login / Register | Yes (System User only) | Yes (System User + LDAP) |
+| Portal Login / Register | Yes (System User) | Yes (System User) |
 | Portal Chat with Sessions | Yes | Yes |
 | Session Rename / Delete | Yes | Yes |
 | Agent Pool Assignment | Yes | Yes |
 | **Identity & Authentication** | | |
 | Local System User Auth | Yes | Yes |
-| LDAP Unified Authentication | No | Yes |
-| LDAP Auto-Registration | No | Yes |
-| LDAP Sync Job | No | Yes |
 | Admin Dashboard Isolation (LOCAL only) | Yes | Yes |
 | **Skill System** | | |
 | Skill CRUD (skill_api.py) | Yes | Yes |
+| Skill Distribution via Admin API | Yes | Yes |
+| Private Skill Backup (visibility=PRIVATE) | Yes | Yes |
+| Skill Management via Admin API | Yes | Yes |
 | Secure Token Distribution (skill_token_api.py) | No | Yes |
+| **Agent Recovery** | | |
+| Recovery Codes (RC-XXXX-XXXX-XXXX) | Yes | Yes |
+| Agent Recovery (POST /api/admin/agent/recover) | Yes | Yes |
 | **Security & Encryption** | | |
 | Encrypted config.json (DB credentials) | Yes | Yes |
 | Encrypted AGENT_CREDENTIALS | Yes | Yes |
@@ -133,8 +136,10 @@ COMMIT;
 | Data Masking | Yes | Yes |
 | **Database** | | |
 | Tables | 30 | 35 |
-| PL/SQL Packages | 10 | 13 |
+| PL/SQL Packages | 13 | 16 |
 | Scheduler Jobs | 13 | 17 |
+| Data Grants | 23 | 23 |
+| Tests | 105 | 135 |
 | **License** | Apache 2.0 | BSL 1.1 |
 
 ---
@@ -158,7 +163,7 @@ else:
 
 HTTP endpoint (public, no auth):
 ```bash
-curl http://localhost:8000/api/agent/deployment-check
+curl http://localhost:18080/api/agent/deployment-check
 ```
 
 The `1_schema.sql` script now includes built-in protection: it auto-aborts if `SYSTEM_CONFIG.schema_version` exists.
@@ -226,9 +231,9 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 27+ tables, JRD views, indexes, property graph, seed data
-      2_api.sql                 # 8+ PL/SQL packages
-      3_jobs.sql                # 12+ scheduler jobs
+      1_schema.sql              # 30 tables, JRD views, indexes, property graph, seed data
+      2_api.sql                 # 13 PL/SQL packages
+      3_jobs.sql                # 13 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in templates
     lib/
       config.py                 # Unified Config with encrypted DB credentials
@@ -253,7 +258,7 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.5.0
+      server.py                 # HTTP server v3.6.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/
