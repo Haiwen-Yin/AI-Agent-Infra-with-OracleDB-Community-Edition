@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.1 - Enterprise Edition - Agent API
+"""AI Agent Infra v3.6.2 - Enterprise Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, and Admin/Agent separation support.

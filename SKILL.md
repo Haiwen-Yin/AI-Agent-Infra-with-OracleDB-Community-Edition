@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.6.1
+version: v3.6.2
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.6.1 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.6.2 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.6.1
+# AI Agent Infra with OracleDB - Community Edition v3.6.2
 
 **Author:** Haiwen Yin
-**Version:** v3.6.1 - 2026-06-14
+**Version:** v3.6.2 - 2026-06-14
 **License:** Apache License 2.0 (Community Edition)
 
 ## ⚠️ CRITICAL: Database & Driver Requirements
@@ -19,7 +19,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.6.1 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.6.2 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -31,7 +31,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.6.1 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.6.2 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -48,7 +48,7 @@ pip install oracledb>=4.0.1
 ```
 +-----------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                     |
-|                   Community Edition v3.6.1                      |
+|                   Community Edition v3.6.2                      |
 +-----------------------------------------------------------------+
 |                                                                 |
 |  +-----------------------------------------------------------+  |
@@ -82,7 +82,7 @@ pip install oracledb>=4.0.1
 +-----------------------------------------------------------------+
 ```
 
-## Edition Comparison (v3.6.1)
+## Edition Comparison (v3.6.2)
 
 ### 1. Skill Storage & Distribution
 
@@ -144,7 +144,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.6.1)
+#### Current Enforcement Status (v3.6.2)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
@@ -265,7 +265,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 
 ## Admin/Agent Separation Architecture
 
-v3.6.1 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+v3.6.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
 
 ### Modes
 
@@ -294,12 +294,12 @@ v3.6.1 introduces a mode system that separates Admin Agent (runs Web Portal, hol
         │                             │
         ▼                             ▼
 ┌─────────────────────────────────────────────────┐
-│              Business Agent (mode=agent)        │
+│            Business Agent (mode=agent)          │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
 │  │ Agent    │  │ End User │  │ agent_config  │  │
 │  │ Bootstrap│  │ Pool     │  │ .json (enc)   │  │
 │  └──────────┘  └──────────┘  └───────────────┘  │
-│  ✗ No AIADMIN  ✓ Data Grants enforced     	  │
+│  ✗ No AIADMIN  ✓ Data Grants enforced	          │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -902,7 +902,7 @@ Response:
   "table_count": 30,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.6.1, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.6.2, 30 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 

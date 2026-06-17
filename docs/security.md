@@ -1,4 +1,4 @@
-# Security - AI Agent Infra v3.6.1 (2026-06-14) - Community Edition
+# Security - AI Agent Infra v3.6.2 (2026-06-14) - Community Edition
 
 ## Data Masking
 
@@ -87,9 +87,9 @@ AGENT_COLLABORATION tracks cross-agent sharing requests:
 - Returns 'GRANTED' if entity is SHARED/PUBLIC or owner matches
 - Returns 'DENIED' for PRIVATE entities not owned by the requesting agent
 
-## Deep Data Security (v3.6.1)
+## Deep Data Security (v3.6.2)
 
-v3.6.1 replaces VPD with Oracle Deep Data Security:
+v3.6.2 replaces VPD with Oracle Deep Data Security:
 
 - **23 Data Grants** enforce row-level, column-level, and cell-level access control (including `collab_member_own` for COLLAB_GROUP_MEMBERS and `collab_group_member_access` for COLLAB_GROUPS)
 - **MAC** on 7 tables prevents view-based bypass of row-level policies
@@ -119,11 +119,11 @@ This prevents one agent's private thoughts, internal reasoning, or sensitive int
 
 ## Admin/Agent Separation Security Model
 
-v3.6.1 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
+v3.6.2 introduces the Admin/Agent Separation Architecture, which significantly reduces the security blast radius of a compromised Business Agent.
 
 ### Threat Model Comparison
 
-| Threat | Before v3.6.1 | After v3.6.1 (Agent mode) |
+| Threat | Before v3.6.2 | After v3.6.2 (Agent mode) |
 |--------|--------------|--------------------------|
 | Business Agent compromised | Attacker gets AIADMIN credentials → full database access | Attacker gets End User credentials → Data Grant filtered access only |
 | Credential leakage from config.json | AIADMIN user/password exposed | Only End User credentials exposed (scoped by Data Grants) |

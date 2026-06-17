@@ -1,0 +1,29 @@
+{
+  "database": {
+    "pool_min": 2,
+    "pool_max": 5,
+    "pool_increment": 1,
+    "_encrypted": "7PjhS/316zgCnmJARPBS/jyO7KZcUpwmYnca16HCxbBfM80a1jrhi7JgmqbNNGsQjZeCmU7uyzPlh4YRlVNzuV5uUykiPWqlUg07O0RFBsJd06kaLKr3BgTWkqAOUBB7dDQ1FMMvbESZQ1bpdw19/qfdveinpuHUK8mlnbIQrN088LR77tCvjFxfCSIgtw=="
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8001,
+    "session_timeout": 300
+  },
+  "embedding": {
+    "api_url": "http://10.10.10.1:12345/v1/embeddings",
+    "model": "text-embedding-bge-m3",
+    "dimension": 1024
+  },
+  "security": {
+    "masking_enabled": true,
+    "pbkdf2_iterations": 100000,
+    "max_login_attempts": 5,
+    "lockout_minutes": 15
+  },
+  "enterprise": {
+    "license_type": "community",
+    "skill_token_ttl_min": 60,
+    "presigned_url_ttl_sec": 300
+  }
+}

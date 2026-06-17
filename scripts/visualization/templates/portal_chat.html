@@ -255,8 +255,13 @@ function switchSession(wsId){
   fetch('/portal/api/chat/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace_id:wsId})})
   .then(function(r){return r.json()})
   .then(function(d){
-    if(d.success){loadHistory()}
-  }).catch(function(){});
+    if(d.success){
+      loadHistory();
+    }else{
+      console.error('Switch failed:',d.error);
+      loadSessions();
+    }
+  }).catch(function(e){console.error('Switch error:',e);loadSessions()});
 }
 
 function renameSession(wsId,currentName){

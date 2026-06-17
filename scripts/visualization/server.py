@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.6.1 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.6.2 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -1705,6 +1705,49 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': 'Skill not found'}, 404)
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
+
+    def _handle_portal_chat_send(self):
+        try:
+            sess_data = _get_session(self)
+            if not sess_data:
+                self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+                return
+            session_id, sess = sess_data
+            body = self._read_body()
+            data = json.loads(body) if body else {}
+            message = data.get('message', '').strip()
+            if not message:
+                self._send_json({'success': False, 'error': 'Empty message'})
+                return
+            agent_id = sess.get('agent_id', '')
+            user_id = sess.get('user_id', '')
+            workspace_id = sess.get('workspace_id', '')
+            ctx_id = None
+            if workspace_id:
+                _clear_portal_agent_context()
+                ctx_data = {'role': 'user', 'content': message, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
+                ctx_id = workspace_api.save_context(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id or user_id,
+                    context_type='CHAT_MESSAGE',
+                    context_data=ctx_data,
+                )
+                reply_data = {'role': 'agent', 'content': 'Message received and stored.', 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
+                workspace_api.save_context(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id or user_id,
+                    context_type='CHAT_MESSAGE',
+                    context_data=reply_data,
+                )
+                _set_portal_agent_context(sess)
+            self._send_json({
+                'success': True,
+                'reply': 'Message received and stored.',
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'user_context_id': ctx_id,
+            })
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
 
     def _handle_portal_chat_new(self):
         session_data = _get_session(self)

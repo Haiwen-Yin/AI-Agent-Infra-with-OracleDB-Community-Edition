@@ -5,6 +5,20 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
+## [3.6.2] - 2026-06-18
+
+### Summary
+
+Bug fix release — adds missing Portal chat send handler, fixes session switching error handling, updates version and website references.
+
+### Fixed - Both Editions
+
+- **Portal Chat Send** — Added missing `_handle_portal_chat_send()` method; Portal users can now send chat messages
+- **Session Switching** — Fixed `switchSession()` JS to handle errors properly with console logging and session list refresh on failure
+- **Version** — Updated all version references from v3.6.1 to v3.6.2
+- **Website** — Added official website reference https://db4agent.top
+
+---
 ## [3.6.1] - 2026-06-14
 
 ### Summary
@@ -24,7 +38,7 @@ Bug fix release — fixes Portal login error (`_handle_portal_login` method miss
 - **ENT feature matrix** — Fixed "Encrypted DB Credentials | No | Yes" → "Yes | Yes" in SKILL.md; added missing Recovery Codes and Private Skill rows
 - **ENT api-reference** — Fixed title "Community Edition" → "Enterprise Edition"; added missing 9 Admin API endpoints
 - **ENT RELEASE_NOTES** — Added missing Skill Token API section
-- **Version display** — All page titles and sidebar version badges updated from v3.4.0 to v3.6.1
+- **Version display** — All page titles and sidebar version badges updated from v3.4.0 to v3.6.2
 
 ### Changed - Both Editions
 

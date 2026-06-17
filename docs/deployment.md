@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.6.1 (2026-06-14) - Community Edition
+# Deployment Guide - AI Agent Infra v3.6.2 (2026-06-14) - Community Edition
 
 ## Prerequisites
 
@@ -113,7 +113,7 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
-v3.6.1 test suite: 105 tests across 16 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
+v3.6.2 test suite: 105 tests across 16 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
 
 ## Starting the Web Server
 
@@ -162,7 +162,7 @@ ALTER TABLE ENTITY_ACCESS_LOG SPLIT PARTITION P_MAX
 
 ## Admin Mode and Agent Mode Deployment
 
-v3.6.1 introduces mode-based deployment for Admin/Agent separation. In production, the Admin Agent runs the Web Portal with AIADMIN access, while Business Agents run independently with only End User credentials.
+v3.6.2 introduces mode-based deployment for Admin/Agent separation. In production, the Admin Agent runs the Web Portal with AIADMIN access, while Business Agents run independently with only End User credentials.
 
 ### Admin Agent Deployment (mode=admin)
 
