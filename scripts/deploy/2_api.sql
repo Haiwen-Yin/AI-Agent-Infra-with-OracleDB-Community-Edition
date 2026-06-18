@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.6.1 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.7.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1349,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.6.1 API Deployment Complete
+PROMPT AI Agent Infra v3.7.0 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2084,6 +2084,540 @@ END BRANCH_MANAGER;
 /
 
 
+
+
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.6.1 - Community Edition API Deployment Complete
+PROMPT 14. LOOP_MANAGER Package [NEW v3.7.0]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE LOOP_MANAGER AS
+
+    FUNCTION create_loop(
+        p_title               VARCHAR2,
+        p_summary             VARCHAR2 DEFAULT NULL,
+        p_goal_definition     JSON,
+        p_stop_conditions     JSON,
+        p_evaluation_config   JSON,
+        p_trigger_config      JSON DEFAULT NULL,
+        p_harness_template_id VARCHAR2 DEFAULT NULL,
+        p_workspace_id        VARCHAR2 DEFAULT NULL,
+        p_branch_id           VARCHAR2 DEFAULT NULL,
+        p_owned_by_agent      VARCHAR2 DEFAULT NULL,
+        p_visibility          VARCHAR2 DEFAULT 'PRIVATE'
+    ) RETURN VARCHAR2;
+
+    FUNCTION get_loop(p_loop_id VARCHAR2) RETURN JSON;
+
+    FUNCTION update_loop(
+        p_loop_id            VARCHAR2,
+        p_title              VARCHAR2 DEFAULT NULL,
+        p_summary            VARCHAR2 DEFAULT NULL,
+        p_goal_definition    JSON DEFAULT NULL,
+        p_stop_conditions    JSON DEFAULT NULL,
+        p_evaluation_config  JSON DEFAULT NULL,
+        p_trigger_config     JSON DEFAULT NULL,
+        p_visibility         VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER;
+
+    PROCEDURE delete_loop(p_loop_id VARCHAR2);
+
+    FUNCTION list_loops(
+        p_status   VARCHAR2 DEFAULT NULL,
+        p_agent_id VARCHAR2 DEFAULT NULL,
+        p_limit    NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR;
+
+    FUNCTION start_run(
+        p_loop_id        VARCHAR2,
+        p_agent_id       VARCHAR2,
+        p_trigger_type   VARCHAR2 DEFAULT 'MANUAL',
+        p_trigger_source VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2;
+
+    FUNCTION get_run(p_run_id VARCHAR2) RETURN JSON;
+
+    FUNCTION list_runs(
+        p_loop_id VARCHAR2 DEFAULT NULL,
+        p_status  VARCHAR2 DEFAULT NULL,
+        p_limit   NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR;
+
+    PROCEDURE pause_run(p_run_id VARCHAR2);
+    PROCEDURE resume_run(p_run_id VARCHAR2);
+    PROCEDURE stop_run(p_run_id VARCHAR2, p_reason VARCHAR2 DEFAULT NULL);
+
+    FUNCTION record_iteration(
+        p_run_id            VARCHAR2,
+        p_plan_data         JSON DEFAULT NULL,
+        p_actions           JSON DEFAULT NULL,
+        p_observations      JSON DEFAULT NULL,
+        p_evaluation_result JSON DEFAULT NULL,
+        p_evaluation_passed VARCHAR2 DEFAULT 'N',
+        p_adjustment        JSON DEFAULT NULL,
+        p_token_usage       NUMBER DEFAULT 0
+    ) RETURN VARCHAR2;
+
+    FUNCTION get_iteration(p_iteration_id VARCHAR2) RETURN JSON;
+
+    FUNCTION list_iterations(
+        p_run_id VARCHAR2,
+        p_limit  NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR;
+
+    FUNCTION add_hook(
+        p_loop_id     VARCHAR2,
+        p_hook_event  VARCHAR2,
+        p_hook_type   VARCHAR2,
+        p_hook_config JSON DEFAULT NULL,
+        p_priority    NUMBER DEFAULT 5
+    ) RETURN VARCHAR2;
+
+    PROCEDURE remove_hook(p_hook_id VARCHAR2);
+
+    FUNCTION list_hooks(p_loop_id VARCHAR2) RETURN SYS_REFCURSOR;
+
+    FUNCTION get_loop_stats(p_loop_id VARCHAR2) RETURN JSON;
+
+    FUNCTION check_stop_conditions(p_run_id VARCHAR2) RETURN VARCHAR2;
+
+    PROCEDURE cleanup_old_runs(p_days_threshold NUMBER DEFAULT 90);
+
+    PROCEDURE process_scheduled_triggers;
+
+    PROCEDURE check_stuck_runs;
+
+END LOOP_MANAGER;
+/
+
+
+CREATE OR REPLACE PACKAGE BODY LOOP_MANAGER AS
+
+FUNCTION create_loop(
+        p_title               VARCHAR2,
+        p_summary             VARCHAR2 DEFAULT NULL,
+        p_goal_definition     JSON,
+        p_stop_conditions     JSON,
+        p_evaluation_config   JSON,
+        p_trigger_config      JSON DEFAULT NULL,
+        p_harness_template_id VARCHAR2 DEFAULT NULL,
+        p_workspace_id        VARCHAR2 DEFAULT NULL,
+        p_branch_id           VARCHAR2 DEFAULT NULL,
+        p_owned_by_agent      VARCHAR2 DEFAULT NULL,
+        p_visibility          VARCHAR2 DEFAULT 'PRIVATE'
+    ) RETURN VARCHAR2 IS
+        v_entity_id VARCHAR2(64);
+    BEGIN
+        v_entity_id := RAWTOHEX(SYS_GUID());
+        INSERT INTO ENTITIES (
+            ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, STATUS,
+            OWNED_BY_AGENT, SOURCE_AGENT, VISIBILITY,
+            IMPORTANCE, RETRIEVAL_COUNT, WORKSPACE_ID
+        ) VALUES (
+            v_entity_id, 'LOOP_DEFINITION', p_title, p_summary, 'ACTIVE',
+            p_owned_by_agent, p_owned_by_agent, p_visibility,
+            5, 0, p_workspace_id
+        );
+        INSERT INTO LOOP_META (
+            ENTITY_ID, ENTITY_TYPE, LOOP_VERSION,
+            GOAL_DEFINITION, STOP_CONDITIONS, EVALUATION_CONFIG,
+            TRIGGER_CONFIG, HARNESS_TEMPLATE_ID, WORKSPACE_ID, BRANCH_ID
+        ) VALUES (
+            v_entity_id, 'LOOP_DEFINITION', '1.0',
+            p_goal_definition, p_stop_conditions, p_evaluation_config,
+            p_trigger_config, p_harness_template_id, p_workspace_id, p_branch_id
+        );
+        RETURN v_entity_id;
+    END create_loop;
+
+FUNCTION get_loop(p_loop_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'loop_id' VALUE e.ENTITY_ID, 'title' VALUE e.TITLE,
+            'summary' VALUE e.SUMMARY, 'status' VALUE e.STATUS,
+            'visibility' VALUE e.VISIBILITY, 'owned_by_agent' VALUE e.OWNED_BY_AGENT,
+            'workspace_id' VALUE e.WORKSPACE_ID, 'loop_version' VALUE m.LOOP_VERSION,
+            'goal_definition' VALUE m.GOAL_DEFINITION, 'stop_conditions' VALUE m.STOP_CONDITIONS,
+            'evaluation_config' VALUE m.EVALUATION_CONFIG, 'trigger_config' VALUE m.TRIGGER_CONFIG,
+            'harness_template_id' VALUE m.HARNESS_TEMPLATE_ID, 'branch_id' VALUE m.BRANCH_ID,
+            'created_at' VALUE e.CREATED_AT, 'updated_at' VALUE e.UPDATED_AT
+        ) INTO v_result
+        FROM ENTITIES e JOIN LOOP_META m ON e.ENTITY_ID = m.ENTITY_ID
+        WHERE e.ENTITY_ID = p_loop_id AND e.ENTITY_TYPE = 'LOOP_DEFINITION';
+        RETURN v_result;
+    EXCEPTION WHEN NO_DATA_FOUND THEN RETURN NULL;
+    END get_loop;
+
+FUNCTION update_loop(
+        p_loop_id VARCHAR2, p_title VARCHAR2 DEFAULT NULL, p_summary VARCHAR2 DEFAULT NULL,
+        p_goal_definition JSON DEFAULT NULL, p_stop_conditions JSON DEFAULT NULL,
+        p_evaluation_config JSON DEFAULT NULL, p_trigger_config JSON DEFAULT NULL,
+        p_visibility VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+        v_count NUMBER := 0;
+    BEGIN
+        IF p_title IS NOT NULL THEN
+            UPDATE ENTITIES SET TITLE = p_title, UPDATED_AT = SYSTIMESTAMP
+            WHERE ENTITY_ID = p_loop_id AND ENTITY_TYPE = 'LOOP_DEFINITION';
+            v_count := v_count + SQL%ROWCOUNT;
+        END IF;
+        IF p_summary IS NOT NULL THEN
+            UPDATE ENTITIES SET SUMMARY = p_summary, UPDATED_AT = SYSTIMESTAMP
+            WHERE ENTITY_ID = p_loop_id AND ENTITY_TYPE = 'LOOP_DEFINITION';
+        END IF;
+        IF p_visibility IS NOT NULL THEN
+            UPDATE ENTITIES SET VISIBILITY = p_visibility, UPDATED_AT = SYSTIMESTAMP
+            WHERE ENTITY_ID = p_loop_id AND ENTITY_TYPE = 'LOOP_DEFINITION';
+        END IF;
+        UPDATE LOOP_META SET
+            GOAL_DEFINITION = NVL(p_goal_definition, GOAL_DEFINITION),
+            STOP_CONDITIONS = NVL(p_stop_conditions, STOP_CONDITIONS),
+            EVALUATION_CONFIG = NVL(p_evaluation_config, EVALUATION_CONFIG),
+            TRIGGER_CONFIG = NVL(p_trigger_config, TRIGGER_CONFIG)
+        WHERE ENTITY_ID = p_loop_id;
+        v_count := v_count + SQL%ROWCOUNT;
+        RETURN v_count;
+    END update_loop;
+
+PROCEDURE delete_loop(p_loop_id VARCHAR2) IS
+    BEGIN
+        DELETE FROM LOOP_HOOKS WHERE LOOP_ID = p_loop_id;
+        DELETE FROM LOOP_META WHERE ENTITY_ID = p_loop_id;
+        DELETE FROM ENTITIES WHERE ENTITY_ID = p_loop_id AND ENTITY_TYPE = 'LOOP_DEFINITION';
+    END delete_loop;
+
+FUNCTION list_loops(
+        p_status VARCHAR2 DEFAULT NULL, p_agent_id VARCHAR2 DEFAULT NULL, p_limit NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR IS
+        v_cursor SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cursor FOR
+            SELECT e.ENTITY_ID AS loop_id, e.TITLE, e.SUMMARY, e.STATUS,
+                   e.VISIBILITY, e.OWNED_BY_AGENT, e.WORKSPACE_ID,
+                   m.LOOP_VERSION, e.CREATED_AT, e.UPDATED_AT
+            FROM ENTITIES e JOIN LOOP_META m ON e.ENTITY_ID = m.ENTITY_ID
+            WHERE e.ENTITY_TYPE = 'LOOP_DEFINITION'
+              AND (p_status IS NULL OR e.STATUS = p_status)
+              AND (p_agent_id IS NULL OR e.OWNED_BY_AGENT = p_agent_id)
+            ORDER BY e.CREATED_AT DESC FETCH FIRST p_limit ROWS ONLY;
+        RETURN v_cursor;
+    END list_loops;
+
+FUNCTION start_run(
+        p_loop_id        VARCHAR2,
+        p_agent_id       VARCHAR2,
+        p_trigger_type   VARCHAR2 DEFAULT 'MANUAL',
+        p_trigger_source VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2 IS
+        v_run_id VARCHAR2(64);
+    BEGIN
+        v_run_id := RAWTOHEX(SYS_GUID());
+        INSERT INTO LOOP_RUNS (
+            RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
+            STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT
+        ) VALUES (
+            v_run_id, p_loop_id, p_agent_id, p_trigger_type, p_trigger_source,
+            'RUNNING', 0, 0, SYSTIMESTAMP
+        );
+        RETURN v_run_id;
+    END start_run;
+
+FUNCTION get_run(p_run_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'run_id' VALUE r.RUN_ID, 'loop_id' VALUE r.LOOP_ID,
+            'agent_id' VALUE r.AGENT_ID, 'trigger_type' VALUE r.TRIGGER_TYPE,
+            'trigger_source' VALUE r.TRIGGER_SOURCE, 'status' VALUE r.STATUS,
+            'iteration_count' VALUE r.ITERATION_COUNT,
+            'total_tokens' VALUE r.TOTAL_TOKENS,
+            'final_result' VALUE r.FINAL_RESULT,
+            'error_message' VALUE r.ERROR_MESSAGE,
+            'started_at' VALUE r.STARTED_AT, 'completed_at' VALUE r.COMPLETED_AT
+        ) INTO v_result
+        FROM LOOP_RUNS r WHERE r.RUN_ID = p_run_id;
+        RETURN v_result;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RETURN NULL;
+    END get_run;
+
+FUNCTION list_runs(
+        p_loop_id VARCHAR2 DEFAULT NULL,
+        p_status  VARCHAR2 DEFAULT NULL,
+        p_limit   NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR IS
+        v_cursor SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cursor FOR
+            SELECT RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
+                   STATUS, ITERATION_COUNT, TOTAL_TOKENS, FINAL_RESULT,
+                   STARTED_AT, COMPLETED_AT
+            FROM LOOP_RUNS
+            WHERE (p_loop_id IS NULL OR LOOP_ID = p_loop_id)
+              AND (p_status IS NULL OR STATUS = p_status)
+            ORDER BY STARTED_AT DESC
+            FETCH FIRST p_limit ROWS ONLY;
+        RETURN v_cursor;
+    END list_runs;
+
+PROCEDURE pause_run(p_run_id VARCHAR2) IS
+    BEGIN
+        UPDATE LOOP_RUNS SET STATUS = 'PAUSED'
+        WHERE RUN_ID = p_run_id AND STATUS = 'RUNNING';
+    END pause_run;
+
+PROCEDURE resume_run(p_run_id VARCHAR2) IS
+    BEGIN
+        UPDATE LOOP_RUNS SET STATUS = 'RUNNING'
+        WHERE RUN_ID = p_run_id AND STATUS = 'PAUSED';
+    END resume_run;
+
+PROCEDURE stop_run(p_run_id VARCHAR2, p_reason VARCHAR2 DEFAULT NULL) IS
+    BEGIN
+        UPDATE LOOP_RUNS SET
+            STATUS = 'STOPPED', FINAL_RESULT = p_reason, COMPLETED_AT = SYSTIMESTAMP
+        WHERE RUN_ID = p_run_id AND STATUS IN ('RUNNING','PAUSED');
+    END stop_run;
+
+FUNCTION record_iteration(
+        p_run_id            VARCHAR2,
+        p_plan_data         JSON DEFAULT NULL,
+        p_actions           JSON DEFAULT NULL,
+        p_observations      JSON DEFAULT NULL,
+        p_evaluation_result JSON DEFAULT NULL,
+        p_evaluation_passed VARCHAR2 DEFAULT 'N',
+        p_adjustment        JSON DEFAULT NULL,
+        p_token_usage       NUMBER DEFAULT 0
+    ) RETURN VARCHAR2 IS
+        v_iter_id    VARCHAR2(64);
+        v_iter_count NUMBER;
+    BEGIN
+        SELECT ITERATION_COUNT INTO v_iter_count
+        FROM LOOP_RUNS WHERE RUN_ID = p_run_id;
+        v_iter_id := RAWTOHEX(SYS_GUID());
+        INSERT INTO LOOP_ITERATIONS (
+            ITERATION_ID, RUN_ID, ITERATION_ORDER,
+            PLAN_DATA, ACTIONS, OBSERVATIONS,
+            EVALUATION_RESULT, EVALUATION_PASSED, ADJUSTMENT,
+            TOKEN_USAGE, STARTED_AT, COMPLETED_AT
+        ) VALUES (
+            v_iter_id, p_run_id, v_iter_count + 1,
+            p_plan_data, p_actions, p_observations,
+            p_evaluation_result, p_evaluation_passed, p_adjustment,
+            p_token_usage, SYSTIMESTAMP, SYSTIMESTAMP
+        );
+        UPDATE LOOP_RUNS SET
+            ITERATION_COUNT = v_iter_count + 1,
+            TOTAL_TOKENS = TOTAL_TOKENS + p_token_usage
+        WHERE RUN_ID = p_run_id;
+        IF p_evaluation_passed = 'Y' THEN
+            UPDATE LOOP_RUNS SET
+                STATUS = 'COMPLETED', COMPLETED_AT = SYSTIMESTAMP,
+                FINAL_RESULT = 'Goal achieved at iteration ' || (v_iter_count + 1)
+            WHERE RUN_ID = p_run_id;
+        END IF;
+        RETURN v_iter_id;
+    END record_iteration;
+
+FUNCTION get_iteration(p_iteration_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'iteration_id' VALUE i.ITERATION_ID, 'run_id' VALUE i.RUN_ID,
+            'iteration_order' VALUE i.ITERATION_ORDER,
+            'plan_data' VALUE i.PLAN_DATA, 'actions' VALUE i.ACTIONS,
+            'observations' VALUE i.OBSERVATIONS,
+            'evaluation_result' VALUE i.EVALUATION_RESULT,
+            'evaluation_passed' VALUE i.EVALUATION_PASSED,
+            'adjustment' VALUE i.ADJUSTMENT,
+            'token_usage' VALUE i.TOKEN_USAGE,
+            'started_at' VALUE i.STARTED_AT, 'completed_at' VALUE i.COMPLETED_AT
+        ) INTO v_result
+        FROM LOOP_ITERATIONS i WHERE i.ITERATION_ID = p_iteration_id;
+        RETURN v_result;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RETURN NULL;
+    END get_iteration;
+
+FUNCTION list_iterations(
+        p_run_id VARCHAR2,
+        p_limit  NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR IS
+        v_cursor SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cursor FOR
+            SELECT ITERATION_ID, RUN_ID, ITERATION_ORDER,
+                   EVALUATION_PASSED, TOKEN_USAGE,
+                   STARTED_AT, COMPLETED_AT
+            FROM LOOP_ITERATIONS
+            WHERE RUN_ID = p_run_id
+            ORDER BY ITERATION_ORDER ASC
+            FETCH FIRST p_limit ROWS ONLY;
+        RETURN v_cursor;
+    END list_iterations;
+
+FUNCTION add_hook(
+        p_loop_id     VARCHAR2,
+        p_hook_event  VARCHAR2,
+        p_hook_type   VARCHAR2,
+        p_hook_config JSON DEFAULT NULL,
+        p_priority    NUMBER DEFAULT 5
+    ) RETURN VARCHAR2 IS
+        v_hook_id VARCHAR2(64);
+    BEGIN
+        v_hook_id := RAWTOHEX(SYS_GUID());
+        INSERT INTO LOOP_HOOKS (
+            HOOK_ID, LOOP_ID, HOOK_EVENT, HOOK_TYPE,
+            HOOK_CONFIG, PRIORITY, ENABLED, CREATED_AT
+        ) VALUES (
+            v_hook_id, p_loop_id, p_hook_event, p_hook_type,
+            p_hook_config, p_priority, 'Y', SYSTIMESTAMP
+        );
+        RETURN v_hook_id;
+    END add_hook;
+
+PROCEDURE remove_hook(p_hook_id VARCHAR2) IS
+    BEGIN
+        DELETE FROM LOOP_HOOKS WHERE HOOK_ID = p_hook_id;
+    END remove_hook;
+
+FUNCTION list_hooks(p_loop_id VARCHAR2) RETURN SYS_REFCURSOR IS
+        v_cursor SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cursor FOR
+            SELECT HOOK_ID, LOOP_ID, HOOK_EVENT, HOOK_TYPE,
+                   HOOK_CONFIG, PRIORITY, ENABLED, CREATED_AT
+            FROM LOOP_HOOKS
+            WHERE LOOP_ID = p_loop_id
+            ORDER BY PRIORITY ASC, CREATED_AT ASC;
+        RETURN v_cursor;
+    END list_hooks;
+
+FUNCTION get_loop_stats(p_loop_id VARCHAR2) RETURN JSON IS
+        v_result       JSON;
+        v_total_runs   NUMBER;
+        v_completed    NUMBER;
+        v_failed       NUMBER;
+        v_running      NUMBER;
+        v_total_iters  NUMBER;
+        v_total_tokens NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_total_runs FROM LOOP_RUNS WHERE LOOP_ID = p_loop_id;
+        SELECT COUNT(*) INTO v_completed FROM LOOP_RUNS WHERE LOOP_ID = p_loop_id AND STATUS = 'COMPLETED';
+        SELECT COUNT(*) INTO v_failed FROM LOOP_RUNS WHERE LOOP_ID = p_loop_id AND STATUS IN ('FAILED','STOPPED','TIMEOUT');
+        SELECT COUNT(*) INTO v_running FROM LOOP_RUNS WHERE LOOP_ID = p_loop_id AND STATUS IN ('RUNNING','PAUSED');
+        SELECT COUNT(*), NVL(SUM(TOKEN_USAGE),0) INTO v_total_iters, v_total_tokens
+        FROM LOOP_ITERATIONS li JOIN LOOP_RUNS lr ON li.RUN_ID = lr.RUN_ID
+        WHERE lr.LOOP_ID = p_loop_id;
+        SELECT JSON_OBJECT(
+            'loop_id' VALUE p_loop_id,
+            'total_runs' VALUE v_total_runs,
+            'completed_runs' VALUE v_completed,
+            'failed_runs' VALUE v_failed,
+            'running_runs' VALUE v_running,
+            'total_iterations' VALUE v_total_iters,
+            'total_tokens' VALUE v_total_tokens
+        ) INTO v_result FROM DUAL;
+        RETURN v_result;
+    END get_loop_stats;
+
+FUNCTION check_stop_conditions(p_run_id VARCHAR2) RETURN VARCHAR2 IS
+        v_run        LOOP_RUNS%ROWTYPE;
+        v_stop       JSON;
+        v_max_iter   NUMBER;
+        v_max_tokens NUMBER;
+        v_max_dur    NUMBER;
+        v_elapsed    NUMBER;
+    BEGIN
+        SELECT * INTO v_run FROM LOOP_RUNS WHERE RUN_ID = p_run_id;
+        SELECT m.STOP_CONDITIONS INTO v_stop
+        FROM LOOP_META m JOIN ENTITIES e ON m.ENTITY_ID = e.ENTITY_ID
+        WHERE e.ENTITY_ID = v_run.LOOP_ID;
+        v_max_iter   := JSON_VALUE(v_stop, '$.max_iterations');
+        v_max_tokens := JSON_VALUE(v_stop, '$.max_tokens');
+        v_max_dur    := JSON_VALUE(v_stop, '$.max_duration_seconds');
+        IF v_max_iter IS NOT NULL AND v_run.ITERATION_COUNT >= v_max_iter THEN
+            RETURN 'STOP';
+        END IF;
+        IF v_max_tokens IS NOT NULL AND v_run.TOTAL_TOKENS >= v_max_tokens THEN
+            RETURN 'STOP';
+        END IF;
+        IF v_max_dur IS NOT NULL THEN
+            v_elapsed := EXTRACT(DAY FROM (SYSTIMESTAMP - v_run.STARTED_AT))*86400 + EXTRACT(HOUR FROM (SYSTIMESTAMP - v_run.STARTED_AT))*3600 + EXTRACT(MINUTE FROM (SYSTIMESTAMP - v_run.STARTED_AT))*60 + EXTRACT(SECOND FROM (SYSTIMESTAMP - v_run.STARTED_AT));
+            IF v_elapsed >= v_max_dur THEN
+                RETURN 'TIMEOUT';
+            END IF;
+        END IF;
+        RETURN 'CONTINUE';
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RETURN 'STOP';
+    END check_stop_conditions;
+
+PROCEDURE cleanup_old_runs(p_days_threshold NUMBER DEFAULT 90) IS
+    BEGIN
+        DELETE FROM LOOP_ITERATIONS
+        WHERE RUN_ID IN (
+            SELECT RUN_ID FROM LOOP_RUNS
+            WHERE STATUS IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
+              AND COMPLETED_AT < SYSTIMESTAMP - p_days_threshold
+        );
+        DELETE FROM LOOP_RUNS
+        WHERE STATUS IN ('COMPLETED','STOPPED','FAILED','TIMEOUT')
+          AND COMPLETED_AT < SYSTIMESTAMP - p_days_threshold;
+    END cleanup_old_runs;
+
+PROCEDURE process_scheduled_triggers IS
+        v_run_id VARCHAR2(64);
+    BEGIN
+        FOR rec IN (
+            SELECT e.ENTITY_ID AS loop_id, e.OWNED_BY_AGENT
+            FROM ENTITIES e
+            JOIN LOOP_META m ON e.ENTITY_ID = m.ENTITY_ID
+            WHERE e.ENTITY_TYPE = 'LOOP_DEFINITION'
+              AND e.STATUS = 'ACTIVE'
+              AND m.TRIGGER_CONFIG IS NOT NULL
+              AND JSON_VALUE(m.TRIGGER_CONFIG, '$.trigger_type') = 'SCHEDULE'
+              AND NOT EXISTS (
+                  SELECT 1 FROM LOOP_RUNS lr
+                  WHERE lr.LOOP_ID = e.ENTITY_ID
+                    AND lr.STATUS IN ('RUNNING','PAUSED')
+              )
+        ) LOOP
+            v_run_id := start_run(rec.loop_id, NVL(rec.OWNED_BY_AGENT,'system'), 'SCHEDULE', 'cron');
+        END LOOP;
+    END process_scheduled_triggers;
+
+PROCEDURE check_stuck_runs IS
+        v_max_dur NUMBER;
+        v_stop    JSON;
+    BEGIN
+        FOR rec IN (
+            SELECT r.RUN_ID, r.LOOP_ID, r.STARTED_AT
+            FROM LOOP_RUNS r
+            WHERE r.STATUS = 'RUNNING'
+        ) LOOP
+            BEGIN
+                SELECT m.STOP_CONDITIONS INTO v_stop
+                FROM LOOP_META m WHERE m.ENTITY_ID = rec.LOOP_ID;
+                v_max_dur := JSON_VALUE(v_stop, '$.max_duration_seconds');
+                IF v_max_dur IS NOT NULL THEN
+                    IF EXTRACT(DAY FROM (SYSTIMESTAMP - rec.STARTED_AT))*86400 + EXTRACT(HOUR FROM (SYSTIMESTAMP - rec.STARTED_AT))*3600 + EXTRACT(MINUTE FROM (SYSTIMESTAMP - rec.STARTED_AT))*60 + EXTRACT(SECOND FROM (SYSTIMESTAMP - rec.STARTED_AT)) >= v_max_dur THEN
+                        UPDATE LOOP_RUNS SET
+                            STATUS = 'TIMEOUT',
+                            ERROR_MESSAGE = 'Exceeded max_duration_seconds',
+                            COMPLETED_AT = SYSTIMESTAMP
+                        WHERE RUN_ID = rec.RUN_ID;
+                    END IF;
+                END IF;
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+        END LOOP;
+    END check_stuck_runs;
+
+END LOOP_MANAGER;
+/
+
+PROMPT ============================================================
+PROMPT AI Agent Infra v3.7.0 - Community Edition API Deployment Complete
 PROMPT ============================================================

@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.6.2 (2026-06-14) - Community Edition
+# API Reference - AI Agent Infra v3.7.0 (2026-06-18) - Community Edition
 
 ## Python API (scripts/lib/)
 
@@ -218,7 +218,7 @@ get_workspace_tasks(workspace_id) -> list
 
 **Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
 
-## Admin API (v3.6.2)
+## Admin API (v3.7.0)
 
 Admin API endpoints for Admin/Agent Separation Architecture. Only available in `admin` or `standalone` mode.
 

@@ -3,7 +3,9 @@
     "pool_min": 2,
     "pool_max": 5,
     "pool_increment": 1,
-    "_encrypted": "7PjhS/316zgCnmJARPBS/jyO7KZcUpwmYnca16HCxbBfM80a1jrhi7JgmqbNNGsQjZeCmU7uyzPlh4YRlVNzuV5uUykiPWqlUg07O0RFBsJd06kaLKr3BgTWkqAOUBB7dDQ1FMMvbESZQ1bpdw19/qfdveinpuHUK8mlnbIQrN088LR77tCvjFxfCSIgtw=="
+    "password": "oracle",
+    "dsn": "10.10.10.130:1521/ai_agent",
+    "user": "aiadmin"
   },
   "server": {
     "host": "0.0.0.0",
@@ -14,6 +16,13 @@
     "api_url": "http://10.10.10.1:12345/v1/embeddings",
     "model": "text-embedding-bge-m3",
     "dimension": 1024
+  },
+  "llm_judge": {
+    "enabled": false,
+    "api_url": "http://10.10.10.1:12345/v1/chat/completions",
+    "model": "gpt-4o",
+    "timeout": 60,
+    "min_score": 7
   },
   "security": {
     "masking_enabled": true,

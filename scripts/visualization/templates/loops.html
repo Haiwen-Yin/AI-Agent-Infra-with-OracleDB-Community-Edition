@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loops - AI Agent Infra Community v3.7.0</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}
+.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}
+.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}
+.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);flex-wrap:wrap}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+.content-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-height:0}
+.list-panel{flex:1;overflow-y:auto;padding:0 20px;min-width:0;min-height:0}
+.detail-field{margin-bottom:10px}
+.detail-field .lbl{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.detail-field .val{color:var(--text-primary);font-size:.88rem;line-height:1.5;word-break:break-word}
+.detail-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)}
+.detail-section h6{color:var(--accent);font-size:.88rem;margin-bottom:10px;font-weight:600}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.88rem}
+.data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg-card);box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle;color:#fff}
+.data-table tbody tr{cursor:pointer;transition:background .1s}
+.data-table tbody tr:hover{background:rgba(233,69,96,.05)}
+.data-table tbody tr.selected{background:rgba(233,69,96,.1)}
+.badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
+.badge-active{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-inactive{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-running{background:rgba(52,152,219,.15);color:#3498db}
+.badge-completed{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-failed{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-stopped{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-paused{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-timeout{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-pending{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-draft{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-enabled{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-disabled{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-test{background:rgba(52,152,219,.15);color:#3498db}
+.badge-diff{background:rgba(155,89,182,.15);color:#9b59b6}
+.badge-llm_judge{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-manual{background:rgba(160,160,176,.15);color:#a0a0b0}
+.btn-action{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s;margin-left:auto}
+.btn-action:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.detail-actions button{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;transition:all .15s}
+.detail-actions button:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions button.btn-danger{background:rgba(231,76,60,.12);color:#e74c3c;border-color:rgba(231,76,60,.25)}
+.detail-actions button.btn-danger:hover{background:rgba(231,76,60,.25);border-color:#e74c3c}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:24px;width:560px;max-width:92vw;max-height:85vh;overflow-y:auto}
+.modal-box h5{color:var(--accent);margin:0 0 16px;font-size:1.05rem}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:6px;padding:8px 10px;font-size:.88rem}
+.form-group textarea{min-height:80px;resize:vertical;font-family:'Courier New',monospace}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.modal-actions button{padding:8px 20px;border-radius:6px;font-size:.88rem;cursor:pointer;transition:all .15s;border:1px solid}
+.btn-primary{background:rgba(233,69,96,.15);color:var(--accent);border-color:rgba(233,69,96,.3)}
+.btn-primary:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.btn-secondary{background:rgba(160,160,176,.1);color:var(--text-secondary);border-color:var(--border-color)}
+.btn-secondary:hover{background:rgba(160,160,176,.2)}
+.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;color:#fff}
+.tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.75rem;margin:2px 4px 2px 0}
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
+.empty-state .icon{font-size:3rem;margin-bottom:12px;opacity:.5}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+.btn-sm{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:4px;padding:3px 8px;font-size:.75rem;cursor:pointer;transition:all .15s;margin-right:4px}
+.btn-sm:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.btn-sm.btn-warn{background:rgba(241,196,15,.12);color:#f1c40f;border-color:rgba(241,196,15,.25)}
+.btn-sm.btn-warn:hover{background:rgba(241,196,15,.25);border-color:#f1c40f}
+.btn-sm.btn-danger{background:rgba(231,76,60,.12);color:#e74c3c;border-color:rgba(231,76,60,.25)}
+.btn-sm.btn-danger:hover{background:rgba(231,76,60,.25);border-color:#e74c3c}
+.btn-sm.btn-info{background:rgba(52,152,219,.12);color:#3498db;border-color:rgba(52,152,219,.25)}
+.btn-sm.btn-info:hover{background:rgba(52,152,219,.25);border-color:#3498db}
+.btn-sm.btn-success{background:rgba(46,204,113,.12);color:#2ecc71;border-color:rgba(46,204,113,.25)}
+.btn-sm.btn-success:hover{background:rgba(46,204,113,.25);border-color:#2ecc71}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:8px 0}
+.stat-card{background:rgba(15,52,96,.3);border:1px solid var(--border-color);border-radius:6px;padding:12px;text-align:center}
+.stat-card .stat-value{font-size:1.4rem;font-weight:700;color:var(--accent)}
+.stat-card .stat-label{font-size:.72rem;color:var(--text-secondary);text-transform:uppercase;margin-top:4px}
+.split-layout{display:flex;gap:16px;flex:1;min-height:0;overflow:hidden}
+.left-panel{flex:1;overflow-y:auto;min-width:0;min-height:0;border-right:1px solid var(--border-color);padding:0 16px 0 20px}
+.right-panel{position:relative;flex:1;overflow-y:auto;min-width:0;min-height:0;padding:0 20px 0 8px}
+.iter-timeline{position:relative;padding-left:24px;margin:8px 0}
+.iter-timeline::before{content:"";position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border-color)}
+.iter-node{position:relative;padding:8px 0 8px 16px}
+.iter-node::before{content:"";position:absolute;left:-20px;top:14px;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg-sidebar)}
+.iter-node.passed::before{background:#2ecc71}
+.iter-node.failed::before{background:#e74c3c}
+.iter-node .iter-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.json-block{background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:10px 12px;font-family:'Courier New',monospace;font-size:.8rem;color:#cfe2ff;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
+.section-card{background:rgba(15,52,96,.2);border:1px solid var(--border-color);border-radius:8px;padding:14px;margin-bottom:14px}
+.section-card h6{margin:0 0 8px;color:var(--accent);font-size:.9rem;font-weight:600}
+.run-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid rgba(42,42,74,.4);cursor:pointer;transition:background .1s}
+.run-row:hover{background:rgba(233,69,96,.05)}
+.run-row.selected{background:rgba(233,69,96,.1)}
+.loop-item{background:rgba(15,52,96,.25);border:1px solid var(--border-color);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:all .15s}
+.loop-item:hover{border-color:var(--accent);background:rgba(233,69,96,.05)}
+.loop-item.selected{border-color:var(--accent);background:rgba(233,69,96,.1)}
+.loop-item .loop-title{font-size:.92rem;font-weight:600;color:#fff}
+.loop-item .loop-meta{font-size:.76rem;color:var(--text-secondary);margin-top:4px}
+@media(max-width:900px){.split-layout{flex-direction:column}.left-panel{border-right:none;border-bottom:1px solid var(--border-color);padding:0 20px}.right-panel{position:relative;padding:0 20px}}
+
+.detail-close-btn{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px;transition:all .15s;z-index:10}
+.detail-close-btn:hover{color:var(--text-primary);background:rgba(255,255,255,.08)}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>AI Agent Infra v3.7.0</h5>
+    <small>Community Edition</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon">&#129504;</span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon">&#129302;</span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs"><span class="icon">&#128196;</span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills"><span class="icon">&#9881;</span><span data-zh>Skills</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon">&#127793;</span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon">&#128101;</span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops" class="active"><span class="icon">&#128260;</span><span data-zh>循环</span><span data-en>Loops</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div>
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>循环管理</span><span data-en>Loop Management</span></h4>
+    <button class="btn-action" onclick="showCreateLoopModal()"><span data-zh>+ 创建循环</span><span data-en>+ Create Loop</span></button>
+    <button class="btn-action" style="margin-left:0" onclick="loadLoops()"><span data-zh>刷新</span><span data-en>Refresh</span></button>
+  </div>
+  <div class="content-area">
+    <div class="split-layout">
+      <div class="left-panel" id="loopListPanel">
+        <div style="padding:12px 0"><span data-zh>循环列表</span><span data-en>Loop List</span></div>
+        <div id="loopList"></div>
+      </div>
+      <div class="right-panel" id="loopDetailPanel">
+        <div class="empty-state" id="detailEmpty">
+          <div class="icon">&#128260;</div>
+          <p><span data-zh>选择一个循环以查看详情</span><span data-en>Select a loop to view details</span></p>
+        </div>
+        <div id="detailContent" style="display:none"><button class="detail-close-btn" onclick="deselectLoop()" title="Close">&#10005;</button></div>
+      </div>
+    </div>
+    <div class="loading-overlay" id="loading"><div class="spinner"></div></div>
+  </div>
+</div>
+<div id="modalContainer"></div>
+<script>
+var allLoops=[];var selectedLoopId=null;var selectedRunId=null;var currentLoop=null;var currentRuns=[];
+
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
+function escapeHtml(s){if(s==null)return '';var d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function statusBadge(s){var cls='badge-'+String(s||'').toLowerCase();return '<span class="badge-status '+cls+'">'+escapeHtml(s||'')+'</span>'}
+function evalBadge(t){var cls='badge-'+String(t||'').toLowerCase();return '<span class="badge-status '+cls+'">'+escapeHtml(t||'')+'</span>'}
+function fmtJson(obj){if(obj==null)return '-';try{if(typeof obj==='string'){try{return escapeHtml(JSON.stringify(JSON.parse(obj),null,2))}catch(e){return escapeHtml(obj)}}return escapeHtml(JSON.stringify(obj,null,2))}catch(e){return escapeHtml(String(obj))}}
+function trunc(s,n){s=String(s||'');return s.length>n?s.substring(0,n)+'...':s}
+
+async function loadLoops(){
+  document.getElementById('loading').style.display='flex';
+  try{
+    var r=await fetch('/api/loops');
+    if(!r.ok){if(r.status===401){window.location.href='/login';return;}throw new Error('HTTP '+r.status);}
+    var d=await r.json();allLoops=d.loops||d||[];
+    renderLoopList(allLoops);
+  }catch(e){
+    console.error(e);
+    var lp=document.getElementById('loopList');
+    if(lp)lp.innerHTML='<div style="text-align:center;padding:40px;color:var(--accent)"><span data-zh>加载循环失败：</span><span data-en>Failed to load loops: </span>'+escapeHtml(e.message||String(e))+'</div>';
+  }
+  document.getElementById('loading').style.display='none';
+}
+
+function renderLoopList(loops){
+  var el=document.getElementById('loopList');
+  if(!loops||!loops.length){el.innerHTML='<div class="empty-state"><div class="icon">&#128260;</div><p><span data-zh>暂无循环</span><span data-en>No loops found</span></p></div>';return}
+  var h='';
+  for(var i=0;i<loops.length;i++){
+    var l=loops[i];
+    var sel=(l.loop_id===selectedLoopId)?' selected':'';
+    h+='<div class="loop-item'+sel+'" onclick="selectLoop(\''+escapeHtml(l.loop_id)+'\')">';
+    h+='<div style="display:flex;align-items:center;gap:8px;justify-content:space-between"><span class="loop-title">'+escapeHtml(l.title||l.loop_id)+'</span>'+statusBadge(l.status||'DRAFT')+'</div>';
+    h+='<div class="loop-meta"><span data-zh>迭代</span><span data-en>Iterations</span>: '+escapeHtml(String(l.iteration_count||0))+' · <span data-zh>令牌</span><span data-en>Tokens</span>: '+escapeHtml(String(l.total_tokens||0))+'</div>';
+    h+='<div class="loop-meta" style="font-family:monospace">'+escapeHtml(trunc(l.loop_id,24))+'</div>';
+    h+='</div>';
+  }
+  el.innerHTML=h;
+}
+
+async function selectLoop(loopId){
+  selectedLoopId=loopId;selectedRunId=null;
+  renderLoopList(allLoops);
+  document.getElementById('detailEmpty').style.display='none';
+  document.getElementById('detailContent').style.display='block';
+  document.getElementById('detailContent').innerHTML='<button class="detail-close-btn" onclick="deselectLoop()" title="Close">&#10005;</button><div class="spinner" style="margin:30px auto"></div>';
+  try{
+    var r=await fetch('/api/loops/'+encodeURIComponent(loopId));
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    currentLoop=await r.json();
+    renderDetail(currentLoop);
+    await loadRuns(loopId);
+  }catch(e){
+    document.getElementById('detailContent').innerHTML='<p style="color:#e74c3c"><span data-zh>加载失败：</span><span data-en>Load failed: </span>'+escapeHtml(e.message)+'</p>';
+  }
+}
+
+function deselectLoop(){
+  selectedLoopId=null;selectedRunId=null;
+  document.getElementById('detailContent').style.display='none';
+  document.getElementById('detailContent').innerHTML='<button class="detail-close-btn" onclick="deselectLoop()" title="Close">&#10005;</button>';
+  document.getElementById('detailEmpty').style.display='block';
+  document.querySelectorAll('.loop-item.selected').forEach(function(el){el.classList.remove('selected')});
+}
+
+function renderDetail(l){
+  var st=l.stats||{};
+  var h='';
+  h+='<div class="section-card"><h6><span data-zh>循环概览</span><span data-en>Loop Overview</span></h6>';
+  h+='<div class="detail-field"><div class="lbl"><span data-zh>标题</span><span data-en>Title</span></div><div class="val">'+escapeHtml(l.title||'-')+'</div></div>';
+  h+='<div class="detail-field"><div class="lbl">Loop ID</div><div class="val" style="font-family:monospace">'+escapeHtml(l.loop_id||'-')+'</div></div>';
+  h+='<div class="detail-field"><div class="lbl"><span data-zh>状态</span><span data-en>Status</span></div><div class="val">'+statusBadge(l.status||'-')+'</div></div>';
+  if(l.agent_id)h+='<div class="detail-field"><div class="lbl"><span data-zh>智能体</span><span data-en>Agent</span></div><div class="val" style="font-family:monospace">'+escapeHtml(l.agent_id)+'</div></div>';
+  if(l.workspace_id)h+='<div class="detail-field"><div class="lbl"><span data-zh>工作区</span><span data-en>Workspace</span></div><div class="val" style="font-family:monospace">'+escapeHtml(l.workspace_id)+'</div></div>';
+  if(l.created_at)h+='<div class="detail-field"><div class="lbl"><span data-zh>创建时间</span><span data-en>Created</span></div><div class="val">'+escapeHtml(l.created_at)+'</div></div>';
+  h+='<div class="detail-actions">';
+  h+='<button class="btn-sm btn-success" onclick="startRun(\''+escapeHtml(l.loop_id)+'\')"><span data-zh>启动运行</span><span data-en>Start Run</span></button>';
+  h+='<button class="btn-sm btn-info" onclick="showCreateLoopModal(\''+escapeHtml(l.loop_id)+'\')"><span data-zh>编辑</span><span data-en>Edit</span></button>';
+  h+='<button class="btn-sm btn-danger" onclick="deleteLoop(\''+escapeHtml(l.loop_id)+'\')"><span data-zh>删除</span><span data-en>Delete</span></button>';
+  h+='</div>';
+  h+='</div>';
+
+  h+='<div class="section-card"><h6><span data-zh>目标定义</span><span data-en>Goal Definition</span></h6><div class="json-block">'+fmtJson(l.goal_definition)+'</div></div>';
+  h+='<div class="section-card"><h6><span data-zh>停止条件</span><span data-en>Stop Conditions</span></h6><div class="json-block">'+fmtJson(l.stop_conditions)+'</div></div>';
+  h+='<div class="section-card"><h6><span data-zh>评估配置</span><span data-en>Evaluation Config</span></h6>';
+  if(l.evaluation_config){try{var ec=typeof l.evaluation_config==='string'?JSON.parse(l.evaluation_config):l.evaluation_config;if(ec&&ec.eval_type)h+='<div style="margin-bottom:8px">'+evalBadge(ec.eval_type)+'</div>'}catch(e){}}
+  h+='<div class="json-block">'+fmtJson(l.evaluation_config)+'</div></div>';
+  if(l.trigger_config)h+='<div class="section-card"><h6><span data-zh>触发配置</span><span data-en>Trigger Config</span></h6><div class="json-block">'+fmtJson(l.trigger_config)+'</div></div>';
+
+  h+='<div class="section-card"><h6><span data-zh>统计</span><span data-en>Stats</span></h6>';
+  h+='<div class="stats-grid">';
+  h+='<div class="stat-card"><div class="stat-value">'+escapeHtml(String(st.total_runs||l.total_runs||0))+'</div><div class="stat-label"><span data-zh>总运行</span><span data-en>Total Runs</span></div></div>';
+  h+='<div class="stat-card"><div class="stat-value" style="color:#2ecc71">'+escapeHtml(String(st.completed||0))+'</div><div class="stat-label"><span data-zh>已完成</span><span data-en>Completed</span></div></div>';
+  h+='<div class="stat-card"><div class="stat-value" style="color:#e74c3c">'+escapeHtml(String(st.failed||0))+'</div><div class="stat-label"><span data-zh>失败</span><span data-en>Failed</span></div></div>';
+  h+='<div class="stat-card"><div class="stat-value" style="color:#3498db">'+escapeHtml(String(st.running||0))+'</div><div class="stat-label"><span data-zh>运行中</span><span data-en>Running</span></div></div>';
+  h+='<div class="stat-card"><div class="stat-value">'+escapeHtml(String(st.total_tokens||l.total_tokens||0))+'</div><div class="stat-label"><span data-zh>总令牌</span><span data-en>Total Tokens</span></div></div>';
+  h+='</div></div>';
+
+  h+='<div class="section-card"><h6><span data-zh>运行列表</span><span data-en>Runs</span></h6><div id="runsContainer"><div class="spinner" style="margin:20px auto"></div></div></div>';
+  h+='<div class="section-card" id="iterationsSection" style="display:none"><h6><span data-zh>迭代时间线</span><span data-en>Iterations Timeline</span></h6><div id="iterationsContainer"></div></div>';
+
+  document.getElementById('detailContent').innerHTML='<button class="detail-close-btn" onclick="deselectLoop()" title="Close">&#10005;</button>'+h;
+}
+async function loadRuns(loopId){
+  var c=document.getElementById('runsContainer');if(!c)return;
+  c.innerHTML='<div class="spinner" style="margin:20px auto"></div>';
+  try{
+    var r=await fetch('/api/loops/'+encodeURIComponent(loopId)+'/runs');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var d=await r.json();currentRuns=d.runs||d||[];
+    renderRuns(currentRuns);
+  }catch(e){c.innerHTML='<p style="color:#e74c3c"><span data-zh>加载运行失败：</span><span data-en>Failed to load runs: </span>'+escapeHtml(e.message)+'</p>'}
+}
+
+function renderRuns(runs){
+  var c=document.getElementById('runsContainer');if(!c)return;
+  if(!runs||!runs.length){c.innerHTML='<p style="color:var(--text-secondary);font-size:.85rem"><span data-zh>暂无运行</span><span data-en>No runs yet</span></p>';return}
+  var h='';
+  for(var i=0;i<runs.length;i++){
+    var rn=runs[i];
+    var sel=(rn.run_id===selectedRunId)?' selected':'';
+    h+='<div class="run-row'+sel+'" onclick="loadIterations(\''+escapeHtml(rn.run_id)+'\')">';
+    h+='<span style="font-family:monospace;font-size:.8rem">'+escapeHtml(trunc(rn.run_id,18))+'</span>';
+    h+=statusBadge(rn.status||'-');
+    h+='<span style="font-size:.78rem;color:var(--text-secondary)"><span data-zh>迭代</span><span data-en>Iter</span>: '+escapeHtml(String(rn.iteration_count||0))+'</span>';
+    h+='<span style="font-size:.78rem;color:var(--text-secondary)"><span data-zh>令牌</span><span data-en>Tokens</span>: '+escapeHtml(String(rn.total_tokens||0))+'</span>';
+    h+='<span style="margin-left:auto;display:flex;gap:4px">';
+    if(rn.status==='RUNNING'){h+='<button class="btn-sm btn-warn" onclick="event.stopPropagation();pauseRun(\''+escapeHtml(rn.run_id)+'\')"><span data-zh>暂停</span><span data-en>Pause</span></button>';h+='<button class="btn-sm btn-danger" onclick="event.stopPropagation();stopRun(\''+escapeHtml(rn.run_id)+'\')"><span data-zh>停止</span><span data-en>Stop</span></button>'}
+    else if(rn.status==='PAUSED'){h+='<button class="btn-sm btn-success" onclick="event.stopPropagation();resumeRun(\''+escapeHtml(rn.run_id)+'\')"><span data-zh>恢复</span><span data-en>Resume</span></button>';h+='<button class="btn-sm btn-danger" onclick="event.stopPropagation();stopRun(\''+escapeHtml(rn.run_id)+'\')"><span data-zh>停止</span><span data-en>Stop</span></button>'}
+    else{h+='<button class="btn-sm btn-success" onclick="event.stopPropagation();startRun(\''+escapeHtml(selectedLoopId||'')+'\')"><span data-zh>启动</span><span data-en>Start</span></button>'}
+    h+='</span></div>';
+  }
+  c.innerHTML=h;
+}
+
+async function loadIterations(runId){
+  selectedRunId=runId;
+  renderRuns(currentRuns);
+  var sec=document.getElementById('iterationsSection');var c=document.getElementById('iterationsContainer');
+  if(sec)sec.style.display='block';
+  if(c)c.innerHTML='<div class="spinner" style="margin:20px auto"></div>';
+  try{
+    var r=await fetch('/api/loops/runs/'+encodeURIComponent(runId)+'/iterations');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var d=await r.json();var iters=d.iterations||d||[];
+    renderIterations(iters);
+  }catch(e){if(c)c.innerHTML='<p style="color:#e74c3c"><span data-zh>加载迭代失败：</span><span data-en>Failed to load iterations: </span>'+escapeHtml(e.message)+'</p>'}
+}
+
+function renderIterations(iters){
+  var c=document.getElementById('iterationsContainer');if(!c)return;
+  if(!iters||!iters.length){c.innerHTML='<p style="color:var(--text-secondary);font-size:.85rem"><span data-zh>暂无迭代</span><span data-en>No iterations</span></p>';return}
+  var h='<div class="iter-timeline">';
+  for(var i=0;i<iters.length;i++){
+    var it=iters[i];
+    var passed=it.evaluation_passed;var cls='';var mark='';
+    if(passed===true||passed==='Y'||passed===1||passed==='true'){cls=' passed';mark='&#10004;'}
+    else if(passed===false||passed==='N'||passed===0||passed==='false'){cls=' failed';mark='&#10006;'}
+    h+='<div class="iter-node'+cls+'">';
+    h+='<div class="iter-head"><b style="color:#fff"><span data-zh>迭代</span><span data-en>Iteration</span> #'+escapeHtml(String(it.iteration_number||it.iteration||i+1))+'</b>';
+    if(mark)h+='<span style="font-size:1rem">'+mark+'</span>';
+    if(it.status)h+=statusBadge(it.status);
+    h+='</div>';
+    if(it.token_usage!=null)h+='<div style="font-size:.78rem;color:var(--text-secondary)"><span data-zh>令牌用量</span><span data-en>Tokens</span>: '+escapeHtml(String(it.token_usage))+'</div>';
+    if(it.started_at)h+='<div style="font-size:.76rem;color:var(--text-secondary)"><span data-zh>开始</span><span data-en>Start</span>: '+escapeHtml(it.started_at)+(it.completed_at?(' · <span data-zh>完成</span><span data-en>End</span>: '+escapeHtml(it.completed_at)):'')+'</div>';
+    if(it.evaluation_result)h+='<div style="font-size:.76rem;color:var(--text-secondary);margin-top:2px"><span data-zh>评估</span><span data-en>Eval</span>: <span class="json-block" style="display:inline-block;max-height:120px;margin-top:4px">'+fmtJson(it.evaluation_result)+'</span></div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  c.innerHTML=h;
+}
+
+function closeModal(){document.getElementById('modalContainer').innerHTML=''}
+
+function showCreateLoopModal(editId){
+  var l=null;
+  if(editId){for(var i=0;i<allLoops.length;i++){if(allLoops[i].loop_id===editId)l=allLoops[i]}}
+  var h='<div class="modal-overlay" onclick="closeModal()"><div class="modal-box" onclick="event.stopPropagation()">';
+  h+='<h5>'+(l?'<span data-zh>编辑循环</span><span data-en>Edit Loop</span>':'<span data-zh>创建循环</span><span data-en>Create Loop</span>')+'</h5>';
+  h+='<div class="form-group"><label><span data-zh>标题 *</span><span data-en>Title *</span></label><input id="clTitle" value="'+escapeHtml(l?l.title:'')+'"></div>';
+  h+='<div class="form-group"><label><span data-zh>目标定义 (JSON)</span><span data-en>Goal Definition (JSON)</span></label><textarea id="clGoal" rows="4">'+escapeHtml(l?fmtJsonRaw(l.goal_definition):'')+'</textarea></div>';
+  h+='<div class="form-group"><label><span data-zh>停止条件 (JSON)</span><span data-en>Stop Conditions (JSON)</span></label><textarea id="clStop" rows="4">'+escapeHtml(l?fmtJsonRaw(l.stop_conditions):'')+'</textarea></div>';
+  h+='<div class="form-group"><label><span data-zh>评估类型</span><span data-en>Eval Type</span></label><select id="clEvalType"><option value="TEST">TEST</option><option value="DIFF">DIFF</option><option value="LLM_JUDGE">LLM_JUDGE</option><option value="MANUAL">MANUAL</option></select></div>';
+  h+='<div class="form-group"><label><span data-zh>评估配置 (JSON)</span><span data-en>Evaluation Config (JSON)</span></label><textarea id="clEval" rows="4">'+escapeHtml(l?fmtJsonRaw(l.evaluation_config):'')+'</textarea></div>';
+  h+='<div class="form-group"><label><span data-zh>触发配置 (JSON, 可选)</span><span data-en>Trigger Config (JSON, optional)</span></label><textarea id="clTrigger" rows="3">'+escapeHtml(l?fmtJsonRaw(l.trigger_config):'')+'</textarea></div>';
+  h+='<div class="form-group"><label><span data-zh>智能体 ID</span><span data-en>Agent ID</span></label><input id="clAgentId" value="'+escapeHtml(l?l.agent_id||'':'')+'"></div>';
+  h+='<div class="form-group"><label><span data-zh>工作区 ID</span><span data-en>Workspace ID</span></label><input id="clWorkspaceId" value="'+escapeHtml(l?l.workspace_id||'':'')+'"></div>';
+  h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
+  h+='<button type="button" class="btn-primary" onclick="createLoop('+(l?'\''+escapeHtml(l.loop_id)+'\'':'null')+')"><span data-zh>保存</span><span data-en>Save</span></button></div>';
+  h+='</div></div>';
+  document.getElementById('modalContainer').innerHTML=h;
+  if(l&&l.evaluation_config){try{var ec=typeof l.evaluation_config==='string'?JSON.parse(l.evaluation_config):l.evaluation_config;if(ec&&ec.eval_type){var sel=document.getElementById('clEvalType');if(sel)sel.value=ec.eval_type}}catch(e){}}
+}
+
+function fmtJsonRaw(obj){if(obj==null)return '';try{if(typeof obj==='string'){JSON.parse(obj);return obj}return JSON.stringify(obj,null,2)}catch(e){return String(obj)}}
+
+function parseJsonField(val,fallback){if(!val||!val.trim())return fallback;try{return JSON.parse(val)}catch(e){return null}}
+
+async function createLoop(editId){
+  var title=document.getElementById('clTitle').value.trim();
+  if(!title){alert('Title is required');return}
+  var data={title:title};
+  var goal=parseJsonField(document.getElementById('clGoal').value,document.getElementById('clGoal').value||null);
+  var stop=parseJsonField(document.getElementById('clStop').value,null);
+  var evalTxt=document.getElementById('clEval').value.trim();
+  var evalType=document.getElementById('clEvalType').value;
+  var evalCfg=evalTxt?parseJsonField(evalTxt,{eval_type:evalType}):{eval_type:evalType};
+  if(!evalCfg)evalCfg={eval_type:evalType};else if(typeof evalCfg==='object'&&!evalCfg.eval_type)evalCfg.eval_type=evalType;
+  var trig=parseJsonField(document.getElementById('clTrigger').value,null);
+  if(goal)data.goal_definition=goal;
+  if(stop)data.stop_conditions=stop;
+  data.evaluation_config=evalCfg;
+  if(trig)data.trigger_config=trig;
+  var ag=document.getElementById('clAgentId').value.trim();if(ag)data.agent_id=ag;
+  var ws=document.getElementById('clWorkspaceId').value.trim();if(ws)data.workspace_id=ws;
+  try{
+    var url='/api/loops/create';var method='POST';
+    if(editId){data.loop_id=editId}
+    var r=await fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    var d=await r.json();if(!r.ok){alert(d.error||'Create failed');return}
+    closeModal();loadLoops();if(editId)selectLoop(editId);
+  }catch(e){alert('Error: '+e.message)}
+}
+
+async function startRun(loopId){
+  if(!loopId){alert('No loop selected');return}
+  try{var r=await fetch('/api/loops/runs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loop_id:loopId})});var d=await r.json();if(!r.ok){alert(d.error||'Start failed');return}selectLoop(loopId)}catch(e){alert('Error: '+e.message)}
+}
+async function pauseRun(runId){
+  try{var r=await fetch('/api/loops/runs/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});var d=await r.json();if(!r.ok){alert(d.error||'Pause failed');return}if(selectedLoopId){await loadRuns(selectedLoopId)}}catch(e){alert('Error: '+e.message)}
+}
+async function resumeRun(runId){
+  try{var r=await fetch('/api/loops/runs/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});var d=await r.json();if(!r.ok){alert(d.error||'Resume failed');return}if(selectedLoopId){await loadRuns(selectedLoopId)}}catch(e){alert('Error: '+e.message)}
+}
+async function stopRun(runId){
+  if(!confirm('Stop this run?'))return;
+  try{var r=await fetch('/api/loops/runs/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});var d=await r.json();if(!r.ok){alert(d.error||'Stop failed');return}if(selectedLoopId){await loadRuns(selectedLoopId)}}catch(e){alert('Error: '+e.message)}
+}
+
+async function deleteLoop(loopId){
+  if(!confirm('Delete this loop? This cannot be undone.'))return;
+  try{var r=await fetch('/api/loops/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loop_id:loopId})});var d=await r.json();if(!r.ok){alert(d.error||'Delete failed');return}selectedLoopId=null;document.getElementById('detailContent').style.display='none';document.getElementById('detailEmpty').style.display='block';loadLoops()}catch(e){alert('Error: '+e.message)}
+}
+
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadLoops();
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);
+document.getElementById('loopDetailPanel').addEventListener('click',function(e){
+  if(e.target===this||e.target.id==='detailEmpty'||e.target.closest('#detailEmpty')){
+    if(selectedLoopId)deselectLoop();
+  }
+});
+</script>
+</body>
+</html>

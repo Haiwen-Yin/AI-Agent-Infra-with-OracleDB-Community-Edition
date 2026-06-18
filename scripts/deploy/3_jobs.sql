@@ -1,4 +1,4 @@
--- AI Agent Infra v3.6.1 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.0 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -264,4 +264,64 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.6.1 - Community Edition - Phase 3: Scheduler Jobs Complete (13 jobs)
+PROMPT ============================================================
+PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.0]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'LOOP_TRIGGER_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN LOOP_MANAGER.process_scheduled_triggers; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=1',
+        enabled         => TRUE,
+        comments        => 'Every minute: check scheduled Loop triggers and start runs'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('LOOP_TRIGGER_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.0]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'LOOP_STUCK_CHECK_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN LOOP_MANAGER.check_stuck_runs; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=5',
+        enabled         => TRUE,
+        comments        => 'Every 5 minutes: check for stuck/timed-out Loop runs'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('LOOP_STUCK_CHECK_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.0]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'LOOP_CLEANUP_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN LOOP_MANAGER.cleanup_old_runs(90); END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=WEEKLY; BYDAY=SUN; BYHOUR=6',
+        enabled         => TRUE,
+        comments        => 'Weekly: cleanup old completed Loop runs older than 90 days'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('LOOP_CLEANUP_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT AI Agent Infra v3.7.0 - Community Edition - Phase 3: Scheduler Jobs Complete (16 jobs)

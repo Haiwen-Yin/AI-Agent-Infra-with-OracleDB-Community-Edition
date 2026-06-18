@@ -5,6 +5,45 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
+## [3.7.0] - 2026-06-18
+
+### Summary
+
+**Loop Engineering** — Introduces Loop Engineering as the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables, LOOP_MANAGER PL/SQL package, loop_api.py Python module, evaluation engine with 4 evaluation types, lifecycle hooks, and 3 scheduler jobs.
+
+### Added - Both Editions
+
+- **Loop Engineering methodology** — The 4th generation AI engineering methodology (after Prompt/Context/Harness Engineering), proposed by Peter Steinberger in June 2026
+- 4 new tables: LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS
+- LOOP_MANAGER package/schema with ~22 functions for loop lifecycle management
+- loop_api.py Python module with 25 functions including evaluation engine
+- 4 evaluation types: TEST (command), DIFF (git diff), LLM_JUDGE (LLM scoring), MANUAL (human review)
+- Stop conditions: max_iterations, max_tokens, max_duration_seconds
+- Lifecycle hooks: PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT
+- 3 new scheduler jobs: LOOP_TRIGGER_JOB, LOOP_STUCK_CHECK_JOB, LOOP_CLEANUP_JOB
+- loops.html template with loop management dashboard
+- docs/loop-engineering.md documentation
+- config.json llm_judge section (disabled by default)
+- [ENT only] LOOP_AUDIT table for audit trail
+
+### Changed - Both Editions
+
+- **Test suite** — Community Edition: 121 tests; Enterprise Edition: 151 tests
+- **Schema** — COM: 30 → 34 tables, 13 → 14 PL/SQL packages, 13 → 16 scheduler jobs; ENT: 35 → 40 tables, 16 → 17 PL/SQL packages, 17 → 20 scheduler jobs
+- **Python modules** — COM: 23 → 24 modules; ENT: 24 → 25 modules
+
+### Fixed - Both Editions
+
+- **Oracle COM loop API imports** — Fixed `from scripts.lib.loop_api` to `from lib.loop_api` causing HTTP 500 on /api/loops endpoints
+- **Oracle COM missing handler methods** — Added missing `_api_loops_stats`, `_api_loops_hooks`, `_api_loops_run_get` methods; fixed route-method name mismatches
+- **COM navigation** — Added loops link back to Community Edition sidebar (loops is a core feature available in all editions)
+- **Loop detail close button** — Added ❌ close button to loop detail panel header
+- **Oracle ENT audit** — Added missing /audit route and /api/audit endpoint with handler methods
+- **Server startup** — Fixed server startup script using `nohup` instead of `setsid` to prevent shell timeout deadlocks
+- **Loop seed data** — Added realistic loop definitions with runs, iterations, and hooks to all editions
+
+
+---
 ## [3.6.2] - 2026-06-18
 
 ### Summary

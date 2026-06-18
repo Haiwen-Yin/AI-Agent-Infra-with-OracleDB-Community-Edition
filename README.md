@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.6.2
+# AI Agent Infra with OracleDB - Community Edition v3.7.0
 
-[![Version](https://img.shields.io/badge/version-v3.6.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, and Agent pool management — built on Oracle 26ai.**
+**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.6.2 (2026-06-18): Admin/Agent Separation Architecture — New mode system (standalone/admin/agent) separating Admin Agent (Web Portal + AIADMIN) from Business Agent (independent process, End User only); Admin Token authentication; encrypted credential distribution; Agent Bootstrap CLI; mode-aware connection management; Portal chat send/switch fix.** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.7.0 (2026-06-18): Loop Engineering — The 4th generation AI engineering methodology (after Prompt/Context/Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables (LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS), LOOP_MANAGER PL/SQL package (~22 functions), loop_api.py Python module with 4 evaluation types (TEST, DIFF, LLM_JUDGE, MANUAL), 3 scheduler jobs, and lifecycle hooks (PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT, ON_START).** See [CHANGELOG.md](CHANGELOG.md) for details.
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.6.2.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.0.md)**
 
 ---
 
@@ -94,6 +94,55 @@ COMMIT;
 - `AGENT_CREDENTIALS.CREDENTIAL_VALUE`: encrypted with master key (fixed from broken random-key encryption)
 - Master key: env `MASTER_DB_KEY` > `~/.oracle-infra/master.key` > auto-generate
 
+---
+
+## Loop Engineering
+
+**Loop Engineering** is the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. It treats the iterative refinement loop — where an AI agent repeatedly evaluates its output against stop conditions and feeds results back for the next iteration — as a first-class, observable, and manageable engineering artifact.
+
+This project implements Loop Engineering with:
+
+| Component | Description |
+|-----------|-------------|
+| **4 new tables** | `LOOP_META`, `LOOP_RUNS`, `LOOP_ITERATIONS`, `LOOP_HOOKS` |
+| **LOOP_MANAGER** PL/SQL package | ~22 functions for loop lifecycle management |
+| **loop_api.py** | Python module with evaluation engine supporting 4 evaluation types |
+| **3 scheduler jobs** | `LOOP_TRIGGER_JOB`, `LOOP_STUCK_CHECK_JOB`, `LOOP_CLEANUP_JOB` |
+| **Detail panel close button** | ❌ button in loop detail panel header for quick dismiss |
+| **Lifecycle hooks** | `PRE_RUN`, `POST_ITERATION`, `ON_STOP`, `ON_FAIL`, `ON_TIMEOUT` |
+
+### Evaluation Types
+
+The evaluation engine supports 4 evaluation types for determining whether an iteration's output meets the stop conditions:
+
+| Type | Description |
+|------|-------------|
+| `TEST` | Run a command; pass if exit code is 0 |
+| `DIFF` | Check git diff for changes |
+| `LLM_JUDGE` | LLM-based scoring of output quality |
+| `MANUAL` | Human review |
+
+### Stop Conditions
+
+Loops terminate when any of these conditions are met:
+- `max_iterations` — maximum number of iterations
+- `max_tokens` — cumulative token budget exhausted
+- `max_duration_seconds` — wall-clock time limit
+
+### Configuration
+
+The `llm_judge` section in `config.json` configures the LLM evaluation (disabled by default):
+
+```json
+{
+  "llm_judge": {
+    "enabled": false,
+    "model": "gpt-4",
+    "threshold": 0.8
+  }
+}
+```
+
 > **For Enterprise Edition features, see the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-OracleDB-Enterprise-Edition).**
 
 ---
@@ -137,11 +186,11 @@ COMMIT;
 | Master Key Management | Yes | Yes |
 | Data Masking | Yes | Yes |
 | **Database** | | |
-| Tables | 30 | 35 |
-| PL/SQL Packages | 13 | 16 |
-| Scheduler Jobs | 13 | 17 |
+| Tables | 34 | 40 |
+| PL/SQL Packages | 14 | 17 |
+| Scheduler Jobs | 16 | 20 |
 | Data Grants | 23 | 23 |
-| Tests | 105 | 135 |
+| Tests | 121 | 151 |
 | **License** | Apache 2.0 | BSL 1.1 |
 
 ---
@@ -233,9 +282,9 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 30 tables, JRD views, indexes, property graph, seed data
-      2_api.sql                 # 13 PL/SQL packages
-      3_jobs.sql                # 13 scheduler jobs
+      1_schema.sql              # 34 tables, JRD views, indexes, property graph, seed data
+      2_api.sql                 # 14 PL/SQL packages
+      3_jobs.sql                # 16 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in templates
     lib/
       config.py                 # Unified Config with encrypted DB credentials
@@ -260,7 +309,7 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.6.2
+      server.py                 # HTTP server v3.7.0
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

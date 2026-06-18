@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra v3.6.2 (2026-06-14) - Community Edition
+# Architecture - AI Agent Infra v3.7.0 (2026-06-18) - Community Edition
 
 ## Unified Entity Model
 
@@ -308,7 +308,7 @@ Portal requests use End User connections with Data Grant filtering. Admin/manage
 
 ## Admin/Agent Separation Architecture
 
-v3.6.2 introduces a mode system that separates Admin Agent from Business Agent:
+v3.7.0 introduces a mode system that separates Admin Agent from Business Agent:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
