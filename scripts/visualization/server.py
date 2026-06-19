@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.1 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.7.2 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,

@@ -4,6 +4,21 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.7.2] - 2026-06-19
+
+### Fixed — Documentation Consistency
+
+- LOOP_MANAGER function count corrected: ~33 → ~22 (actual package spec count)
+- loop_api.py description corrected: "33 functions" → "32 public API functions + private evaluation helpers"
+- LOOP_CLEANUP_JOB schedule corrected: "Weekly Sunday 06:00" → "Weekly Sunday 06:00" (matches actual SQL)
+- ENTITIES partition count corrected: 7 → 8 (includes SKILL partition)
+- Reference-partitioned children count corrected: 6 → 8 (includes SKILL_META, LOOP_META)
+- ON_START lifecycle hook added to v3.7.0 entry (was previously omitted)
+- loop-engineering.md body text corrected: "four evaluation types" → "six evaluation types"
+- RELEASE_NOTES v3.7.0/v3.7.1 bug fixes boundary clarified
+- README project structure updated: all Python modules listed, template count corrected
+- SKILL_MANAGER PL/SQL package removed from docs (not present in Community Edition 2_api.sql)
+
 ---
 ## [3.7.1] - 2026-06-19
 

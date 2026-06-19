@@ -745,7 +745,7 @@ CREATE TABLE TASK_DEPENDENCIES (
 );
 
 PROMPT ============================================================
-PROMPT 21a. TASK_LOOP_BINDING (Non-Partitioned) [NEW v3.7.1]
+PROMPT 21a. TASK_LOOP_BINDING (Non-Partitioned) [NEW v3.7.2]
 PROMPT ============================================================
 
 CREATE TABLE TASK_LOOP_BINDING (

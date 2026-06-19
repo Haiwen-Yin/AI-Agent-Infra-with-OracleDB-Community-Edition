@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.7.1
+# AI Agent Infra with OracleDB - Community Edition v3.7.2
 
-[![Version](https://img.shields.io/badge/version-v3.7.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.2-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.7.1 (2026-06-19): Loop Engineering Collaborative Integration — Spec-Driven Loop, Task-Loop Binding, Collaborative Loop, Skill-Triggered Loop. Adds SPEC_VALIDATION & AGGREGATE evaluation types (6 total), TASK_LOOP_BINDING table, 7 new API endpoints, 8 new loop_api.py functions. Session persistence & auth fixes.** Building on v3.7.0 which introduced Loop Engineering (4th gen AI methodology, 4 loop tables, LOOP_MANAGER package, 4 eval types, lifecycle hooks, 3 scheduler jobs). See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.7.2 (2026-06-19): Loop Engineering Collaborative Integration — Spec-Driven Loop, Task-Loop Binding, Collaborative Loop, Skill-Triggered Loop. Adds SPEC_VALIDATION & AGGREGATE evaluation types (6 total), TASK_LOOP_BINDING table, 7 new API endpoints, 8 new loop_api.py functions. Session persistence & auth fixes.** Building on v3.7.0 which introduced Loop Engineering (4th gen AI methodology, 4 loop tables, LOOP_MANAGER package, 4 eval types, lifecycle hooks, 3 scheduler jobs). See [CHANGELOG.md](CHANGELOG.md) for details.
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.1.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.2.md)**
 
 ---
 
@@ -188,7 +188,7 @@ The `llm_judge` section in `config.json` configures the LLM evaluation (disabled
 | Master Key Management | Yes | Yes |
 | Data Masking | Yes | Yes |
 | **Database** | | |
-| Tables | 34 | 40 |
+| Tables | 35 | 41 |
 | PL/SQL Packages | 14 | 17 |
 | Scheduler Jobs | 16 | 20 |
 | Data Grants | 23 | 23 |
@@ -311,8 +311,8 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.7.1
-      templates/                # 9+ HTML templates
+      server.py                 # HTTP server v3.7.2
+      templates/                # 14 HTML templates
       static/                   # style.css + vis-network.min.js
   docs/
   config.json                  # Database connection config (auto-encrypted)

@@ -17,9 +17,13 @@ v2.2 adopts a layered JSON strategy that balances relational integrity with docu
 ## WORKSPACE Lifecycle
 
 ```
-ACTIVE ──pause──► PAUSED ──resume──► ACTIVE
-   │                  │
-   └──archive──► ARCHIVED ◄──archive──┘
+ACTIVE ──pause──▸ PAUSED ──resume──▸ ACTIVE
+  │                                  │
+  └──archive──▸ ARCHIVED             │
+                                     │
+PAUSED ──archive──▸ ARCHIVED         │
+                                     │
+ACTIVE ──archive──▸ ARCHIVED
 ```
 
 | Status | Description | Allowed Transitions |

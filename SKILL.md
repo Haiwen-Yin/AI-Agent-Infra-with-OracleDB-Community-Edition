@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.7.1
+version: v3.7.2
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.7.1 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.7.2 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation, loop-engineering]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.7.1
+# AI Agent Infra with OracleDB - Community Edition v3.7.2
 
 **Author:** Haiwen Yin
-**Version:** v3.7.1 - 2026-06-19
+**Version:** v3.7.2 - 2026-06-19
 **License:** Apache License 2.0 (Community Edition)
 **Official Website:** [https://db4agent.top](https://db4agent.top)
 
@@ -20,7 +20,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.7.1 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.7.2 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -32,7 +32,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.7.1 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.7.2 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -47,43 +47,31 @@ pip install oracledb>=4.0.1
 ## Architecture Overview
 
 ```
-+--------------------------------------------------------------------+
-|                AI Agent Infra with OracleDB                        |
-|                   Community Edition v3.7.1                         |
-+--------------------------------------------------------------------+
-|                                                                    |
-|  +--------------------------------------------------------------+  |
-|  |  ENTITIES (unified, RANGE partitioned)                       |  |
-|  |  +----------+----------+----------+--------+--------------+  |  |
-|  |  | MEMORY   | KNOWLEDGE|TASK_OUT  |EXPERI- | HARNESS_     |  |  |
-|  |  |          |          |PUT       |ENCE    | TEMPLATE     |  |  |
-|  |  +----------+----------+----------+--------+--------------+  |  |
-|  |  PK: (ENTITY_ID, ENTITY_TYPE)                                |  |
-|  |  COL: WORKSPACE_ID -> WORKSPACES                             |  |
-|  +--------------------------------------------------------------+  |
-|                         |                                          |
-|  +----------------------------------------------+                  |
-|  |  ENTITY_EDGES (REFERENCE partitioned)        |                  |
-|  |  PK: (EDGE_ID, SOURCE_ID)                    |                  |
-|  |  FK: -> ENTITIES(ENTITY_ID, ENTITY_TYPE)     |                  |
-|  |  + 4 other reference-partitioned children    |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-|  +----------------------------------------------+                  |
-|  |  WORKSPACES                                  |                  |
-|  |  |-- WORKSPACE_CONTEXT (append-only JSON)    |                  |
-|  |  +-- WORKSPACE_TASKS (JRD updatable)         |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-|  +----------------------------------------------+                  |
-|  |  AGENT_SESSION (handoff chain)               |                  |
-|  |  PREDECESSOR_SESSION_ID -> self (chain)      |                  |
-|  +----------------------------------------------+                  |
-|                                                                    |
-+--------------------------------------------------------------------+
+AI Agent Infra with OracleDB — Community Edition v3.7.2
+│
+├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
+│   ├── P_MEMORY      — MEMORY
+│   ├── P_KNOWLEDGE   — KNOWLEDGE
+│   ├── P_TASK_OUTPUT — TASK_OUTPUT
+│   ├── P_EXPERIENCE  — EXPERIENCE
+│   ├── P_HARNESS     — HARNESS_TEMPLATE
+│   ├── P_SPEC        — SPEC
+│   ├── P_SKILL       — SKILL
+│   └── P_OTHERS      — DEFAULT
+│   PK: (ENTITY_ID, ENTITY_TYPE)  |  COL: WORKSPACE_ID -> WORKSPACES
+│   8 reference-partitioned children:
+│     ENTITY_EDGES, KNOWLEDGE_META, SPEC_META, HARNESS_META,
+│     ENTITY_EMBEDDINGS, ENTITY_TAGS, SKILL_META, LOOP_META
+│
+├── WORKSPACES
+│   ├── WORKSPACE_CONTEXT (append-only JSON)
+│   └── WORKSPACE_TASKS (JRD updatable)
+│
+└── AGENT_SESSION (handoff chain)
+    └── PREDECESSOR_SESSION_ID -> self (chain)
 ```
 
-## Edition Comparison (v3.7.1)
+## Edition Comparison (v3.7.2)
 
 ### 1. Skill Storage & Distribution
 
@@ -95,7 +83,6 @@ Database-backed Skill registry with resource distribution.
 | **SKILL_DV** | JRD updatable duality view for Skill entities |
 | **skill_api.py** | 12 functions: register, get, list, update, delete, resolve dependencies, validate, deprecate, + 4 admin-mode functions (register_via_admin, update_via_admin, delete_via_admin, upload_skill_resource_via_admin) |
 | **skill_acquire_api.py** | 7 functions: discover, acquire_text, acquire_resource, acquire_full, + 3 admin-mode functions (discover_via_admin, acquire_via_admin) |
-| **SKILL_MANAGER** PL/SQL | 6 subprograms: CRUD, dependency resolution, validation |
 
 **Skill Access Flow (Community Edition):**
 1. `discover_skills()` or `discover_skills_via_admin()` -> list available skills
@@ -145,7 +132,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.7.1)
+#### Current Enforcement Status (v3.7.2)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
@@ -266,7 +253,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 
 ## Admin/Agent Separation Architecture
 
-v3.7.1 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+v3.7.2 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
 
 ### Modes
 
@@ -279,29 +266,21 @@ v3.7.1 introduces a mode system that separates Admin Agent (runs Web Portal, hol
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  Admin Agent (mode=admin)       │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │ Web      │  │ AIADMIN  │  │ Admin Token   │  │
-│  │ Portal   │  │ Pool     │  │ Generator     │  │
-│  └──────────┘  └──────────┘  └───────────────┘  │
-│       │                             │           │
-│       │   admin_token (secure)      │           │
-│       │   ┌──────────────────┐      │           │
-│       │   │  Encrypted Cred  │      │           │
-│       │   │  Distribution    │      │           │
-│       │   └──────────────────┘      │           │
-└───────│─────────────────────────────│───────────┘
-        │                             │
-        ▼                             ▼
-┌─────────────────────────────────────────────────┐
-│              Business Agent (mode=agent)        │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │ Agent    │  │ End User │  │ agent_config  │  │
-│  │ Bootstrap│  │ Pool     │  │ .json (enc)   │  │
-│  └──────────┘  └──────────┘  └───────────────┘  │
-│  ✗ No AIADMIN  ✓ Data Grants enforced      	  │
-└─────────────────────────────────────────────────┘
+Admin Agent (mode=admin)
+├── Web Portal
+├── AIADMIN Connection Pool
+└── Admin Token Generator
+        │
+        │ admin_token (secure)
+        ▼
+Encrypted Credential Distribution
+        │
+        ▼
+Business Agent (mode=agent)
+├── Agent Bootstrap CLI
+├── End User Connection Pool
+└── agent_config.json (encrypted)
+    ✓ Data Grants enforced    ✗ No AIADMIN access
 ```
 
 ### Key APIs
@@ -779,7 +758,7 @@ results = search("partition*", strategy="auto")
 
 | Table | Partitioning Strategy |
 |-------|-----------------------|
-| ENTITIES | LIST by ENTITY_TYPE (7 partitions: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC, OTHER) |
+| ENTITIES | LIST by ENTITY_TYPE (8 partitions: MEMORY, KNOWLEDGE, TASK_OUTPUT, EXPERIENCE, HARNESS_TEMPLATE, SPEC, SKILL, OTHERS) |
 | ENTITY_EDGES | REFERENCE from ENTITIES |
 | KNOWLEDGE_META | REFERENCE from ENTITIES |
 | ENTITY_EMBEDDINGS | REFERENCE from ENTITIES |
@@ -791,7 +770,7 @@ results = search("partition*", strategy="auto")
 | AGENT_SESSION | RANGE by IS_ACTIVE |
 | ENTITY_ACCESS_LOG | RANGE by CREATED_AT (monthly) |
 
-**Note:** 6 reference-partitioned children (ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, SPEC_META, HARNESS_META, ENTITY_TAGS). Non-partitioned tables: AGENT_REGISTRY, AGENT_CREDENTIALS, AGENT_PERMISSION_LOG, AGENT_COLLABORATION, COLLAB_GROUPS, COLLAB_GROUP_MEMBERS, SPEC_PLAN_LINKS, SYSTEM_USERS, SYSTEM_CONFIG, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES, TAGS.
+**Note:** 8 reference-partitioned children (ENTITY_EDGES, KNOWLEDGE_META, ENTITY_EMBEDDINGS, SPEC_META, HARNESS_META, ENTITY_TAGS). Non-partitioned tables: AGENT_REGISTRY, AGENT_CREDENTIALS, AGENT_PERMISSION_LOG, AGENT_COLLABORATION, COLLAB_GROUPS, COLLAB_GROUP_MEMBERS, SPEC_PLAN_LINKS, SYSTEM_USERS, SYSTEM_CONFIG, WORKSPACES, WORKSPACE_CONTEXT, WORKSPACE_TASKS, TASK_CONTEXT_SNAPSHOTS, TASK_TOOL_CALLS, TASK_DEPENDENCIES, TAGS.
 
 ## Composite Primary Keys
 
@@ -871,7 +850,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.7.1" or None,
+#   "schema_version": "3.7.2" or None,
 #   "table_count": 34,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -899,11 +878,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.7.1",
+  "schema_version": "3.7.2",
   "table_count": 34,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.1, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.2, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -912,8 +891,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.7.1
-Deployment aborted: existing deployment found. Schema version: 3.7.1
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.7.2
+Deployment aborted: existing deployment found. Schema version: 3.7.2
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -930,8 +909,8 @@ END;
 
 ```
 Agent receives Skill → check_deployment() → deployed?
-                                            ├── YES → Register skill only, DO NOT deploy
-                                            └── NO  → Run full deployment (1_schema → 2_api → 3_jobs → 4_harness)
+├── YES → Register skill only, DO NOT deploy
+└── NO  → Run full deployment (1_schema → 2_api → 3_jobs → 4_harness)
 ```
 
 ---
@@ -1064,7 +1043,7 @@ ai-agent-infra-community/
         vis-network.min.js      # Vis.js network visualization library
 ```
 
-## Database Schema (34 Tables)
+## Database Schema (35 Tables)
 
 ### Core Tables (7)
 
@@ -1128,7 +1107,7 @@ ai-agent-infra-community/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-### Loop Tables (5) [NEW v3.7.0, extended v3.7.1]
+### Loop Tables (5) [NEW v3.7.0, extended v3.7.2]
 
 | Table | Purpose |
 |-------|---------|
@@ -1150,7 +1129,7 @@ ai-agent-infra-community/
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 | EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
-| LOOP_MANAGER [NEW v3.7.0, extended v3.7.1] | ~22 | 6 evaluation types via loop_api.py | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
+| LOOP_MANAGER [NEW v3.7.0, extended v3.7.2] | ~22 | 6 evaluation types via loop_api.py | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
 
 ## Python API (24 Modules, 131+ Functions)
 
@@ -1366,7 +1345,7 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| MEMORY_FUSION_JOB | Daily 03:00 | Fuses similar memories, decays importance scores, archives below threshold |
+| MEMORY_FUSION_JOB | Weekly Sunday 06:00 | Fuses similar memories, decays importance scores, archives below threshold |
 | MEMORY_FUSION_CYCLE | Daily 04:00 | Runs full fusion cycle (decay + consolidate + archive) |
 | MEMORY_FUSION_STATS | Daily 05:00 | Computes and logs memory fusion statistics |
 | SESSION_CLEANUP_JOB | Hourly | Ends stale active sessions past timeout threshold |
@@ -1378,9 +1357,9 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 | DORMANT_AGENT_JOB [NEW v2.3.0] | Every 30 min | Auto-hibernates agents inactive beyond dormant_timeout_min |
 | CREDENTIAL_CLEANUP_JOB [NEW v2.3.0] | Daily 02:00 | Purges expired and revoked credentials |
 | EMBEDDING_GENERATION_JOB [NEW v2.3.2] | Every 2 hours | Auto-generates embeddings for new MEMORY/KNOWLEDGE entities |
-| LOOP_TRIGGER_JOB [NEW v3.7.1] | Every minute | Triggers pending loop runs that are ready to execute |
-| LOOP_STUCK_CHECK_JOB [NEW v3.7.1] | Every 5 min | Detects and handles stuck/timed-out loop runs (no iteration beyond threshold) |
-| LOOP_CLEANUP_JOB [NEW v3.7.1] | Weekly Sunday 06:00 | Cleans up completed/failed loop runs older than retention period |
+| LOOP_TRIGGER_JOB [NEW v3.7.2] | Every minute | Triggers pending loop runs that are ready to execute |
+| LOOP_STUCK_CHECK_JOB [NEW v3.7.2] | Every 5 min | Detects and handles stuck/timed-out loop runs (no iteration beyond threshold) |
+| LOOP_CLEANUP_JOB [NEW v3.7.2] | Weekly Sunday 06:00 | Cleans up completed/failed loop runs older than retention period |
 
 ## Harness Templates (5 Built-in)
 
@@ -1496,7 +1475,7 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 | Python | 3.14+ / oracledb 4.0.1+ thin mode (4.0.0 has TCPS/Deep Sec issues; 4.1.0+ recommended when available) |
 | Server | `http://<web_host>:<web_port>` |
 
-### Collaborative Integration (v3.7.1)
+### Collaborative Integration (v3.7.2)
 - **Spec-Driven Loop** | Create loops from Spec acceptance_criteria; SPEC_VALIDATION eval type |
 - **Task-Loop Binding** | Bind loops to task steps; auto-complete on loop success; TASK_LOOP_BINDING table |
 - **Collaborative Loop** | Parent/child loops for collab groups; AGGREGATE eval type; 2-level nesting |
