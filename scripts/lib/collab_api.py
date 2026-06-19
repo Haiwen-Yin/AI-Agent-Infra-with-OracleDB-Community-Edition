@@ -346,3 +346,25 @@ def sync_group_context(group_id: str) -> Dict[str, Any]:
             continue
     
     return {"group_id": group_id, "synced_count": synced}
+
+
+def create_group_loop(group_id: str, title: str, goal_definition: dict, agent_id: str, **kwargs) -> str:
+    from .loop_api import create_loop
+    loop_id = create_loop(
+        title=title,
+        goal_definition=goal_definition,
+        stop_conditions=kwargs.get("stop_conditions", {"max_iterations": 10, "timeout_minutes": 60, "consecutive_passes": 2}),
+        evaluation_config=kwargs.get("evaluation_config", {"type": "AGGREGATE"}),
+        owned_by_agent=agent_id,
+        collab_group_id=group_id,
+        **{k: v for k, v in kwargs.items() if k not in ("stop_conditions", "evaluation_config")}
+    )
+    return loop_id
+
+def get_group_loop_status(group_id: str) -> Dict[str, Any]:
+    rows = execute_query("""
+        SELECT e.ENTITY_ID, e.TITLE, e.STATUS, m.COLLAB_GROUP_ID
+        FROM ENTITIES e JOIN LOOP_META m ON e.ENTITY_ID = m.ENTITY_ID
+        WHERE m.COLLAB_GROUP_ID = :group_id AND e.ENTITY_TYPE = 'LOOP_DEFINITION'
+    """, {"group_id": group_id})
+    return {"group_id": group_id, "loops": [_row_to_dict(r) for r in rows]}

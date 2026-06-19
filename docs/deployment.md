@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.7.0 (2026-06-18) - Community Edition
+# Deployment Guide - AI Agent Infra v3.7.1 (2026-06-18) - Community Edition
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes
 - Global unique constraints: UK_ENTITIES_ID, UK_EDGES_ID, UK_TASK_PLANS_ID, UK_TASK_STEPS_ID, UK_ACCESS_LOG_ID
 - ~25 local indexes + global indexes on non-partitioned tables
 - 1 property graph, 4 duality views
-- Seeds SYSTEM_CONFIG with version 3.7.0
+- Seeds SYSTEM_CONFIG with version 3.7.1
 - Seeds SYSTEM_CONFIG with `admin.registration_token` for Admin/Agent separation
 
 ### Phase 2: API Packages (2_api.sql)
@@ -113,7 +113,7 @@ cd /root/oracle-memory-by-yhw/scripts
 python -m tests.test_all
 ```
 
-v3.7.0 test suite: 121 tests across 17 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
+v3.7.1 test suite: 121 tests across 17 modules (connection: 6, memory: 8, knowledge: 8, agent: 8, security: 5, harness: 6, graph: 8, workspace: 12).
 
 ## Starting the Web Server
 
@@ -162,7 +162,7 @@ ALTER TABLE ENTITY_ACCESS_LOG SPLIT PARTITION P_MAX
 
 ## Admin Mode and Agent Mode Deployment
 
-v3.7.0 introduces mode-based deployment for Admin/Agent separation. In production, the Admin Agent runs the Web Portal with AIADMIN access, while Business Agents run independently with only End User credentials.
+v3.7.1 introduces mode-based deployment for Admin/Agent separation. In production, the Admin Agent runs the Web Portal with AIADMIN access, while Business Agents run independently with only End User credentials.
 
 ### Admin Agent Deployment (mode=admin)
 

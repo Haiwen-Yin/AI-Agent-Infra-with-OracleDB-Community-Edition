@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.7.0
+version: v3.7.1
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.7.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.7.1 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation, loop-engineering]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.7.0
+# AI Agent Infra with OracleDB - Community Edition v3.7.1
 
 **Author:** Haiwen Yin
-**Version:** v3.7.0 - 2026-06-18
+**Version:** v3.7.1 - 2026-06-19
 **License:** Apache License 2.0 (Community Edition)
 **Official Website:** [https://db4agent.top](https://db4agent.top)
 
@@ -20,7 +20,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.7.0 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+v3.7.1 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
 
 ```sql
 -- Check your database version
@@ -32,7 +32,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.7.0 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.7.1 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -49,7 +49,7 @@ pip install oracledb>=4.0.1
 ```
 +--------------------------------------------------------------------+
 |                AI Agent Infra with OracleDB                        |
-|                   Community Edition v3.7.0                         |
+|                   Community Edition v3.7.1                         |
 +--------------------------------------------------------------------+
 |                                                                    |
 |  +--------------------------------------------------------------+  |
@@ -83,7 +83,7 @@ pip install oracledb>=4.0.1
 +--------------------------------------------------------------------+
 ```
 
-## Edition Comparison (v3.7.0)
+## Edition Comparison (v3.7.1)
 
 ### 1. Skill Storage & Distribution
 
@@ -145,7 +145,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.7.0)
+#### Current Enforcement Status (v3.7.1)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
@@ -266,7 +266,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 
 ## Admin/Agent Separation Architecture
 
-v3.7.0 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+v3.7.1 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
 
 ### Modes
 
@@ -871,7 +871,7 @@ from lib.deploy_api import check_deployment
 result = check_deployment()
 # result = {
 #   "deployed": True/False,
-#   "schema_version": "3.7.0" or None,
+#   "schema_version": "3.7.1" or None,
 #   "table_count": 34,
 #   "agent_count": 5,
 #   "user_count": 3,
@@ -899,11 +899,11 @@ Response:
 ```json
 {
   "deployed": true,
-  "schema_version": "3.7.0",
+  "schema_version": "3.7.1",
   "table_count": 34,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.0, 34 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.1, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -912,8 +912,8 @@ Response:
 The deploy script `1_schema.sql` now includes an automatic check. If `SYSTEM_CONFIG` table exists with a `schema_version` key, the script will **abort** with an error:
 
 ```
-EXISTING DEPLOYMENT DETECTED: schema_version = 3.7.0
-Deployment aborted: existing deployment found. Schema version: 3.7.0
+EXISTING DEPLOYMENT DETECTED: schema_version = 3.7.1
+Deployment aborted: existing deployment found. Schema version: 3.7.1
 ```
 
 To force reinitialize (DESTRUCTIVE — requires human admin approval):
@@ -1012,7 +1012,7 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 34 tables, 6 JRD views, indexes, property graph, seed data
+      1_schema.sql              # 35 tables, 6 JRD views, indexes, property graph, seed data
       2_api.sql                 # 14 PL/SQL packages
       3_jobs.sql                # 16 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in harness templates
@@ -1128,7 +1128,7 @@ ai-agent-infra-community/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-### Loop Tables (4) [NEW v3.7.0]
+### Loop Tables (5) [NEW v3.7.0, extended v3.7.1]
 
 | Table | Purpose |
 |-------|---------|
@@ -1136,6 +1136,7 @@ ai-agent-infra-community/
 | LOOP_RUNS | Loop execution instances: status, start/end time, token usage, iteration count |
 | LOOP_ITERATIONS | Per-iteration records: input, output, evaluation result, tokens consumed, duration |
 | LOOP_HOOKS | Lifecycle hook definitions: hook type, target function, configuration |
+| TASK_LOOP_BINDING | Task-step to loop binding: BINDING_ID, STEP_ID, LOOP_ID, BINDING_TYPE, AUTO_START |
 
 ## PL/SQL Packages (14 Packages)
 
@@ -1149,7 +1150,7 @@ ai-agent-infra-community/
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 | EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
-| LOOP_MANAGER [NEW v3.7.0] | ~22 | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
+| LOOP_MANAGER [NEW v3.7.0, extended v3.7.1] | ~22 | 6 evaluation types via loop_api.py | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
 
 ## Python API (24 Modules, 131+ Functions)
 
@@ -1377,9 +1378,9 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 | DORMANT_AGENT_JOB [NEW v2.3.0] | Every 30 min | Auto-hibernates agents inactive beyond dormant_timeout_min |
 | CREDENTIAL_CLEANUP_JOB [NEW v2.3.0] | Daily 02:00 | Purges expired and revoked credentials |
 | EMBEDDING_GENERATION_JOB [NEW v2.3.2] | Every 2 hours | Auto-generates embeddings for new MEMORY/KNOWLEDGE entities |
-| LOOP_TRIGGER_JOB [NEW v3.7.0] | Every minute | Triggers pending loop runs that are ready to execute |
-| LOOP_STUCK_CHECK_JOB [NEW v3.7.0] | Every 5 min | Detects and handles stuck/timed-out loop runs (no iteration beyond threshold) |
-| LOOP_CLEANUP_JOB [NEW v3.7.0] | Weekly Sunday 06:00 | Cleans up completed/failed loop runs older than retention period |
+| LOOP_TRIGGER_JOB [NEW v3.7.1] | Every minute | Triggers pending loop runs that are ready to execute |
+| LOOP_STUCK_CHECK_JOB [NEW v3.7.1] | Every 5 min | Detects and handles stuck/timed-out loop runs (no iteration beyond threshold) |
+| LOOP_CLEANUP_JOB [NEW v3.7.1] | Weekly Sunday 06:00 | Cleans up completed/failed loop runs older than retention period |
 
 ## Harness Templates (5 Built-in)
 
@@ -1494,3 +1495,12 @@ Auto-detection rules: boolean operators (AND/OR/NOT) → fulltext; `$`/`~` → f
 | User | `<db_user>` / `<db_password>` |
 | Python | 3.14+ / oracledb 4.0.1+ thin mode (4.0.0 has TCPS/Deep Sec issues; 4.1.0+ recommended when available) |
 | Server | `http://<web_host>:<web_port>` |
+
+### Collaborative Integration (v3.7.1)
+- **Spec-Driven Loop** | Create loops from Spec acceptance_criteria; SPEC_VALIDATION eval type |
+- **Task-Loop Binding** | Bind loops to task steps; auto-complete on loop success; TASK_LOOP_BINDING table |
+- **Collaborative Loop** | Parent/child loops for collab groups; AGGREGATE eval type; 2-level nesting |
+- **Branch-Isolated Loop** | Loops bound to branch_id run in branch context |
+- **Skill-Triggered Loop** | Skills with validation_loop metadata auto-start verification |
+- **ON_START lifecycle hook** | Added to hook event types |
+- **7 new API endpoints** | /api/loops/from-spec, /api/loops/collab, /api/loops/{id}/children, /api/loops/{id}/aggregation, /api/tasks/steps/{id}/bind-loop, /api/tasks/steps/{id}/loop, /api/collab/{id}/loop |

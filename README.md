@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.7.0
+# AI Agent Infra with OracleDB - Community Edition v3.7.1
 
-[![Version](https://img.shields.io/badge/version-v3.7.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.7.1-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.7.0 (2026-06-18): Loop Engineering — The 4th generation AI engineering methodology (after Prompt/Context/Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables (LOOP_META, LOOP_RUNS, LOOP_ITERATIONS, LOOP_HOOKS), LOOP_MANAGER PL/SQL package (~22 functions), loop_api.py Python module with 4 evaluation types (TEST, DIFF, LLM_JUDGE, MANUAL), 3 scheduler jobs, and lifecycle hooks (PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT, ON_START).** See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v3.7.1 (2026-06-19): Loop Engineering Collaborative Integration — Spec-Driven Loop, Task-Loop Binding, Collaborative Loop, Skill-Triggered Loop. Adds SPEC_VALIDATION & AGGREGATE evaluation types (6 total), TASK_LOOP_BINDING table, 7 new API endpoints, 8 new loop_api.py functions. Session persistence & auth fixes.** Building on v3.7.0 which introduced Loop Engineering (4th gen AI methodology, 4 loop tables, LOOP_MANAGER package, 4 eval types, lifecycle hooks, 3 scheduler jobs). See [CHANGELOG.md](CHANGELOG.md) for details.
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.1.md)**
 
 ---
 
@@ -104,16 +104,16 @@ This project implements Loop Engineering with:
 
 | Component | Description |
 |-----------|-------------|
-| **4 new tables** | `LOOP_META`, `LOOP_RUNS`, `LOOP_ITERATIONS`, `LOOP_HOOKS` |
+| **5 new tables** | `LOOP_META`, `LOOP_RUNS`, `LOOP_ITERATIONS`, `LOOP_HOOKS`, `TASK_LOOP_BINDING` |
 | **LOOP_MANAGER** PL/SQL package | ~22 functions for loop lifecycle management |
-| **loop_api.py** | Python module with evaluation engine supporting 4 evaluation types |
+| **loop_api.py** | Python module with evaluation engine supporting 6 evaluation types |
 | **3 scheduler jobs** | `LOOP_TRIGGER_JOB`, `LOOP_STUCK_CHECK_JOB`, `LOOP_CLEANUP_JOB` |
 | **Detail panel close button** | ❌ button in loop detail panel header for quick dismiss |
-| **Lifecycle hooks** | `PRE_RUN`, `POST_ITERATION`, `ON_STOP`, `ON_FAIL`, `ON_TIMEOUT` |
+| **Lifecycle hooks** | `ON_START`, `PRE_RUN`, `POST_ITERATION`, `ON_STOP`, `ON_FAIL`, `ON_TIMEOUT` |
 
 ### Evaluation Types
 
-The evaluation engine supports 4 evaluation types for determining whether an iteration's output meets the stop conditions:
+The evaluation engine supports 6 evaluation types for determining whether an iteration's output meets the stop conditions:
 
 | Type | Description |
 |------|-------------|
@@ -121,6 +121,8 @@ The evaluation engine supports 4 evaluation types for determining whether an ite
 | `DIFF` | Check git diff for changes |
 | `LLM_JUDGE` | LLM-based scoring of output quality |
 | `MANUAL` | Human review |
+| `SPEC_VALIDATION` | Validate against spec acceptance criteria |
+| `AGGREGATE` | Aggregate child loop run results |
 
 ### Stop Conditions
 
@@ -282,7 +284,7 @@ cd scripts && python -m tests.test_all
 ai-agent-infra-community/
   scripts/
     deploy/
-      1_schema.sql              # 34 tables, JRD views, indexes, property graph, seed data
+      1_schema.sql              # 35 tables, JRD views, indexes, property graph, seed data
       2_api.sql                 # 14 PL/SQL packages
       3_jobs.sql                # 16 scheduler jobs
       4_harness_templates.sql   # HARNESS_META + 5 built-in templates
@@ -309,7 +311,7 @@ ai-agent-infra-community/
       test_all.py               # Master runner
       ... (14+ suites)
     visualization/
-      server.py                 # HTTP server v3.7.0
+      server.py                 # HTTP server v3.7.1
       templates/                # 9+ HTML templates
       static/                   # style.css + vis-network.min.js
   docs/

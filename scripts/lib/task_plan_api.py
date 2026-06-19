@@ -290,3 +290,23 @@ def distribute_plan_to_group(plan_id: str, group_id: str) -> Dict[str, Any]:
         update_step(step["step_id"], assigned_agent_id=agent_id)
         assigned += 1
     return {"plan_id": plan_id, "group_id": group_id, "assigned": assigned, "member_count": len(active_members)}
+
+
+def bind_loop_to_step(step_id: str, loop_id: str, binding_type: str = 'COMPLETION', auto_start: str = 'N') -> str:
+    from .loop_api import start_run
+    binding_id = execute_insert_returning_id("""
+        INSERT INTO TASK_LOOP_BINDING (BINDING_ID, STEP_ID, LOOP_ID, BINDING_TYPE, AUTO_START)
+        VALUES (RAWTOHEX(SYS_GUID()), :step_id, :loop_id, :binding_type, :auto_start)
+        RETURNING BINDING_ID INTO :ret_id
+    """, {"step_id": step_id, "loop_id": loop_id, "binding_type": binding_type, "auto_start": auto_start})
+    execute("UPDATE TASK_STEPS SET LOOP_ID = :loop_id, STEP_COMPLETION_TYPE = 'LOOP' WHERE STEP_ID = :step_id", {"loop_id": loop_id, "step_id": step_id})
+    if auto_start == 'Y':
+        start_run(loop_id, ...)
+    return binding_id
+
+def get_step_loop(step_id: str) -> Optional[Dict[str, Any]]:
+    row = execute_query_one("""
+        SELECT b.BINDING_ID, b.STEP_ID, b.LOOP_ID, b.BINDING_TYPE, b.AUTO_START, b.CREATED_AT
+        FROM TASK_LOOP_BINDING b WHERE b.STEP_ID = :step_id
+    """, {"step_id": step_id})
+    return _row_to_dict(row) if row else None

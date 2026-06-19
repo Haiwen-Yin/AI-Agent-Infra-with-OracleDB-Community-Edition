@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.7.1 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -96,10 +96,11 @@ def _get_session(request_handler):
     if not sess:
         return None
     cfg = _load_server_config()
-    timeout = getattr(cfg, 'session_timeout', 300) * 60
-    if time.time() - sess['created_at'] > timeout:
+    timeout = getattr(cfg, 'session_timeout', 300)
+    if time.time() - sess.get('last_access', sess['created_at']) > timeout:
         sessions.pop(session_id, None)
         return None
+    sess['last_access'] = time.time()
     return session_id, sess
 
 
@@ -562,6 +563,27 @@ class VisHandler(BaseHTTPRequestHandler):
         if path == '/api/loop/delete':
             self._handle_loop_delete()
             return
+        elif path == '/api/loops/from-spec':
+            self._api_loops_from_spec()
+            return
+        elif path == '/api/loops/collab':
+            self._api_loops_collab()
+            return
+        elif path.startswith('/api/loops/') and path.endswith('/children'):
+            self._api_loops_children(path)
+            return
+        elif path.startswith('/api/loops/') and path.endswith('/aggregation'):
+            self._api_loops_aggregation(path)
+            return
+        elif path.startswith('/api/tasks/steps/') and path.endswith('/bind-loop'):
+            self._api_task_step_bind_loop(path)
+            return
+        elif path.startswith('/api/tasks/steps/') and path.endswith('/loop'):
+            self._api_task_step_loop(path)
+            return
+        elif path.startswith('/api/collab/') and path.endswith('/loop'):
+            self._api_collab_loop(path)
+            return
 
         self._send_error(404, 'Not found')
 
@@ -583,7 +605,7 @@ class VisHandler(BaseHTTPRequestHandler):
         session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly; Max-Age=3600'.format(session_id))
         body = json.dumps({'success': True, 'session_id': session_id}).encode()
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -679,8 +701,22 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_loops_runs(path, qs)
             elif path.startswith('/api/loops/') and path.endswith('/hooks'):
                 self._api_loops_hooks(path)
+            elif path.startswith('/api/loops/') and path.endswith('/children'):
+                self._api_loops_children(path)
+            elif path.startswith('/api/loops/') and path.endswith('/aggregation'):
+                self._api_loops_aggregation(path)
             elif path.startswith('/api/loops/'):
                 self._api_loops_get(path)
+            elif path == '/api/loops/from-spec':
+                self._api_loops_from_spec()
+            elif path == '/api/loops/collab':
+                self._api_loops_collab()
+            elif path.startswith('/api/tasks/steps/') and path.endswith('/bind-loop'):
+                self._api_task_step_bind_loop(path)
+            elif path.startswith('/api/tasks/steps/') and path.endswith('/loop'):
+                self._api_task_step_loop(path)
+            elif path.startswith('/api/collab/') and path.endswith('/loop'):
+                self._api_collab_loop(path)
             elif path.startswith('/api/loop-runs/') and path.endswith('/iterations'):
                 self._api_loops_iterations(path, qs)
             elif path.startswith('/api/loop-runs/'):
@@ -1467,7 +1503,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 sess['agent_id'] = pool_agent['agent_id']
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
-            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+            self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly; Max-Age=3600'.format(session_id))
             body_out = json.dumps({'success': True, 'session_id': session_id, 'user_id': result['user_id'], 'username': result['username'], 'has_agent': bool(pool_agent)}).encode()
             self.send_header('Content-Length', str(len(body_out)))
             self.end_headers()
@@ -1497,7 +1533,7 @@ class VisHandler(BaseHTTPRequestHandler):
             sess['agent_id'] = pool_agent['agent_id']
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly'.format(session_id))
+        self.send_header('Set-Cookie', 'session_id={}; Path=/; HttpOnly; Max-Age=3600'.format(session_id))
         body_out = json.dumps({
             'success': True,
             'session_id': session_id,
@@ -2138,6 +2174,55 @@ class VisHandler(BaseHTTPRequestHandler):
                           data['hook_type'], data.get('hook_config'),
                           data.get('priority', 5))
         self._send_json({'success': True, 'hook_id': hook_id})
+
+    def _api_loops_from_spec(self):
+        from lib.loop_api import create_loop_from_spec
+        data = json.loads(self._read_body())
+        loop_id = create_loop_from_spec(data['spec_id'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('spec_id','agent_id')})
+        self._send_json({'success': True, 'loop_id': loop_id})
+
+    def _api_loops_collab(self):
+        from lib.loop_api import create_collab_loop
+        data = json.loads(self._read_body())
+        loop_id = create_collab_loop(data['group_id'], data.get('parent_loop_id'), data['agent_id'], **{k:v for k,v in data.items() if k not in ('group_id','parent_loop_id','agent_id')})
+        self._send_json({'success': True, 'loop_id': loop_id})
+
+    def _api_loops_children(self, path):
+        from lib.loop_api import list_loops
+        loop_id = path.split('/')[-2]
+        children = list_loops(parent_loop_id=loop_id)
+        self._send_json({'children': children})
+
+    def _api_loops_aggregation(self, path):
+        from lib.loop_api import aggregate_child_runs, list_runs
+        loop_id = path.split('/')[-2]
+        runs = list_runs(loop_id=loop_id, limit=1)
+        if runs:
+            parent_run_id = runs[0].get('run_id')
+            agg = aggregate_child_runs(parent_run_id)
+            self._send_json(agg)
+        else:
+            self._send_json({'total': 0, 'completed': 0, 'failed': 0, 'running': 0, 'results': []})
+
+    def _api_task_step_bind_loop(self, path):
+        from lib.task_plan_api import bind_loop_to_step
+        step_id = path.split('/')[4]
+        data = json.loads(self._read_body())
+        binding_id = bind_loop_to_step(step_id, data['loop_id'], data.get('binding_type', 'COMPLETION'), data.get('auto_start', 'N'))
+        self._send_json({'success': True, 'binding_id': binding_id})
+
+    def _api_task_step_loop(self, path):
+        from lib.task_plan_api import get_step_loop
+        step_id = path.split('/')[4]
+        binding = get_step_loop(step_id)
+        self._send_json(binding or {})
+
+    def _api_collab_loop(self, path):
+        from lib.collab_api import create_group_loop
+        group_id = path.split('/')[3]
+        data = json.loads(self._read_body())
+        loop_id = create_group_loop(group_id, data['title'], data['goal_definition'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('title','goal_definition','agent_id')})
+        self._send_json({'success': True, 'loop_id': loop_id})
 
     def _serve_template(self, filename):
         filepath = os.path.join(TEMPLATES_DIR, filename)

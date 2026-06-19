@@ -1,4 +1,4 @@
-# Loop Engineering - AI Agent Infra v3.7.0 (2026-06-18) - Community Edition
+# Loop Engineering - AI Agent Infra v3.7.1 (2026-06-18) - Community Edition
 
 ## Overview
 
@@ -60,8 +60,8 @@ LOOP_HOOKS
 | `LOOP_RUNS` | Partitioned by `STATUS` | Tracks each execution instance of a loop (one per start) |
 | `LOOP_ITERATIONS` | Reference partitioned from `LOOP_RUNS` | Records each iteration's plan/action/observation/evaluation/adjustment |
 | `LOOP_HOOKS` | Standalone with FK to loop | Lifecycle hooks fired at defined events |
-| `LOOP_MANAGER` | PL/SQL package (~22 functions) | Server-side loop orchestration, evaluation, and stop-condition logic |
-| `loop_api.py` | Python module (25 functions) | Application-side API, including the 4 evaluation types |
+| `LOOP_MANAGER` | PL/SQL package (~33 functions) | Server-side loop orchestration, evaluation, and stop-condition logic |
+| `loop_api.py` | Python module (33 functions) | Application-side API, including the 6 evaluation types |
 
 ### LOOP_META Schema
 
@@ -272,7 +272,7 @@ Hooks are best-effort and non-blocking by default: a failing hook logs an error 
 
 ## API Reference
 
-The Python module `scripts/lib/loop_api.py` exposes 25 functions (including the 4 evaluation handlers). The most important are listed below. The PL/SQL package `LOOP_MANAGER` mirrors the orchestration logic server-side with ~22 functions.
+The Python module `scripts/lib/loop_api.py` exposes 33 functions (including the 4 evaluation handlers). The most important are listed below. The PL/SQL package `LOOP_MANAGER` mirrors the orchestration logic server-side with ~33 functions.
 
 ### Definition & Runs
 
@@ -486,3 +486,33 @@ Together these features let a Loop be both **executable** (via a Harness Templat
 
 
 
+
+## v3.7.1 — Collaborative Integration
+
+### Spec-Driven Loop
+- `create_loop_from_spec(spec_id, agent_id)` derives goal from Spec acceptance_criteria
+- `derive_loop_from_spec()` in spec_api.py returns derived loop parameters
+- SPEC_VALIDATION evaluation type: validates each criterion against iteration observations
+- POST /api/loops/from-spec endpoint
+
+### Task-Loop Binding
+- `bind_loop_to_step(step_id, loop_id)` creates TASK_LOOP_BINDING entry
+- Step STEP_COMPLETION_TYPE: MANUAL (default), LOOP (auto-complete on loop success), SPEC
+- WAITING_LOOP status added to TASK_STEPS
+- `on_loop_run_completed()` auto-updates bound step status
+- POST /api/tasks/steps/{id}/bind-loop endpoint
+
+### Collaborative Loop
+- `create_collab_loop(group_id, parent_loop_id)` creates loop with COLLAB_GROUP_ID
+- `create_sub_loops_for_group()` creates child loops for each group member
+- 2-level nesting limit enforced (parent_loop_id cannot point to a sub-loop)
+- AGGREGATE evaluation type: collects child run results
+- `aggregate_child_runs(parent_run_id)` returns aggregation summary
+- GET /api/loops/{id}/children and /api/loops/{id}/aggregation endpoints
+
+### Branch-Isolated Loop
+- Loops with branch_id set automatically run in branch context
+
+### Skill-Triggered Loop
+- `create_validation_loop_for_skill(skill_id, agent_id)` checks skill metadata
+- Auto-triggered on skill acquire if validation_loop defined in skill properties

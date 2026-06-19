@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Loops - AI Agent Infra Community v3.7.0</title>
+<title>Loops - AI Agent Infra Community v3.7.1</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
 :root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
@@ -61,6 +61,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 .badge-diff{background:rgba(155,89,182,.15);color:#9b59b6}
 .badge-llm_judge{background:rgba(230,126,34,.15);color:#e67e22}
 .badge-manual{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-spec_validation{background:rgba(26,188,156,.15);color:#1abc9c}
 .btn-action{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s;margin-left:auto}
 .btn-action:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
 .detail-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
@@ -134,7 +135,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <body>
 <div class="sidebar">
   <div class="sidebar-brand">
-    <h5>AI Agent Infra v3.7.0</h5>
+    <h5>AI Agent Infra v3.7.1</h5>
     <small>Community Edition</small>
   </div>
   <nav class="sidebar-nav">
@@ -233,6 +234,7 @@ async function selectLoop(loopId){
     currentLoop=await r.json();
     renderDetail(currentLoop);
     await loadRuns(loopId);
+    loadChildLoops(loopId);
   }catch(e){
     document.getElementById('detailContent').innerHTML='<p style="color:#e74c3c"><span data-zh>加载失败：</span><span data-en>Load failed: </span>'+escapeHtml(e.message)+'</p>';
   }
@@ -281,6 +283,8 @@ function renderDetail(l){
 
   h+='<div class="section-card"><h6><span data-zh>运行列表</span><span data-en>Runs</span></h6><div id="runsContainer"><div class="spinner" style="margin:20px auto"></div></div></div>';
   h+='<div class="section-card" id="iterationsSection" style="display:none"><h6><span data-zh>迭代时间线</span><span data-en>Iterations Timeline</span></h6><div id="iterationsContainer"></div></div>';
+  h+='<div class="section-card" id="childLoopsSection"><h6><span data-zh>子循环</span><span data-en>Child Loops</span></h6><div id="childLoopsContainer"><div class="spinner" style="margin:20px auto"></div></div></div>';
+  h+='<div class="section-card" id="aggregationSection" style="display:none"><h6><span data-zh>聚合结果</span><span data-en>Aggregation</span></h6><div id="aggregationContainer"></div></div>';
 
   document.getElementById('detailContent').innerHTML='<button class="detail-close-btn" onclick="deselectLoop()" title="Close">&#10005;</button>'+h;
 }
@@ -361,9 +365,11 @@ function showCreateLoopModal(editId){
   var h='<div class="modal-overlay" onclick="closeModal()"><div class="modal-box" onclick="event.stopPropagation()">';
   h+='<h5>'+(l?'<span data-zh>编辑循环</span><span data-en>Edit Loop</span>':'<span data-zh>创建循环</span><span data-en>Create Loop</span>')+'</h5>';
   h+='<div class="form-group"><label><span data-zh>标题 *</span><span data-en>Title *</span></label><input id="clTitle" value="'+escapeHtml(l?l.title:'')+'"></div>';
+  if(!l){h+='<div class="form-group"><label><span data-zh>从规格创建</span><span data-en>Create from Spec</span></label><div style="display:flex;gap:8px"><select id="clSpecId" style="flex:1" onchange="onSpecSelected()"><option value="">-- <span data-zh>选择规格</span><span data-en>Select Spec</span> --</option></select><button type="button" class="btn-sm btn-info" onclick="createLoopFromSpec()"><span data-zh>从规格创建</span><span data-en>From Spec</span></button></div></div>';
+  h+='<div class="form-group"><label><span data-zh>协作组 (可选)</span><span data-en>Collaboration Group (optional)</span></label><select id="clCollabGroup"><option value="">-- <span data-zh>无</span><span data-en>None</span> --</option></select></div>'}
   h+='<div class="form-group"><label><span data-zh>目标定义 (JSON)</span><span data-en>Goal Definition (JSON)</span></label><textarea id="clGoal" rows="4">'+escapeHtml(l?fmtJsonRaw(l.goal_definition):'')+'</textarea></div>';
   h+='<div class="form-group"><label><span data-zh>停止条件 (JSON)</span><span data-en>Stop Conditions (JSON)</span></label><textarea id="clStop" rows="4">'+escapeHtml(l?fmtJsonRaw(l.stop_conditions):'')+'</textarea></div>';
-  h+='<div class="form-group"><label><span data-zh>评估类型</span><span data-en>Eval Type</span></label><select id="clEvalType"><option value="TEST">TEST</option><option value="DIFF">DIFF</option><option value="LLM_JUDGE">LLM_JUDGE</option><option value="MANUAL">MANUAL</option></select></div>';
+  h+='<div class="form-group"><label><span data-zh>评估类型</span><span data-en>Eval Type</span></label><select id="clEvalType"><option value="TEST">TEST</option><option value="DIFF">DIFF</option><option value="LLM_JUDGE">LLM_JUDGE</option><option value="MANUAL">MANUAL</option><option value="SPEC_VALIDATION">SPEC_VALIDATION</option></select></div>';
   h+='<div class="form-group"><label><span data-zh>评估配置 (JSON)</span><span data-en>Evaluation Config (JSON)</span></label><textarea id="clEval" rows="4">'+escapeHtml(l?fmtJsonRaw(l.evaluation_config):'')+'</textarea></div>';
   h+='<div class="form-group"><label><span data-zh>触发配置 (JSON, 可选)</span><span data-en>Trigger Config (JSON, optional)</span></label><textarea id="clTrigger" rows="3">'+escapeHtml(l?fmtJsonRaw(l.trigger_config):'')+'</textarea></div>';
   h+='<div class="form-group"><label><span data-zh>智能体 ID</span><span data-en>Agent ID</span></label><input id="clAgentId" value="'+escapeHtml(l?l.agent_id||'':'')+'"></div>';
@@ -372,6 +378,7 @@ function showCreateLoopModal(editId){
   h+='<button type="button" class="btn-primary" onclick="createLoop('+(l?'\''+escapeHtml(l.loop_id)+'\'':'null')+')"><span data-zh>保存</span><span data-en>Save</span></button></div>';
   h+='</div></div>';
   document.getElementById('modalContainer').innerHTML=h;
+  if(!l)loadModalDropdowns();
   if(l&&l.evaluation_config){try{var ec=typeof l.evaluation_config==='string'?JSON.parse(l.evaluation_config):l.evaluation_config;if(ec&&ec.eval_type){var sel=document.getElementById('clEvalType');if(sel)sel.value=ec.eval_type}}catch(e){}}
 }
 
@@ -396,6 +403,7 @@ async function createLoop(editId){
   if(trig)data.trigger_config=trig;
   var ag=document.getElementById('clAgentId').value.trim();if(ag)data.agent_id=ag;
   var ws=document.getElementById('clWorkspaceId').value.trim();if(ws)data.workspace_id=ws;
+  var cg=document.getElementById('clCollabGroup');if(cg){var cgv=cg.value;if(cgv)data.collab_group_id=cgv}
   try{
     var url='/api/loops/create';var method='POST';
     if(editId){data.loop_id=editId}
@@ -423,6 +431,43 @@ async function stopRun(runId){
 async function deleteLoop(loopId){
   if(!confirm('Delete this loop? This cannot be undone.'))return;
   try{var r=await fetch('/api/loops/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loop_id:loopId})});var d=await r.json();if(!r.ok){alert(d.error||'Delete failed');return}selectedLoopId=null;document.getElementById('detailContent').style.display='none';document.getElementById('detailEmpty').style.display='block';loadLoops()}catch(e){alert('Error: '+e.message)}
+}
+
+async function loadModalDropdowns(){
+  try{var r=await fetch('/api/specs');if(r.ok){var d=await r.json();var specs=d.specs||d||[];var sel=document.getElementById('clSpecId');if(sel){for(var i=0;i<specs.length;i++){var o=document.createElement('option');o.value=String(specs[i].spec_id);o.textContent=specs[i].title||specs[i].spec_id;sel.appendChild(o)}}}}catch(e){}
+  try{var r=await fetch('/api/collab');if(r.ok){var d=await r.json();var groups=d.groups||d||[];var sel=document.getElementById('clCollabGroup');if(sel){for(var i=0;i<groups.length;i++){var o=document.createElement('option');o.value=String(groups[i].group_id||groups[i].collab_group_id||'');o.textContent=groups[i].name||groups[i].group_id||groups[i].collab_group_id;sel.appendChild(o)}}}}catch(e){}
+}
+
+async function onSpecSelected(){
+  var sel=document.getElementById('clSpecId');if(!sel||!sel.value)return;
+  try{var r=await fetch('/api/specs/'+encodeURIComponent(sel.value));if(!r.ok)return;var spec=await r.json();
+  var ti=document.getElementById('clTitle');if(ti&&!ti.value)ti.value=spec.title||'';
+  var gl=document.getElementById('clGoal');if(gl&&!gl.value)gl.value=JSON.stringify(spec.goal||spec.description||{spec_id:spec.spec_id},null,2);
+  }catch(e){}
+}
+
+async function createLoopFromSpec(){
+  var sel=document.getElementById('clSpecId');if(!sel||!sel.value){alert('Select a spec first');return}
+  var data={spec_id:sel.value};
+  var cg=document.getElementById('clCollabGroup');if(cg&&cg.value)data.collab_group_id=cg.value;
+  try{var r=await fetch('/api/loops/from-spec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});var d=await r.json();if(!r.ok){alert(d.error||'Create from spec failed');return}closeModal();loadLoops();if(d.loop_id)selectLoop(d.loop_id)}catch(e){alert('Error: '+e.message)}
+}
+
+async function loadChildLoops(loopId){
+  var c=document.getElementById('childLoopsContainer');if(!c)return;
+  try{var r=await fetch('/api/loops/'+encodeURIComponent(String(loopId))+'/children');if(!r.ok){c.innerHTML='<p style="color:var(--text-secondary);font-size:.85rem"><span data-zh>暂无子循环</span><span data-en>No child loops</span></p>';return}
+  var d=await r.json();var children=d.children||d||[];
+  if(!children.length){c.innerHTML='<p style="color:var(--text-secondary);font-size:.85rem"><span data-zh>暂无子循环</span><span data-en>No child loops</span></p>';return}
+  var h='';for(var i=0;i<children.length;i++){var ch=children[i];
+  h+='<div class="loop-item" onclick="selectLoop(\''+escapeHtml(String(ch.loop_id))+'\')">';
+  h+='<div style="display:flex;align-items:center;gap:8px;justify-content:space-between"><span class="loop-title">'+escapeHtml(ch.title||ch.loop_id)+'</span>'+statusBadge(ch.status||'DRAFT')+'</div>';
+  h+='<div class="loop-meta"><span data-zh>迭代</span><span data-en>Iter</span>: '+escapeHtml(String(ch.iteration_count||0))+'</div>';
+  if(ch.evaluation_result)h+='<div class="loop-meta" style="font-size:.72rem"><span data-zh>评估</span><span data-en>Eval</span>: '+trunc(String(ch.evaluation_result),80)+'</div>';
+  h+='</div>'}
+  c.innerHTML=h;
+  }catch(e){c.innerHTML='<p style="color:var(--text-secondary);font-size:.85rem"><span data-zh>暂无子循环</span><span data-en>No child loops</span></p>'}
+  try{var r2=await fetch('/api/loops/'+encodeURIComponent(String(loopId))+'/aggregation');if(r2.ok){var agg=await r2.json();var ac=document.getElementById('aggregationContainer');var as=document.getElementById('aggregationSection');
+  if(as&&agg&&Object.keys(agg).length){as.style.display='';ac.innerHTML='<div class="json-block">'+fmtJson(agg)+'</div>'}}}catch(e){}
 }
 
 (function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - Community Edition - Loop Engineering API
+"""AI Agent Infra v3.7.1 - Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -9,6 +9,7 @@ import json
 import subprocess
 import os
 import urllib.request
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .connection import (
@@ -45,6 +46,9 @@ def create_loop(
     branch_id: Optional[str] = None,
     owned_by_agent: Optional[str] = None,
     visibility: str = "PRIVATE",
+    spec_id: Optional[str] = None,
+    parent_loop_id: Optional[str] = None,
+    collab_group_id: Optional[str] = None,
 ) -> str:
     entity_id = execute_insert_returning_id("""
         INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, STATUS,
@@ -61,9 +65,11 @@ def create_loop(
     execute("""
         INSERT INTO LOOP_META (ENTITY_ID, ENTITY_TYPE, LOOP_VERSION,
                                GOAL_DEFINITION, STOP_CONDITIONS, EVALUATION_CONFIG,
-                               TRIGGER_CONFIG, HARNESS_TEMPLATE_ID, WORKSPACE_ID, BRANCH_ID)
+                               TRIGGER_CONFIG, HARNESS_TEMPLATE_ID, WORKSPACE_ID, BRANCH_ID,
+                               SPEC_ID, PARENT_LOOP_ID, COLLAB_GROUP_ID)
         VALUES (:eid, 'LOOP_DEFINITION', '1.0',
-                :goal, :stop, :eval, :trigger_cfg, :harness, :ws, :branch)
+                :goal, :stop, :eval, :trigger_cfg, :harness, :ws, :branch,
+                :spec_id, :parent_loop_id, :collab_group_id)
     """, {
         "eid": entity_id,
         "goal": json.dumps(goal_definition),
@@ -71,6 +77,8 @@ def create_loop(
         "eval": json.dumps(evaluation_config),
         "trigger_cfg": json.dumps(trigger_config) if trigger_config else None,
         "harness": harness_template_id, "ws": workspace_id, "branch": branch_id,
+        "spec_id": spec_id, "parent_loop_id": parent_loop_id,
+        "collab_group_id": collab_group_id,
     })
     return entity_id
 
@@ -81,7 +89,8 @@ def get_loop(loop_id: str) -> Optional[Dict[str, Any]]:
                e.OWNED_BY_AGENT, e.WORKSPACE_ID, e.CREATED_AT, e.UPDATED_AT,
                m.LOOP_VERSION, m.GOAL_DEFINITION, m.STOP_CONDITIONS,
                m.EVALUATION_CONFIG, m.TRIGGER_CONFIG,
-               m.HARNESS_TEMPLATE_ID, m.BRANCH_ID
+               m.HARNESS_TEMPLATE_ID, m.BRANCH_ID,
+               m.SPEC_ID, m.PARENT_LOOP_ID, m.COLLAB_GROUP_ID
         FROM ENTITIES e JOIN LOOP_META m ON e.ENTITY_ID = m.ENTITY_ID
         WHERE e.ENTITY_ID = :id AND e.ENTITY_TYPE = 'LOOP_DEFINITION'
     """, {"id": loop_id})
@@ -116,12 +125,16 @@ def delete_loop(loop_id: str) -> bool:
     execute("DELETE FROM LOOP_ITERATIONS WHERE RUN_ID IN (SELECT RUN_ID FROM LOOP_RUNS WHERE LOOP_ID = :id)", {"id": loop_id})
     execute("DELETE FROM LOOP_RUNS WHERE LOOP_ID = :id", {"id": loop_id})
     execute("DELETE FROM LOOP_HOOKS WHERE LOOP_ID = :id", {"id": loop_id})
+    execute("DELETE FROM TASK_LOOP_BINDING WHERE LOOP_ID = :id", {"id": loop_id})
     execute("DELETE FROM LOOP_META WHERE ENTITY_ID = :id", {"id": loop_id})
     execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :id AND ENTITY_TYPE = 'LOOP_DEFINITION'", {"id": loop_id})
     return True
 
 
 def list_loops(status: Optional[str] = None, agent_id: Optional[str] = None,
+               parent_loop_id: Optional[str] = None,
+               collab_group_id: Optional[str] = None,
+               spec_id: Optional[str] = None,
                limit: int = 50) -> List[Dict[str, Any]]:
     sql = """SELECT e.ENTITY_ID AS loop_id, e.TITLE, e.SUMMARY, e.STATUS, e.VISIBILITY,
                e.OWNED_BY_AGENT, e.WORKSPACE_ID, e.CREATED_AT,
@@ -133,6 +146,12 @@ def list_loops(status: Optional[str] = None, agent_id: Optional[str] = None,
         sql += " AND e.STATUS = :status"; params["status"] = status
     if agent_id:
         sql += " AND e.OWNED_BY_AGENT = :agent_id"; params["agent_id"] = agent_id
+    if parent_loop_id:
+        sql += " AND m.PARENT_LOOP_ID = :parent_loop_id"; params["parent_loop_id"] = parent_loop_id
+    if collab_group_id:
+        sql += " AND m.COLLAB_GROUP_ID = :collab_group_id"; params["collab_group_id"] = collab_group_id
+    if spec_id:
+        sql += " AND m.SPEC_ID = :spec_id_filter"; params["spec_id_filter"] = spec_id
     sql += " ORDER BY e.CREATED_AT DESC FETCH FIRST :limit ROWS ONLY"
     return [_row_to_dict(r) for r in execute_query(sql, params)]
 
@@ -140,22 +159,25 @@ def list_loops(status: Optional[str] = None, agent_id: Optional[str] = None,
 # -- Run Management --
 
 def start_run(loop_id: str, agent_id: str, trigger_type: str = "MANUAL",
-              trigger_source: Optional[str] = None) -> str:
+              trigger_source: Optional[str] = None,
+              parent_run_id: Optional[str] = None) -> str:
     return execute_insert_returning_id("""
         INSERT INTO LOOP_RUNS (RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
-                               STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT)
+                               STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT,
+                               PARENT_RUN_ID)
         VALUES (RAWTOHEX(SYS_GUID()), :loop_id, :agent_id, :trigger_type, :trigger_source,
-                'RUNNING', 0, 0, SYSTIMESTAMP)
+                'RUNNING', 0, 0, SYSTIMESTAMP, :parent_run_id)
         RETURNING RUN_ID INTO :ret_id
     """, {"loop_id": loop_id, "agent_id": agent_id,
-          "trigger_type": trigger_type, "trigger_source": trigger_source})
+          "trigger_type": trigger_type, "trigger_source": trigger_source,
+          "parent_run_id": parent_run_id})
 
 
 def get_run(run_id: str) -> Optional[Dict[str, Any]]:
     row = execute_query_one("""
         SELECT RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
                STATUS, ITERATION_COUNT, TOTAL_TOKENS, FINAL_RESULT,
-               ERROR_MESSAGE, STARTED_AT, COMPLETED_AT
+               ERROR_MESSAGE, STARTED_AT, COMPLETED_AT, PARENT_RUN_ID
         FROM LOOP_RUNS WHERE RUN_ID = :id
     """, {"id": run_id})
     return dict(row) if row else None
@@ -186,16 +208,189 @@ def resume_run(run_id: str) -> bool:
 
 
 def stop_run(run_id: str, reason: Optional[str] = None) -> bool:
-    return execute("UPDATE LOOP_RUNS SET STATUS = 'STOPPED', FINAL_RESULT = :reason, "
-                   "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
-                   "AND STATUS IN ('RUNNING','PAUSED')",
-                   {"id": run_id, "reason": reason}) > 0
+    result = execute("UPDATE LOOP_RUNS SET STATUS = 'STOPPED', FINAL_RESULT = :reason, "
+                     "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
+                     "AND STATUS IN ('RUNNING','PAUSED')",
+                     {"id": run_id, "reason": reason}) > 0
+    if result:
+        on_loop_run_completed(run_id)
+    return result
 
 
 def fail_run(run_id: str, error_message: str) -> bool:
     return execute("UPDATE LOOP_RUNS SET STATUS = 'FAILED', ERROR_MESSAGE = :err, "
                    "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id",
                    {"id": run_id, "err": error_message}) > 0
+
+
+def complete_run(run_id: str, final_result: Optional[str] = None) -> bool:
+    result = execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', FINAL_RESULT = :result, "
+                     "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
+                     "AND STATUS IN ('RUNNING','PAUSED')",
+                     {"id": run_id, "result": final_result}) > 0
+    if result:
+        on_loop_run_completed(run_id)
+    return result
+
+
+# -- Collaborative & Spec-Driven Loop Features --
+
+def create_loop_from_spec(spec_id: str, agent_id: str, **kwargs: Any) -> str:
+    from .spec_api import get_spec
+    spec = get_spec(spec_id)
+    if not spec:
+        raise ValueError(f"Spec {spec_id} not found")
+    acceptance = spec.get("acceptance_criteria") or {}
+    if isinstance(acceptance, str):
+        acceptance = json.loads(acceptance)
+    goal_definition = {"type": "SPEC_VALIDATION", "spec_id": spec_id,
+                       "criteria": acceptance}
+    stop_conditions = kwargs.pop("stop_conditions", {"max_iterations": 10})
+    evaluation_config = {"type": "SPEC_VALIDATION", "spec_id": spec_id}
+    return create_loop(
+        title=kwargs.pop("title", f"Loop for spec: {spec.get('title', spec_id)}"),
+        goal_definition=goal_definition,
+        stop_conditions=stop_conditions,
+        evaluation_config=evaluation_config,
+        owned_by_agent=agent_id,
+        spec_id=spec_id,
+        **kwargs,
+    )
+
+
+def create_collab_loop(group_id: str, parent_loop_id: Optional[str],
+                       agent_id: str, **kwargs: Any) -> str:
+    if parent_loop_id:
+        parent = get_loop(parent_loop_id)
+        if not parent:
+            raise ValueError(f"Parent loop {parent_loop_id} not found")
+        if parent.get("parent_loop_id"):
+            raise ValueError("2-level nesting limit: parent_loop_id is already a child loop")
+    from .collab_api import list_group_members
+    members = list_group_members(group_id)
+    if not members:
+        raise ValueError(f"Collaboration group {group_id} has no members")
+    return create_loop(
+        title=kwargs.pop("title", f"Collab loop for group {group_id}"),
+        goal_definition=kwargs.pop("goal_definition", {"type": "COLLABORATIVE", "group_id": group_id}),
+        stop_conditions=kwargs.pop("stop_conditions", {"max_iterations": 10}),
+        evaluation_config=kwargs.pop("evaluation_config", {"type": "CONSENSUS"}),
+        owned_by_agent=agent_id,
+        collab_group_id=group_id,
+        parent_loop_id=parent_loop_id,
+        **kwargs,
+    )
+
+
+def create_sub_loops_for_group(parent_loop_id: str, group_id: str,
+                               agent_ids: List[str]) -> List[str]:
+    parent = get_loop(parent_loop_id)
+    if not parent:
+        raise ValueError(f"Parent loop {parent_loop_id} not found")
+    if parent.get("parent_loop_id"):
+        raise ValueError("Parent loop is already a sub-loop; 2-level nesting limit exceeded")
+    sub_loop_ids = []
+    for aid in agent_ids:
+        lid = create_loop(
+            title=f"Sub-loop for agent {aid}",
+            goal_definition=parent.get("goal_definition", {}),
+            stop_conditions=parent.get("stop_conditions", {}),
+            evaluation_config=parent.get("evaluation_config", {}),
+            owned_by_agent=aid,
+            parent_loop_id=parent_loop_id,
+            collab_group_id=group_id,
+        )
+        sub_loop_ids.append(lid)
+    return sub_loop_ids
+
+
+def aggregate_child_runs(parent_run_id: str) -> Dict[str, Any]:
+    rows = execute_query("""
+        SELECT RUN_ID, STATUS, FINAL_RESULT
+        FROM LOOP_RUNS WHERE PARENT_RUN_ID = :parent_run_id
+    """, {"parent_run_id": parent_run_id})
+    total = len(rows)
+    completed = sum(1 for r in rows if r["status"] == "COMPLETED")
+    failed = sum(1 for r in rows if r["status"] in ("FAILED", "STOPPED", "TIMEOUT"))
+    running = sum(1 for r in rows if r["status"] in ("RUNNING", "PAUSED"))
+    results = [{"run_id": r["run_id"], "status": r["status"],
+                "final_result": r["final_result"]} for r in rows]
+    return {"total": total, "completed": completed, "failed": failed,
+            "running": running, "results": results}
+
+
+def bind_loop_to_step(loop_id: str, step_id: str,
+                      binding_type: str = 'COMPLETION',
+                      auto_start: str = 'N') -> str:
+    binding_id = execute_insert_returning_id("""
+        INSERT INTO TASK_LOOP_BINDING (BINDING_ID, LOOP_ID, STEP_ID, BINDING_TYPE,
+                                       AUTO_START, CREATED_AT)
+        VALUES (RAWTOHEX(SYS_GUID()), :loop_id, :step_id, :binding_type,
+                :auto_start, SYSTIMESTAMP)
+        RETURNING BINDING_ID INTO :ret_id
+    """, {"loop_id": loop_id, "step_id": step_id,
+          "binding_type": binding_type, "auto_start": auto_start})
+    execute("UPDATE TASK_STEPS SET LOOP_ID = :loop_id, STEP_COMPLETION_TYPE = 'LOOP' "
+            "WHERE STEP_ID = :step_id",
+            {"loop_id": loop_id, "step_id": step_id})
+    if auto_start == 'Y':
+        loop = get_loop(loop_id)
+        start_run(loop_id, loop.get("owned_by_agent") if loop else None)
+    return binding_id
+
+
+def get_step_loop(step_id: str) -> Optional[Dict[str, Any]]:
+    row = execute_query_one("""
+        SELECT b.BINDING_ID, b.LOOP_ID, b.STEP_ID, b.BINDING_TYPE,
+               b.AUTO_START, b.CREATED_AT
+        FROM TASK_LOOP_BINDING b WHERE b.STEP_ID = :step_id
+    """, {"step_id": step_id})
+    if not row:
+        return None
+    result = dict(row)
+    loop = get_loop(result["loop_id"])
+    if loop:
+        result["loop"] = loop
+    return result
+
+
+def on_loop_run_completed(run_id: str) -> List[str]:
+    run = get_run(run_id)
+    if not run:
+        return []
+    loop_id = run["loop_id"]
+    rows = execute_query("""
+        SELECT STEP_ID, BINDING_TYPE FROM TASK_LOOP_BINDING
+        WHERE LOOP_ID = :loop_id AND BINDING_TYPE = 'COMPLETION'
+    """, {"loop_id": loop_id})
+    updated = []
+    for r in rows:
+        execute("UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = SYSTIMESTAMP "
+                "WHERE STEP_ID = :step_id", {"step_id": r["step_id"]})
+        updated.append(r["step_id"])
+    return updated
+
+
+def create_validation_loop_for_skill(skill_id: str, agent_id: str) -> Optional[str]:
+    from .skill_api import get_skill
+    skill = get_skill(skill_id)
+    if not skill:
+        return None
+    metadata = skill.get("metadata") or skill.get("skill_metadata") or {}
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    validation_loop = metadata.get("validation_loop")
+    if not validation_loop:
+        return None
+    if isinstance(validation_loop, str):
+        validation_loop = json.loads(validation_loop)
+    return create_loop(
+        title=validation_loop.get("title", f"Validation loop for skill {skill_id}"),
+        goal_definition=validation_loop.get("goal_definition", {"type": "SKILL_VALIDATION", "skill_id": skill_id}),
+        stop_conditions=validation_loop.get("stop_conditions", {"max_iterations": 5}),
+        evaluation_config=validation_loop.get("evaluation_config", {"type": "TEST"}),
+        owned_by_agent=agent_id,
+    )
 
 
 # -- Iteration Management --
@@ -298,7 +493,6 @@ def check_stop_conditions(run_id: str) -> str:
         return "STOP"
     max_dur = stop.get("max_duration_seconds")
     if max_dur and run.get("started_at"):
-        from datetime import datetime
         elapsed = (datetime.now() - run["started_at"].replace(tzinfo=None)).total_seconds()
         if elapsed >= max_dur:
             return "TIMEOUT"
@@ -348,7 +542,7 @@ def cleanup_old_runs(days_threshold: int = 90) -> int:
 def evaluate_iteration(run_id: str, iteration_id: str) -> Dict[str, Any]:
     """Evaluate an iteration using the configured evaluation method.
 
-    Supports 4 evaluation types:
+    Supports 6 evaluation types:
     - TEST: run a shell command, check exit code
     - DIFF: analyze git diff
     - LLM_JUDGE: call an LLM API to score the output
@@ -375,6 +569,10 @@ def evaluate_iteration(run_id: str, iteration_id: str) -> Dict[str, Any]:
         return _eval_diff(eval_cfg, iter_data)
     elif eval_type == "LLM_JUDGE":
         return _eval_llm_judge(eval_cfg, iter_data)
+    elif eval_type == "SPEC_VALIDATION":
+        return _eval_spec_validation(eval_cfg, iter_data)
+    elif eval_type == "AGGREGATE":
+        return _eval_aggregate(eval_cfg, iter_data)
     else:
         return _eval_manual(eval_cfg, iter_data)
 
@@ -514,6 +712,53 @@ def _eval_llm_judge(cfg: Dict, iter_data: Dict) -> Dict[str, Any]:
         return {"passed": False, "eval_type": "LLM_JUDGE", "error": str(e)}
 
 
+def _eval_spec_validation(cfg: Dict, iter_data: Dict) -> Dict[str, Any]:
+    """Validate iteration results against spec acceptance criteria."""
+    from .spec_api import get_spec
+    spec_id = cfg.get("spec_id")
+    if not spec_id:
+        return {"passed": False, "eval_type": "SPEC_VALIDATION", "error": "No spec_id configured"}
+    spec = get_spec(spec_id)
+    if not spec:
+        return {"passed": False, "eval_type": "SPEC_VALIDATION", "error": f"Spec {spec_id} not found"}
+    properties = spec.get("properties", {})
+    criteria = properties.get("acceptance_criteria", [])
+    if not criteria:
+        return {"passed": True, "eval_type": "SPEC_VALIDATION", "details": {"message": "No acceptance criteria defined, auto-pass"}}
+    results = []
+    all_passed = True
+    for criterion in criteria:
+        crit_str = str(criterion).lower()
+        obs = iter_data.get("observations", {})
+        if isinstance(obs, str):
+            try:
+                obs = json.loads(obs)
+            except Exception:
+                obs = {}
+        obs_str = json.dumps(obs).lower() if isinstance(obs, dict) else str(obs).lower()
+        passed = any(kw in obs_str for kw in crit_str.split() if len(kw) > 2) or "pass" in obs_str or "success" in obs_str
+        results.append({"criterion": str(criterion), "passed": passed})
+        if not passed:
+            all_passed = False
+    return {"passed": all_passed, "eval_type": "SPEC_VALIDATION", "details": {"criteria_results": results, "total": len(criteria), "passed_count": sum(1 for r in results if r["passed"])}}
+
+
+def _eval_aggregate(cfg: Dict, iter_data: Dict) -> Dict[str, Any]:
+    """Aggregate results from child/sub-loop runs."""
+    parent_run_id = iter_data.get("parent_run_id") or cfg.get("parent_run_id")
+    if not parent_run_id:
+        return {"passed": False, "eval_type": "AGGREGATE", "error": "No parent_run_id for aggregation"}
+    agg = aggregate_child_runs(parent_run_id)
+    total = agg.get("total", 0)
+    completed = agg.get("completed", 0)
+    failed = agg.get("failed", 0)
+    if total == 0:
+        return {"passed": False, "eval_type": "AGGREGATE", "details": {"message": "No child runs found"}}
+    all_completed = (completed + failed) == total
+    all_passed = failed == 0 and completed > 0 and all_completed
+    return {"passed": all_passed, "eval_type": "AGGREGATE", "details": {"total": total, "completed": completed, "failed": failed, "all_completed": all_completed, "results": agg.get("results", [])}}
+
+
 def _eval_manual(cfg: Dict, iter_data: Dict) -> Dict[str, Any]:
     """Mark iteration as awaiting manual review."""
     return {"passed": False, "eval_type": "MANUAL",
@@ -561,6 +806,7 @@ def execute_loop_iteration(run_id: str, agent_id: str,
     if passed:
         execute("UPDATE LOOP_RUNS SET STATUS='COMPLETED', COMPLETED_AT=SYSTIMESTAMP, "
                 "FINAL_RESULT='Goal achieved' WHERE RUN_ID=:id", {"id": run_id})
+        on_loop_run_completed(run_id)
         return {"iteration_id": iter_id, "evaluation": eval_result,
                 "stop_status": "STOP", "run_status": "COMPLETED"}
 

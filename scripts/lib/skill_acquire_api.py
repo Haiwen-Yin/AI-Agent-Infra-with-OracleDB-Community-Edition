@@ -138,6 +138,14 @@ def acquire_skill_full(skill_id: str, agent_id: Optional[str] = None, session_id
         resource_zip = acquire_skill_resource(skill_id, agent_id, session_id)
 
     result = {**text_result, "resource_zip": resource_zip}
+
+    # v3.7.1: Auto-trigger validation loop if defined in skill metadata
+    try:
+        from .loop_api import create_validation_loop_for_skill
+        validation_loop_id = create_validation_loop_for_skill(skill_id, agent_id or 'system')
+    except Exception:
+        pass
+
     return result
 
 
@@ -194,4 +202,12 @@ def acquire_skill_via_admin(
         import base64
         result["resource_zip"] = base64.b64decode(result["resource_zip"])
         result.pop("resource_encoding", None)
+
+    # v3.7.1: Auto-trigger validation loop if defined in skill metadata
+    try:
+        from .loop_api import create_validation_loop_for_skill
+        validation_loop_id = create_validation_loop_for_skill(skill_id, 'system')
+    except Exception:
+        pass
+
     return result

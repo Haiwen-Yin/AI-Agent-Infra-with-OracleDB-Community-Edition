@@ -439,3 +439,42 @@ def validate_group_progress(spec_id: str, group_id: str) -> Dict[str, Any]:
     """Validate a collaboration group's overall progress against a spec."""
     from . import collab_api
     return collab_api.validate_group_against_spec(group_id, spec_id)
+
+
+def derive_loop_from_spec(spec_id: str, agent_id: str) -> Dict[str, Any]:
+    """Derive a loop definition from a spec. Returns the derived loop parameters."""
+    spec = get_spec(spec_id)
+    if not spec:
+        raise ValueError(f"Spec {spec_id} not found")
+
+    properties = spec.get("properties", {})
+    acceptance_criteria = properties.get("acceptance_criteria", [])
+
+    goal_definition = {
+        "type": "SPEC_VALIDATION",
+        "spec_id": spec_id,
+        "success_criteria": [str(c) for c in acceptance_criteria] if acceptance_criteria else [f"Spec {spec_id} validated"],
+        "constraints": ["Must validate against all acceptance criteria"]
+    }
+
+    stop_conditions = {
+        "max_iterations": 10,
+        "timeout_minutes": 60,
+        "consecutive_passes": 2
+    }
+
+    evaluation_config = {
+        "type": "SPEC_VALIDATION",
+        "spec_id": spec_id,
+        "criteria": [str(c) for c in acceptance_criteria] if acceptance_criteria else []
+    }
+
+    return {
+        "title": f"Loop for spec: {spec.get('title', spec_id)}",
+        "summary": f"Auto-derived loop for spec validation",
+        "goal_definition": goal_definition,
+        "stop_conditions": stop_conditions,
+        "evaluation_config": evaluation_config,
+        "spec_id": spec_id,
+        "owned_by_agent": agent_id
+    }

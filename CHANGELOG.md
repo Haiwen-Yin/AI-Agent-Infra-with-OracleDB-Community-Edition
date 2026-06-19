@@ -5,6 +5,52 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
+## [3.7.1] - 2026-06-19
+
+### Summary
+
+**Loop Engineering Collaborative Integration** — Connects Loop Engineering with Spec, Task, Branch, Collab, and Skill modules, enabling Spec-driven loops, Task-Loop bindings, and Collaborative Loops. Also fixes session persistence, PG loop API compatibility, and adds SPEC_VALIDATION and AGGREGATE evaluation types.
+
+### Added - Both Editions
+
+- **Spec-Driven Loop** — Create loops from Spec acceptance criteria; SPEC_VALIDATION evaluation type validates against spec criteria
+- **Task-Loop Binding** — Bind loops to task steps; step auto-completes when loop succeeds; new TASK_LOOP_BINDING table
+- **Collaborative Loop** — Create parent/child loops for collaboration groups; AGGREGATE evaluation type collects child results; 2-level nesting limit
+- **Branch-Isolated Loop** — Loops bound to a branch_id automatically run in branch context
+- **Skill-Triggered Loop** — Skills with validation_loop metadata auto-start verification loops on acquire
+- LOOP_META new columns: SPEC_ID, PARENT_LOOP_ID, COLLAB_GROUP_ID
+- LOOP_RUNS new column: PARENT_RUN_ID
+- TASK_STEPS new columns: LOOP_ID, STEP_COMPLETION_TYPE (MANUAL/LOOP/SPEC + WAITING_LOOP status)
+- TASK_LOOP_BINDING table (BINDING_ID, STEP_ID, LOOP_ID, BINDING_TYPE, AUTO_START)
+- SPEC_VALIDATION evaluation type — validates iteration against spec acceptance_criteria
+- AGGREGATE evaluation type — aggregates child loop run results
+- 7 new API endpoints: /api/loops/from-spec, /api/loops/collab, /api/loops/{id}/children, /api/loops/{id}/aggregation, /api/tasks/steps/{id}/bind-loop, /api/tasks/steps/{id}/loop, /api/collab/{id}/loop
+- 8 new loop_api.py functions: create_loop_from_spec, create_collab_loop, create_sub_loops_for_group, aggregate_child_runs, bind_loop_to_step, get_step_loop, on_loop_run_completed, create_validation_loop_for_skill
+- derive_loop_from_spec() in spec_api.py
+- bind_loop_to_step(), get_step_loop() in task_plan_api.py
+- create_group_loop(), get_group_loop_status() in collab_api.py
+- loops.html: From Spec creation, Collab Group selector, Child Loops panel, SPEC_VALIDATION/AGGREGATE badges
+- [ENT only] LOOP_AUDIT COLLAB_GROUP_ID column for collaborative audit trail
+- [ENT only] log_loop_audit() enhanced with collaborative action types: SUB_LOOP_CREATED, SUB_LOOP_COMPLETED, AGGREGATION_DONE
+
+### Fixed - Both Editions
+
+- **Session persistence** — Added Max-Age=3600 to session cookie; session survives tab switches
+- **Session timeout** — Changed from 5-hour (300*60) to 5-minute sliding window using last_access
+- **PG loop API compatibility** — Fixed method name mismatches (_api_loop_get → _api_loops_get etc.)
+- **PG runs API** — Fixed _api_loops_runs() signature to accept qs parameter
+- **Oracle COM loop API imports** — Fixed from scripts.lib.loop_api to from lib.loop_api
+- **Oracle COM missing handlers** — Added _api_loops_stats, _api_loops_hooks, _api_loops_run_get methods
+- **COM navigation** — Added loops link to Community Edition sidebar
+- **Loop detail close button** — Added ❌ close button to detail panel header
+- **Oracle ENT audit** — Added missing /audit route and /api/audit endpoint
+- **PG ENT audit** — Created audit_api.py, audit.html, routes, and endpoints
+- **PG authentication** — Fixed user_manager.authenticate() hash comparison with upper()
+- **Route order** — /api/loops/{id}/children and /aggregation now match before catch-all /api/loops/{id}
+- **Server startup** — Fixed startup script using nohup instead of setsid
+- **PG ENT edition label** — Fixed templates showing "Community Edition" instead of "Enterprise Edition"
+
+---
 ## [3.7.0] - 2026-06-18
 
 ### Summary
