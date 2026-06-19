@@ -2,7 +2,7 @@
 
 **版本**: v3.7.2 | **日期**: 2026-06-19 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
-> v3.7.0 引入循环工程（Loop Engineering）——第4代 AI 工程方法论（继提示词工程、上下文工程、Harness 工程之后），由 Peter Steinberger 于2026年6月提出。新增4张循环表、LOOP_MANAGER PL/SQL包、loop_api.py Python模块、6种评估类型、生命周期钩子和3个调度作业。v3.7.2 新增循环工程协同集成：规格驱动循环、Task-Loop 绑定、协作循环、SPEC_VALIDATION 与 AGGREGATE 评估类型。同时修复会话持久化、PG 循环 API 兼容性等问题。
+> v3.7.0 引入循环工程（Loop Engineering）——第4代 AI 工程方法论（继提示词工程、上下文工程、Harness 工程之后），由 Peter Steinberger 于2026年6月提出。新增4张循环表、LOOP_MANAGER PL/SQL包、loop_api.py Python模块、6种评估类型、生命周期钩子和3个调度作业。v3.7.1 新增循环工程协同集成：规格驱动循环、Task-Loop 绑定、协作循环、SPEC_VALIDATION 与 AGGREGATE 评估类型、Skill-Triggered Loop。同时修复会话持久化、PG 循环 API 兼容性等问题。v3.7.2 文档一致性修正：LOOP_MANAGER 函数数、loop_api 公共函数数、LOOP_CLEANUP 调度、PG 术语、ENTITIES 分区数、评估类型数、架构图对齐等。
 
 ### v3.6.0 新增功能
 
@@ -29,12 +29,24 @@
 
 **Skill 分发 API**：`GET /api/admin/skill/list`、`GET /api/admin/skill/{id}/acquire`，Business Agent 通过 Admin Agent 获取 Skill 内容。
 
-### v3.7.2 修复
+### v3.7.1 修复
 
 - **Portal 登录**：修复缺失的 `_handle_portal_login()` 方法，Portal 用户现在可以正常登录并被自动分配 Pool Agent
 - **Portal 注册**：注册响应新增 `has_agent` 字段，前端可正确判断 Agent 可用性
 - **图谱交互**：详情面板改为固定浮层，不再挤压图谱容器；点击空白关闭详情并重置高亮；所有交互保持视图位置不变
 - **文档修正**：Deep Sec 引入版本号 v3.5.0→v3.4.0、PBKDF2 描述 SHA256/100K→SHA512/210K、Admin Token 格式 AT_+32hex、Data Grant 数量 22→23、测试计数更新、端口号 8000→18080/18090、版本号显示统一至 v3.7.2
+
+### v3.7.2 文档一致性修正
+
+- **LOOP_MANAGER 函数数**：~33 → ~22（实际子程序数）
+- **loop_api.py**：33 functions → 32 公共 API 函数 + 私有评估辅助函数
+- **LOOP_CLEANUP_JOB 调度**：Daily 03:00 → Weekly Sunday 06:00
+- **PG 术语**：PL/SQL package → PL/pgSQL schema
+- **ENTITIES 分区数**：7 → 8（含 SKILL）
+- **引用分区子表数**：6 → 8（含 SKILL_META、LOOP_META）
+- **评估类型数**：4 → 6（含 SPEC_VALIDATION、AGGREGATE）
+- **SKILL_MANAGER**：从社区版 SKILL.md 移除（仅企业版存在）
+- **架构图**：box-drawing 矩形图 → 树符号 + Markdown 表格，修复对齐与分区缺失
 
 ---
 
@@ -340,7 +352,7 @@ Agent 弹性管理系统提供智能体的完整生命周期管理，包括注�
 
 ```
 POOL ──assign_random_pool_agent()──▸ ACTIVE
-  ▴                               	 │
+  ▴                                  │
   └──────hibernate_agent()───────────┘
         (DORMANT_AGENT_JOB auto-trigger)
 ```
