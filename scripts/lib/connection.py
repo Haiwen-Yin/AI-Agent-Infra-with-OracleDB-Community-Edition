@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.7.3 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -46,7 +46,7 @@ def get_pool() -> oracledb.ConnectionPool:
             if _pool is None:
                 cfg = get_config()
                 if cfg.agent.mode == "agent":
-                    raise RuntimeError("AIADMIN pool not available in agent mode")
+                    raise RuntimeError("Schema owner pool not available in agent mode")
                 db_cfg = cfg.database
                 logger.info("Initializing connection pool: %s@%s (min=%d, max=%d)",
                             db_cfg.user, db_cfg.dsn, db_cfg.pool_min, db_cfg.pool_max)
@@ -145,7 +145,7 @@ def get_end_user_connection(agent_id: str) -> Optional[oracledb.Connection]:
                 dsn=db_cfg.dsn,
             )
             with conn.cursor() as cur:
-                cur.execute("ALTER SESSION SET CURRENT_SCHEMA = AIADMIN")
+                cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {cfg.database.user}")
             _end_user_connections[agent_id] = conn
             _logger.info("Created Deep Sec End User connection for %s (EU: %s)", agent_id, eu_name)
             return conn
@@ -177,7 +177,7 @@ def _get_agent_mode_end_user_connection(agent_id: str) -> Optional[oracledb.Conn
             dsn=creds["dsn"],
         )
         with conn.cursor() as cur:
-            cur.execute("ALTER SESSION SET CURRENT_SCHEMA = AIADMIN")
+            cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {cfg.database.user}")
         with _end_user_lock:
             _end_user_connections[agent_id] = conn
         _logger.info("Created Agent-mode End User connection for %s (EU: %s)", agent_id, creds["username"])
@@ -226,14 +226,14 @@ def apply_agent_context(conn: oracledb.Connection, agent_id: Optional[str] = Non
     if aid:
         try:
             with conn.cursor() as cur:
-                cur.execute("BEGIN AIADMIN.SET_AGENT_CONTEXT.set_agent_id(:aid); END;", {"aid": aid})
+                cur.execute(f"BEGIN {cfg.database.user}.SET_AGENT_CONTEXT.set_agent_id(:aid); END;", {"aid": aid})
         except oracledb.Error as e:
             _logger.debug("SET_AGENT_CONTEXT.set_agent_id failed (Deep Sec not deployed?): %s", e)
 
 def clear_agent_context(conn: oracledb.Connection) -> None:
     try:
         with conn.cursor() as cur:
-            cur.execute("BEGIN AIADMIN.SET_AGENT_CONTEXT.clear_context(); END;")
+            cur.execute(f"BEGIN {cfg.database.user}.SET_AGENT_CONTEXT.clear_context(); END;")
     except oracledb.Error as e:
         _logger.debug("SET_AGENT_CONTEXT.clear_context failed (Deep Sec not deployed?): %s", e)
 

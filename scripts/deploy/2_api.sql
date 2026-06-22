@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.7.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.7.3 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1349,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.7.0 API Deployment Complete
+PROMPT AI Agent Infra v3.7.3 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2087,7 +2087,7 @@ END BRANCH_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT 14. LOOP_MANAGER Package [NEW v3.7.0]
+PROMPT 14. LOOP_MANAGER Package [NEW v3.7.3]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE LOOP_MANAGER AS
@@ -2619,5 +2619,5 @@ END LOOP_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.7.0 - Community Edition API Deployment Complete
+PROMPT AI Agent Infra v3.7.3 - Community Edition API Deployment Complete
 PROMPT ============================================================

@@ -1,7 +1,7 @@
-"""AI Agent Infra v3.7.0 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.7.3 - Community Edition - Unified Configuration Manager
 
-Reads from config.json with environment variable overrides.
-Priority: Environment Variables > config.json > Built-in defaults
+Reads from encrypted config.json with environment variable fallback.
+Priority: config.json (encrypted) > Environment Variables > Built-in defaults
 Supports Admin/Agent separation modes (standalone, admin, agent).
 """
 
@@ -14,16 +14,16 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "3.7.0"
+VERSION = "3.7.3"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @dataclass(frozen=True)
 class DatabaseConfig:
-    user: str = "openclaw"
-    password: str = "hermes"
-    dsn: str = "10.10.10.130:1521/openclaw"
+    user: str = "aiadmin"
+    password: str = "oracle"
+    dsn: str = "localhost:1521/free"
     pool_min: int = 2
     pool_max: int = 5
     pool_increment: int = 1
@@ -40,15 +40,15 @@ class ServerConfig:
 
 @dataclass(frozen=True)
 class EmbeddingConfig:
-    api_url: str = "http://10.10.10.1:12345/v1/embeddings"
-    model: str = "text-embedding-bge-m3"
-    dimension: int = 1024
+    api_url: str = ""
+    model: str = ""
+    dimension: int = 0
 
 
 @dataclass(frozen=True)
 class SecurityConfig:
     masking_enabled: bool = True
-    pbkdf2_iterations: int = 100000
+    pbkdf2_iterations: int = 210000
     max_login_attempts: int = 5
     lockout_minutes: int = 15
 
@@ -109,10 +109,11 @@ def load_config() -> Config:
 
     db_resolved = _decrypt_database_section(db_raw)
 
+    # Priority: config.json (decrypted) > Environment Variables > Defaults
     db = DatabaseConfig(
-        user=os.environ.get("MEMORY_DB_USER", db_resolved.get("user", DatabaseConfig.user)),
-        password=os.environ.get("MEMORY_DB_PASSWORD", db_resolved.get("password", DatabaseConfig.password)),
-        dsn=os.environ.get("MEMORY_DB_DSN", db_resolved.get("dsn", DatabaseConfig.dsn)),
+        user=db_resolved.get("user") or os.environ.get("MEMORY_DB_USER", DatabaseConfig.user),
+        password=db_resolved.get("password") or os.environ.get("MEMORY_DB_PASSWORD", DatabaseConfig.password),
+        dsn=db_resolved.get("dsn") or os.environ.get("MEMORY_DB_DSN", DatabaseConfig.dsn),
         pool_min=int(db_resolved.get("pool_min", DatabaseConfig.pool_min)),
         pool_max=int(db_resolved.get("pool_max", DatabaseConfig.pool_max)),
         pool_increment=int(db_resolved.get("pool_increment", DatabaseConfig.pool_increment)),
@@ -121,15 +122,15 @@ def load_config() -> Config:
     )
 
     srv = ServerConfig(
-        host=os.environ.get("MEMORY_SERVER_HOST", srv_raw.get("host", ServerConfig.host)),
-        port=int(os.environ.get("MEMORY_SERVER_PORT", srv_raw.get("port", ServerConfig.port))),
-        session_timeout=int(os.environ.get("MEMORY_SESSION_TIMEOUT", srv_raw.get("session_timeout", ServerConfig.session_timeout))),
+        host=srv_raw.get("host") or os.environ.get("MEMORY_SERVER_HOST", ServerConfig.host),
+        port=int(srv_raw.get("port") or os.environ.get("MEMORY_SERVER_PORT", ServerConfig.port)),
+        session_timeout=int(srv_raw.get("session_timeout") or os.environ.get("MEMORY_SESSION_TIMEOUT", ServerConfig.session_timeout)),
     )
 
     emb = EmbeddingConfig(
-        api_url=os.environ.get("MEMORY_EMBEDDING_API", emb_raw.get("api_url", EmbeddingConfig.api_url)),
-        model=emb_raw.get("model", EmbeddingConfig.model),
-        dimension=int(emb_raw.get("dimension", EmbeddingConfig.dimension)),
+        api_url=emb_raw.get("api_url") or os.environ.get("MEMORY_EMBEDDING_API", EmbeddingConfig.api_url),
+        model=emb_raw.get("model") or os.environ.get("MEMORY_EMBEDDING_MODEL", EmbeddingConfig.model),
+        dimension=int(emb_raw.get("dimension") or os.environ.get("MEMORY_EMBEDDING_DIM", EmbeddingConfig.dimension)),
     )
 
     sec = SecurityConfig(
@@ -141,10 +142,10 @@ def load_config() -> Config:
 
     agent_raw = raw.get("agent", {})
     agt = AgentModeConfig(
-        mode=os.environ.get("AGENT_MODE", agent_raw.get("mode", AgentModeConfig.mode)),
-        admin_token=os.environ.get("AGENT_ADMIN_TOKEN", agent_raw.get("admin_token", AgentModeConfig.admin_token)),
-        admin_api_url=os.environ.get("AGENT_ADMIN_API_URL", agent_raw.get("admin_api_url", AgentModeConfig.admin_api_url)),
-        agent_id=os.environ.get("AGENT_ID", agent_raw.get("agent_id", AgentModeConfig.agent_id)),
+        mode=agent_raw.get("mode") or os.environ.get("AGENT_MODE", AgentModeConfig.mode),
+        admin_token=agent_raw.get("admin_token") or os.environ.get("AGENT_ADMIN_TOKEN", AgentModeConfig.admin_token),
+        admin_api_url=agent_raw.get("admin_api_url") or os.environ.get("AGENT_ADMIN_API_URL", AgentModeConfig.admin_api_url),
+        agent_id=agent_raw.get("agent_id") or os.environ.get("AGENT_ID", AgentModeConfig.agent_id),
     )
 
     return Config(database=db, server=srv, embedding=emb, security=sec, agent=agt, project_root=_PROJECT_ROOT)

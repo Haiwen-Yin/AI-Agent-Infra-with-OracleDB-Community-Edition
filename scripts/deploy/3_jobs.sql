@@ -1,4 +1,4 @@
--- AI Agent Infra v3.7.0 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.3 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -265,7 +265,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.0]
+PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.3]
 PROMPT ============================================================
 
 BEGIN
@@ -285,7 +285,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.0]
+PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.3]
 PROMPT ============================================================
 
 BEGIN
@@ -305,7 +305,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.0]
+PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.3]
 PROMPT ============================================================
 
 BEGIN
@@ -324,4 +324,4 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.7.0 - Community Edition - Phase 3: Scheduler Jobs Complete (16 jobs)
+PROMPT AI Agent Infra v3.7.3 - Community Edition - Phase 3: Scheduler Jobs Complete (16 jobs)

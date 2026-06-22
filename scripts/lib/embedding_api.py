@@ -42,6 +42,12 @@ def _get_api_config() -> Dict[str, Any]:
 def _detect_dimension(model: str, api_url: str) -> int:
     if model in MODEL_DIMENSIONS:
         return MODEL_DIMENSIONS[model]
+    if not api_url or not model:
+        raise ValueError(
+            "Embedding model not configured. "
+            "Please set embedding.api_url and embedding.model in config.json. "
+            "Supported models: " + ", ".join(sorted(MODEL_DIMENSIONS.keys()))
+        )
     try:
         result = generate_embedding("dimension probe", api_url=api_url, model=model)
         return len(result)

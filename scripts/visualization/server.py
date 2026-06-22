@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.2 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.7.3 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -25,7 +25,7 @@ from lib import spec_api, collab_api, branch_api
 from lib import security, config, user_api
 from lib import loop_api
 
-VERSION = "3.7.0"
+VERSION = "3.7.3"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -2288,6 +2288,26 @@ def main():
         print("[server] Database connection pool initialized")
     except Exception as e:
         print("[server] WARNING: Database connection failed: {}".format(e))
+
+    try:
+        from lib.config import get_config
+        emb_cfg = get_config().embedding
+        if not emb_cfg.model or not emb_cfg.api_url:
+            print("[server] WARNING: Embedding model not configured.")
+            print("[server]   Set embedding.api_url and embedding.model in config.json.")
+            print("[server]   Vector search and embedding features will be unavailable until configured.")
+        else:
+            print("[server] Embedding model: {} (dim={})".format(emb_cfg.model, emb_cfg.dimension))
+    except Exception as e:
+        print("[server] WARNING: Could not load embedding config: {}".format(e))
+
+    emb_cfg = connection.get_config().embedding
+    if not emb_cfg.api_url or not emb_cfg.model:
+        print("[server] WARNING: Embedding model not configured. "
+              "Vector search and embedding generation will not work. "
+              "Please set embedding.api_url and embedding.model in config.json.")
+    else:
+        print("[server] Embedding model: {} (dim={})".format(emb_cfg.model, emb_cfg.dimension))
 
     server = HTTPServer((host, port), VisHandler)
     print("[server] AI Agent Infra v{} visualization server".format(VERSION))

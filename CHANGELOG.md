@@ -4,6 +4,30 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.7.3] - 2026-06-23
+
+### Summary
+
+Deployment fix release — resolves schema creation order issues, hardcoded schema owner names, configuration priority, and embedding model auto-detection discovered during fresh deployment testing.
+
+### Fixed - Oracle COM/ENT
+
+- **CONTEXT_BRANCHES FK ordering** — Removed inline FK constraints referencing not-yet-created tables (WORKSPACES, WORKSPACE_CONTEXT, AGENT_REGISTRY); added via ALTER TABLE after parent tables exist
+- **LOOP_RUNS self-reference** — Moved UK_LOOP_RUNS_ID UNIQUE(RUN_ID) inline to CREATE TABLE (was added via ALTER TABLE after, causing ORA-02270 on FK_LR_PARENT_RUN self-reference)
+- **LOOP_ITERATIONS partitioning** — Changed from PARTITION BY REFERENCE to PARTITION BY RANGE(STARTED_AT) to resolve incompatibility with parent table's composite subpartitioning (ORA-14661)
+
+### Fixed - All Editions
+
+- **Hardcoded schema owner** — 4_grants.sql and 6_deep_sec_policy.sql: replaced literal AIADMIN with `DEFINE SCHEMA_OWNER` substitution variable; connection.py: `ALTER SESSION SET CURRENT_SCHEMA` and `SET_AGENT_CONTEXT` calls now read schema name from config
+- **PG RLS policy** — Replaced hardcoded `'aiadmin'` in RLS policies with psql variable `:'schema_owner'`
+- **PG agent_bootstrap.py** — Changed `SET search_path TO aiadmin` to `SET search_path TO public`
+- **Config priority** — Changed from Environment Variables > config.json > Defaults to config.json (encrypted) > Environment Variables > Defaults; removed hardcoded default credentials (openclaw/hermes/10.10.10.130)
+- **EmbeddingConfig defaults** — Changed from hardcoded model/dimension to empty strings, forcing explicit configuration
+- **SecurityConfig** — pbkdf2_iterations default 100000 → 210000
+- **Embedding model auto-detection** — embedding_api.py now raises ValueError with supported model list when embedding model is not configured, instead of silently using default
+- **server.py startup** — Added embedding configuration check with WARNING message on startup
+
+---
 ## [3.7.2] - 2026-06-19
 
 ### Fixed — Documentation Consistency
@@ -145,12 +169,6 @@ Bug fix release — fixes Portal login error (`_handle_portal_login` method miss
 - **Graph detail panel** — Changed to `position:fixed` overlay to prevent graph resize/pan when showing details
 - **Graph click behavior** — Click blank area now closes detail panel and resets highlight; view position preserved on all interactions
 
----
-
-
-## [Unreleased]
-
----
 ---
 
 

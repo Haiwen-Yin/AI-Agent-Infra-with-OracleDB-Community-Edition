@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.0 - Community Edition - Connection Crypto Module
+"""AI Agent Infra v3.7.3 - Community Edition - Connection Crypto Module
 
 Encrypts and decrypts database connection information in config.json.
 Uses PBKDF2-HMAC-SHA512 key derivation and stream cipher with HMAC authentication.

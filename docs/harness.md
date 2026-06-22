@@ -1,4 +1,4 @@
-# Harness Template System - AI Agent Infra v3.7.0 (2026-06-18) - Community Edition
+# Harness Template System - AI Agent Infra v3.7.3 (2026-06-18) - Community Edition
 
 ## Overview
 
