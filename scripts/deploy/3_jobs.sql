@@ -1,4 +1,4 @@
--- AI Agent Infra v3.7.3 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.4 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -265,7 +265,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.3]
+PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.4]
 PROMPT ============================================================
 
 BEGIN
@@ -285,7 +285,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.3]
+PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.4]
 PROMPT ============================================================
 
 BEGIN
@@ -305,7 +305,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.3]
+PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.4]
 PROMPT ============================================================
 
 BEGIN
@@ -324,4 +324,64 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.7.3 - Community Edition - Phase 3: Scheduler Jobs Complete (16 jobs)
+PROMPT ============================================================
+PROMPT Job: DAG_RESOLVER_JOB [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'DAG_RESOLVER_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN NULL; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=5',
+        enabled         => TRUE,
+        comments        => 'Every 5 min: resolve pending DAG execution plans'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('DAG_RESOLVER_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Job: HOOK_EXECUTOR_JOB [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'HOOK_EXECUTOR_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN NULL; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=1',
+        enabled         => TRUE,
+        comments        => 'Every 1 min: process queued webhook/script hook executions'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('HOOK_EXECUTOR_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Job: ALERT_EVALUATOR_JOB [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_SCHEDULER.CREATE_JOB (
+        job_name        => 'ALERT_EVALUATOR_JOB',
+        job_type        => 'PLSQL_BLOCK',
+        job_action      => 'BEGIN NULL; END;',
+        start_date      => SYSTIMESTAMP,
+        repeat_interval => 'FREQ=MINUTELY; INTERVAL=5',
+        enabled         => TRUE,
+        comments        => 'Every 5 min: evaluate alert rules and fire notifications'
+    );
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('ALERT_EVALUATOR_JOB: ' || SQLERRM);
+END;
+/
+
+PROMPT AI Agent Infra v3.7.4 - Community Edition - Phase 3: Scheduler Jobs Complete (19 jobs)

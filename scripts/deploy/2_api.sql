@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.7.3 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.7.4 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1349,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.7.3 API Deployment Complete
+PROMPT AI Agent Infra v3.7.4 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2087,7 +2087,7 @@ END BRANCH_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT 14. LOOP_MANAGER Package [NEW v3.7.3]
+PROMPT 14. LOOP_MANAGER Package [NEW v3.7.4]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE LOOP_MANAGER AS
@@ -2619,5 +2619,279 @@ END LOOP_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.7.3 - Community Edition API Deployment Complete
+PROMPT 15. COLLAB_MESSAGE_MANAGER Package [NEW v3.7.4]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE COLLAB_MESSAGE_MANAGER AS
+    FUNCTION send_message(
+        p_group_id    VARCHAR2,
+        p_sender      VARCHAR2,
+        p_body        CLOB,
+        p_receiver    VARCHAR2 DEFAULT NULL,
+        p_subject     VARCHAR2 DEFAULT NULL,
+        p_type        VARCHAR2 DEFAULT 'TEXT',
+        p_priority    VARCHAR2 DEFAULT 'NORMAL',
+        p_parent_id   VARCHAR2 DEFAULT NULL,
+        p_attachment  VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2;
+
+    FUNCTION get_message(p_message_id VARCHAR2) RETURN JSON;
+
+    FUNCTION get_unread_count(p_agent_id VARCHAR2, p_group_id VARCHAR2 DEFAULT NULL) RETURN NUMBER;
+
+    PROCEDURE mark_read(p_message_id VARCHAR2, p_agent_id VARCHAR2);
+
+    FUNCTION get_thread(p_message_id VARCHAR2) RETURN SYS_REFCURSOR;
+
+    FUNCTION search_messages(p_query VARCHAR2, p_group_id VARCHAR2 DEFAULT NULL) RETURN SYS_REFCURSOR;
+END COLLAB_MESSAGE_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY COLLAB_MESSAGE_MANAGER AS
+    FUNCTION send_message(
+        p_group_id    VARCHAR2,
+        p_sender      VARCHAR2,
+        p_body        CLOB,
+        p_receiver    VARCHAR2 DEFAULT NULL,
+        p_subject     VARCHAR2 DEFAULT NULL,
+        p_type        VARCHAR2 DEFAULT 'TEXT',
+        p_priority    VARCHAR2 DEFAULT 'NORMAL',
+        p_parent_id   VARCHAR2 DEFAULT NULL,
+        p_attachment  VARCHAR2 DEFAULT NULL
+    ) RETURN VARCHAR2 IS
+        v_msg_id   VARCHAR2(64) := RAWTOHEX(SYS_GUID());
+        v_thread   VARCHAR2(64);
+    BEGIN
+        IF p_parent_id IS NOT NULL THEN
+            BEGIN
+                SELECT NVL(THREAD_ID, p_parent_id) INTO v_thread
+                FROM COLLAB_MESSAGES WHERE MESSAGE_ID = p_parent_id;
+            EXCEPTION WHEN NO_DATA_FOUND THEN v_thread := NULL;
+            END;
+        END IF;
+
+        INSERT INTO COLLAB_MESSAGES
+            (MESSAGE_ID, GROUP_ID, SENDER_AGENT_ID, RECEIVER_AGENT_ID,
+             PARENT_MESSAGE_ID, THREAD_ID, SUBJECT, BODY,
+             MESSAGE_TYPE, PRIORITY, STATUS, ATTACHMENT_ENTITY_ID)
+        VALUES
+            (v_msg_id, p_group_id, p_sender, p_receiver,
+             p_parent_id, v_thread, p_subject, p_body,
+             p_type, p_priority, 'SENT', p_attachment);
+
+        RETURN v_msg_id;
+    END send_message;
+
+    FUNCTION get_message(p_message_id VARCHAR2) RETURN JSON IS
+        v_result JSON;
+    BEGIN
+        SELECT JSON_OBJECT(
+            'message_id' VALUE MESSAGE_ID,
+            'group_id' VALUE GROUP_ID,
+            'sender' VALUE SENDER_AGENT_ID,
+            'receiver' VALUE RECEIVER_AGENT_ID,
+            'subject' VALUE SUBJECT,
+            'body' VALUE BODY,
+            'type' VALUE MESSAGE_TYPE,
+            'priority' VALUE PRIORITY,
+            'status' VALUE STATUS,
+            'created_at' VALUE TO_CHAR(CREATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS'),
+            'read_at' VALUE CASE WHEN READ_AT IS NOT NULL THEN TO_CHAR(READ_AT, 'YYYY-MM-DD"T"HH24:MI:SS') ELSE NULL END
+        ) INTO v_result
+        FROM COLLAB_MESSAGES WHERE MESSAGE_ID = p_message_id;
+        RETURN v_result;
+    EXCEPTION WHEN NO_DATA_FOUND THEN RETURN NULL;
+    END get_message;
+
+    FUNCTION get_unread_count(p_agent_id VARCHAR2, p_group_id VARCHAR2 DEFAULT NULL) RETURN NUMBER IS
+        v_count NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_count
+        FROM COLLAB_MESSAGES
+        WHERE (RECEIVER_AGENT_ID = p_agent_id OR RECEIVER_AGENT_ID IS NULL)
+          AND STATUS IN ('SENT', 'DELIVERED')
+          AND (p_group_id IS NULL OR GROUP_ID = p_group_id);
+        RETURN v_count;
+    END get_unread_count;
+
+    PROCEDURE mark_read(p_message_id VARCHAR2, p_agent_id VARCHAR2) IS
+    BEGIN
+        UPDATE COLLAB_MESSAGES
+        SET READ_AT = SYSTIMESTAMP, STATUS = 'READ'
+        WHERE MESSAGE_ID = p_message_id
+          AND (RECEIVER_AGENT_ID = p_agent_id OR RECEIVER_AGENT_ID IS NULL);
+    END mark_read;
+
+    FUNCTION get_thread(p_message_id VARCHAR2) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+        v_thread VARCHAR2(64);
+    BEGIN
+        SELECT NVL(THREAD_ID, MESSAGE_ID) INTO v_thread
+        FROM COLLAB_MESSAGES WHERE MESSAGE_ID = p_message_id;
+
+        OPEN v_cur FOR
+            SELECT * FROM COLLAB_MESSAGES
+            WHERE THREAD_ID = v_thread OR MESSAGE_ID = v_thread
+            ORDER BY CREATED_AT;
+        RETURN v_cur;
+    END get_thread;
+
+    FUNCTION search_messages(p_query VARCHAR2, p_group_id VARCHAR2 DEFAULT NULL) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT * FROM COLLAB_MESSAGES
+            WHERE (UPPER(SUBJECT) LIKE '%' || UPPER(p_query) || '%'
+                   OR UPPER(BODY) LIKE '%' || UPPER(p_query) || '%')
+              AND (p_group_id IS NULL OR GROUP_ID = p_group_id)
+            ORDER BY CREATED_AT DESC
+            FETCH FIRST 50 ROWS ONLY;
+        RETURN v_cur;
+    END search_messages;
+END COLLAB_MESSAGE_MANAGER;
+/
+
+PROMPT ============================================================
+PROMPT 16. TRACE_MANAGER Package [NEW v3.7.4]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE TRACE_MANAGER AS
+    FUNCTION init_trace(p_source VARCHAR2 DEFAULT 'API') RETURN VARCHAR2;
+    FUNCTION get_trace_tree(p_trace_id VARCHAR2) RETURN SYS_REFCURSOR;
+    FUNCTION get_trace_summary(
+        p_agent_id VARCHAR2 DEFAULT NULL,
+        p_since    TIMESTAMP DEFAULT NULL,
+        p_limit    NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR;
+    FUNCTION get_span_count(p_trace_id VARCHAR2) RETURN NUMBER;
+END TRACE_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY TRACE_MANAGER AS
+    FUNCTION init_trace(p_source VARCHAR2 DEFAULT 'API') RETURN VARCHAR2 IS
+        v_id VARCHAR2(64) := RAWTOHEX(SYS_GUID());
+    BEGIN
+        RETURN v_id;
+    END init_trace;
+
+    FUNCTION get_trace_tree(p_trace_id VARCHAR2) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT 'SESSION' AS span_type, SESSION_ID AS span_id, AGENT_ID, START_TIME, END_TIME, TRACE_ID
+            FROM AGENT_SESSION WHERE TRACE_ID = p_trace_id
+            UNION ALL
+            SELECT 'PLAN', PLAN_ID, AGENT_ID, CREATED_AT, COMPLETED_AT, TRACE_ID
+            FROM TASK_PLANS WHERE TRACE_ID = p_trace_id
+            UNION ALL
+            SELECT 'RUN', RUN_ID, AGENT_ID, STARTED_AT, COMPLETED_AT, TRACE_ID
+            FROM LOOP_RUNS WHERE TRACE_ID = p_trace_id
+            UNION ALL
+            SELECT 'TOOL', CALL_ID, NULL, CREATED_AT, NULL, TRACE_ID
+            FROM TASK_TOOL_CALLS WHERE TRACE_ID = p_trace_id
+            ORDER BY 4;
+        RETURN v_cur;
+    END get_trace_tree;
+
+    FUNCTION get_trace_summary(
+        p_agent_id VARCHAR2 DEFAULT NULL,
+        p_since    TIMESTAMP DEFAULT NULL,
+        p_limit    NUMBER DEFAULT 50
+    ) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT s.TRACE_ID, s.AGENT_ID, s.SESSION_ID,
+                   s.START_TIME, s.END_TIME, s.IS_ACTIVE,
+                   (SELECT COUNT(*) FROM TASK_PLANS p WHERE p.TRACE_ID = s.TRACE_ID) AS plan_count,
+                   (SELECT COUNT(*) FROM LOOP_RUNS r WHERE r.TRACE_ID = s.TRACE_ID) AS run_count,
+                   (SELECT COUNT(*) FROM TASK_TOOL_CALLS t WHERE t.TRACE_ID = s.TRACE_ID) AS tool_count
+            FROM AGENT_SESSION s
+            WHERE s.TRACE_ID IS NOT NULL
+              AND (p_agent_id IS NULL OR s.AGENT_ID = p_agent_id)
+              AND (p_since IS NULL OR s.START_TIME >= p_since)
+            ORDER BY s.START_TIME DESC
+            FETCH FIRST p_limit ROWS ONLY;
+        RETURN v_cur;
+    END get_trace_summary;
+
+    FUNCTION get_span_count(p_trace_id VARCHAR2) RETURN NUMBER IS
+        v_total NUMBER := 0;
+    BEGIN
+        SELECT COUNT(*) INTO v_total FROM AGENT_SESSION WHERE TRACE_ID = p_trace_id;
+        SELECT COUNT(*) + v_total INTO v_total FROM TASK_PLANS WHERE TRACE_ID = p_trace_id;
+        SELECT COUNT(*) + v_total INTO v_total FROM LOOP_RUNS WHERE TRACE_ID = p_trace_id;
+        SELECT COUNT(*) + v_total INTO v_total FROM TASK_TOOL_CALLS WHERE TRACE_ID = p_trace_id;
+        RETURN v_total;
+    END get_span_count;
+END TRACE_MANAGER;
+/
+
+PROMPT ============================================================
+PROMPT 17. MONITOR_MANAGER Package [NEW v3.7.4]
+PROMPT ============================================================
+
+CREATE OR REPLACE PACKAGE MONITOR_MANAGER AS
+    FUNCTION get_stalled_agents(p_idle_minutes NUMBER DEFAULT 10) RETURN SYS_REFCURSOR;
+    FUNCTION get_active_plan_counts RETURN SYS_REFCURSOR;
+    FUNCTION get_token_usage_trend(p_days NUMBER DEFAULT 7) RETURN SYS_REFCURSOR;
+    FUNCTION get_loop_health RETURN SYS_REFCURSOR;
+END MONITOR_MANAGER;
+/
+
+CREATE OR REPLACE PACKAGE BODY MONITOR_MANAGER AS
+    FUNCTION get_stalled_agents(p_idle_minutes NUMBER DEFAULT 10) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT a.AGENT_ID, a.AGENT_NAME, a.STATUS, a.LAST_SEEN_AT, a.LAST_ACTIVE_AT,
+                   ROUND(EXTRACT(DAY FROM (SYSTIMESTAMP - NVL(a.LAST_ACTIVE_AT, a.LAST_SEEN_AT)))*24*60 +
+                         EXTRACT(HOUR FROM (SYSTIMESTAMP - NVL(a.LAST_ACTIVE_AT, a.LAST_SEEN_AT)))*60 +
+                         EXTRACT(MINUTE FROM (SYSTIMESTAMP - NVL(a.LAST_ACTIVE_AT, a.LAST_SEEN_AT))), 1) AS idle_minutes
+            FROM AGENT_REGISTRY a
+            WHERE a.STATUS IN ('ACTIVE', 'POOL')
+              AND NVL(a.LAST_ACTIVE_AT, a.LAST_SEEN_AT) < SYSTIMESTAMP - NUMTODSINTERVAL(p_idle_minutes, 'MINUTE')
+            ORDER BY idle_minutes DESC;
+        RETURN v_cur;
+    END get_stalled_agents;
+
+    FUNCTION get_active_plan_counts RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT AGENT_ID, COUNT(*) AS plan_count, STATUS
+            FROM TASK_PLANS
+            WHERE STATUS IN ('PENDING', 'RUNNING', 'BLOCKED')
+            GROUP BY AGENT_ID, STATUS
+            ORDER BY AGENT_ID;
+        RETURN v_cur;
+    END get_active_plan_counts;
+
+    FUNCTION get_token_usage_trend(p_days NUMBER DEFAULT 7) RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT TRUNC(STARTED_AT) AS day, COUNT(*) AS run_count, SUM(TOTAL_TOKENS) AS total_tokens
+            FROM LOOP_RUNS
+            WHERE STARTED_AT >= SYSTIMESTAMP - NUMTODSINTERVAL(p_days, 'DAY')
+            GROUP BY TRUNC(STARTED_AT)
+            ORDER BY day;
+        RETURN v_cur;
+    END get_token_usage_trend;
+
+    FUNCTION get_loop_health RETURN SYS_REFCURSOR IS
+        v_cur SYS_REFCURSOR;
+    BEGIN
+        OPEN v_cur FOR
+            SELECT STATUS, COUNT(*) AS cnt
+            FROM LOOP_RUNS
+            WHERE STARTED_AT >= SYSTIMESTAMP - NUMTODSINTERVAL(1, 'DAY')
+            GROUP BY STATUS
+            ORDER BY cnt DESC;
+        RETURN v_cur;
+    END get_loop_health;
+END MONITOR_MANAGER;
+/
+
+PROMPT AI Agent Infra v3.7.4 - Community Edition API Deployment Complete
 PROMPT ============================================================

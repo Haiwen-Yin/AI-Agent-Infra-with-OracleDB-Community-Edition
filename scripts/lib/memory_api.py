@@ -237,3 +237,88 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
         "updated_at": row.get("updated_at"),
         "expires_at": row.get("expires_at"),
     }
+
+
+# -- D4: Advanced Memory Management (v3.7.4) --
+
+def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dict[str, Any]:
+    """Merge branch memories into target workspace, resolving conflicts."""
+    from .connection import execute_query, execute_insert_returning_id
+    from .branch_api import get_branch_context_chain
+
+    memories = execute_query(
+        """SELECT e.ENTITY_ID, e.TITLE, e.CONTENT, e.CATEGORY, e.VISIBILITY
+           FROM ENTITIES e
+           JOIN ENTITY_TAGS et ON et.ENTITY_ID = e.ENTITY_ID AND et.ENTITY_TYPE = e.ENTITY_TYPE
+           WHERE e.ENTITY_TYPE = 'MEMORY'
+             AND (e.WORKSPACE_ID IN (
+                   SELECT WORKSPACE_ID FROM WORKSPACES WHERE BRANCH_ID = :bid
+                  ) OR EXISTS (
+                   SELECT 1 FROM CONTEXT_BRANCHES cb WHERE cb.BRANCH_ID = :bid
+                  ))
+           FETCH FIRST 200 ROWS ONLY""",
+        {"bid": branch_id},
+    )
+
+    merged = 0
+    skipped = 0
+    for m in memories:
+        existing = execute_query_one(
+            "SELECT ENTITY_ID FROM ENTITIES WHERE TITLE = :title AND WORKSPACE_ID = :wid AND ENTITY_TYPE = 'MEMORY'",
+            {"title": m["title"], "wid": target_workspace_id},
+        )
+        if existing:
+            skipped += 1
+            continue
+        execute_insert_returning_id(
+            """INSERT INTO ENTITIES (ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT, CATEGORY,
+               WORKSPACE_ID, VISIBILITY, CREATED_AT)
+               VALUES (RAWTOHEX(SYS_GUID()), 'MEMORY', :title, :content, :cat,
+                       :wid, 'SHARED', SYSTIMESTAMP)
+               RETURNING ENTITY_ID INTO :ret_id""",
+            {"title": m["title"], "content": m["content"],
+             "cat": m.get("category", "CONSOLIDATED"), "wid": target_workspace_id},
+        )
+        merged += 1
+
+    return {"merged": merged, "skipped": skipped, "total": len(memories)}
+
+
+def promote_to_semantic(memory_id: str) -> Optional[str]:
+    """Promote an episodic memory to semantic knowledge."""
+    mem = get_memory(memory_id)
+    if not mem:
+        return None
+
+    from .knowledge_api import create_knowledge
+
+    knowledge_id = create_knowledge(
+        title=mem.get("title", "Promoted Memory"),
+        content=mem.get("content", ""),
+        domain="CONSOLIDATED",
+        topic="EPISODIC_TO_SEMANTIC",
+        workspace_id=mem.get("workspace_id"),
+        visibility=mem.get("visibility", "SHARED"),
+    )
+
+    execute(
+        "UPDATE ENTITIES SET METADATA = JSON_OBJECT('promoted_to' VALUE :kid, 'promoted_at' VALUE SYSTIMESTAMP) "
+        "WHERE ENTITY_ID = :mid",
+        {"kid": knowledge_id, "mid": memory_id},
+    )
+
+    return knowledge_id
+
+
+def schedule_consolidation(agent_id: str, interval_hours: int = 24) -> bool:
+    """Schedule periodic memory consolidation for an agent."""
+    from .connection import execute_insert
+    execute_insert(
+        """INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+           VALUES (:key, :val, :desc)
+           ON DUPLICATE KEY UPDATE CONFIG_VALUE = :val""",
+        {"key": f"consolidation_{agent_id}",
+         "val": str(interval_hours),
+         "desc": f"Memory consolidation interval for {agent_id}"},
+    )
+    return True

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - Community Edition - Loop Engineering API
+"""AI Agent Infra v3.7.4 - Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -16,6 +16,15 @@ from .connection import (
     execute, execute_query, execute_query_one, execute_insert_returning_id,
 )
 from .config import get_config
+
+
+def _fire_hooks(loop_id: str, hook_event: str, context: Optional[Dict[str, Any]] = None):
+    """Fire LOOP_HOOKS for the given event. Silently ignores errors."""
+    try:
+        from .event_bus import execute_hooks
+        execute_hooks(loop_id, hook_event, context)
+    except Exception as e:
+        logger.debug("Hook execution failed for %s/%s: %s", loop_id, hook_event, e)
 
 
 def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,7 +170,7 @@ def list_loops(status: Optional[str] = None, agent_id: Optional[str] = None,
 def start_run(loop_id: str, agent_id: str, trigger_type: str = "MANUAL",
               trigger_source: Optional[str] = None,
               parent_run_id: Optional[str] = None) -> str:
-    return execute_insert_returning_id("""
+    run_id = execute_insert_returning_id("""
         INSERT INTO LOOP_RUNS (RUN_ID, LOOP_ID, AGENT_ID, TRIGGER_TYPE, TRIGGER_SOURCE,
                                STATUS, ITERATION_COUNT, TOTAL_TOKENS, STARTED_AT,
                                PARENT_RUN_ID)
@@ -171,6 +180,8 @@ def start_run(loop_id: str, agent_id: str, trigger_type: str = "MANUAL",
     """, {"loop_id": loop_id, "agent_id": agent_id,
           "trigger_type": trigger_type, "trigger_source": trigger_source,
           "parent_run_id": parent_run_id})
+    _fire_hooks(loop_id, "ON_START", {"run_id": run_id, "agent_id": agent_id})
+    return run_id
 
 
 def get_run(run_id: str) -> Optional[Dict[str, Any]]:
@@ -208,27 +219,37 @@ def resume_run(run_id: str) -> bool:
 
 
 def stop_run(run_id: str, reason: Optional[str] = None) -> bool:
+    run = get_run(run_id)
     result = execute("UPDATE LOOP_RUNS SET STATUS = 'STOPPED', FINAL_RESULT = :reason, "
                      "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
                      "AND STATUS IN ('RUNNING','PAUSED')",
                      {"id": run_id, "reason": reason}) > 0
     if result:
+        if run:
+            _fire_hooks(run["loop_id"], "ON_STOP", {"run_id": run_id, "reason": reason})
         on_loop_run_completed(run_id)
     return result
 
 
 def fail_run(run_id: str, error_message: str) -> bool:
-    return execute("UPDATE LOOP_RUNS SET STATUS = 'FAILED', ERROR_MESSAGE = :err, "
+    run = get_run(run_id)
+    result = execute("UPDATE LOOP_RUNS SET STATUS = 'FAILED', ERROR_MESSAGE = :err, "
                    "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id",
                    {"id": run_id, "err": error_message}) > 0
+    if result and run:
+        _fire_hooks(run["loop_id"], "ON_FAIL", {"run_id": run_id, "error": error_message})
+    return result
 
 
 def complete_run(run_id: str, final_result: Optional[str] = None) -> bool:
+    run = get_run(run_id)
     result = execute("UPDATE LOOP_RUNS SET STATUS = 'COMPLETED', FINAL_RESULT = :result, "
                      "COMPLETED_AT = SYSTIMESTAMP WHERE RUN_ID = :id "
                      "AND STATUS IN ('RUNNING','PAUSED')",
                      {"id": run_id, "result": final_result}) > 0
     if result:
+        if run:
+            _fire_hooks(run["loop_id"], "ON_STOP", {"run_id": run_id, "result": final_result})
         on_loop_run_completed(run_id)
     return result
 
@@ -802,6 +823,11 @@ def execute_loop_iteration(run_id: str, agent_id: str,
             {"result": json.dumps(eval_result), "passed": "Y" if passed else "N",
              "adj": json.dumps({"next_action": "continue" if not passed else "done"}),
              "id": iter_id})
+
+    run = get_run(run_id)
+    if run:
+        _fire_hooks(run["loop_id"], "POST_ITERATION",
+                     {"run_id": run_id, "iteration_id": iter_id, "passed": passed})
 
     if passed:
         execute("UPDATE LOOP_RUNS SET STATUS='COMPLETED', COMPLETED_AT=SYSTIMESTAMP, "

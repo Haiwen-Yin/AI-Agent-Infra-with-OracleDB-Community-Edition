@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.7.4 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -226,14 +226,14 @@ def apply_agent_context(conn: oracledb.Connection, agent_id: Optional[str] = Non
     if aid:
         try:
             with conn.cursor() as cur:
-                cur.execute(f"BEGIN {cfg.database.user}.SET_AGENT_CONTEXT.set_agent_id(:aid); END;", {"aid": aid})
+                cur.execute(f"BEGIN {get_config().database.user}.SET_AGENT_CONTEXT.set_agent_id(:aid); END;", {"aid": aid})
         except oracledb.Error as e:
             _logger.debug("SET_AGENT_CONTEXT.set_agent_id failed (Deep Sec not deployed?): %s", e)
 
 def clear_agent_context(conn: oracledb.Connection) -> None:
     try:
         with conn.cursor() as cur:
-            cur.execute(f"BEGIN {cfg.database.user}.SET_AGENT_CONTEXT.clear_context(); END;")
+            cur.execute(f"BEGIN {get_config().database.user}.SET_AGENT_CONTEXT.clear_context(); END;")
     except oracledb.Error as e:
         _logger.debug("SET_AGENT_CONTEXT.clear_context failed (Deep Sec not deployed?): %s", e)
 

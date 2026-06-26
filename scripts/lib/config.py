@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v3.7.4 - Community Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Priority: config.json (encrypted) > Environment Variables > Built-in defaults
@@ -14,7 +14,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "3.7.3"
+VERSION = "3.7.4"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 

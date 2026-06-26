@@ -1,6 +1,6 @@
 -- ============================================================
 -- 6_deep_sec_policy.sql — Oracle Deep Data Security (Deep Sec)
--- AI Agent Infra with OracleDB v3.7.3
+-- AI Agent Infra with OracleDB v3.7.4
 -- ============================================================
 --
 -- Deep Sec enforcement via Direct Logon with Local End Users.
@@ -568,4 +568,94 @@ PROMPT   3. Column masking: CREDENTIAL_VALUE hidden from agents
 PROMPT   4. MAC: prevents view bypass of row-level policies
 PROMPT   5. Declarative: policies visible in USER_DATA_GRANTS
 PROMPT   6. Direct Logon: no IAM dependency for local deployment
+PROMPT ============================================================
+
+PROMPT ============================================================
+PROMPT Data Grant: COLLAB_MESSAGES [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Creating Data Grant: collab_message_access...');
+
+    EXECUTE IMMEDIATE q'[CREATE DATA GRANT collab_message_access
+        ON COLLAB_MESSAGES
+        WHERE SENDER_AGENT_ID = ORA_END_USER_CONTEXT.username
+           OR RECEIVER_AGENT_ID = ORA_END_USER_CONTEXT.username
+           OR (RECEIVER_AGENT_ID IS NULL AND GROUP_ID IN (
+               SELECT GROUP_ID FROM COLLAB_GROUP_MEMBERS
+               WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+                 AND STATUS = 'ACTIVE'))
+        TO agent_data_role]';
+
+    DBMS_OUTPUT.PUT_LINE('  collab_message_access created');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('  collab_message_access: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Data Grant: EVENT_LOG (read-only to agents) [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Creating Data Grant: event_log_access...');
+
+    EXECUTE IMMEDIATE q'[CREATE DATA GRANT event_log_access
+        ON EVENT_LOG
+        WHERE SOURCE_ID = ORA_END_USER_CONTEXT.username
+           OR EVENT_TYPE IN (
+               SELECT EVENT_TYPE FROM EVENT_SUBSCRIPTIONS
+               WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+                 AND ENABLED = 'Y'
+           )
+        TO agent_data_role]';
+
+    DBMS_OUTPUT.PUT_LINE('  event_log_access created');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('  event_log_access: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Data Grant: EVENT_SUBSCRIPTIONS [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Creating Data Grant: event_sub_own...');
+
+    EXECUTE IMMEDIATE q'[CREATE DATA GRANT event_sub_own
+        ON EVENT_SUBSCRIPTIONS
+        WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+        TO agent_data_role]';
+
+    DBMS_OUTPUT.PUT_LINE('  event_sub_own created');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('  event_sub_own: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT Data Grant: AGENT_CAPABILITY_INDEX [NEW v3.7.4]
+PROMPT ============================================================
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Creating Data Grant: capability_own...');
+
+    EXECUTE IMMEDIATE q'[CREATE DATA GRANT capability_own
+        ON AGENT_CAPABILITY_INDEX
+        WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
+        TO agent_data_role]';
+
+    DBMS_OUTPUT.PUT_LINE('  capability_own created');
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('  capability_own: ' || SQLERRM);
+END;
+/
+
+PROMPT ============================================================
+PROMPT v3.7.4 Deep Sec Policy Deployment Complete
 PROMPT ============================================================

@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.7.3
+version: v3.7.4
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.7.3 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.7.4 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation, loop-engineering]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.7.3
+# AI Agent Infra with OracleDB - Community Edition v3.7.4
 
 **Author:** Haiwen Yin
-**Version:** v3.7.3 - 2026-06-19
+**Version:** v3.7.4 - 2026-06-26
 **License:** Apache License 2.0 (Community Edition)
 **Official Website:** [https://db4agent.top](https://db4agent.top)
 
@@ -20,7 +20,7 @@ related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 
 **Minimum required version: 23.26.2.0.0**
 
-v3.7.3 uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support.
+This system uses Oracle Deep Data Security (Deep Sec) features that require Oracle AI Database 26ai version **23.26.2 or later**. Earlier versions (including 23.26.1) have incomplete Deep Sec support. Introduced in v3.4.0 and extended through v3.7.4.
 
 ```sql
 -- Check your database version
@@ -32,7 +32,7 @@ SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';
 
 **Required version: oracledb 4.0.1**
 
-v3.7.3 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
+v3.7.4 requires `oracledb` version **4.0.1** or later. Earlier versions (4.0.0) lack the `create_end_user_security_context` API and have TCPS protocol incompatibilities with Oracle 26ai.
 
 ```bash
 pip install oracledb>=4.0.1
@@ -47,7 +47,7 @@ pip install oracledb>=4.0.1
 ## Architecture Overview
 
 ```
-AI Agent Infra with OracleDB — Community Edition v3.7.3
+AI Agent Infra with OracleDB — Community Edition v3.7.4
 │
 ├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
 │   ├── P_MEMORY      — MEMORY
@@ -71,7 +71,7 @@ AI Agent Infra with OracleDB — Community Edition v3.7.3
     └── PREDECESSOR_SESSION_ID -> self (chain)
 ```
 
-## Edition Comparison (v3.7.3)
+## Edition Comparison (v3.7.4)
 
 ### 1. Skill Storage & Distribution
 
@@ -132,7 +132,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.7.3)
+#### Current Enforcement Status (v3.7.4)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 
@@ -253,7 +253,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITIES', 'ENTITIES_VISIBILITY_VPD');
 
 ## Admin/Agent Separation Architecture
 
-v3.7.3 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
+v3.7.4 introduces a mode system that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials).
 
 ### Modes
 
@@ -882,7 +882,7 @@ Response:
   "table_count": 34,
   "agent_count": 5,
   "user_count": 3,
-  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.3, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
+  "recommendation": "EXISTING DEPLOYMENT DETECTED (v3.7.4, 35 tables, 5 agents, 3 users). DO NOT re-run deploy scripts..."
 }
 ```
 
@@ -1107,7 +1107,7 @@ ai-agent-infra-community/
 |-------|---------|-------------|
 | SPEC_PLAN_LINKS | Spec↔Plan many-to-many [NEW v2.3.0] | SPEC_ID, PLAN_ID, LINK_TYPE (DRIVES/VALIDATES/CONSTRAINS/EXTENDS), LINK_STRENGTH, UK=(SPEC_ID,PLAN_ID,LINK_TYPE) |
 
-### Loop Tables (5) [NEW v3.7.0, extended v3.7.3]
+### Loop Tables (5) [NEW v3.7.0, extended v3.7.4]
 
 | Table | Purpose |
 |-------|---------|
@@ -1129,7 +1129,7 @@ ai-agent-infra-community/
 | SPEC_MANAGER [NEW v2.3.0] | 8 | create_spec, get_spec, update_spec, validate_spec, derive_spec, create_plan_from_spec, link_spec_to_plan, get_spec_plan_links |
 | COLLAB_GROUP_MANAGER [NEW v2.3.0] | 6 | create_group, get_group, update_group, add_member, remove_member, get_group_members |
 | EMBEDDING_MANAGER [NEW v2.3.2] | 5 | generate_embedding, generate_and_store, cosine_similarity, batch_embed_entities, get_stats |
-| LOOP_MANAGER [NEW v3.7.0, extended v3.7.3] | ~22 | 6 evaluation types via loop_api.py | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
+| LOOP_MANAGER [NEW v3.7.0, extended v3.7.4] | ~22 | 6 evaluation types via loop_api.py | create_loop, get_loop, update_loop, delete_loop, list_loops, start_run, get_run, stop_run, list_runs, add_iteration, get_iteration, list_iterations, evaluate_iteration, register_hook, get_hooks, trigger_hook, unregister_hook, get_loop_stats, get_stuck_loops, cleanup_finished_loops |
 
 ## Python API (24 Modules, 131+ Functions)
 

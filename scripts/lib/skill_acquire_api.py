@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.3 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v3.7.4 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Community Edition: direct access, no token required
@@ -139,7 +139,7 @@ def acquire_skill_full(skill_id: str, agent_id: Optional[str] = None, session_id
 
     result = {**text_result, "resource_zip": resource_zip}
 
-    # v3.7.3: Auto-trigger validation loop if defined in skill metadata
+    # v3.7.4: Auto-trigger validation loop if defined in skill metadata
     try:
         from .loop_api import create_validation_loop_for_skill
         validation_loop_id = create_validation_loop_for_skill(skill_id, agent_id or 'system')
@@ -203,7 +203,7 @@ def acquire_skill_via_admin(
         result["resource_zip"] = base64.b64decode(result["resource_zip"])
         result.pop("resource_encoding", None)
 
-    # v3.7.3: Auto-trigger validation loop if defined in skill metadata
+    # v3.7.4: Auto-trigger validation loop if defined in skill metadata
     try:
         from .loop_api import create_validation_loop_for_skill
         validation_loop_id = create_validation_loop_for_skill(skill_id, 'system')

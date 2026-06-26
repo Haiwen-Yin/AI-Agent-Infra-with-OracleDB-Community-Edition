@@ -1,4 +1,4 @@
-# Loop Engineering - AI Agent Infra v3.7.3 (2026-06-19) - Community Edition
+# Loop Engineering - AI Agent Infra v3.7.4 (2026-06-19) - Community Edition
 
 ## Overview
 
@@ -52,7 +52,7 @@ Together these features let a Loop be both **executable** (via a Harness Templat
 
 
 
-## v3.7.3 — Collaborative Integration
+## v3.7.4 — Collaborative Integration
 
 ### Spec-Driven Loop
 - `create_loop_from_spec(spec_id, agent_id)` derives goal from Spec acceptance_criteria

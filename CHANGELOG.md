@@ -4,6 +4,29 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.7.4] - 2026-06-26
+
+### Summary
+
+6 expansion directions: Agent Communication Protocol, Multi-Agent Orchestration, Event-Driven Architecture, Advanced Memory Management, Observability, and Tool Ecosystem.
+
+### Added - All Editions
+
+- **Agent Communication Protocol** — COLLAB_MESSAGES table + message_api.py (15 functions): send/reply/broadcast/thread messages with priority levels, attachment references, and unread tracking. COLLAB_MESSAGE_MANAGER PL/SQL package.
+- **Multi-Agent Orchestration** — orchestrator.py: DAG resolution (topological sort), sequential/parallel execution groups, fan-out (distribute to multiple agents) and fan-in (CONSENSUS/BEST_OF_N/CONCATENATE/FIRST strategies). STEP_RETRY_POLICY (exponential backoff, fallback actions). STEP_EXECUTION_PLAN table.
+- **Event-Driven Architecture** — EVENT_LOG + EVENT_SUBSCRIPTIONS tables. event_bus.py: publish/subscribe, agent capability discovery via AGENT_CAPABILITY_INDEX, match_skill_to_agents, recommend_agents. LOOP_HOOKS execution engine: WEBHOOK/SCRIPT/NOTIFICATION/MCP_CALL hook types.
+- **Advanced Memory Management** — consolidate_branch_memories(), promote_to_semantic(), merge_knowledge() (OVERWRITE/UNION/WEIGHTED), detect_knowledge_conflicts(), reindex_entity(), queue_reindex().
+- **Observability** — Distributed tracing (TRACE_ID on 6 tables). trace_api.py: init_trace, get_trace_tree, get_trace_summary. monitor_api.py: get_system_overview, get_agent_health, get_stalled_agents. monitor.html dashboard page. TRACE_MANAGER and MONITOR_MANAGER PL/SQL packages. ALERT_EVALUATOR_JOB for rule evaluation.
+- **Tool Ecosystem** — OpenAPI spec auto-import into harness templates. TOOL_REGISTRY table (versioned, typed tool definitions). TOOL_CHAINS + TOOL_CHAIN_STEPS for DAG tool composition. tool_registry.py (14 functions).
+- 25 new API endpoints for messages, monitoring, traces, tools, events, orchestration.
+- 3 new scheduler jobs: DAG_RESOLVER_JOB (5 min), HOOK_EXECUTOR_JOB (1 min), ALERT_EVALUATOR_JOB (5 min).
+
+### Changed - All Editions
+
+- Schema: +9 tables, +6 TRACE_ID columns
+
+---
+
 ## [3.7.3] - 2026-06-23
 
 ### Summary

@@ -392,3 +392,71 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
         "last_reviewed": row.get("last_reviewed"),
         "next_review": row.get("next_review"),
     }
+
+
+# -- D4: Advanced Knowledge Management (v3.7.4) --
+
+def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> Dict[str, Any]:
+    """Merge two knowledge entries using the specified strategy."""
+    source = get_knowledge(source_id)
+    target = get_knowledge(target_id)
+    if not source or not target:
+        return {"error": "Source or target not found"}
+
+    if strategy == "OVERWRITE":
+        execute(
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            {"content": source.get("content", ""), "tid": target_id},
+        )
+        execute("UPDATE ENTITIES SET VISIBILITY = 'PRIVATE' WHERE ENTITY_ID = :sid", {"sid": source_id})
+        return {"strategy": strategy, "target_id": target_id, "source_archived": True}
+
+    elif strategy == "UNION":
+        merged_content = (target.get("content", "") or "") + "\n\n---\n\n" + (source.get("content", "") or "")
+        execute(
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            {"content": merged_content, "tid": target_id},
+        )
+        execute("UPDATE ENTITIES SET VISIBILITY = 'PRIVATE' WHERE ENTITY_ID = :sid", {"sid": source_id})
+        return {"strategy": strategy, "target_id": target_id, "merged_length": len(merged_content)}
+
+    elif strategy == "WEIGHTED":
+        source_strength = float(source.get("metadata", {}).get("strength", 0.5)) if isinstance(source.get("metadata"), dict) else 0.5
+        target_strength = float(target.get("metadata", {}).get("strength", 0.5)) if isinstance(target.get("metadata"), dict) else 0.5
+        total = source_strength + target_strength
+        if total == 0:
+            total = 1
+        merged_content = source.get("content", "") or ""
+        execute(
+            "UPDATE ENTITIES SET CONTENT = :content, UPDATED_AT = SYSTIMESTAMP WHERE ENTITY_ID = :tid",
+            {"content": merged_content, "tid": target_id},
+        )
+        return {"strategy": strategy, "target_id": target_id, "source_weight": source_strength / total}
+
+    return {"error": f"Unknown strategy: {strategy}"}
+
+
+def detect_knowledge_conflicts(workspace_id: str) -> List[Dict[str, Any]]:
+    """Detect knowledge entries with similar titles but different content in the same workspace."""
+    rows = execute_query(
+        """SELECT a.ENTITY_ID as id_a, a.TITLE as title_a, a.CONTENT as content_a,
+                  b.ENTITY_ID as id_b, b.TITLE as title_b, b.CONTENT as content_b
+           FROM ENTITIES a
+           JOIN ENTITIES b ON a.ENTITY_ID < b.ENTITY_ID
+           WHERE a.ENTITY_TYPE = 'KNOWLEDGE' AND b.ENTITY_TYPE = 'KNOWLEDGE'
+             AND a.WORKSPACE_ID = :wid AND b.WORKSPACE_ID = :wid
+             AND (UPPER(a.TITLE) = UPPER(b.TITLE)
+                  OR DBMS_LOB.GETLENGTH(a.CONTENT) > 0 AND DBMS_LOB.GETLENGTH(b.CONTENT) > 0
+                  AND DBMS_LOB.SUBSTR(a.CONTENT, 200, 1) = DBMS_LOB.SUBSTR(b.CONTENT, 200, 1))
+           FETCH FIRST 50 ROWS ONLY""",
+        {"wid": workspace_id},
+    )
+    conflicts = []
+    for r in rows:
+        if r.get("content_a") != r.get("content_b"):
+            conflicts.append({
+                "id_a": r["id_a"], "id_b": r["id_b"],
+                "title": r.get("title_a") or r.get("title_b"),
+                "conflict_type": "content_mismatch",
+            })
+    return conflicts

@@ -1035,3 +1035,50 @@ def _batch_edge_counts(entity_ids: List[str]) -> Dict[str, int]:
     except Exception as e:
         logger.debug(f"Batch edge count query failed: {e}")
         return {}
+
+
+# -- D4: Advanced Embedding Management (v3.7.4) --
+
+def reindex_entity(entity_id: str) -> bool:
+    """Re-generate embedding for a single entity."""
+    from .connection import execute_query_one, execute
+    entity = execute_query_one(
+        "SELECT ENTITY_ID, ENTITY_TYPE, TITLE, CONTENT FROM ENTITIES WHERE ENTITY_ID = :eid",
+        {"eid": entity_id},
+    )
+    if not entity:
+        return False
+    text = (entity.get("title", "") + " " + entity.get("content", "")).strip()
+    if not text:
+        return False
+    try:
+        embedding = generate_embedding(text)
+        store_embedding(entity_id, entity.get("entity_type", "MEMORY"), embedding)
+        return True
+    except Exception as e:
+        logger.error("reindex_entity failed for %s: %s", entity_id, e)
+        return False
+
+
+def queue_reindex(entity_id: str, priority: int = 0) -> bool:
+    """Queue an entity for re-indexing."""
+    from .connection import execute_insert
+    execute_insert(
+        """INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+           VALUES (:key, :val, :desc)""",
+        {"key": f"reindex_{entity_id}", "val": str(priority),
+         "desc": f"Pending reindex for entity {entity_id}"},
+    )
+    return True
+
+
+def reindex_batch(entity_ids: List[str]) -> Dict[str, int]:
+    """Re-index multiple entities."""
+    success = 0
+    failed = 0
+    for eid in entity_ids:
+        if reindex_entity(eid):
+            success += 1
+        else:
+            failed += 1
+    return {"success": success, "failed": failed}
