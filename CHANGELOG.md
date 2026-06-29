@@ -4,6 +4,26 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.7.5] - 2026-06-28
+
+### Summary
+
+Bug fix and code quality release for Oracle editions. Fixes 5 issues found during v3.7.4 code review.
+
+### Fixed - Oracle COM/ENT
+
+- **orchestrator.py**: `execute_step_with_retry` now queries actual TASK_STEPS and checks LOOP_RUNS status before marking SUCCESS
+- **event_bus.py**: Webhook execution adds retry with exponential backoff and configurable timeout; Script execution replaces `shell=True` with safe `shlex.split()` argument list
+- **message_api.py**: Soft-delete changed from `STATUS='FAILED'` to `STATUS='DELETED'`; CK_CM_STATUS constraint updated in schema
+
+### Fixed - Oracle ENT only
+
+- **Data Grants**: Added missing `event_log_access`, `event_sub_own`, `capability_own` to `6_deep_sec_policy.sql`
+- **Data Grant syntax**: Fixed `CREATE DATA GRANT` to `CREATE OR REPLACE DATA GRANT AS SELECT` for Oracle 23.26.2 compatibility
+- **CK_CM_STATUS**: Fixed constraint in deployed database from `FAILED` to `DELETED`
+
+---
+
 ## [3.7.4] - 2026-06-26
 
 ### Summary

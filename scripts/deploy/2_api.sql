@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.7.4 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.7.5 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1349,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.7.4 API Deployment Complete
+PROMPT AI Agent Infra v3.7.5 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2087,7 +2087,7 @@ END BRANCH_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT 14. LOOP_MANAGER Package [NEW v3.7.4]
+PROMPT 14. LOOP_MANAGER Package [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE LOOP_MANAGER AS
@@ -2619,7 +2619,7 @@ END LOOP_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT 15. COLLAB_MESSAGE_MANAGER Package [NEW v3.7.4]
+PROMPT 15. COLLAB_MESSAGE_MANAGER Package [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE COLLAB_MESSAGE_MANAGER AS
@@ -2752,7 +2752,7 @@ END COLLAB_MESSAGE_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT 16. TRACE_MANAGER Package [NEW v3.7.4]
+PROMPT 16. TRACE_MANAGER Package [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE TRACE_MANAGER AS
@@ -2828,7 +2828,7 @@ END TRACE_MANAGER;
 /
 
 PROMPT ============================================================
-PROMPT 17. MONITOR_MANAGER Package [NEW v3.7.4]
+PROMPT 17. MONITOR_MANAGER Package [NEW v3.7.5]
 PROMPT ============================================================
 
 CREATE OR REPLACE PACKAGE MONITOR_MANAGER AS
@@ -2893,5 +2893,5 @@ CREATE OR REPLACE PACKAGE BODY MONITOR_MANAGER AS
 END MONITOR_MANAGER;
 /
 
-PROMPT AI Agent Infra v3.7.4 - Community Edition API Deployment Complete
+PROMPT AI Agent Infra v3.7.5 - Community Edition API Deployment Complete
 PROMPT ============================================================

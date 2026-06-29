@@ -1,4 +1,4 @@
-# Loop Engineering - AI Agent Infra v3.7.4 (2026-06-19) - Community Edition
+# Loop Engineering - AI Agent Infra v3.7.5 (2026-06-19) - Community Edition
 
 ## Overview
 

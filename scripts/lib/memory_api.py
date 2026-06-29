@@ -239,7 +239,7 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# -- D4: Advanced Memory Management (v3.7.4) --
+# -- D4: Advanced Memory Management (v3.7.5) --
 
 def consolidate_branch_memories(branch_id: str, target_workspace_id: str) -> Dict[str, Any]:
     """Merge branch memories into target workspace, resolving conflicts."""

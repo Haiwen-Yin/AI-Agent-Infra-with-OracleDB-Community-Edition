@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.7.5 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -26,7 +26,7 @@ from lib import security, config, user_api
 from lib import loop_api
 from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 
-VERSION = "3.7.4"
+VERSION = "3.7.5"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -586,7 +586,7 @@ class VisHandler(BaseHTTPRequestHandler):
         elif path.startswith('/api/collab/') and path.endswith('/loop'):
             self._api_collab_loop(path)
             return
-        # v3.7.4 new POST routes
+        # v3.7.5 new POST routes
         if path == '/api/collab/messages/send':
             self._api_message_send()
             return
@@ -768,7 +768,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_loops_run_get(path)
             elif path.startswith('/api/branch/'):
                 self._api_branch_get(path)
-            # v3.7.4 new routes
+            # v3.7.5 new routes
             elif path == '/api/collab/messages':
                 self._api_messages_list(qs)
             elif path == '/api/collab/messages/inbox':
@@ -2364,7 +2364,7 @@ def _generate_sim_reply(message, agent_id, sess):
     return f"[{agent_name}] I received your message: \"{message}\". I'm processing it and will respond more intelligently once connected to a real LLM backend. For now, I can help with basic memory, knowledge, and workspace operations."
 
 
-    # ==================== v3.7.4 Handler Methods ====================
+    # ==================== v3.7.5 Handler Methods ====================
 
     def _api_messages_list(self, qs):
         group_id = qs.get('group_id', [None])[0]

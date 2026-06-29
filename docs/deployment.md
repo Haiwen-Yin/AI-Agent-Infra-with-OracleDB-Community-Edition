@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.7.4 (2026-06-18) - Community Edition
+# Deployment Guide - AI Agent Infra v3.7.5 (2026-06-18) - Community Edition
 
 ## Prerequisites
 

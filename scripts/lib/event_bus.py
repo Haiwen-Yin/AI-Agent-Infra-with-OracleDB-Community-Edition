@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Event Bus + Hook Execution
+"""AI Agent Infra v3.7.5 - Community Edition - Event Bus + Hook Execution
 
 Event publishing, subscription management, and LOOP_HOOKS execution engine.
 Agent capability discovery.
@@ -142,13 +142,35 @@ def execute_hooks(loop_id: str, hook_event: str, context: Optional[Dict[str, Any
 
 def _execute_webhook(config_str: str, payload: str):
     import urllib.request
+    import urllib.error
     config = json.loads(config_str) if config_str else {}
     url = config.get("url")
     if not url:
         return
-    req = urllib.request.Request(url, data=payload.encode("utf-8"),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    urllib.request.urlopen(req, timeout=30)
+    headers = config.get("headers", {"Content-Type": "application/json"})
+    timeout = config.get("timeout", 30)
+    max_retries = config.get("retries", 3)
+
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(url, data=payload.encode("utf-8"),
+                                         headers=headers, method="POST")
+            urllib.request.urlopen(req, timeout=timeout)
+            return
+        except urllib.error.HTTPError as e:
+            logger.warning("Webhook %s attempt %d failed: HTTP %d", url, attempt + 1, e.code)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 ** attempt)
+            else:
+                raise
+        except urllib.error.URLError as e:
+            logger.warning("Webhook %s attempt %d failed: %s", url, attempt + 1, e)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 ** attempt)
+            else:
+                raise
 
 
 def _execute_script(config_str: str, payload: str):
@@ -157,7 +179,21 @@ def _execute_script(config_str: str, payload: str):
     cmd = config.get("command")
     if not cmd:
         return
-    subprocess.run(cmd, shell=True, timeout=60, input=payload.encode(), capture_output=True)
+    args = config.get("args", [])
+    timeout = config.get("timeout", 60)
+    try:
+        if isinstance(args, list) and args:
+            subprocess.run(args, timeout=timeout, input=payload.encode(),
+                           capture_output=True, check=True)
+        else:
+            subprocess.run(cmd.split(), timeout=timeout, input=payload.encode(),
+                           capture_output=True, check=True)
+    except subprocess.TimeoutExpired:
+        logger.error("Script timeout after %ds: %s", timeout, cmd)
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error("Script failed with code %d: %s", e.returncode, e.stderr)
+        raise
 
 
 def _execute_notification(hook: Dict[str, Any], context: Optional[Dict[str, Any]]):

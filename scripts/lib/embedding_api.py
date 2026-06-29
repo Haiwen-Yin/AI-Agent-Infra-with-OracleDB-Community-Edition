@@ -1037,7 +1037,7 @@ def _batch_edge_counts(entity_ids: List[str]) -> Dict[str, int]:
         return {}
 
 
-# -- D4: Advanced Embedding Management (v3.7.4) --
+# -- D4: Advanced Embedding Management (v3.7.5) --
 
 def reindex_entity(entity_id: str) -> bool:
     """Re-generate embedding for a single entity."""

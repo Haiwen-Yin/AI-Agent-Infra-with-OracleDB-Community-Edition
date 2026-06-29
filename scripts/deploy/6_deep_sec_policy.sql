@@ -1,6 +1,6 @@
 -- ============================================================
 -- 6_deep_sec_policy.sql — Oracle Deep Data Security (Deep Sec)
--- AI Agent Infra with OracleDB v3.7.4
+-- AI Agent Infra with OracleDB v3.7.5
 -- ============================================================
 --
 -- Deep Sec enforcement via Direct Logon with Local End Users.
@@ -577,7 +577,7 @@ PROMPT ============================================================
 BEGIN
     DBMS_OUTPUT.PUT_LINE('Creating Data Grant: collab_message_access...');
 
-    EXECUTE IMMEDIATE q'[CREATE DATA GRANT collab_message_access
+    EXECUTE IMMEDIATE q'[CREATE OR REPLACE DATA GRANT collab_message_access AS SELECT
         ON COLLAB_MESSAGES
         WHERE SENDER_AGENT_ID = ORA_END_USER_CONTEXT.username
            OR RECEIVER_AGENT_ID = ORA_END_USER_CONTEXT.username
@@ -601,7 +601,7 @@ PROMPT ============================================================
 BEGIN
     DBMS_OUTPUT.PUT_LINE('Creating Data Grant: event_log_access...');
 
-    EXECUTE IMMEDIATE q'[CREATE DATA GRANT event_log_access
+    EXECUTE IMMEDIATE q'[CREATE OR REPLACE DATA GRANT event_log_access AS SELECT
         ON EVENT_LOG
         WHERE SOURCE_ID = ORA_END_USER_CONTEXT.username
            OR EVENT_TYPE IN (
@@ -625,7 +625,7 @@ PROMPT ============================================================
 BEGIN
     DBMS_OUTPUT.PUT_LINE('Creating Data Grant: event_sub_own...');
 
-    EXECUTE IMMEDIATE q'[CREATE DATA GRANT event_sub_own
+    EXECUTE IMMEDIATE q'[CREATE OR REPLACE DATA GRANT event_sub_own AS SELECT
         ON EVENT_SUBSCRIPTIONS
         WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
         TO agent_data_role]';
@@ -644,7 +644,7 @@ PROMPT ============================================================
 BEGIN
     DBMS_OUTPUT.PUT_LINE('Creating Data Grant: capability_own...');
 
-    EXECUTE IMMEDIATE q'[CREATE DATA GRANT capability_own
+    EXECUTE IMMEDIATE q'[CREATE OR REPLACE DATA GRANT capability_own AS SELECT
         ON AGENT_CAPABILITY_INDEX
         WHERE UPPER(REPLACE(AGENT_ID, '-', '_')) = ORA_END_USER_CONTEXT.username
         TO agent_data_role]';
@@ -657,5 +657,5 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT v3.7.4 Deep Sec Policy Deployment Complete
+PROMPT v3.7.5 Deep Sec Policy Deployment Complete
 PROMPT ============================================================

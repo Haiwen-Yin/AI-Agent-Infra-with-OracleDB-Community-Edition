@@ -394,7 +394,7 @@ def _row_to_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# -- D4: Advanced Knowledge Management (v3.7.4) --
+# -- D4: Advanced Knowledge Management (v3.7.5) --
 
 def merge_knowledge(source_id: str, target_id: str, strategy: str = "UNION") -> Dict[str, Any]:
     """Merge two knowledge entries using the specified strategy."""

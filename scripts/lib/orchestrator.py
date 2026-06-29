@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Multi-Agent Orchestration
+"""AI Agent Infra v3.7.5 - Community Edition - Multi-Agent Orchestration
 
 DAG execution engine, fan-out/fan-in, pipeline orchestration,
 and retry policies for task steps.
@@ -254,12 +254,29 @@ def execute_step_with_retry(step_id: str) -> bool:
     timeout = policy.get("timeout_seconds") if policy else None
     fallback = policy.get("fallback_action", "FAIL") if policy else "FAIL"
 
+    step = execute_query_one(
+        "SELECT * FROM TASK_STEPS WHERE STEP_ID = :sid",
+        {"sid": step_id},
+    )
+    if not step:
+        logger.error("Step %s not found", step_id)
+        return False
+
     for attempt in range(max_retries + 1):
         execute(
             "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'RUNNING', STARTED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
             {"sid": step_id},
         )
         try:
+            loop_id = step.get("loop_id")
+            if loop_id:
+                from . import loop_api
+                runs = loop_api.get_runs_for_loop(loop_id)
+                active_runs = [r for r in runs if r.get("status") == "RUNNING"]
+                if active_runs:
+                    logger.info("Step %s waiting for loop %s to complete", step_id, loop_id)
+                    continue
+
             execute(
                 "UPDATE TASK_STEPS SET STATUS = 'SUCCESS', COMPLETED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid",
                 {"sid": step_id},

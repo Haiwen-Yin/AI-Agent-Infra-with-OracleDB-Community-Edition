@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.4 - Community Edition - Agent Communication Protocol
+"""AI Agent Infra v3.7.5 - Community Edition - Agent Communication Protocol
 
 Inter-agent messaging for collaboration groups. Supports direct messages,
 broadcast, threaded replies, priority levels, and attachment references.
@@ -215,7 +215,7 @@ def broadcast_message(
 
 def delete_message(message_id: str, agent_id: str) -> bool:
     affected = execute(
-        """UPDATE COLLAB_MESSAGES SET STATUS = 'FAILED'
+        """UPDATE COLLAB_MESSAGES SET STATUS = 'DELETED'
            WHERE MESSAGE_ID = :mid AND SENDER_AGENT_ID = :aid""",
         {"mid": message_id, "aid": agent_id},
     )
@@ -229,7 +229,7 @@ def get_group_inbox(group_id: str, agent_id: str, limit: int = 50) -> List[Dict[
               FROM COLLAB_MESSAGES m
               WHERE GROUP_ID = :gid
                 AND (RECEIVER_AGENT_ID = :aid OR RECEIVER_AGENT_ID IS NULL)
-                AND STATUS != 'FAILED'
+                AND STATUS != 'DELETED'
             ) WHERE rn <= :limit""",
         {"gid": group_id, "aid": agent_id, "limit": limit},
     )
@@ -240,7 +240,7 @@ def get_sent_messages(sender_agent_id: str, limit: int = 50) -> List[Dict[str, A
     rows = execute_query(
         """SELECT * FROM (
               SELECT m.*, ROW_NUMBER() OVER (ORDER BY CREATED_AT DESC) AS rn
-              FROM COLLAB_MESSAGES m WHERE SENDER_AGENT_ID = :aid AND STATUS != 'FAILED'
+              FROM COLLAB_MESSAGES m WHERE SENDER_AGENT_ID = :aid AND STATUS != 'DELETED'
             ) WHERE rn <= :limit""",
         {"aid": sender_agent_id, "limit": limit},
     )

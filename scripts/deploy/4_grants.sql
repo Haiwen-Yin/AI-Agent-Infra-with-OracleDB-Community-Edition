@@ -1,6 +1,6 @@
 -- ============================================================
 -- 4_grants.sql — Restricted Database User & Access Control
--- AI Agent Infra with OracleDB v3.7.4
+-- AI Agent Infra with OracleDB v3.7.5
 -- ============================================================
 -- 
 -- This script creates a restricted database user (AGENT_API) that
@@ -202,7 +202,7 @@ PROMPT           for runtime Agent connections. Keep AIADMIN
 PROMPT           credentials for deployment only.
 PROMPT ============================================================
 
--- v3.7.4: New table grants
+-- v3.7.5: New table grants
 GRANT SELECT ON COLLAB_MESSAGES TO AGENT_API;
 CREATE SYNONYM AGENT_API.COLLAB_MESSAGES FOR &&SCHEMA_OWNER..COLLAB_MESSAGES;
 

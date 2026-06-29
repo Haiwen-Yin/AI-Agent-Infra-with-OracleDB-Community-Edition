@@ -1,4 +1,4 @@
--- AI Agent Infra v3.7.4 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.7.5 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -265,7 +265,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.4]
+PROMPT Job: LOOP_TRIGGER_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -285,7 +285,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.4]
+PROMPT Job: LOOP_STUCK_CHECK_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -305,7 +305,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.4]
+PROMPT Job: LOOP_CLEANUP_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -325,7 +325,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: DAG_RESOLVER_JOB [NEW v3.7.4]
+PROMPT Job: DAG_RESOLVER_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -345,7 +345,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: HOOK_EXECUTOR_JOB [NEW v3.7.4]
+PROMPT Job: HOOK_EXECUTOR_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -365,7 +365,7 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT Job: ALERT_EVALUATOR_JOB [NEW v3.7.4]
+PROMPT Job: ALERT_EVALUATOR_JOB [NEW v3.7.5]
 PROMPT ============================================================
 
 BEGIN
@@ -384,4 +384,4 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.7.4 - Community Edition - Phase 3: Scheduler Jobs Complete (19 jobs)
+PROMPT AI Agent Infra v3.7.5 - Community Edition - Phase 3: Scheduler Jobs Complete (19 jobs)
