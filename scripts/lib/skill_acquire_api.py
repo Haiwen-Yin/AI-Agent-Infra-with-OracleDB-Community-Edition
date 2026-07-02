@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v3.8.0 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Community Edition: direct access, no token required

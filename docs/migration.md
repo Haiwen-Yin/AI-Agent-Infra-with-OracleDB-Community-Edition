@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.7.5 (2026-06-18) - Community Edition
+# Migration Guide - AI Agent Infra v3.8.0 (2026-06-18) - Community Edition
 
 ## Version Compatibility
 
@@ -257,7 +257,7 @@ SELECT COUNT(*) FROM SYSTEM_CONFIG;
 -- Expected: 0 (blocked by Data Grant predicate 1=0)
 ```
 
-## v3.4.0 → v3.7.5 Migration
+## v3.4.0 → v3.8.0 Migration
 
 This migration fixes three Deep Sec bugs: ENTITIES_AGENT_OWN predicate missing COLLAB subquery (SHARED entities invisible), missing Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS (End Users cannot access COLLAB tables), and missing WORKSPACE_CONTEXT VISIBILITY column (no isolation for private context in collab workspaces).
 
@@ -320,7 +320,7 @@ SELECT COUNT(*) FROM COLLAB_GROUPS;
 SELECT COUNT(*) FROM USER_DATA_GRANTS;
 ```
 
-## v3.7.2 → v3.7.5 Migration
+## v3.7.2 → v3.8.0 Migration
 
 This migration adds the Admin/Agent Separation Architecture: mode system, admin token authentication, encrypted credential distribution, and mode-aware connection management.
 

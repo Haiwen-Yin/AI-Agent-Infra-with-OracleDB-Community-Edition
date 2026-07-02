@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.7.5
+# AI Agent Infra with OracleDB - Community Edition v3.8.0
 
-[![Version](https://img.shields.io/badge/version-v3.7.5-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.8.0-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-**AI Agent的基础设施架构 — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
+**AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.7.5 (2026-06-28): Bug Fixes — orchestrator execute_step_with_retry stub, event_bus webhook/script security (retry+shlex), message_api soft-delete status (FAILED→DELETED), ENT missing Data Grants (event_log_access/event_sub_own/capability_own) + syntax fix (AS SELECT).** 历史版本信息详见 [CHANGELOG.md](CHANGELOG.md)。
+> **v3.8.0 (2026-07-02): Multi-Agent Integration Testing — LOOP_MANAGER body missing log_loop_audit procedure, DB_CRYPTO ORA-14551 runtime fix (pre-seed master key), agent_api hardcoded AIADMIN. schema prefix removed, 4_grants.sql dynamic default tablespace fix. Full 5-phase deployment: 50 tables, 19 packages (0 invalid), 4 Business Agents registered, 15/15 functional tests passed.** See CHANGELOG.md for historical versions. [CHANGELOG.md](CHANGELOG.md)
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.7.5.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.8.0.md)**
 
 ---
 
@@ -58,7 +58,7 @@ Two independent page systems: **Portal** (user-facing: register/login/chat) and 
 
 - Register/login with local system user authentication
 - Registration checks SYSTEM_USERS (case-insensitive) for duplicates
-- "进入管理页面" button in top-right corner
+- "Enter Admin Portal" button in top-right corner
 
 ### Portal Chat (`/portal/chat`)
 

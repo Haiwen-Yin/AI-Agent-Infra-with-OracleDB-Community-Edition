@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - Community Edition - Agent API
+"""AI Agent Infra v3.8.0 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, and Admin/Agent separation support.
@@ -81,7 +81,7 @@ def _ensure_end_user(agent_id: str) -> None:
             with conn.cursor() as cur:
                 result_var = cur.var(oracledb.STRING)
                 cur.execute(
-                    "BEGIN :r := AIADMIN.END_USER_MANAGER.ensure_end_user(:aid); END;",
+                    "BEGIN :r := END_USER_MANAGER.ensure_end_user(:aid); END;",
                     {"r": result_var, "aid": agent_id},
                 )
                 result = result_var.getvalue()

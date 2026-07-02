@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.7.5 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v3.8.0 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.

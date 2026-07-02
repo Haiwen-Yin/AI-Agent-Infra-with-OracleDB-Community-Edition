@@ -4,6 +4,28 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.8.0] - 2026-07-02
+
+### Summary
+
+Multi-Agent integration testing release. Completed full 5-phase deployment and 15-module functional test suite with zero failures. Multiple runtime bugs discovered and fixed during testing.
+
+### Fixed - Oracle COM/ENT
+
+- **LOOP_MANAGER package body**: Added missing `log_loop_audit` procedure implementation that was declared in the package specification but never defined in the body, causing PLS-00323 compilation error
+- **DB_CRYPTO runtime**: Fixed ORA-14551 (cannot perform DML inside a query) by pre-seeding `db_crypto_master_key` and `db_crypto_key_salt` in SYSTEM_CONFIG during schema deployment instead of lazy-initializing inside a function called from SELECT
+- **agent_api.py `_ensure_end_user`**: Removed hardcoded `AIADMIN.` schema prefix from `END_USER_MANAGER.ensure_end_user` call, allowing the function to resolve against the actual schema owner at runtime
+- **4_grants.sql**: Fixed `AGENT_API` user creation to dynamically retrieve the schema owner's default tablespace via `DBA_USERS.DEFAULT_TABLESPACE` instead of hardcoding `USERS` (which may not exist in all environments)
+
+### Tested - Oracle COM/ENT
+
+- **15-module functional test suite**: All 15 tests passed (Memory CRUD, Knowledge Base, Agent Messaging, Collaboration Group, Loop Lifecycle, Graph Operations, Branch & Workspace, Spec Management, Tool Registry, Monitor API, Event Bus, Task Plan API, Skill API, Agent API, LLM Integration)
+- **4 registered Business Agents**: AGENT_001–004 registered, collaboration group created with coordinator and members
+- **0 invalid database objects**: All PL/SQL packages, package bodies, and views compile successfully
+- **Existing test suites**: `test_loop_api.py` (16 tests) and `test_admin_agent.py` (18 tests) all pass
+
+---
+
 ## [3.7.5] - 2026-06-28
 
 ### Summary

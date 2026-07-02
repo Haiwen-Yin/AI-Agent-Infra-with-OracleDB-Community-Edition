@@ -1,6 +1,6 @@
 -- ============================================================
 -- 6_deep_sec_policy.sql — Oracle Deep Data Security (Deep Sec)
--- AI Agent Infra with OracleDB v3.7.5
+-- AI Agent Infra with OracleDB v3.8.0
 -- ============================================================
 --
 -- Deep Sec enforcement via Direct Logon with Local End Users.
@@ -657,5 +657,5 @@ END;
 /
 
 PROMPT ============================================================
-PROMPT v3.7.5 Deep Sec Policy Deployment Complete
+PROMPT v3.8.0 Deep Sec Policy Deployment Complete
 PROMPT ============================================================
