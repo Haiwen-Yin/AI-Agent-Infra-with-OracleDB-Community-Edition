@@ -1,16 +1,16 @@
 ---
 name: ai-agent-infra-community
-version: v3.8.0
+version: v3.9.0
 author: Haiwen Yin
-description: "AI Agent Infra with OracleDB - Community Edition v3.8.0 - AI Agent的基础设施架构"
+description: "AI Agent Infra with OracleDB - Community Edition v3.9.0 - AI Agent的基础设施架构"
 tags: [oracle, ai-agent, infrastructure, community, knowledge-base, vector-search, hybrid-search, fulltext-search, search-api, oracledb, property-graph, multi-agent, partitioning, composite-pk, workspace, context-continuity, context-branching, jrd, duality-view, spec-driven, elastic-agent, collaboration, admin-agent-separation, loop-engineering]
 related_skills: [oracle-26ai, oracle-sqlcl-execution-methodology]
 ---
 
-# AI Agent Infra with OracleDB - Community Edition v3.8.0
+# AI Agent Infra with OracleDB - Community Edition v3.9.0
 
 **Author:** Haiwen Yin
-**Version:** v3.8.0 - 2026-07-02
+**Version:** v3.9.0 - 2026-07-05
 **License:** Apache License 2.0 (Community Edition)
 **Official Website:** [https://db4agent.top](https://db4agent.top)
 
@@ -47,7 +47,7 @@ pip install oracledb>=4.0.1
 ## Architecture Overview
 
 ```
-AI Agent Infra with OracleDB — Community Edition v3.8.0
+AI Agent Infra with OracleDB — Community Edition v3.9.0
 │
 ├── ENTITIES (LIST partitioned by ENTITY_TYPE, 8 partitions)
 │   ├── P_MEMORY      — MEMORY
@@ -71,7 +71,7 @@ AI Agent Infra with OracleDB — Community Edition v3.8.0
     └── PREDECESSOR_SESSION_ID -> self (chain)
 ```
 
-## Edition Comparison (v3.8.0)
+## Edition Comparison (v3.9.0)
 
 ### 1. Skill Storage & Distribution
 
@@ -132,7 +132,7 @@ Deep Sec uses **Data Grants** (declarative access policies) + **MAC** (Mandatory
 
 **Zero trust**: If no agent context is set, Data Grants return **no data** (unlike old VPD which returned `1=1` = full exposure).
 
-#### Current Enforcement Status (v3.8.0)
+#### Current Enforcement Status (v3.9.0)
 
 **Deep Sec is fully enforcing at the database level** via Direct Logon with Local End Users:
 

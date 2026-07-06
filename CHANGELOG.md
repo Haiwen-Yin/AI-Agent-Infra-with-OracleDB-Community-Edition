@@ -4,6 +4,58 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.9.0] - 2026-07-05
+
+### Summary
+
+AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, Human-in-the-Loop approval, Agent Protocol compatibility, and multi-model routing — connecting the system's capabilities to external AI clients and frameworks.
+
+### Added - All Editions
+
+- **MCP Server** (`mcp_server.py`, `mcp_server_main.py`): Exposes 10 tools (search, memory_create/search, knowledge_create/search, tool_list/invoke, graph_neighbors, loop_status, agent_list) via Model Context Protocol with stdio + SSE dual transport
+- **Tool invocation** (`tool_registry.invoke_tool()`): Executes registered tools by reading INPUT_SCHEMA and making HTTP calls
+- **SSE streaming output**: Web Portal chat supports token-by-token streaming via Server-Sent Events
+- **Approval API** (`approval_api.py`): Unified approval queue for Human-in-the-Loop workflows
+- **Approval web page** (`approvals.html`): Approval queue UI with stats and filter
+- **Agent Protocol endpoints**: `POST/GET /ap/v1/agent/tasks` for benchmark tool interoperability
+- **Multi-model routing** (`ModelRoutingConfig`): Configurable simple/standard/complex model selection
+- **LLM configuration** (`LLMConfig`): api_url, api_key, model, max_context, stream_enabled
+- **MCP configuration** (`MCPConfig`): enabled, transport, sse_port, exposed_tools
+- **event_bus `_execute_mcp_call()`**: MCP call hook implementation
+
+### Added - Database
+
+- `APPROVAL_REQUESTS` table: Unified approval queue
+- `STEP_EXECUTION_PLAN`: REQUIRES_APPROVAL, APPROVED_BY, APPROVED_AT columns
+- `LOOP_META`: REQUIRE_APPROVAL column
+- `TOOL_REGISTRY`: REQUIRES_APPROVAL column
+- `CK_SEP_STATUS`: Added 'PAUSED' value
+
+### Fixed - All Editions
+
+- **ThreadingHTTPServer**: Replaced single-threaded HTTPServer with ThreadingHTTPServer — SSE streaming was blocking all other requests, causing server freeze on portal exit
+- **HTTP/1.1 protocol**: Set protocol_version = HTTP/1.1 — HTTP/1.0 didn't support chunked transfer, browser buffered entire SSE response until connection closed
+- **Session heartbeat**: Added /api/session/heartbeat endpoint (requires auth, updates last_access) — /api/health was public and didn't refresh session; added 120-second periodic heartbeat in all 14 HTML templates via setInterval + visibilitychange
+- **_authenticate_local salt support**: Now queries salt column and computes SHA256(password + salt) when salt exists, SHA256(password) when not — Oracle SYSTEM_USERS table has no salt column, handled via try/except
+- **_handle_portal_agent_release**: Added missing method that was called on portal exit but never defined, causing AttributeError crash
+- **Portal auto-session on login**: Login now auto-loads most recent conversation workspace or creates a new one — previously user saw empty chat with no active session
+- **Portal auto-naming**: First message in a "New Chat" workspace auto-renames it to the first 40 characters of the message
+- **Portal is_current comparison**: Fixed int == str comparison — workspace_id is int in DB but str in session, wrapped with str() comparison
+- **appendMessage return value**: Fixed appendMessage() not returning the bubble element — SSE pump assigned undefined.textContent causing JS error that interrupted token rendering and loadSessions()
+- **SSE pump robustness**: Added finishStream() helper and .catch() error handler — ensured loadSessions() is always called even if pump fails
+- **LLM streaming performance**: Changed resp.read(1) to resp.read(4096) (4KB chunks); increased max_tokens from 4096 to 8192 for reasoning-heavy models
+- **Non-streaming LLM fallback**: Added reasoning_content fallback when content is empty (some models put all output in reasoning_content)
+- **Approvals page JS**: Rewrote approvals.html with correct timer JS (previous sed corruption broke the entire script block with invalid variable names _alo_m/_alo_s)
+- **Approvals sidebar link**: Fixed broken HTML in all 14 templates where sed inserted an unclosed <a> tag inside the icon span
+- **Approvals API filter**: Fixed no-filter case returning only pending items; now always returns all items, filtered by entity_type in Python
+
+### Fixed - Oracle only
+
+- **4_grants.sql tablespace**: Dynamically retrieve schema owner's default tablespace via DBA_USERS.DEFAULT_TABLESPACE instead of hardcoding
+
+
+---
+
 ## [3.8.0] - 2026-07-02
 
 ### Summary

@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - Community Edition - Event Bus + Hook Execution
+"""AI Agent Infra v3.9.0 - Community Edition - Event Bus + Hook Execution
 
 Event publishing, subscription management, and LOOP_HOOKS execution engine.
 Agent capability discovery.
@@ -206,8 +206,49 @@ def _execute_notification(hook: Dict[str, Any], context: Optional[Dict[str, Any]
 
 
 def _execute_mcp_call(config_str: str, payload: str):
+    """Execute an MCP tool call as a hook callback.
+
+    Config should contain:
+        - server_url: URL of the MCP server (for SSE mode)
+        - tool_name: Name of the MCP tool to call
+        - arguments: Arguments dict to pass to the tool
+    Or for stdio mode:
+        - command: Command to start the MCP server
+        - tool_name: Name of the MCP tool to call
+        - arguments: Arguments dict to pass to the tool
+    """
     config = json.loads(config_str) if config_str else {}
-    logger.info("MCP call: %s", config)
+    tool_name = config.get("tool_name", "")
+    arguments = config.get("arguments", {})
+    if payload:
+        try:
+            ctx = json.loads(payload)
+            arguments.setdefault("_context", ctx)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    server_url = config.get("server_url", "")
+    command = config.get("command", "")
+
+    if server_url:
+        try:
+            import urllib.request
+            data = json.dumps({"tool_name": tool_name, "arguments": arguments}).encode()
+            req = urllib.request.Request(
+                f"{server_url}/messages",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode())
+                logger.info("MCP call %s result: %s", tool_name, str(result)[:200])
+        except Exception as e:
+            logger.error("MCP call %s failed: %s", tool_name, e)
+    elif command:
+        logger.info("MCP stdio call %s (not yet supported in sync mode)", tool_name)
+    else:
+        logger.info("MCP call %s with no server configured", tool_name)
 
 
 def register_capability(agent_id: str, capability: str, confidence: float = 1.0) -> str:

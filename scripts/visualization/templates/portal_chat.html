@@ -175,6 +175,7 @@ function appendMessage(role,content,ts,messageId){
   div.innerHTML='<div class="avatar">'+avatarText+'</div><div class="bubble">'+escapeHtml(content)+restartBtn+'<div class="time">'+escapeHtml(formatTime(ts))+'</div></div>';
   container.appendChild(div);
   container.scrollTop=container.scrollHeight;
+  return div.querySelector('.bubble');
 }
 
 function sendMessage(){
@@ -186,30 +187,51 @@ function sendMessage(){
   appendMessage('user',msg,new Date().toISOString());
   document.getElementById('sendBtn').disabled=true;
   document.getElementById('typingIndicator').style.display='block';
-  fetch('/portal/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    document.getElementById('sendBtn').disabled=false;
-    document.getElementById('typingIndicator').style.display='none';
-    if(d.success){
-      appendMessage('agent',d.reply,d.timestamp);
-      if(d.user_context_id){
-        var userMsgs=document.querySelectorAll('.msg.user .bubble');
-        if(userMsgs.length){
-          var lastBubble=userMsgs[userMsgs.length-1];
-          if(!lastBubble.querySelector('.restart-btn')){
-            var isZh=document.documentElement.getAttribute('data-lang')==='zh';
-            var btn=document.createElement('button');
-            btn.className='restart-btn';
-            btn.textContent=isZh?'↺ 重新开始':'↺ Restart';
-            btn.onclick=function(){forkFromMessage(d.user_context_id)};
-            lastBubble.insertBefore(btn,lastBubble.querySelector('.time'));
-          }
-        }
+
+  fetch('/portal/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,stream:true})})
+  .then(function(response){
+    var contentType=response.headers.get('Content-Type')||'';
+    if(contentType.indexOf('text/event-stream')>=0){
+      var reader=response.body.getReader();
+      var decoder=new TextDecoder();
+      var agentBubble=appendMessage('agent','',new Date().toISOString());
+      var fullText='';
+      var buffer='';
+      function finishStream(){
+        document.getElementById('sendBtn').disabled=false;
+        document.getElementById('typingIndicator').style.display='none';
+        if(fullText)loadSessions();
       }
-      loadSessions();
+      function pump(){
+        reader.read().then(function(result){
+          if(result.done){finishStream();return;}
+          buffer+=decoder.decode(result.value,{stream:true});
+          var lines=buffer.split('\n');
+          buffer=lines.pop();
+          lines.forEach(function(line){
+            if(line.startsWith('data: ')){
+              try{
+                var d=JSON.parse(line.substring(6));
+                if(d.type==='token'){fullText+=d.content;if(agentBubble)agentBubble.innerHTML=escapeHtml(fullText)+'<div class="time">'+escapeHtml(formatTime(new Date().toISOString()))+'</div>';}
+                if(d.type==='done'){finishStream();}
+              }catch(e){}
+            }
+          });
+          pump();
+        }).catch(function(e){finishStream();});
+      }
+      pump();
     }else{
-      appendMessage('agent','Error: '+(d.error||'Unknown error'),new Date().toISOString());
+      return response.json().then(function(d){
+        document.getElementById('sendBtn').disabled=false;
+        document.getElementById('typingIndicator').style.display='none';
+        if(d.success){
+          appendMessage('agent',d.reply,d.timestamp);
+          loadSessions();
+        }else{
+          appendMessage('agent','Error: '+(d.error||'Unknown error'),new Date().toISOString());
+        }
+      });
     }
   })
   .catch(function(err){

@@ -142,7 +142,7 @@ def update_step(step_id: str, **kwargs: Any) -> bool:
     return execute(sql, params) > 0
 
 
-def get_plan_steps(plan_id: str) -> List[Dict[str, Any]]:
+def list_steps(plan_id: str) -> List[Dict[str, Any]]:
     """Return all steps for a plan ordered by STEP_ORDER."""
     sql = """
         SELECT STEP_ID, PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
@@ -310,3 +310,6 @@ def get_step_loop(step_id: str) -> Optional[Dict[str, Any]]:
         FROM TASK_LOOP_BINDING b WHERE b.STEP_ID = :step_id
     """, {"step_id": step_id})
     return _row_to_dict(row) if row else None
+
+def get_plan_steps(plan_id):
+    return list_steps(plan_id)

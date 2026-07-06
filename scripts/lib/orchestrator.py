@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.8.0 - Community Edition - Multi-Agent Orchestration
+"""AI Agent Infra v3.9.0 - Community Edition - Multi-Agent Orchestration
 
 DAG execution engine, fan-out/fan-in, pipeline orchestration,
 and retry policies for task steps.
@@ -262,6 +262,30 @@ def execute_step_with_retry(step_id: str) -> bool:
         logger.error("Step %s not found", step_id)
         return False
 
+    # v3.9.0: Check if step requires approval before execution
+    try:
+        from .approval_api import check_approval_needed, get_pending_for_entity, create_request
+        if check_approval_needed("STEP", step_id):
+            pending = get_pending_for_entity("STEP", step_id)
+            if pending:
+                logger.info("Step %s waiting for approval %s", step_id, pending.get("approval_id"))
+                execute(
+                    "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PAUSED' WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
+                    {"sid": step_id},
+                )
+                return False
+            else:
+                requested_by = step.get("agent_id", "system")
+                create_request("STEP", step_id, requested_by)
+                execute(
+                    "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PAUSED' WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
+                    {"sid": step_id},
+                )
+                logger.info("Step %s paused for approval", step_id)
+                return False
+    except Exception as e:
+        logger.warning("Approval check failed for step %s: %s", step_id, e)
+
     for attempt in range(max_retries + 1):
         execute(
             "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'RUNNING', STARTED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid AND STATUS = 'PENDING'",
@@ -317,3 +341,35 @@ def execute_step_with_retry(step_id: str) -> bool:
                 )
                 return False
     return False
+
+
+def approve_step(step_id: str, approver: str) -> bool:
+    """Approve a paused step and resume it."""
+    from .approval_api import approve, get_pending_for_entity
+    pending = get_pending_for_entity("STEP", step_id)
+    if not pending:
+        return False
+    result = approve(pending["approval_id"], approver)
+    if result:
+        execute(
+            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'PENDING', APPROVED_BY = :approver, APPROVED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid AND STATUS = 'PAUSED'",
+            {"approver": approver, "sid": step_id},
+        )
+        logger.info("Step %s approved by %s, resuming", step_id, approver)
+    return result
+
+
+def reject_step(step_id: str, approver: str, reason: str = "") -> bool:
+    """Reject a paused step and skip it."""
+    from .approval_api import reject, get_pending_for_entity
+    pending = get_pending_for_entity("STEP", step_id)
+    if not pending:
+        return False
+    result = reject(pending["approval_id"], approver, reason)
+    if result:
+        execute(
+            "UPDATE STEP_EXECUTION_PLAN SET STATUS = 'SKIPPED', APPROVED_BY = :approver, APPROVED_AT = SYSTIMESTAMP WHERE STEP_ID = :sid AND STATUS = 'PAUSED'",
+            {"approver": approver, "sid": step_id},
+        )
+        logger.info("Step %s rejected by %s: %s", step_id, approver, reason)
+    return result

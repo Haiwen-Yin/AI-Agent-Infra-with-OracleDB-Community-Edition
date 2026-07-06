@@ -1,11 +1,13 @@
-"""AI Agent Infra v3.8.0 - Community Edition - Tool Registry + DAG Chains
+"""AI Agent Infra v3.9.0 - Community Edition - Tool Registry + DAG Chains
 
-OpenAPI import, tool versioning, tool DAG composition.
+OpenAPI import, tool versioning, tool DAG composition, tool invocation.
 Tables: TOOL_REGISTRY, TOOL_CHAINS, TOOL_CHAIN_STEPS
 """
 
 import json
 import logging
+import urllib.request
+import urllib.error
 from typing import Any, Dict, List, Optional
 
 from .connection import (
@@ -215,6 +217,95 @@ def get_tool_stats() -> Dict[str, Any]:
         calls = r.get("total_calls", 0) or 0
         stats["by_type"][ttype] = stats["by_type"].get(ttype, 0) + cnt
         stats["by_status"][stat] = stats["by_status"].get(stat, 0) + cnt
-        stats["total_tools"] += cnt
-        stats["total_calls"] += calls
+    stats["total_tools"] += cnt
+    stats["total_calls"] += calls
     return stats
+
+
+def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
+                timeout: int = 30) -> Dict[str, Any]:
+    """Execute a registered tool by making an HTTP call to its endpoint.
+
+    Reads the tool's INPUT_SCHEMA (which contains path, method, parameters)
+    and constructs an HTTP request accordingly.
+
+    Returns a dict with: success, status_code, body, error
+    """
+    tool = get_tool(tool_id)
+    if not tool:
+        return {"success": False, "error": f"Tool {tool_id} not found"}
+    if tool.get("status", "ACTIVE") != "ACTIVE":
+        return {"success": False, "error": f"Tool {tool_id} is not active"}
+
+    input_schema = tool.get("input_schema", {})
+    if isinstance(input_schema, str):
+        try:
+            input_schema = json.loads(input_schema)
+        except (json.JSONDecodeError, TypeError):
+            input_schema = {}
+
+    path = input_schema.get("path", "/")
+    method = input_schema.get("method", "GET").upper()
+    parameters = input_schema.get("parameters", [])
+    request_body = input_schema.get("requestBody", {})
+
+    input_params = input_params or {}
+
+    url = path
+    query_parts = []
+    body_data = None
+    headers = {"Content-Type": "application/json"}
+
+    for param in parameters:
+        pname = param.get("name", "")
+        pin = param.get("in", "query")
+        if pname in input_params:
+            if pin == "path":
+                url = url.replace(f"{{{pname}}}", str(input_params[pname]))
+            elif pin == "query":
+                query_parts.append(f"{pname}={input_params[pname]}")
+            elif pin == "header":
+                headers[pname] = str(input_params[pname])
+
+    if query_parts:
+        url += "?" + "&".join(query_parts)
+
+    if method in ("POST", "PUT", "PATCH") and request_body:
+        body_data = json.dumps(input_params).encode()
+
+    if method == "GET" and input_params:
+        for k, v in input_params.items():
+            if k not in [p.get("name") for p in parameters]:
+                query_parts.append(f"{k}={v}")
+        if query_parts:
+            url += ("?" if "?" not in url else "&") + "&".join(query_parts)
+
+    try:
+        req = urllib.request.Request(url, data=body_data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp_body = resp.read().decode("utf-8", errors="replace")
+            record_tool_call(tool_id)
+            return {
+                "success": True,
+                "status_code": resp.status,
+                "body": resp_body,
+                "url": url,
+                "method": method,
+            }
+    except urllib.error.HTTPError as e:
+        resp_body = e.read().decode("utf-8", errors="replace")
+        return {
+            "success": False,
+            "status_code": e.code,
+            "body": resp_body,
+            "error": str(e),
+            "url": url,
+            "method": method,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "url": url,
+            "method": method,
+        }

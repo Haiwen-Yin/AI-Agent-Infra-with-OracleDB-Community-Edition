@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Monitor - AI Agent Infra Community v3.8.0</title>
+<title>Monitor - AI Agent Infra Community v3.9.0</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>
 
@@ -145,7 +145,7 @@ body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family
 <body>
 <div class="sidebar">
   <div class="sidebar-brand">
-    <h5>AI Agent Infra v3.8.0</h5>
+    <h5>AI Agent Infra v3.9.0</h5>
     <small>Community Edition</small>
   </div>
   <nav class="sidebar-nav">
@@ -203,7 +203,8 @@ if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
 if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
 function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
 _aloInt=setInterval(_aloTick,1000);
-document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
 
 
 function statusColor(s){var m={'ONLINE':'#2ecc71','IDLE':'#f1c40f','BUSY':'#3498db','STALLED':'#e74c3c','DORMANT':'#a0a0b0'};return m[s]||'#a0a0b0'}
