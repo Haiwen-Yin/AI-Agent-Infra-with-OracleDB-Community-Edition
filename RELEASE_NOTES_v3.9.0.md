@@ -51,18 +51,18 @@ Configurable model routing based on task complexity:
 
 ## Database Changes
 
-- : Added REQUIRES_APPROVAL, APPROVED_BY, APPROVED_AT columns
-- : Added REQUIRE_APPROVAL column
-- : Added REQUIRES_APPROVAL column
--  constraint: Added 'PAUSED' value
-- New table:  (unified approval queue)
+- `STEP_EXECUTION_PLAN`: Added REQUIRES_APPROVAL, APPROVED_BY, APPROVED_AT columns
+- `LOOP_META`: Added REQUIRE_APPROVAL column
+- `TOOL_REGISTRY`: Added REQUIRES_APPROVAL column
+- `CK_SEP_STATUS` constraint: Added 'PAUSED' value
+- New table: `APPROVAL_REQUESTS` (unified approval queue)
 
 ## New Files
 
--  — MCP Server implementation
--  — MCP Server entry point
--  — Unified approval management API
--  — Approval queue page
+- `scripts/lib/mcp_server.py` — MCP Server implementation
+- `scripts/mcp_server_main.py` — MCP Server entry point
+- `scripts/lib/approval_api.py` — Unified approval management API
+- `scripts/visualization/templates/approvals.html` — Approval queue page
 
 ## Upgrade Notes
 
