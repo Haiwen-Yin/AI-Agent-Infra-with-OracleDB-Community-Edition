@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.9.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v3.10.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -28,7 +28,7 @@ from lib import security, config, user_api
 from lib import loop_api
 from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 
-VERSION = "3.9.0"
+VERSION = "3.10.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -719,6 +719,20 @@ class VisHandler(BaseHTTPRequestHandler):
                 q = qs.get('q', [''])[0]
                 et = qs.get('type', [None])[0]
                 self._send_json(graph_api.graph_search(keyword=q if q else None, entity_type=et))
+            elif path == '/api/graph/causal':
+                from lib import graph_api
+                entity_id = qs.get('entity_id', [''])[0]
+                depth = int(qs.get('depth', ['3'])[0])
+                self._send_json({"causes": graph_api.find_causes(entity_id, depth), "contradictions": graph_api.find_contradictions(entity_id), "provenance": graph_api.trace_provenance(entity_id)})
+            elif path == '/api/graph/collaboration':
+                from lib import graph_api
+                agent_id = qs.get('agent_id', [''])[0]
+                group_id = qs.get('group_id', [''])[0]
+                self._send_json({"trusted": graph_api.get_trusted_agents(agent_id, group_id), "recommendations": graph_api.recommend_collaborators(agent_id, group_id)})
+            elif path == '/api/graph/lineage':
+                from lib import graph_api
+                entity_id = qs.get('entity_id', [''])[0]
+                self._send_json(graph_api.trace_data_lineage(entity_id))
             elif path == '/api/graph/all':
                 self._send_json(_graph_all())
             elif path == '/api/branches':

@@ -307,6 +307,13 @@ def promote_to_semantic(memory_id: str) -> Optional[str]:
         {"kid": knowledge_id, "mid": memory_id},
     )
 
+    # v3.10.0: Write PROMOTED_TO graph edge
+    try:
+        from .graph_api import record_promotion
+        record_promotion(memory_id, knowledge_id)
+    except Exception:
+        pass
+
     return knowledge_id
 
 

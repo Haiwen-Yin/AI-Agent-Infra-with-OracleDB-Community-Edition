@@ -127,6 +127,7 @@ def add_group_member(
     role: str = "MEMBER",
     branch_id: Optional[str] = None,
 ) -> str:
+    """Add a member to a collaboration group and initialize trust edges."""
     personal_workspace_id = None
     if role in ("LEAD", "CONTRIBUTOR"):
         personal_workspace_id = create_workspace(
@@ -143,13 +144,29 @@ def add_group_member(
         VALUES ({member_id_sql}, :gid, :aid, :role, :pwid, :vmbrid, SYSTIMESTAMP, 'ACTIVE')
         RETURNING MEMBER_ID INTO :ret_id
     """
-    return execute_insert_returning_id(sql, {
+    member_id = execute_insert_returning_id(sql, {
         "gid": group_id,
         "aid": agent_id,
         "role": role,
         "pwid": personal_workspace_id,
         "vmbrid": branch_id,
     })
+    if member_id:
+        _init_member_trust(group_id, agent_id)
+    return member_id
+
+
+def _init_member_trust(group_id: str, agent_id: str):
+    """v3.10.0: Initialize trust edges when a member joins a group."""
+    try:
+        from .graph_api import init_group_trust
+        group = get_collab_group(group_id)
+        coordinator = group.get('coordinator_agent_id') if group else agent_id
+        members = list_group_members(group_id)
+        existing_ids = [m.get('agent_id') for m in members if m.get('agent_id') != agent_id]
+        init_group_trust(agent_id, group_id, coordinator, existing_ids)
+    except Exception:
+        pass
 
 
 def remove_group_member(group_id: str, agent_id: str) -> bool:

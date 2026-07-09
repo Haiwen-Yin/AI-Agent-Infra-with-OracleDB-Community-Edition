@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.9.0 - Community Edition - Audit API (stub)
+"""AI Agent Infra v3.10.0 - Community Edition - Audit API (stub)
 
 Community Edition does not include full audit functionality.
 Provides minimal stubs to prevent import errors.

@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v3.9.0 - Community Edition - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v3.10.0 - Community Edition - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -1349,7 +1349,7 @@ PROMPT ============================================================
 
 /
 
-PROMPT AI Agent Infra v3.9.0 API Deployment Complete
+PROMPT AI Agent Infra v3.10.0 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -2893,5 +2893,5 @@ CREATE OR REPLACE PACKAGE BODY MONITOR_MANAGER AS
 END MONITOR_MANAGER;
 /
 
-PROMPT AI Agent Infra v3.9.0 - Community Edition API Deployment Complete
+PROMPT AI Agent Infra v3.10.0 - Community Edition API Deployment Complete
 PROMPT ============================================================

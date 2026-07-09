@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.9.0 - MCP Server
+"""AI Agent Infra v3.10.0 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
@@ -202,6 +202,47 @@ async def list_tools() -> List[Tool]:
             },
         ))
 
+    if "graph_causal" in exposed:
+        tools.append(Tool(
+            name="graph_causal",
+            description="Trace causal relationships, contradictions, and provenance for an entity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entity_id": {"type": "string"},
+                    "depth": {"type": "integer", "default": 3},
+                },
+                "required": ["entity_id"],
+            },
+        ))
+
+    if "graph_lineage" in exposed:
+        tools.append(Tool(
+            name="graph_lineage",
+            description="Trace data lineage: derivation chain + access history.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entity_id": {"type": "string"},
+                },
+                "required": ["entity_id"],
+            },
+        ))
+
+    if "graph_collaboration" in exposed:
+        tools.append(Tool(
+            name="graph_collaboration",
+            description="Get trusted agents and collaboration recommendations within a group.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string"},
+                    "group_id": {"type": "string"},
+                },
+                "required": ["agent_id", "group_id"],
+            },
+        ))
+
     return tools
 
 
@@ -284,6 +325,25 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         elif name == "agent_list":
             agents = agent_api.list_agents()
             return [TextContent(type="text", text=json.dumps(agents, default=str, ensure_ascii=False))]
+
+        elif name == "graph_causal":
+            result = {
+                "causes": graph_api.find_causes(arguments.get("entity_id", ""), arguments.get("depth", 3)),
+                "contradictions": graph_api.find_contradictions(arguments.get("entity_id", "")),
+                "provenance": graph_api.trace_provenance(arguments.get("entity_id", "")),
+            }
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
+
+        elif name == "graph_lineage":
+            result = graph_api.trace_data_lineage(arguments.get("entity_id", ""))
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
+
+        elif name == "graph_collaboration":
+            result = {
+                "trusted": graph_api.get_trusted_agents(arguments.get("agent_id", ""), arguments.get("group_id", "")),
+                "recommendations": graph_api.recommend_collaborators(arguments.get("agent_id", ""), arguments.get("group_id", "")),
+            }
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
 
         else:
             return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]

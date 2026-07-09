@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.9.0 - Community Edition - Schema Deployment
+PROMPT AI Agent Infra v3.10.0 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -116,7 +116,7 @@ CREATE TABLE ENTITIES (
     CONSTRAINT CK_ENTITIES_STATUS CHECK (STATUS IN ('ACTIVE','ARCHIVED','DELETED','DRAFT')),
     CONSTRAINT CK_ENTITIES_VISIBILITY CHECK (VISIBILITY IN ('PRIVATE','SHARED','PUBLIC')),
     CONSTRAINT CK_ENTITIES_IMPORTANCE CHECK (IMPORTANCE BETWEEN 1 AND 10),
-    CONSTRAINT CK_ENTITIES_TYPE CHECK (ENTITY_TYPE IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC','SKILL','LOOP_DEFINITION','OTHER'))
+    CONSTRAINT CK_ENTITIES_TYPE CHECK (ENTITY_TYPE IN ('MEMORY','KNOWLEDGE','TASK_OUTPUT','EXPERIENCE','HARNESS_TEMPLATE','SPEC','SKILL','LOOP_DEFINITION','AGENT','TASK_STEP','APPROVAL','LOOP_ITERATION','OTHER'))
 ) PARTITION BY LIST (ENTITY_TYPE)
 SUBPARTITION BY RANGE (CREATED_AT)
 SUBPARTITION TEMPLATE (
@@ -1665,7 +1665,7 @@ PROMPT ============================================================
 PROMPT Seed Data
 PROMPT ============================================================
 
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.9.0', 'Current schema version');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.10.0', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_url', 'http://10.10.10.1:12345/v1/embeddings', 'Embedding API URL for in-database generation');
@@ -1679,6 +1679,15 @@ INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('sessi
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('branch_cleanup_days', '90', 'Days before abandoned branches are auto-cleaned');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('branch_max_context_depth', '50', 'Max context nodes returned per branch chain');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('admin.registration_token', 'NOT_INITIALIZED', 'Admin token for Agent registration (run generate_admin_token to initialize)');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_success_delta', '0.1', 'Trust increase on task success');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_failure_delta', '0.15', 'Trust decrease on task failure');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_min_threshold', '0.3', 'Min trust for task delegation');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_max_value', '1.0', 'Max trust value');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_initial_coordinator', '0.5', 'Initial trust to group coordinator');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_initial_member', '0.3', 'Initial trust to other group members');
+
+-- v3.10.0: EDGE_TYPE index for multi-type graph queries
+CREATE INDEX IDX_EDGES_EDGE_TYPE ON ENTITY_EDGES(EDGE_TYPE) LOCAL;
 
 
 INSERT INTO SYSTEM_USERS (USER_ID, USERNAME, PASSWORD_HASH, ROLE, STATUS, AUTH_SOURCE) VALUES ('admin', 'admin', 'SHA256:placeholder_change_me', 'ADMIN', 'ACTIVE', 'LOCAL');
@@ -1714,7 +1723,7 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.9.0 - Community Edition Schema Deployment Complete
+PROMPT AI Agent Infra v3.10.0 - Community Edition Schema Deployment Complete
 PROMPT ============================================================
 
 -- Grant DBMS_CRYPTO for DB_CRYPTO package

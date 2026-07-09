@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - AI Agent Infra v3.9.0 (2026-06-18) - Community Edition
+# Workspace & Context Continuity - AI Agent Infra v3.10.0 (2026-06-18) - Community Edition
 
 ## Design Philosophy: JRD vs Native JSON
 

@@ -1,4 +1,4 @@
--- AI Agent Infra v3.9.0 - Community Edition - Phase 3: Scheduler Jobs
+-- AI Agent Infra v3.10.0 - Community Edition - Phase 3: Scheduler Jobs
 
 WHENEVER SQLERROR CONTINUE;
 
@@ -384,4 +384,4 @@ EXCEPTION
 END;
 /
 
-PROMPT AI Agent Infra v3.9.0 - Community Edition - Phase 3: Scheduler Jobs Complete (19 jobs)
+PROMPT AI Agent Infra v3.10.0 - Community Edition - Phase 3: Scheduler Jobs Complete (19 jobs)
