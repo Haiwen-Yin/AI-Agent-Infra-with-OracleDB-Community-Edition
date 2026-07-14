@@ -4,6 +4,26 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.10.1] - 2026-07-14
+
+### Summary
+
+Enterprise deployment enhancement: offline dependency bundling + pure Python Oracle schema deployment tool.
+
+### Added
+
+- **vendor/ directory**: 30 pre-downloaded Python wheels (cp314, ~12-14MB) for air-gapped deployment
+- **requirements.txt**: Locked dependency versions per edition
+- **install_offline.sh**: One-command offline installation (pip install --no-index --find-links vendor/)
+- **verify_deps.py**: Dependency verification (version + platform compatibility checks)
+- **deploy_oracle.py** (Oracle only): Pure Python schema deployer replacing SQLcl (125MB + Java). Handles PROMPT/DEFINE/&&/block terminator syntax. 200 lines, zero external dependencies beyond oracledb
+
+### Enterprise Air-Gapped Deployment
+
+No internet, SQLcl, or Java required. Copy ZIP to isolated network, run install_offline.sh, deploy with deploy_oracle.py.
+
+---
+
 ## [3.10.0] - 2026-07-09
 
 ### Summary

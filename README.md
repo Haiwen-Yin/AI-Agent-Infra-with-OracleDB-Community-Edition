@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.10.0
+# AI Agent Infra with OracleDB - Community Edition v3.10.1
 
-[![Version](https://img.shields.io/badge/version-v3.10.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.10.1-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.10.0 (2026-07-09): Universal Property Graph - 30+ graph functions across 8 domains (knowledge causal, agent collaboration with group-scoped dynamic trust, task orchestration, skill dependency, approval propagation, data flow, memory evolution, loop iteration). 23 new edge types. Dynamic trust config via SYSTEM_CONFIG. ** See CHANGELOG.md for historical versions. [CHANGELOG.md](CHANGELOG.md)
+> **v3.10.1 (2026-07-14): Offline Deployment - vendor/ directory with 30 pre-downloaded cp314 wheels, install_offline.sh for air-gapped installation, verify_deps.py for integrity check. Pure-Python deploy_oracle.py replaces SQLcl (125MB+Java) with state-machine SQL parser. 544/544 tests pass.**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.0.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.1.md)**
 
 ---
 
