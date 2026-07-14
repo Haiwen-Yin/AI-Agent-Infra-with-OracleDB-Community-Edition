@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge - AI Agent Infra Community v3.10.1</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="/static/vis-network.min.js"></script>
+<style>
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}
+.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}
+.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color)}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+.search-box{flex:1;max-width:400px;position:relative}
+.search-box input{width:100%;background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:8px;padding:7px 14px 7px 34px;font-size:.88rem}
+.search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(233,69,96,.2)}
+.search-box .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:.85rem}
+.stats-badge{background:rgba(233,69,96,.15);color:var(--accent);border-radius:20px;padding:4px 14px;font-size:.8rem;font-weight:600;white-space:nowrap}
+.view-btn{background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-secondary);border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;transition:all .15s}
+.view-btn:hover{border-color:var(--accent);color:var(--text-primary)}
+.view-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.content-area{flex:1;display:flex;overflow:hidden;position:relative}
+#network-container{flex:1;width:100%;height:calc(100vh - 120px);background:var(--bg-primary)}
+#listView{flex:1;overflow-y:auto;padding:0 20px;display:none;min-height:0;height:calc(100vh - 120px)}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.85rem}
+.data-table thead th{background:var(--bg-card);color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:2;box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.3);vertical-align:top;cursor:pointer}
+.data-table tbody tr:hover td{background:rgba(233,69,96,.06)}
+.badge-domain{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.72rem;color:#fff;font-weight:600}
+.content-preview{color:var(--text-secondary);font-size:.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+
+.tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.75rem;margin:2px 4px 2px 0}
+
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.detail-row td{padding:0!important;border-bottom:1px solid var(--border-color)}
+.detail-content{padding:16px 20px;background:var(--bg-secondary);border-left:3px solid var(--accent)}
+.detail-content p{margin:4px 0;font-size:.85rem;color:var(--text-primary)}
+.detail-content p strong{color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px}
+.detail-panel{width:340px;background:var(--bg-secondary);border-left:1px solid var(--border-color);padding:20px;overflow-y:auto;display:none;position:fixed;right:0;top:0;height:100vh;z-index:20;box-shadow:-4px 0 16px rgba(0,0,0,.4)}
+.detail-panel h5{color:var(--accent);font-size:1rem;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between}
+.close-detail{background:none;border:none;color:var(--text-secondary);font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1;transition:color .15s}
+.close-detail:hover{color:var(--accent)}
+
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap}
+.pagination button{background:rgba(233,69,96,.08);border:1px solid rgba(233,69,96,.2);color:#fff;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s}
+.pagination button:hover{background:rgba(233,69,96,.2);border-color:rgba(233,69,96,.4)}
+.pagination button.active{background:rgba(233,69,96,.15);border:1px solid rgba(233,69,96,.3);color:#e94560;font-weight:700}
+.pagination button:disabled{opacity:.35;cursor:not-allowed}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>AI Agent Infra v3.10.1</h5>
+    <small>Community Edition</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge" class="active"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon">&#129504;</span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon">&#129302;</span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs"><span class="icon">&#128196;</span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills"><span class="icon">&#9881;</span><span data-zh>Skills</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon">&#127793;</span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon">&#128101;</span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops"><span class="icon">&#128260;</span><span data-zh>循环</span><span data-en>Loops</span></a>
+    <a href="/monitor"><span class="icon">&#128202;</span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div>
+
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>知识图谱</span><span data-en>Knowledge Graph</span></h4>
+    <div class="search-box">
+      <span class="search-icon">&#128269;</span>
+      <input type="text" id="searchInput" oninput="applyFilter()" data-ph-zh="搜索知识节点..." data-ph-en="Search knowledge nodes...">
+    </div>
+    <span class="stats-badge" id="statsBadge">0 <span data-zh>节点</span><span data-en>nodes</span></span>
+    <button class="view-btn" id="btnGraph" onclick="switchView('graph')"><span data-zh>图谱</span><span data-en>Graph</span></button>
+    <button class="view-btn active" id="btnList" onclick="switchView('list')"><span data-zh>列表</span><span data-en>List</span></button>
+  </div>
+  <div class="content-area">
+     <div id="network-container" style="display:none"></div>
+     <div class="detail-panel" id="nodeDetail" style="display:none">
+       <h5><span data-zh>节点详情</span><span data-en>Node Detail</span><button class="close-detail" onclick="closeGraphDetail()" title="Close">&times;</button></h5>
+       <div id="nodeDetailContent"></div>
+     </div>
+     <div id="listView" style="display:block">
+      <table class="data-table">
+        <thead><tr>
+          <th>ID</th>
+          <th><span data-zh>标题</span><span data-en>Title</span></th>
+          <th><span data-zh>领域</span><span data-en>Domain</span></th>
+          <th><span data-zh>主题</span><span data-en>Topic</span></th>
+          <th><span data-zh>难度</span><span data-en>Difficulty</span></th>
+          <th><span data-zh>重要性</span><span data-en>Importance</span></th>
+          <th><span data-zh>内容</span><span data-en>Content</span></th>
+        </tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+      <div id="pagination" class="pagination"></div>
+     </div>
+
+    <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<script>
+var network = null;
+var allNodes = null;
+var allEdges = null;
+var nodesDataset = null;
+var edgesDataset = null;
+var currentView = 'list';
+var PAGE_SIZE=30;var currentPage=1;var filteredItems=[];
+
+var domainColors = {
+  AI: '#4a90d9', NLP: '#50c878', DB: '#e8a838', ML: '#9b59b6',
+  CV: '#e74c3c', SE: '#1abc9c', Math: '#f39c12', General: '#95a5a6',
+  Security: '#e57373', DevOps: '#4dd0e1', Architecture: '#7e57c2', Database: '#e8a838'
+};
+var edgeTypeColors = {
+  related_to: '#5dade2', depends_on: '#e74c3c', part_of: '#2ecc71',
+  derived_from: '#9b59b6', prerequisite: '#f39c12', default: '#7f8c8d'
+};
+
+function toggleLang() {
+  var html = document.documentElement;
+  var cur = html.getAttribute('data-lang');
+  var next = cur === 'en' ? 'zh' : 'en';
+  html.setAttribute('data-lang', next);
+  localStorage.setItem('lang', next);
+  applyLangPlaceholders();
+}
+
+function applyLangPlaceholders() {
+  var lang = document.documentElement.getAttribute('data-lang') || 'en';
+  document.querySelectorAll('[data-ph-zh]').forEach(function(el) {
+    el.placeholder = lang === 'zh' ? el.getAttribute('data-ph-zh') : el.getAttribute('data-ph-en');
+  });
+}
+
+function closeDetail() {
+  var allD = document.querySelectorAll('.detail-row');
+  for (var i = 0; i < allD.length; i++) allD[i].style.display = 'none';
+}
+
+function toggleDetail(idx) {
+  var el = document.getElementById('kdetail-' + idx);
+  if (!el) return;
+  var allD = document.querySelectorAll('.detail-row');
+  for (var i = 0; i < allD.length; i++) { if (allD[i] !== el) allD[i].style.display = 'none'; }
+  el.style.display = el.style.display === 'table-row' ? 'none' : 'table-row';
+}
+
+function closeGraphDetail() {
+  var dp = document.getElementById('nodeDetail');
+  if (dp) dp.style.display = 'none';
+}
+
+function showGraphDetail(nd) {
+  if (!nd) return;
+  var dp = document.getElementById('nodeDetail');
+  var dc = document.getElementById('nodeDetailContent');
+  if (!dp || !dc) return;
+  var tgs = nd.tags && nd.tags.length > 0 ? nd.tags.map(function(t){return '<span class="tag">'+escapeHtml(t)+'</span>'}).join(' ') : '-';
+  dc.innerHTML = '<p><strong><span data-zh>标题</span><span data-en>Title</span></strong> ' + escapeHtml(nd.title||nd.label||'-') + '</p>' +
+    '<p><strong><span data-zh>内容</span><span data-en>Content</span></strong></p>' +
+    '<pre style="margin:0 0 8px;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">' + escapeHtml(nd.content||'-') + '</pre>' +
+    '<p><strong><span data-zh>摘要</span><span data-en>Summary</span></strong> ' + escapeHtml(nd.summary||'-') + '</p>' +
+    '<p><strong><span data-zh>领域</span><span data-en>Domain</span></strong> ' + escapeHtml(nd.domain||nd.group||'-') + '</p>' +
+    '<p><strong><span data-zh>主题</span><span data-en>Topic</span></strong> ' + escapeHtml(nd.topic||'-') + '</p>' +
+    '<p><strong><span data-zh>难度</span><span data-en>Difficulty</span></strong> ' + escapeHtml(nd.difficulty||'-') + '</p>' +
+    '<p><strong><span data-zh>复习次数</span><span data-en>Review Count</span></strong> ' + (nd.review_count != null ? nd.review_count : '-') + '</p>' +
+    '<p><strong><span data-zh>标签</span><span data-en>Tags</span></strong> ' + tgs + '</p>';
+  dp.style.display = 'block';
+}
+
+function showDetail(nodeId) {
+  if (!allNodes) return;
+  var nodeData = null;
+  for (var i = 0; i < allNodes.length; i++) {
+    if (allNodes[i].id === nodeId) { nodeData = allNodes[i]; break; }
+  }
+  if (!nodeData) return;
+  if (currentView === 'graph') {
+    showGraphDetail(nodeData);
+  } else {
+    closeDetail();
+    var tbody = document.getElementById('listBody');
+    for (var i = 0; i < tbody.children.length; i++) {
+      var tr = tbody.children[i];
+      if (tr.getAttribute('data-nid') === nodeId) {
+        toggleDetail(i);
+        return;
+      }
+    }
+  }
+}
+
+function escapeHtml(str) {
+  var d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function filterNodes(keyword) {
+  if (!nodesDataset || !allNodes) return;
+  keyword = keyword.toLowerCase().trim();
+  if (!keyword) {
+    nodesDataset.clear();
+    nodesDataset.add(allNodes.map(buildVisNode));
+    edgesDataset.clear();
+    edgesDataset.add(allEdges.map(buildVisEdge));
+    updateStats(allNodes.length);
+    return;
+  }
+  var matchedIds = {};
+  var filtered = [];
+  for (var i = 0; i < allNodes.length; i++) {
+    var n = allNodes[i];
+    var text = ((n.label || '') + ' ' + (n.title || '') + ' ' + (n.domain || '') + ' ' + (n.topic || '') + ' ' + (n.content || '') + ' ' + (n.tags || []).join(' ')).toLowerCase();
+    if (text.indexOf(keyword) >= 0) {
+      filtered.push(n);
+      matchedIds[n.id] = true;
+    }
+  }
+  var filteredEdges = [];
+  for (var j = 0; j < allEdges.length; j++) {
+    var e = allEdges[j];
+    if (matchedIds[e.from] && matchedIds[e.to]) {
+      filteredEdges.push(e);
+    }
+  }
+  nodesDataset.clear();
+  nodesDataset.add(filtered.map(buildVisNode));
+  edgesDataset.clear();
+  edgesDataset.add(filteredEdges.map(buildVisEdge));
+  updateStats(filtered.length);
+}
+
+function switchView(v) {
+  currentView = v;
+  if (v !== 'graph') closeGraphDetail();
+  if (v !== 'list') closeDetail();
+  document.getElementById('btnGraph').classList.toggle('active', v === 'graph');
+  document.getElementById('btnList').classList.toggle('active', v === 'list');
+  document.getElementById('listView').style.display = v === 'list' ? 'block' : 'none';
+  document.getElementById('network-container').style.display = v === 'graph' ? 'block' : 'none';
+  if (v === 'list') renderList();
+  if (v === 'graph' && allNodes) {
+    setTimeout(function() { rebuildNetwork(); }, 100);
+  }
+}
+
+var _hlActive = false;
+function highlightConnected(nodeId) {
+  if (!network || !nodesDataset || !edgesDataset) return;
+  var connNodes = network.getConnectedNodes(nodeId);
+  var connEdges = network.getConnectedEdges(nodeId);
+  var highlightSet = new Set([nodeId].concat(connNodes));
+  var edgeSet = new Set(connEdges);
+  var allN = nodesDataset.getIds();
+  for (var i = 0; i < allN.length; i++) {
+    var id = allN[i];
+    var nd = nodesDataset.get(id);
+    if (!nd) continue;
+    if (!nd._origColor) nd._origColor = JSON.parse(JSON.stringify(nd.color));
+    if (highlightSet.has(id)) {
+      var oc = nd._origColor;
+      nodesDataset.update({ id: id, color: { background: oc.highlight.background, border: '#fff', highlight: oc.highlight, hover: oc.hover }, borderWidth: 3, font: { color: '#fff', size: 13 } });
+    } else {
+      var oc2 = nd._origColor;
+      nodesDataset.update({ id: id, color: { background: oc2.background, border: oc2.border, highlight: oc2.highlight, hover: oc2.hover, opacity: 0.15 }, borderWidth: 1, font: { color: 'rgba(224,224,224,0.2)', size: 11 } });
+    }
+  }
+  var allE = edgesDataset.getIds();
+  for (var j = 0; j < allE.length; j++) {
+    var eid = allE[j];
+    var ed = edgesDataset.get(eid);
+    if (!ed) continue;
+    if (!ed._origColor) ed._origColor = JSON.parse(JSON.stringify(ed.color));
+    if (edgeSet.has(eid)) {
+      var oec = ed._origColor;
+      edgesDataset.update({ id: eid, color: { color: '#fff', highlight: oec.highlight, hover: oec.hover }, width: 3, font: { color: '#fff', size: 10 } });
+    } else {
+      var oec2 = ed._origColor;
+      edgesDataset.update({ id: eid, color: { color: oec2.color, highlight: oec2.highlight, hover: oec2.hover, opacity: 0.08 }, width: 1, font: { color: 'rgba(160,160,176,0.15)', size: 9 } });
+    }
+  }
+  _hlActive = true;
+}
+function resetHighlight() {
+  if (!_hlActive || !nodesDataset || !edgesDataset) return;
+  var allN = nodesDataset.getIds();
+  for (var i = 0; i < allN.length; i++) {
+    var nd = nodesDataset.get(allN[i]);
+    if (nd && nd._origColor) {
+      nodesDataset.update({ id: allN[i], color: nd._origColor, borderWidth: 1, font: { color: '#e0e0e0', size: 11 } });
+    }
+  }
+  var allE = edgesDataset.getIds();
+  for (var j = 0; j < allE.length; j++) {
+    var ed = edgesDataset.get(allE[j]);
+    if (ed && ed._origColor) {
+      edgesDataset.update({ id: allE[j], color: ed._origColor, width: 1, font: { color: '#a0a0b0', size: 9 } });
+    }
+  }
+  _hlActive = false;
+}
+
+function rebuildNetwork() {
+  if (!nodesDataset || !allNodes) return;
+  var container = document.getElementById('network-container');
+  if (network) { network.destroy(); network = null; }
+  var options = {
+    nodes: { shape: 'dot', font: { color: '#e0e0e0' } },
+    edges: { smooth: { type: 'continuous' } },
+    physics: { barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 120, springConstant: 0.04 }, stabilization: { iterations: 150 } },
+    interaction: { hover: true, tooltipDelay: 200, navigationButtons: true, keyboard: true }
+  };
+  network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, options);
+  network.on('click', function(params) {
+    var cam = network.getViewPosition();
+    var scale = network.getScale();
+    if (params.nodes.length > 0) {
+      highlightConnected(params.nodes[0]);
+      showDetail(params.nodes[0]);
+    } else {
+      resetHighlight();
+      closeGraphDetail();
+    }
+    network.moveTo({ position: cam, scale: scale, animation: false });
+  });
+}
+
+function renderList() {
+  if (!allNodes) return;
+  var kw = document.getElementById('searchInput').value.toLowerCase().trim();
+  var tbody = document.getElementById('listBody');
+  filteredItems=[];
+  for (var i = 0; i < allNodes.length; i++) {
+    var n = allNodes[i];
+    if (kw) {
+      var t = ((n.label || '') + ' ' + (n.title || '') + ' ' + (n.domain || '') + ' ' + (n.topic || '') + ' ' + (n.content || '')).toLowerCase();
+      if (t.indexOf(kw) < 0) continue;
+    }
+    filteredItems.push(n);
+  }
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;
+  if(currentPage>totalPages)currentPage=totalPages;
+  var start=(currentPage-1)*PAGE_SIZE;
+  var pageItems=filteredItems.slice(start,start+PAGE_SIZE);
+  var h = '';
+  for (var j = 0; j < pageItems.length; j++) {
+    var n = pageItems[j];
+    var dc = domainColors[n.domain || n.group || 'General'] || domainColors.General;
+    h += '<tr data-nid="' + n.id + '" onclick="toggleDetail(' + j + ')" style="cursor:pointer">';
+    h += '<td style="color:var(--text-secondary);font-family:monospace;font-size:.8rem">' + n.id + '</td>';
+    h += '<td style="font-weight:600">' + escapeHtml(n.title || n.label) + '</td>';
+    h += '<td><span class="badge-domain" style="background:' + dc + '">' + escapeHtml(n.domain || n.group || '-') + '</span></td>';
+    h += '<td>' + escapeHtml(n.topic || '-') + '</td>';
+    h += '<td>' + escapeHtml(n.difficulty || '-') + '</td>';
+    h += '<td style="text-align:center">' + (n.importance != null ? n.importance : '-') + '</td>';
+    h += '<td class="content-preview">' + escapeHtml(n.content || '-') + '</td>';
+    h += '</tr>';
+    h += '<tr id="kdetail-' + j + '" class="detail-row" style="display:none"><td colspan="7" style="padding:0">';
+    h += '<div class="detail-content">';
+    h += '<div style="color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px"><span data-zh>节点详情</span><span data-en>Node Detail</span></div>';
+    h += '<p><strong><span data-zh>标题</span><span data-en>Title</span></strong> ' + escapeHtml(n.title || n.label || '-') + '</p>';
+    h += '<p><strong><span data-zh>内容</span><span data-en>Content</span></strong></p>';
+    h += '<pre style="margin:0 0 8px;color:var(--text-primary);font-size:.82rem;white-space:pre-wrap;word-break:break-word">' + escapeHtml(n.content || '-') + '</pre>';
+    h += '<p><strong><span data-zh>摘要</span><span data-en>Summary</span></strong> ' + escapeHtml(n.summary || '-') + '</p>';
+    h += '<p><strong><span data-zh>领域</span><span data-en>Domain</span></strong> ' + escapeHtml(n.domain || n.group || '-') + '</p>';
+    h += '<p><strong><span data-zh>主题</span><span data-en>Topic</span></strong> ' + escapeHtml(n.topic || '-') + '</p>';
+    h += '<p><strong><span data-zh>难度</span><span data-en>Difficulty</span></strong> ' + escapeHtml(n.difficulty || '-') + '</p>';
+    h += '<p><strong><span data-zh>复习次数</span><span data-en>Review Count</span></strong> ' + (n.review_count != null ? n.review_count : '-') + '</p>';
+    var tgs = n.tags && n.tags.length > 0 ? n.tags.map(function(t){return '<span class="tag">'+escapeHtml(t)+'</span>'}).join(' ') : '-';
+    h += '<p><strong><span data-zh>标签</span><span data-en>Tags</span></strong> ' + tgs + '</p>';
+    h += '</div></td></tr>';
+  }
+  tbody.innerHTML = h;
+  renderPagination(filteredItems.length,'pagination',currentPage,'goPage');
+}
+
+function renderPagination(totalCount,pagId,curPage,goFn){
+  var pagDiv=document.getElementById(pagId);if(!pagDiv)return;
+  var totalPages=Math.ceil(totalCount/PAGE_SIZE)||1;
+  if(totalPages<=1){pagDiv.innerHTML='';return}
+  var h='';
+  h+='<button onclick="'+goFn+'('+(curPage-1)+')"'+(curPage<=1?' disabled':'')+'>&laquo; Prev</button>';
+  var startPage=Math.max(1,curPage-3);
+  var endPage=Math.min(totalPages,curPage+3);
+  if(startPage>1)h+='<button onclick="'+goFn+'(1)">1</button>';
+  if(startPage>2)h+='<button disabled>...</button>';
+  for(var p=startPage;p<=endPage;p++){
+    h+='<button onclick="'+goFn+'('+p+')"'+(p===curPage?' class="active"':'')+'>'+p+'</button>';
+  }
+  if(endPage<totalPages-1)h+='<button disabled>...</button>';
+  if(endPage<totalPages)h+='<button onclick="'+goFn+'('+totalPages+')">'+totalPages+'</button>';
+  h+='<button onclick="'+goFn+'('+(curPage+1)+')"'+(curPage>=totalPages?' disabled':'')+' >Next &raquo;</button>';
+  pagDiv.innerHTML=h;
+}
+
+function goPage(p){
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;
+  if(p<1||p>totalPages)return;
+  currentPage=p;
+  renderList();
+}
+
+function applyFilter() {
+  currentPage=1;
+  if (currentView === 'list') { renderList(); return; }
+  filterNodes(document.getElementById('searchInput').value);
+}
+
+function buildVisNode(n) {
+  var imp = n.importance != null ? n.importance : 5;
+  var size = 5 + (imp / 10) * 10;
+  var group = n.domain || n.group || 'General';
+  var color = domainColors[group] || domainColors.General;
+  return {
+    id: n.id,
+    label: n.label || n.title || '',
+    title: n.title || n.label || '',
+    size: size,
+    color: { background: color, border: color, highlight: { background: color, border: '#fff' }, hover: { background: color, border: '#fff' } },
+    shape: n.shape || 'dot',
+    font: { color: '#e0e0e0', size: 11 },
+    borderWidth: 1,
+    originalData: n
+  };
+}
+
+function buildVisEdge(e) {
+  var edgeColor = edgeTypeColors[e.edge_type || e.label] || edgeTypeColors.default;
+  if (e.label) edgeColor = edgeTypeColors[e.label] || edgeColor;
+  return {
+    from: e.from,
+    to: e.to,
+    label: e.label || '',
+    arrows: e.arrows || 'to',
+    color: { color: edgeColor, highlight: edgeColor, hover: edgeColor },
+    font: { color: '#a0a0b0', size: 9, strokeWidth: 0 },
+    smooth: { type: 'continuous' }
+  };
+}
+
+function updateStats(count) {
+  var lang = document.documentElement.getAttribute('data-lang') || 'en';
+  if (lang === 'zh') {
+    document.getElementById('statsBadge').innerHTML = count + ' 节点';
+  } else {
+    document.getElementById('statsBadge').innerHTML = count + ' nodes';
+  }
+}
+
+function initNetwork(data) {
+  allNodes = data.nodes || [];
+  allEdges = data.edges || [];
+  var visNodes = allNodes.map(buildVisNode);
+  var visEdges = allEdges.map(buildVisEdge);
+  nodesDataset = new vis.DataSet(visNodes);
+  edgesDataset = new vis.DataSet(visEdges);
+  var container = document.getElementById('network-container');
+  var options = {
+    nodes: { shape: 'dot', font: { color: '#e0e0e0' } },
+    edges: { smooth: { type: 'continuous' } },
+    physics: {
+      barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 120, springConstant: 0.04 },
+      stabilization: { iterations: 150 }
+    },
+    interaction: { hover: true, tooltipDelay: 200, navigationButtons: true, keyboard: true }
+  };
+  network = new vis.Network(container, { nodes: nodesDataset, edges: edgesDataset }, options);
+  network.on('click', function(params) {
+    var cam = network.getViewPosition();
+    var scale = network.getScale();
+    if (params.nodes.length > 0) {
+      highlightConnected(params.nodes[0]);
+      showDetail(params.nodes[0]);
+    } else {
+      resetHighlight();
+      closeGraphDetail();
+    }
+    network.moveTo({ position: cam, scale: scale, animation: false });
+  });
+  updateStats(allNodes.length);
+  if (currentView === 'list') renderList();
+  document.getElementById('loadingOverlay').style.display = 'none';
+}
+
+async function loadData() {
+  try {
+    var res = await fetch('/api/knowledge');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    initNetwork(data);
+  } catch (err) {
+    document.getElementById('loadingOverlay').innerHTML =
+      '<div style="text-align:center;color:var(--accent)"><div style="font-size:2rem;margin-bottom:12px">&#9888;</div><div>' + escapeHtml(err.message) + '</div></div>';
+  }
+}
+
+var _autoLogoutTimer=null;
+function _resetAutoLogout(){if(_autoLogoutTimer)clearTimeout(_autoLogoutTimer);_autoLogoutTimer=setTimeout(function(){window.location.href='/logout'},300000)}
+document.addEventListener('mousemove',_resetAutoLogout);
+document.addEventListener('keydown',_resetAutoLogout);
+document.addEventListener('click',_resetAutoLogout);
+_resetAutoLogout();
+
+applyLangPlaceholders();
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadData();
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+</script>
+</body>
+</html>

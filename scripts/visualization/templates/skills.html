@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skills - AI Agent Infra Community v3.10.1</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}
+.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}
+.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}
+.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color)}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+
+.content-area{flex:1;display:flex;overflow:hidden;position:relative;min-height:0}
+.list-panel{flex:1;overflow-y:auto;padding:0 20px;min-width:0}
+
+
+
+.detail-field{margin-bottom:10px}
+.detail-field .lbl{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.detail-field .val{color:var(--text-primary);font-size:.88rem;line-height:1.5;word-break:break-word}
+.detail-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)}
+.detail-section h6{color:var(--accent);font-size:.88rem;margin-bottom:10px;font-weight:600}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.88rem}
+.data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg-card);box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle;color:#fff}
+.data-table tbody tr{cursor:pointer;transition:background .1s}
+.data-table tbody tr:hover{background:rgba(233,69,96,.05)}
+.data-table tbody tr.selected{background:rgba(233,69,96,.1)}
+.badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
+.badge-active{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-inactive{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-decommissioned{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-pending{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-running{background:rgba(52,152,219,.15);color:#3498db}
+.badge-blocked{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-success{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-failed{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-cancelled{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-paused{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-archived{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-deprecated{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-disabled{background:rgba(231,76,60,.15);color:#e74c3c}
+.btn-action{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s;margin-left:auto}
+.btn-action:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.detail-actions button{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;transition:all .15s}
+.detail-actions button:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions button.btn-danger{background:rgba(231,76,60,.12);color:#e74c3c;border-color:rgba(231,76,60,.25)}
+.detail-actions button.btn-danger:hover{background:rgba(231,76,60,.25);border-color:#e74c3c}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:24px;width:560px;max-height:85vh;overflow-y:auto}
+.modal-box h5{color:var(--accent);margin:0 0 16px;font-size:1.05rem}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:6px;padding:8px 10px;font-size:.88rem}
+.form-group textarea{min-height:80px;resize:vertical;font-family:'Courier New',monospace}
+.form-group input[type="file"]{padding:6px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.modal-actions button{padding:8px 20px;border-radius:6px;font-size:.88rem;cursor:pointer;transition:all .15s;border:1px solid}
+.btn-primary{background:rgba(233,69,96,.15);color:var(--accent);border-color:rgba(233,69,96,.3)}
+.btn-primary:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.btn-secondary{background:rgba(160,160,176,.1);color:var(--text-secondary);border-color:var(--border-color)}
+.btn-secondary:hover{background:rgba(160,160,176,.2)}
+.resource-info{background:rgba(15,52,96,.3);border:1px solid var(--border-color);border-radius:6px;padding:10px 14px;margin-top:8px}
+.resource-info p{margin:2px 0;font-size:.82rem}
+.resource-info .lbl{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase}
+.badge-open{background:rgba(233,69,96,.15);color:#e94560}
+.badge-acknowledged{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-resolved{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-false-positive{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-escalated{background:rgba(155,89,182,.15);color:#9b59b6}
+.cap-tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.72rem;margin:1px 3px 1px 0}
+.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;color:#fff}
+.tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.75rem;margin:2px 4px 2px 0}
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
+.empty-state .icon{font-size:3rem;margin-bottom:12px;opacity:.5}
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap}
+.pagination button{background:rgba(233,69,96,.08);border:1px solid rgba(233,69,96,.2);color:#fff;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s}
+.pagination button:hover{background:rgba(233,69,96,.2);border-color:rgba(233,69,96,.4)}
+.pagination button.active{background:rgba(233,69,96,.15);border:1px solid rgba(233,69,96,.3);color:#e94560;font-weight:700}
+.pagination button:disabled{opacity:.35;cursor:not-allowed}
+.detail-row td{padding:0!important;border-bottom:1px solid var(--border-color)}.detail-content{padding:16px 20px;background:var(--bg-secondary);border-left:3px solid var(--accent)}.detail-content p{margin:4px 0;font-size:.85rem;color:var(--text-primary)}.detail-content p strong{color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+</style>
+</head><body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>AI Agent Infra v3.10.1</h5>
+    <small>Community Edition</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon">&#129504;</span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon">&#129302;</span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs"><span class="icon">&#128196;</span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills" class="active"><span class="icon">&#9881;</span><span data-zh>Skills</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon">&#127793;</span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon">&#128101;</span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops"><span class="icon">&#128260;</span><span data-zh>循环</span><span data-en>Loops</span></a>
+    <a href="/monitor"><span class="icon">&#128202;</span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div><div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>技能管理</span><span data-en>Skills Management</span></h4>
+    <button class="btn-action" onclick="showCreateModal()"><span data-zh>+ 创建技能</span><span data-en>+ Create Skill</span></button>
+  </div>
+  <div class="content-area">
+    <div class="list-panel" id="listPanel">
+      <table class="data-table" id="skillTable"><thead><tr>
+        <th><span data-zh>技能名称</span><span data-en>Skill Name</span></th>
+        <th><span data-zh>版本</span><span data-en>Version</span></th>
+        <th><span data-zh>类型</span><span data-en>Type</span></th>
+        <th><span data-zh>格式</span><span data-en>Format</span></th>
+        <th><span data-zh>运行时</span><span data-en>Runtime</span></th>
+        <th><span data-zh>状态</span><span data-en>Status</span></th>
+        <th><span data-zh>资源</span><span data-en>Resource</span></th>
+      </tr></thead><tbody id="skillBody"></tbody></table>
+      <div id="pagination" class="pagination"></div>
+    </div>
+    <div class="loading-overlay" id="loading"><div class="spinner"></div></div>
+  </div>
+</div>
+<div id="modalContainer"></div>
+<script>
+var allSkills=[];var PAGE_SIZE=30;var currentPage=1;var filteredItems=[];
+
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
+function escapeHtml(s){if(s==null)return '';var d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function fmtSize(bytes){if(!bytes)return '-';if(bytes<1024)return bytes+' B';if(bytes<1048576)return (bytes/1024).toFixed(1)+' KB';return (bytes/1048576).toFixed(1)+' MB'}
+function statusBadge(s){var cls=s==='ACTIVE'?'badge-active':s==='DEPRECATED'?'badge-deprecated':s==='DISABLED'?'badge-disabled':'badge-deprecated';return '<span class="badge-status '+cls+'">'+escapeHtml(s||'')+'</span>'}
+
+function renderPagination(totalCount,pagId,curPage,goFn){
+  var pagDiv=document.getElementById(pagId);if(!pagDiv)return;
+  var totalPages=Math.ceil(totalCount/PAGE_SIZE)||1;
+  if(totalPages<=1){pagDiv.innerHTML='';return}
+  var h='';
+  h+='<button onclick="'+goFn+'('+(curPage-1)+')"'+(curPage<=1?' disabled':'')+'>&laquo; Prev</button>';
+  var startPage=Math.max(1,curPage-3);var endPage=Math.min(totalPages,curPage+3);
+  if(startPage>1)h+='<button onclick="'+goFn+'(1)">1</button>';
+  if(startPage>2)h+='<button disabled>...</button>';
+  for(var p=startPage;p<=endPage;p++){h+='<button onclick="'+goFn+'('+p+')"'+(p===curPage?' class="active"':'')+'>'+p+'</button>'}
+  if(endPage<totalPages-1)h+='<button disabled>...</button>';
+  if(endPage<totalPages)h+='<button onclick="'+goFn+'('+totalPages+')">'+totalPages+'</button>';
+  h+='<button onclick="'+goFn+'('+(curPage+1)+')"'+(curPage>=totalPages?' disabled':'')+' >Next &raquo;</button>';
+  pagDiv.innerHTML=h;
+}
+
+function closeDetail(){var allD=document.querySelectorAll('.detail-row');for(var i=0;i<allD.length;i++)allD[i].style.display='none';var rows=document.querySelectorAll('.data-table tbody tr.selected');for(var i=0;i<rows.length;i++)rows[i].classList.remove('selected')}
+
+function buildDetail(s){
+  var h='<p><strong>Skill ID</strong> '+escapeHtml(s.entity_id)+'</p>';
+  h+='<p><strong>Title</strong> '+escapeHtml(s.title)+'</p>';
+  h+='<p><strong>Category</strong> '+escapeHtml(s.category||'-')+'</p>';
+  h+='<p><strong>Visibility</strong> '+escapeHtml(s.visibility||'-')+'</p>';
+  if(s.text_content)h+='<p><strong>Text Content</strong> <pre style="background:var(--input-bg);padding:8px;border-radius:4px;overflow-x:auto;font-size:.82rem;color:#fff;margin-top:4px">'+escapeHtml(s.text_content.substring(0,2000))+(s.text_content.length>2000?'...':'')+'</pre></p>';
+  if(s.resource_filename){
+    h+='<div class="resource-info"><p class="lbl">Resource File</p>';
+    h+='<p>'+escapeHtml(s.resource_filename)+' ('+fmtSize(s.resource_size)+', '+escapeHtml(s.resource_mime_type||'unknown')+')</p>';
+    h+='<p class="lbl">SHA-256</p><p style="font-family:monospace;font-size:.72rem;word-break:break-all">'+escapeHtml(s.resource_checksum||'')+'</p>';
+    if(s.resource_server_host) h+='<p class="lbl"><span data-zh>存储服务器</span><span data-en>Storage Server</span></p><p>'+escapeHtml(s.resource_server_host)+'</p>';
+    if(s.resource_uri) h+='<p class="lbl"><span data-zh>文件位置</span><span data-en>File Location</span></p><p style="font-family:monospace;font-size:.82rem;word-break:break-all">'+escapeHtml(s.resource_uri)+'</p>';
+    h+='</div>';
+  }
+  h+='<div class="detail-actions">';
+  h+='<button onclick="showUploadModal(\''+s.entity_id+'\')"><span data-zh>上传资源</span><span data-en>Upload Resource</span></button>';
+  h+='<button onclick="directDownload(\''+s.entity_id+'\')"><span data-zh>下载资源</span><span data-en>Download</span></button>';
+  if(s.resource_uri) h+='<button onclick="downloadResource(\''+s.entity_id+'\')"><span data-zh>下载资源</span><span data-en>Download Resource</span></button>';
+  h+='<button class="btn-danger" onclick="confirmDelete(\''+s.entity_id+'\',\''+escapeHtml(s.skill_name)+'\')"><span data-zh>删除</span><span data-en>Delete</span></button>';
+  h+='</div>';
+  return h;
+}
+
+function renderTable(skills){
+  filteredItems=skills||[];
+  var tb=document.getElementById('skillBody');tb.innerHTML='';
+  if(!filteredItems.length){renderPagination(0,'pagination',1,'goPage');return;}
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;if(currentPage>totalPages)currentPage=totalPages;
+  var start=(currentPage-1)*PAGE_SIZE;var pageItems=filteredItems.slice(start,start+PAGE_SIZE);
+  var h='';
+  for(var i=0;i<pageItems.length;i++){
+    var s=pageItems[i];
+    var resIcon=s.resource_filename?'<span style="color:#2ecc71">&#128206;</span>':'-';
+    h+='<tr onclick="toggleDetail('+i+')">';
+    h+='<td>'+escapeHtml(s.skill_name||'')+'</td>';
+    h+='<td>'+escapeHtml(s.skill_version||'')+'</td>';
+    h+='<td>'+escapeHtml(s.skill_type||'')+'</td>';
+    h+='<td>'+escapeHtml(s.skill_format||'')+'</td>';
+    h+='<td>'+escapeHtml(s.runtime||'')+'</td>';
+    h+='<td>'+statusBadge(s.skill_status)+'</td>';
+    h+='<td>'+resIcon+'</td>';
+    h+='</tr>';
+    h+='<tr id="detail-'+i+'" class="detail-row" style="display:none"><td colspan="7"><div class="detail-content">'+buildDetail(pageItems[i])+'</div></td></tr>';
+  }
+  tb.innerHTML=h;
+  renderPagination(filteredItems.length,'pagination',currentPage,'goPage');
+}
+function goPage(p){var tp=Math.ceil(filteredItems.length/PAGE_SIZE)||1;if(p<1||p>tp)return;currentPage=p;renderTable(filteredItems)}
+
+function toggleDetail(idx){var el=document.getElementById('detail-'+idx);if(!el)return;if(el.style.display==='table-row'){el.style.display='none';return}closeDetail();el.style.display='table-row';var row=el.previousElementSibling;if(row)row.classList.add('selected')}
+
+async function loadSkills(){
+  document.getElementById('loading').style.display='flex';
+  try{var r=await fetch('/api/skills');var d=await r.json();allSkills=d.skills||[];filteredItems=allSkills;renderTable(filteredItems);}catch(e){console.error(e);}
+  document.getElementById('loading').style.display='none';
+}
+
+function closeModal(){document.getElementById('modalContainer').innerHTML=''}
+
+function showCreateModal(){
+  var h='<div class="modal-overlay" onclick="closeModal()"><div class="modal-box" onclick="event.stopPropagation()">';
+  h+='<h5><span data-zh>创建技能</span><span data-en>Create Skill</span> <span data-zh-title="上传一个必须包含 SKILL.md 的 ZIP 压缩包。元数据（名称、版本、类型、格式、运行时等）从 SKILL.md 自动解析。压缩包中的其他文件将作为技能资源存储。" data-en-title="Upload a ZIP archive that must contain SKILL.md. Metadata (name, version, type, format, runtime, etc.) is auto-parsed from SKILL.md. Other files are stored as skill resources." title="Upload a ZIP archive that must contain SKILL.md. Metadata (name, version, type, format, runtime, etc.) is auto-parsed from SKILL.md. Other files are stored as skill resources." style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--text-secondary);color:var(--text-secondary);font-size:.72rem;cursor:help;margin-left:6px;">?</span></h5>';
+  h+='<div id="uploadStep">';
+  h+='<div class="form-group"><label><span data-zh>技能包 (ZIP，必须包含 SKILL.md)</span><span data-en>Skill Package (ZIP, must contain SKILL.md)</span></label><input type="file" id="skillZipFile" name="file" accept=".zip" required style="display:none"><button type="button" class="btn-primary" onclick="document.getElementById(&#39;skillZipFile&#39;).click()" style="margin-top:4px"><span data-zh>选择文件</span><span data-en>Choose File</span></button> <span id="zipFileName" style="display:inline-block;font-size:.82rem;color:var(--text-secondary);background:var(--input-bg);border:1px solid var(--border-color);border-radius:4px;padding:4px 10px;min-width:120px;margin-left:8px"></span></div>';
+  h+='<div id="createStatus" style="display:none;margin-top:8px;padding:8px;border-radius:6px;font-size:.85rem"></div>';
+  h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
+  h+='<button type="button" class="btn-primary" onclick="parseUpload()"><span data-zh>上传并解析</span><span data-en>Upload & Parse</span></button></div>';
+  h+='</div>';
+  h+='<div id="confirmStep" style="display:none">';
+  h+='<div style="background:rgba(46,204,113,.08);border:1px solid rgba(46,204,113,.2);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:.82rem;color:#2ecc71"><span data-zh>解析成功，请确认以下信息后提交</span><span data-en>Parsed successfully. Please confirm and submit.</span></div>';
+  h+='<div class="form-group"><label><span data-zh>技能名称</span><span data-en>Skill Name</span></label><input id="cfSkillName" name="skill_name" required></div>';
+  h+='<div class="form-group"><label><span data-zh>标题</span><span data-en>Title</span></label><input id="cfTitle" name="title" required></div>';
+  h+='<div class="form-group"><label><span data-zh>版本</span><span data-en>Version</span></label><input id="cfVersion" name="skill_version" required></div>';
+  h+='<div class="form-group"><label><span data-zh>类型</span><span data-en>Type</span></label><select id="cfType" name="skill_type"><option value="CUSTOM">CUSTOM</option><option value="BUILTIN">BUILTIN</option></select></div>';
+  h+='<div class="form-group"><label><span data-zh>格式</span><span data-en>Format</span></label><select id="cfFormat" name="skill_format"><option value="TEXT">TEXT</option><option value="SCRIPT">SCRIPT</option><option value="HYBRID">HYBRID</option></select></div>';
+  h+='<div class="form-group"><label><span data-zh>运行时</span><span data-en>Runtime</span></label><select id="cfRuntime" name="runtime"><option value="PYTHON">PYTHON</option><option value="BASH">BASH</option><option value="NODE">NODE</option><option value="OTHER">OTHER</option></select></div>';
+  h+='<div class="form-group"><label><span data-zh>描述</span><span data-en>Description</span></label><textarea id="cfDesc" name="skill_description" rows="3"></textarea></div>';
+  h+='<div id="cfFileInfo" style="background:var(--input-bg);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:.82rem;color:var(--text-secondary)"></div>';
+  h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="showUploadStep()"><span data-zh>返回</span><span data-en>Back</span></button>';
+  h+='<button type="button" class="btn-primary" onclick="confirmCreate()"><span data-zh>确认创建</span><span data-en>Confirm Create</span></button></div>';
+  h+='</div>';
+  h+='</div></div>';
+  document.getElementById('modalContainer').innerHTML=h;
+}
+
+var _pendingZip=null;
+async function parseUpload(){
+  document.getElementById('skillZipFile').addEventListener('change',function(){var fn=this.files[0]?this.files[0].name:'';document.getElementById('zipFileName').textContent=fn});
+var fileInput=document.getElementById('skillZipFile');
+  if(!fileInput.files||!fileInput.files.length){return}
+  var st=document.getElementById('createStatus');
+  st.style.display='block';st.style.background='rgba(52,152,219,.15)';st.style.color='#3498db';
+  st.innerHTML='<span data-zh>正在上传并解析...</span><span data-en>Uploading and parsing...</span>';
+  var fd=new FormData();
+  fd.append('file',fileInput.files[0]);
+  try{
+    var r=await fetch('/api/skill/create',{method:'POST',body:fd});
+    var d=await r.json();
+    if(!r.ok){
+      st.style.background='rgba(231,76,60,.15)';st.style.color='#e74c3c';
+      st.innerHTML=escapeHtml(d.error||'Parse failed');
+      return;
+    }
+    var sk=d.skill||{};
+    _pendingZip=d;
+    document.getElementById('cfSkillName').value=sk.skill_name||'';
+    document.getElementById('cfTitle').value=sk.title||'';
+    document.getElementById('cfVersion').value=sk.skill_version||'1.0.0';
+    document.getElementById('cfType').value=sk.skill_type||'CUSTOM';
+    document.getElementById('cfFormat').value=sk.skill_format||'TEXT';
+    document.getElementById('cfRuntime').value=sk.runtime||'PYTHON';
+    document.getElementById('cfDesc').value=sk.skill_description||'';
+    var info='';
+    if(d.file_count) info+='<span data-zh>资源文件: </span><span data-en>Resources: </span>'+d.file_count+' <span data-zh>个</span><span data-en> files</span> ('+fmtSize(sk.resource_size)+')';
+    if(sk.resource_server_host) info+=' &middot; <span data-zh>服务器: </span><span data-en>Server: </span>'+escapeHtml(sk.resource_server_host);
+    document.getElementById('cfFileInfo').innerHTML=info;
+    document.getElementById('uploadStep').style.display='none';
+    document.getElementById('confirmStep').style.display='block';
+  }catch(err){
+    st.style.background='rgba(231,76,60,.15)';st.style.color='#e74c3c';
+    st.innerHTML='Error: '+escapeHtml(err.message);
+  }
+}
+function showUploadStep(){
+  document.getElementById('uploadStep').style.display='block';
+  document.getElementById('confirmStep').style.display='none';
+  document.getElementById('createStatus').style.display='none';
+}
+async function confirmCreate(){
+  if(!_pendingZip) return;
+  var data={
+    skill_id:_pendingZip.skill_id,
+    skill_name:document.getElementById('cfSkillName').value,
+    title:document.getElementById('cfTitle').value,
+    skill_version:document.getElementById('cfVersion').value,
+    skill_type:document.getElementById('cfType').value,
+    skill_format:document.getElementById('cfFormat').value,
+    runtime:document.getElementById('cfRuntime').value,
+    skill_description:document.getElementById('cfDesc').value
+  };
+  try{
+    var r=await fetch('/api/skill/'+data.skill_id+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    var d=await r.json();
+    closeModal();loadSkills();
+  }catch(err){alert('Error: '+err.message)}
+}
+
+function showUploadModal(skillId){
+  var h='<div class="modal-overlay" onclick="closeModal()"><div class="modal-box" onclick="event.stopPropagation()">';
+  h+='<h5><span data-zh>上传资源</span><span data-en>Upload Resource</span></h5>';
+  h+='<form onsubmit="return submitUpload(event,\''+skillId+'\')">';
+  h+='<div class="form-group"><label><span data-zh>选择文件</span><span data-en>Choose File</span></label><input type="file" id="uploadFileInput" name="file" required style="display:none"><button type="button" class="btn-primary" onclick="document.getElementById(&#39;uploadFileInput&#39;).click()" style="margin-top:4px"><span data-zh>选择文件</span><span data-en>Choose File</span></button> <span id="uploadFileName" style="display:inline-block;font-size:.82rem;color:var(--text-secondary);background:var(--input-bg);border:1px solid var(--border-color);border-radius:4px;padding:4px 10px;min-width:120px;margin-left:8px"></span></div>';
+  h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
+  h+='<button type="submit" class="btn-primary"><span data-zh>上传</span><span data-en>Upload</span></button></div>';
+  h+='</form></div></div>';
+  document.getElementById('modalContainer').innerHTML=h;
+}
+
+document.addEventListener('DOMContentLoaded',function(){var uf=document.getElementById('uploadFileInput');if(uf)uf.addEventListener('change',function(){var fn=this.files[0]?this.files[0].name:'';var sp=document.getElementById('uploadFileName');if(sp)sp.textContent=fn})});
+async function submitUpload(e,skillId){
+  e.preventDefault();
+  var fd=new FormData(e.target);
+  try{
+    var r=await fetch('/api/skill/'+skillId+'/upload',{method:'POST',body:fd});
+    var d=await r.json();
+    if(!r.ok){alert(d.error||'Upload failed');return false}
+    closeModal();loadSkills();
+  }catch(err){alert('Error: '+err.message)}
+  return false;
+}
+
+async function downloadResource(skillId){
+  window.location.href='/api/skill/'+skillId+'/resource';
+}
+
+function directDownload(skillId){
+  window.location.href='/api/skill/'+skillId+'/resource';
+}
+
+function confirmDelete(skillId,name){
+  if(!confirm('Delete skill "'+name+'"?'))return;
+  fetch('/api/skill/'+skillId+'/delete',{method:'POST'}).then(function(r){return r.json()}).then(function(d){loadSkills()}).catch(function(e){alert('Error: '+e.message)});
+}
+
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadSkills();
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+</script>
+</body>
+</html>

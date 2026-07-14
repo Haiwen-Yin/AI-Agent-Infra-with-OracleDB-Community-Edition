@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitor - AI Agent Infra Community v3.10.1</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+
+:root{--bg-primary:#1a1a2e;--bg-secondary:#16213e;--bg-card:#0f3460;--bg-sidebar:#0d1b2a;--text-primary:#e0e0e0;--text-secondary:#a0a0b0;--accent:#e94560;--accent-hover:#ff6b81;--border-color:#2a2a4a;--input-bg:#1a1a3e;--input-border:#3a3a5a;--sidebar-width:220px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-primary);color:var(--text-primary);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-sidebar);border-right:1px solid var(--border-color);display:flex;flex-direction:column;padding:0;position:fixed;left:0;top:0;z-index:10}
+.sidebar-brand{padding:20px 16px 12px;border-bottom:1px solid var(--border-color)}
+.sidebar-brand h5{margin:0;color:var(--accent);font-size:.95rem;font-weight:700}
+.sidebar-brand small{color:var(--text-secondary);font-size:.7rem}
+.sidebar-nav{flex:1;padding:12px 0;overflow-y:auto;min-height:0}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-secondary);text-decoration:none;font-size:.88rem;transition:all .15s;border-left:3px solid transparent}
+.sidebar-nav a:hover{color:var(--text-primary);background:rgba(233,69,96,.08)}
+.sidebar-nav a.active{color:var(--accent);background:rgba(233,69,96,.12);border-left-color:var(--accent)}
+.sidebar-nav a .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:12px 16px;border-top:1px solid var(--border-color);flex-shrink:0}
+.sidebar-footer a{display:block;color:var(--text-secondary);font-size:.78rem;text-decoration:none;padding:4px 0;transition:all .15s}
+.sidebar-footer a:hover{color:var(--accent)}
+.lang-toggle{background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;width:100%;transition:all .2s;margin-bottom:6px}
+.lang-toggle:hover{border-color:var(--accent);color:var(--text-primary)}
+.logout-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:8px 12px;background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;font-size:.82rem;cursor:pointer;transition:all .15s;text-decoration:none;margin-top:8px;text-align:center}
+.logout-btn:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.timer-display{font-size:.68rem;color:var(--text-secondary);text-align:center;padding:4px 0;margin-top:6px;font-family:monospace}
+.timer-display.warn{color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-left:var(--sidebar-width)}
+.top-bar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);flex-wrap:wrap}
+.top-bar h4{margin:0;font-size:1.1rem;font-weight:600;flex-shrink:0}
+.content-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-height:0}
+.list-panel{flex:1;overflow-y:auto;padding:0 20px;min-width:0;min-height:0}
+.detail-field{margin-bottom:10px}
+.detail-field .lbl{color:var(--text-secondary);font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.detail-field .val{color:var(--text-primary);font-size:.88rem;line-height:1.5;word-break:break-word}
+.detail-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)}
+.detail-section h6{color:var(--accent);font-size:.88rem;margin-bottom:10px;font-weight:600}
+.data-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.88rem}
+.data-table thead th{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--border-color);text-align:left;font-weight:600;white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg-card);box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.data-table tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,42,74,.4);vertical-align:middle;color:#fff}
+.data-table tbody tr{cursor:pointer;transition:background .1s}
+.data-table tbody tr:hover{background:rgba(233,69,96,.05)}
+.data-table tbody tr.selected{background:rgba(233,69,96,.1)}
+.badge-status{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.75rem;font-weight:600;letter-spacing:.3px}
+.badge-active{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-inactive{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-running{background:rgba(52,152,219,.15);color:#3498db}
+.badge-completed{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-failed{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-stopped{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-paused{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-timeout{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-pending{background:rgba(241,196,15,.15);color:#f1c40f}
+.badge-draft{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-enabled{background:rgba(46,204,113,.15);color:#2ecc71}
+.badge-disabled{background:rgba(231,76,60,.15);color:#e74c3c}
+.badge-test{background:rgba(52,152,219,.15);color:#3498db}
+.badge-diff{background:rgba(155,89,182,.15);color:#9b59b6}
+.badge-llm_judge{background:rgba(230,126,34,.15);color:#e67e22}
+.badge-manual{background:rgba(160,160,176,.15);color:#a0a0b0}
+.badge-spec_validation{background:rgba(26,188,156,.15);color:#1abc9c}
+.btn-action{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer;transition:all .15s;margin-left:auto}
+.btn-action:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.detail-actions button{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;transition:all .15s}
+.detail-actions button:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.detail-actions button.btn-danger{background:rgba(231,76,60,.12);color:#e74c3c;border-color:rgba(231,76,60,.25)}
+.detail-actions button.btn-danger:hover{background:rgba(231,76,60,.25);border-color:#e74c3c}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-box{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:24px;width:560px;max-width:92vw;max-height:85vh;overflow-y:auto}
+.modal-box h5{color:var(--accent);margin:0 0 16px;font-size:1.05rem}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:var(--input-bg);border:1px solid var(--input-border);color:var(--text-primary);border-radius:6px;padding:8px 10px;font-size:.88rem}
+.form-group textarea{min-height:80px;resize:vertical;font-family:'Courier New',monospace}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.modal-actions button{padding:8px 20px;border-radius:6px;font-size:.88rem;cursor:pointer;transition:all .15s;border:1px solid}
+.btn-primary{background:rgba(233,69,96,.15);color:var(--accent);border-color:rgba(233,69,96,.3)}
+.btn-primary:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.btn-secondary{background:rgba(160,160,176,.1);color:var(--text-secondary);border-color:var(--border-color)}
+.btn-secondary:hover{background:rgba(160,160,176,.2)}
+.truncate-id{font-family:'Courier New',monospace;font-size:.8rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;color:#fff}
+.tag{display:inline-block;background:rgba(233,69,96,.12);color:var(--accent);border-radius:4px;padding:2px 8px;font-size:.75rem;margin:2px 4px 2px 0}
+.loading-overlay{position:absolute;inset:0;background:rgba(26,26,46,.85);display:flex;align-items:center;justify-content:center;z-index:5}
+.spinner{width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
+.empty-state .icon{font-size:3rem;margin-bottom:12px;opacity:.5}
+[data-lang="zh"] [data-en]{display:none!important}
+[data-lang="en"] [data-zh]{display:none!important}
+.btn-sm{background:rgba(233,69,96,.12);color:var(--accent);border:1px solid rgba(233,69,96,.25);border-radius:4px;padding:3px 8px;font-size:.75rem;cursor:pointer;transition:all .15s;margin-right:4px}
+.btn-sm:hover{background:rgba(233,69,96,.25);border-color:var(--accent)}
+.btn-sm.btn-warn{background:rgba(241,196,15,.12);color:#f1c40f;border-color:rgba(241,196,15,.25)}
+.btn-sm.btn-warn:hover{background:rgba(241,196,15,.25);border-color:#f1c40f}
+.btn-sm.btn-danger{background:rgba(231,76,60,.12);color:#e74c3c;border-color:rgba(231,76,60,.25)}
+.btn-sm.btn-danger:hover{background:rgba(231,76,60,.25);border-color:#e74c3c}
+.btn-sm.btn-info{background:rgba(52,152,219,.12);color:#3498db;border-color:rgba(52,152,219,.25)}
+.btn-sm.btn-info:hover{background:rgba(52,152,219,.25);border-color:#3498db}
+.btn-sm.btn-success{background:rgba(46,204,113,.12);color:#2ecc71;border-color:rgba(46,204,113,.25)}
+.btn-sm.btn-success:hover{background:rgba(46,204,113,.25);border-color:#2ecc71}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:8px 0}
+.stat-card{background:rgba(15,52,96,.3);border:1px solid var(--border-color);border-radius:6px;padding:12px;text-align:center}
+.stat-card .stat-value{font-size:1.4rem;font-weight:700;color:var(--accent)}
+.stat-card .stat-label{font-size:.72rem;color:var(--text-secondary);text-transform:uppercase;margin-top:4px}
+.split-layout{display:flex;gap:16px;flex:1;min-height:0;overflow:hidden}
+.left-panel{flex:1;overflow-y:auto;min-width:0;min-height:0;border-right:1px solid var(--border-color);padding:0 16px 0 20px}
+.right-panel{position:relative;flex:1;overflow-y:auto;min-width:0;min-height:0;padding:0 20px 0 8px}
+.iter-timeline{position:relative;padding-left:24px;margin:8px 0}
+.iter-timeline::before{content:"";position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border-color)}
+.iter-node{position:relative;padding:8px 0 8px 16px}
+.iter-node::before{content:"";position:absolute;left:-20px;top:14px;width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid var(--bg-sidebar)}
+.iter-node.passed::before{background:#2ecc71}
+.iter-node.failed::before{background:#e74c3c}
+.iter-node .iter-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.json-block{background:var(--input-bg);border:1px solid var(--input-border);border-radius:6px;padding:10px 12px;font-family:'Courier New',monospace;font-size:.8rem;color:#cfe2ff;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
+.section-card{background:rgba(15,52,96,.2);border:1px solid var(--border-color);border-radius:8px;padding:14px;margin-bottom:14px}
+.section-card h6{margin:0 0 8px;color:var(--accent);font-size:.9rem;font-weight:600}
+.run-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid rgba(42,42,74,.4);cursor:pointer;transition:background .1s}
+.run-row:hover{background:rgba(233,69,96,.05)}
+.run-row.selected{background:rgba(233,69,96,.1)}
+.loop-item{background:rgba(15,52,96,.25);border:1px solid var(--border-color);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;transition:all .15s}
+.loop-item:hover{border-color:var(--accent);background:rgba(233,69,96,.05)}
+.loop-item.selected{border-color:var(--accent);background:rgba(233,69,96,.1)}
+.loop-item .loop-title{font-size:.92rem;font-weight:600;color:#fff}
+.loop-item .loop-meta{font-size:.76rem;color:var(--text-secondary);margin-top:4px}
+@media(max-width:900px){.split-layout{flex-direction:column}.left-panel{border-right:none;border-bottom:1px solid var(--border-color);padding:0 20px}.right-panel{position:relative;padding:0 20px}}
+
+.detail-close-btn{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-secondary);font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:4px;transition:all .15s;z-index:10}
+.detail-close-btn:hover{color:var(--text-primary);background:rgba(255,255,255,.08)}
+
+.stat-card{background:rgba(15,52,96,.3);border:1px solid var(--border-color);border-radius:6px;padding:16px;text-align:center}
+.stat-card .stat-value{font-size:1.6rem;font-weight:700;color:var(--accent)}
+.stat-card .stat-label{color:var(--text-secondary);font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.stat-row{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.metric-box{background:rgba(15,52,96,.2);border:1px solid var(--border-color);border-radius:6px;padding:12px 20px;flex:1;min-width:200px}
+.metric-box .metric-label{color:var(--text-secondary);font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.metric-box .metric-value{color:var(--text-primary);font-size:1.05rem;font-weight:600}
+.section-title{color:var(--accent);font-size:.95rem;font-weight:600;margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border-color)}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>AI Agent Infra v3.10.1</h5>
+    <small>Community Edition</small>
+  </div>
+  <nav class="sidebar-nav">
+        <a href="/knowledge"><span class="icon">&#128218;</span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+        <a href="/memory"><span class="icon">&#129504;</span><span data-zh>记忆</span><span data-en>Memory</span></a>
+        <a href="/agents"><span class="icon">&#129302;</span><span data-zh>智能体</span><span data-en>Agents</span></a>
+        <a href="/tasks"><span class="icon">&#9989;</span><span data-zh>任务</span><span data-en>Tasks</span></a>
+        <a href="/workspaces"><span class="icon">&#128193;</span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+        <a href="/graph"><span class="icon">&#127760;</span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+        <a href="/specs"><span class="icon">&#128196;</span><span data-zh>规格</span><span data-en>Specs</span></a>
+        <a href="/skills"><span class="icon">&#9881;</span><span data-zh>Skills</span><span data-en>Skills</span></a>
+        <a href="/branches"><span class="icon">&#127793;</span><span data-zh>分支</span><span data-en>Branches</span></a>
+        <a href="/collab"><span class="icon">&#128101;</span><span data-zh>协作</span><span data-en>Collab</span></a>
+        <a href="/loops"><span class="icon">&#128260;</span><span data-zh>循环</span><span data-en>Loops</span></a>
+        <a href="/monitor" class="active"><span class="icon">&#128202;</span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+    <div class="sidebar-footer">
+        <button class="lang-toggle" onclick="toggleLang()">中文</button>
+        <a href="/logout" class="logout-btn"><span>&#128682;</span><span data-zh>登出</span><span data-en>Logout</span></a>
+        <div class="timer-display" id="sessionTimer">00:00</div>
+    </div>
+</div>
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>系统监控</span><span data-en>System Monitor</span></h4>
+    <button class="btn-action" onclick="loadAll()"><span data-zh>刷新</span><span data-en>Refresh</span></button>
+  </div>
+  <div class="content-area">
+    <div class="list-panel" style="padding:20px">
+      <div class="stat-row" id="overviewCards"></div>
+      <div class="section-title"><span data-zh>Agent 健康</span><span data-en>Agent Health</span></div>
+      <table class="data-table">
+        <thead><tr><th><span data-zh>Agent ID</span><span data-en>Agent ID</span></th><th><span data-zh>名称</span><span data-en>Name</span></th><th><span data-zh>状态</span><span data-en>Status</span></th><th><span data-zh>活跃计划</span><span data-en>Active Plans</span></th><th><span data-zh>运行循环</span><span data-en>Running Loops</span></th><th><span data-zh>最后活跃</span><span data-en>Last Active</span></th><th><span data-zh>闲置(秒)</span><span data-en>Stale (s)</span></th></tr></thead>
+        <tbody id="agentTable"></tbody>
+      </table>
+      <div id="stalledSection" style="display:none;margin-top:20px">
+        <div class="section-title" style="color:#e74c3c"><span data-zh>停滞 Agent</span><span data-en>Stalled Agents</span></div>
+        <table class="data-table">
+          <thead><tr><th><span data-zh>Agent ID</span><span data-en>Agent ID</span></th><th><span data-zh>名称</span><span data-en>Name</span></th><th><span data-zh>最后活跃</span><span data-en>Last Active</span></th><th><span data-zh>闲置(分)</span><span data-en>Stale (min)</span></th></tr></thead>
+          <tbody id="stalledTable"></tbody>
+        </table>
+      </div>
+      <div class="section-title"><span data-zh>性能指标</span><span data-en>Performance Metrics</span></div>
+      <div id="metricsContent" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+    </div>
+  </div>
+</div>
+<script>
+function toggleLang(){var b=document.body;var t=document.querySelector('.lang-toggle');if(b.getAttribute('data-lang')=='en'){b.setAttribute('data-lang','zh');t.textContent='EN'}else{b.setAttribute('data-lang','en');t.textContent='中文'}}
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+
+
+function statusColor(s){var m={'ONLINE':'#2ecc71','IDLE':'#f1c40f','BUSY':'#3498db','STALLED':'#e74c3c','DORMANT':'#a0a0b0'};return m[s]||'#a0a0b0'}
+function statusBadge(s){return '<span class="badge-status" style="background:'+statusColor(s)+'20;color:'+statusColor(s)+'">'+s+'</span>'}
+
+async function loadOverview(){
+  try{var r=await fetch('/api/monitor/overview');var d=await r.json();
+    var a=d.agents||{};
+    var cards=[
+      {label:'Total Agents',value:a.total||0,color:'#3498db'},
+      {label:'Online',value:a.online||0,color:'#2ecc71'},
+      {label:'Busy',value:a.busy||0,color:'#f1c40f'},
+      {label:'Stalled',value:d.stalled_count||0,color:'#e74c3c'}
+    ];
+    document.getElementById('overviewCards').innerHTML=cards.map(c=>
+      '<div class="stat-card" style="flex:1;min-width:140px"><div class="stat-value" style="color:'+c.color+'">'+c.value+'</div><div class="stat-label">'+c.label+'</div></div>'
+    ).join('');
+  }catch(e){console.error(e)}
+}
+
+async function loadAgents(){
+  try{var r=await fetch('/api/monitor/agents');var d=await r.json();
+    var agents=d.agents||[];
+    document.getElementById('agentTable').innerHTML=agents.map(a=>
+      '<tr><td><span class="truncate-id">'+(a.agent_id||'')+'</span></td><td>'+(a.agent_name||'')+'</td><td>'+statusBadge(a.status)+'</td><td>'+(a.active_plan_count||0)+'</td><td>'+(a.running_loop_count||0)+'</td><td>'+(a.last_active_at||'<span data-zh>从未</span><span data-en>Never</span>')+'</td><td>'+(a.stale_seconds||'-')+'</td></tr>'
+    ).join('');
+  }catch(e){console.error(e)}
+}
+
+async function loadStalls(){
+  try{var r=await fetch('/api/monitor/stalls');var d=await r.json();
+    var stalls=d.stalls||d||[];
+    if(stalls.length>0){
+      document.getElementById('stalledSection').style.display='';
+      document.getElementById('stalledTable').innerHTML=stalls.map(s=>
+        '<tr style="background:rgba(231,76,60,.05)"><td><span class="truncate-id">'+(s.agent_id||'')+'</span></td><td>'+(s.agent_name||'')+'</td><td>'+(s.last_active_at||'Never')+'</td><td>'+(s.stale_minutes||'?')+'</td></tr>'
+      ).join('');
+    }else{document.getElementById('stalledSection').style.display='none'}
+  }catch(e){console.error(e)}
+}
+
+async function loadMetrics(){
+  try{var r=await fetch('/api/monitor/metrics');var d=await r.json();
+    var boxes=[
+      {label:'Avg Session Duration',value:d.avg_session_duration||'N/A'},
+      {label:'Avg Loop Duration',value:d.avg_loop_duration||'N/A'},
+      {label:'Avg Iterations',value:d.avg_iteration_count||'N/A'},
+      {label:'Avg Tool Duration',value:(d.avg_tool_duration_ms||'N/A')+'ms'}
+    ];
+    document.getElementById('metricsContent').innerHTML=boxes.map(b=>
+      '<div class="metric-box"><div class="metric-label">'+b.label+'</div><div class="metric-value">'+b.value+'</div></div>'
+    ).join('');
+  }catch(e){console.error(e)}
+}
+
+function loadAll(){loadOverview();loadAgents();loadStalls();loadMetrics()}
+loadAll();
+setInterval(loadAll,30000);
+
+var sessionStart=Date.now();
+setInterval(function(){var e=Math.floor((Date.now()-sessionStart)/1000);var m=String(Math.floor(e/60)).padStart(2,'0');var s=String(e%60).padStart(2,'0');var el=document.getElementById('sessionTimer');if(el)el.textContent=m+':'+s;if(e>270)el.classList.add('warn')},1000);
+</script>
+</body>
+</html>
