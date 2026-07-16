@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Monitoring & Observability
+"""AI Agent Infra v3.10.2 - Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.

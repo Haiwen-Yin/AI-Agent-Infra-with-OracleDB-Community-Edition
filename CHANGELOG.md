@@ -4,10 +4,34 @@ All notable changes to AI Agent Infra with OracleDB are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.10.2] - 2026-07-16
+
+### Summary
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
+Enterprise encryption enhancement: per-Agent independent crypto keys, config.json auto-encryption on startup, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
+
+### Added
+
+- **Per-Agent independent crypto keys**: Each Agent gets its own 32-byte encryption key stored in SYSTEM_CONFIG (key=agent_crypto_key:{agent_id}), distributed via admin_token at registration
+- **Key rotation API**: POST /api/admin/crypto/rotate (global) and POST /api/admin/crypto/rotate/{agent_id} (per-Agent), with automatic re-encryption of affected credentials
+- **Config.json auto-encryption on startup**: server.py now calls auto_encrypt_config() which encrypts database, llm.api_key, and model_routing.*_api_key sections transparently
+- **encrypt_config.py CLI tool**: Unified across all 4 editions (was Oracle ENT only)
+- **Portal Markdown rendering**: portal_chat.html now renders LLM responses with Markdown (headers, code blocks, lists, bold/italic, links), auto-scroll during streaming, exit button with session cleanup, auto-detection of expired sessions
+
+### Fixed
+
+
+### Changed
+
+- config.json now encrypts database + llm + model_routing sections (was database only)
+- Agent heartbeat checks crypto key version for rotation detection
+
+---
+
 ## [3.10.1] - 2026-07-14
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Enterprise deployment enhancement: offline dependency bundling + pure Python Oracle schema deployment tool.
 
 ### Added
@@ -27,7 +51,7 @@ No internet, SQLcl, or Java required. Copy ZIP to isolated network, run install_
 ## [3.10.0] - 2026-07-09
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Universal Property Graph release. Extends the graph model from entity-level adjacency to 8 functional domains, adding 30+ graph functions and 23 new edge types: knowledge causality, agent collaboration (group-scoped dynamic trust), task orchestration, skill dependencies, approval propagation, data flow, memory evolution, and loop iteration.
 
 ### Added
@@ -50,7 +74,7 @@ Universal Property Graph release. Extends the graph model from entity-level adja
 ## [3.9.0] - 2026-07-05
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, Human-in-the-Loop approval, Agent Protocol compatibility, and multi-model routing — connecting the system's capabilities to external AI clients and frameworks.
 
 ### Added - All Editions
@@ -102,7 +126,7 @@ AI Agent ecosystem connectivity release. Adds MCP Server, SSE streaming output, 
 ## [3.8.0] - 2026-07-02
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Multi-Agent integration testing release. Completed full 5-phase deployment and 15-module functional test suite with zero failures. Multiple runtime bugs discovered and fixed during testing.
 
 ### Fixed - Oracle COM/ENT
@@ -124,7 +148,7 @@ Multi-Agent integration testing release. Completed full 5-phase deployment and 1
 ## [3.7.5] - 2026-06-28
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Bug fix and code quality release for Oracle editions. Fixes 5 issues found during v3.7.4 code review.
 
 ### Fixed - Oracle COM/ENT
@@ -144,7 +168,7 @@ Bug fix and code quality release for Oracle editions. Fixes 5 issues found durin
 ## [3.7.4] - 2026-06-26
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 6 expansion directions: Agent Communication Protocol, Multi-Agent Orchestration, Event-Driven Architecture, Advanced Memory Management, Observability, and Tool Ecosystem.
 
 ### Added - All Editions
@@ -167,7 +191,7 @@ Bug fix and code quality release for Oracle editions. Fixes 5 issues found durin
 ## [3.7.3] - 2026-06-23
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Deployment fix release — resolves schema creation order issues, hardcoded schema owner names, configuration priority, and embedding model auto-detection discovered during fresh deployment testing.
 
 ### Fixed - Oracle COM/ENT
@@ -207,7 +231,7 @@ Deployment fix release — resolves schema creation order issues, hardcoded sche
 ## [3.7.1] - 2026-06-19
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Loop Engineering Collaborative Integration** — Connects Loop Engineering with Spec, Task, Branch, Collab, and Skill modules, enabling Spec-driven loops, Task-Loop bindings, and Collaborative Loops. Also fixes session persistence, PG loop API compatibility, and adds SPEC_VALIDATION and AGGREGATE evaluation types.
 
 ### Added - Both Editions
@@ -253,7 +277,7 @@ Deployment fix release — resolves schema creation order issues, hardcoded sche
 ## [3.7.0] - 2026-06-18
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Loop Engineering** — Introduces Loop Engineering as the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. Adds 4 new tables, LOOP_MANAGER PL/SQL package, loop_api.py Python module, evaluation engine with 4 evaluation types, lifecycle hooks, and 3 scheduler jobs.
 
 ### Added - Both Editions
@@ -273,7 +297,7 @@ Deployment fix release — resolves schema creation order issues, hardcoded sche
 
 ### Changed - Both Editions
 
-- **Test suite** — Community Edition: 121 tests; Enterprise Edition: 151 tests
+- **Test suite** — Community Edition: 121 tests; Enterprise Edition: 121 tests
 - **Schema** — COM: 30 → 34 tables, 13 → 14 PL/SQL packages, 13 → 16 scheduler jobs; ENT: 35 → 40 tables, 16 → 17 PL/SQL packages, 17 → 20 scheduler jobs
 - **Python modules** — COM: 23 → 24 modules; ENT: 24 → 25 modules
 
@@ -292,7 +316,7 @@ Deployment fix release — resolves schema creation order issues, hardcoded sche
 ## [3.6.2] - 2026-06-18
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Bug fix release — adds missing Portal chat send handler, fixes session switching error handling, updates version and website references.
 
 ### Fixed - Both Editions
@@ -306,7 +330,7 @@ Bug fix release — adds missing Portal chat send handler, fixes session switchi
 ## [3.6.1] - 2026-06-14
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 Bug fix release — fixes Portal login error (`_handle_portal_login` method missing), corrects documentation inconsistencies, and adds graph node highlight interaction improvements.
 
 ### Fixed - Both Editions
@@ -335,7 +359,7 @@ Bug fix release — fixes Portal login error (`_handle_portal_login` method miss
 ## [3.6.0] - 2026-06-13
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Admin/Agent Separation Architecture** — New mode system (standalone/admin/agent) that separates Admin Agent (runs Web Portal, holds AIADMIN credentials) from Business Agent (independent process, only holds End User credentials). Introduces Admin Token authentication, encrypted credential distribution, Agent Bootstrap CLI, mode-aware connection management, Recovery Codes, Agent Recovery, Private Skill Backup, Skill Distribution & Management API.
 
 ### Added - Both Editions
@@ -368,7 +392,7 @@ Bug fix release — fixes Portal login error (`_handle_portal_login` method miss
 ## [3.5.0] - 2026-06-11
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Deep Sec Multi-Agent Collaboration Fix** — SHARED entities and collaboration group data now correctly visible to End Users via Data Grant predicate fix and 2 new Data Grants for COLLAB_GROUPS/COLLAB_GROUP_MEMBERS access.
 
 ### Bug Fixes
@@ -389,7 +413,7 @@ Bug fix release — fixes Portal login error (`_handle_portal_login` method miss
 ## [3.4.0] - 2026-06-11
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Oracle Deep Data Security (Deep Sec)** — Replaces VPD (DBMS_RLS) with Oracle 26ai Deep Data Security: declarative Data Grants for row/column/cell-level access control, Mandatory Access Control (MAC) preventing view bypass, End User Context with `o:onFirstRead` callback for zero-trust agent identification. Fixes critical VPD vulnerability where unset context exposed all data (`1=1` → zero trust). Column-level masking hides sensitive fields (CREDENTIAL_VALUE) from non-admin users. SYSTEM_CONFIG fully restricted to admin role only.
 
 ### ⚠️ Critical Requirements
@@ -468,7 +492,7 @@ Verified enforcement (Community DB):
 ## [3.3.0] - 2026-06-05
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Database Access Security & UI Visualization** — Five-plus-one-layer database access security model (Skill Policy, Restricted DB User, AUTHID DEFINER, VPD Row-Level Security, Unified Auditing, Credential Sanitization). Enhanced UI visualization with linked Spec/Plan/Branch info across Branches, Specs, and Collab pages. Multi-Agent Collaboration model completed with full integration across Spec, Collab Group, Branch, Task Plan, and Harness layers.
 
 ### Security - Both Editions
@@ -515,7 +539,7 @@ Verified enforcement (Community DB):
 ## [3.2.0] - 2026-06-03
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Context Branching & Multi-Agent Collaboration** — Fork, merge, abandon, and resume conversation context branches within a workspace. Enables single-agent rollback exploration and multi-agent collaboration branching. Abandoned branches preserved as read-only lesson references with manual marking and automatic extraction. Collaboration groups now integrate with Branches, SDD (Spec), Task Plans, and Harness for coordinated multi-agent workflows: parallel exploration, pipeline handoff, task distribution, and group-level spec validation.
 
 ### Added - Both Editions
@@ -576,7 +600,7 @@ Verified enforcement (Community DB):
 ## [3.1.0] - 2026-06-02
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Database-Side Encryption with DB_CRYPTO** — Moved all in-database encryption (LDAP BIND_CREDENTIAL, AGENT CREDENTIALS) from Python-side `encrypt_section()`/`decrypt_section()` (which depended on a local `master.key` file) to Oracle `DBMS_CRYPTO` via a new `DB_CRYPTO` PL/SQL package. Database-side encryption keys are stored in `SYSTEM_CONFIG` and fully managed by the database — no dependency on external files.
 
 ### Added - Both Editions
@@ -634,7 +658,7 @@ Verified enforcement (Community DB):
 ## [3.0.0] - 2026-05-30
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Enterprise Edition Launch + Portal User System & Security Hardening** — The project formerly known as "Oracle AI Database Memory System" (oracle-memory-by-yhw) has been renamed to **AI Agent Infra with OracleDB**, reflecting its evolution from a pure memory system to a comprehensive AI Agent infrastructure architecture. The project now offers two editions: Community Edition (Apache 2.0) and Enterprise Edition (BSL 1.1). This release also adds a full user-facing Portal system (register/login/chat) separate from admin Dashboard, Agent lifecycle with POOL state, LDAP login with auto-registration, encrypted credential storage at rest, and inline detail expansion across all list pages.
 
 ### Added - Both Editions
@@ -701,7 +725,7 @@ Verified enforcement (Community DB):
 ## [2.3.2] - 2026-05-27
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Web UI Optimization** — Client-side pagination (PAGE_SIZE=30), sticky table headers with shadow, viewport height fixes, table spacing improvements, and login language persistence across all 7 data pages. Pure front-end release — no database or API changes. All 183 tests from v2.3.1 continue to pass.
 
 ### Added
@@ -732,7 +756,7 @@ Verified enforcement (Community DB):
 ## [2.3.1] - 2026-05-26
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Vector Search Fix & Enhancement + 5-Signal Hybrid Search + Fulltext Search + Unified Search API** — Fixed in-database embedding generation and retrieval capabilities missed during v2.0.0 architecture rewrite, added multi-modal vector search, 5-signal fusion search (vector + fulltext + relational + tag + graph), Oracle Text fulltext search, and Unified Search API (10 strategies). Backward compatible with v2.3.0 database.
 
 ### Background
@@ -825,7 +849,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 ## [2.2.1] - 2026-05-23
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Visualization architecture upgrade** — replaces monolithic single-file visualization with template-based architecture featuring sidebar navigation, bilingual persistence, Graph Explorer, and workspace detail views. No schema changes; fully compatible with v2.2.0 database.
 
 ### Added
@@ -872,7 +896,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 ## [2.2.0] - 2026-05-20
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Workspace management, context continuity, agent handoff, and JRD updatable views.** Not backward-compatible with v2.1.0 — requires clean deployment.
 
 ### Added
@@ -917,7 +941,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 ## [2.1.0] - 2026-05-19
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Schema evolution with partitioning, composite keys, and Property Graph API.** Not backward-compatible with v2.0.0 — requires fresh deployment or migration.
 
 ### Added
@@ -965,7 +989,7 @@ During v2.0.0 architecture rewrite (partitioning, composite PKs, JRD dual views)
 ## [2.0.0] - 2026-05-15
 
 ### Summary
-
+Enterprise encryption enhancement: per-Agent independent crypto keys with SYSTEM_CONFIG storage, config.json auto-encryption, key rotation API, encrypt_config.py CLI, Portal Markdown rendering.
 **Complete ground-up rewrite.** Not backward-compatible with any v1.x version. No upgrade path — requires fresh deployment.
 
 ### Added

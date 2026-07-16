@@ -1,17 +1,17 @@
-# AI Agent Infra with OracleDB - Community Edition v3.10.1
+# AI Agent Infra with OracleDB - Community Edition v3.10.2
 
-[![Version](https://img.shields.io/badge/version-v3.10.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v3.10.2-blue.svg)](CHANGELOG.md)
 [![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
 [![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
 **AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
 
-> **v3.10.1 (2026-07-14): Offline Deployment - vendor/ directory with 30 pre-downloaded cp314 wheels, install_offline.sh for air-gapped installation, verify_deps.py for integrity check. Pure-Python deploy_oracle.py replaces SQLcl (125MB+Java) with state-machine SQL parser. 544/544 tests pass.**
+> **v3.10.2 (2026-07-16): Encryption enhancement — per-Agent independent crypto keys stored in SYSTEM_CONFIG, config.json auto-encryption on startup (database + LLM + model_routing), key rotation API (global and per-Agent), encrypt_config.py CLI tool, Portal Markdown rendering. 544/544 tests pass.**
 
 📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
 
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.1.md)**
+📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.2.md)**
 
 ---
 
@@ -192,7 +192,7 @@ The `llm_judge` section in `config.json` configures the LLM evaluation (disabled
 | PL/SQL Packages | 14 | 17 |
 | Scheduler Jobs | 16 | 20 |
 | Data Grants | 23 | 23 |
-| Tests | 121 | 151 |
+| Tests | 121 | 121 |
 | **License** | Apache 2.0 | BSL 1.1 |
 
 ---
@@ -235,7 +235,7 @@ The `1_schema.sql` script now includes built-in protection: it auto-aborts if `S
 ### 1. Deploy Schema
 
 ```bash
-sql user/password@//host:port/service @scripts/deploy/1_schema.sql
+python3.14 scripts/deploy_oracle.py aiadmin oracle host:port/service scripts/deploy/1_schema.sql scripts/deploy/2_api.sql scripts/deploy/3_jobs.sql
 sql user/password@//host:port/service @scripts/deploy/2_api.sql
 sql user/password@//host:port/service @scripts/deploy/3_jobs.sql
 sql user/password@//host:port/service @scripts/deploy/4_harness_templates.sql

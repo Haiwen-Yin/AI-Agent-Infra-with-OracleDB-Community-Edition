@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra v3.10.1 (2026-06-18) - Community Edition
+# Deployment Guide - AI Agent Infra v3.10.2 (2026-07-16) - Community Edition
 
 ## Prerequisites
 
@@ -13,7 +13,6 @@
 ### Phase 1: Schema (1_schema.sql)
 Creates all tables, partitions, indexes, property graph, and JSON duality views.
 ```bash
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/1_schema.sql
 ```
 Admin Agent (mode=admin)
 ├── Web Portal
@@ -102,3 +101,21 @@ curl -X POST http://localhost:18080/api/admin/token/rotate \
 - **Chinese garbled text**: oracledb thin mode double-encodes UTF-8; `_fix_encoding()` auto-corrects in viz_server
 - **Server crash on request**: `do_GET` → `_do_GET` wrapper catches exceptions per-request
 - **Port not listening**: Server may take 10-20s to initialize pool; `start_web_server.sh` waits up to 45s
+
+## Pure Python Deployment (deploy_oracle.py)
+
+For Oracle editions, a pure Python deployment tool is available as an alternative to SQLcl. It replaces SQLcl (125MB + Java dependency) with a Python script using the oracledb driver.
+
+Usage:
+```bash
+python3.14 scripts/deploy_oracle.py aiadmin oracle 10.10.10.130:1521/ai_agent_ee \
+    scripts/deploy/1_schema.sql scripts/deploy/2_api.sql scripts/deploy/3_jobs.sql
+```
+
+For SYSDBA scripts:
+```bash
+python3.14 scripts/deploy_oracle.py --sysdba sys oracle 10.10.10.130:1521/ai_agent_ee \
+    scripts/deploy/4_grants.sql
+```
+
+Handles SQLcl syntax: PROMPT removal, DEFINE/&& variable substitution, / block terminator for PL/SQL blocks.

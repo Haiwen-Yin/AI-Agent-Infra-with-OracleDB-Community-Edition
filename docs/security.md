@@ -1,4 +1,4 @@
-# Security - AI Agent Infra v3.10.1 (2026-06-18) - Community Edition
+# Security - AI Agent Infra v3.10.2 (2026-07-16) - Community Edition
 
 ## Data Masking
 
@@ -166,3 +166,37 @@ End User credentials are encrypted in transit using the admin_token as key mater
 | agent_config.json | No | No | Yes (encrypted) |
 | Data Grant enforcement | Yes (with AIADMIN bypass) | Yes (with AIADMIN bypass) | **Always enforced** |
 | SYSTEM_CONFIG access | Via AIADMIN | Via AIADMIN | **Blocked** (admin_data_role only) |
+
+
+## Per-Agent Encryption Keys (v3.10.2)
+
+**Added 2026-07-16** — Each Business Agent receives its own independent 256-bit encryption key at registration time.
+
+### Architecture
+
+- **Key Storage**:  table, key = 
+- **Key Distribution**: Encrypted with admin_token as key material via 
+- **Key Version**: Tracked via  for rotation detection
+- **Key Rotation**:  (global) and  (per-Agent)
+
+### Config.json Auto-Encryption
+
+On server startup,  transparently encrypts:
+
+-  section: user, password, DSN
+-  section: api_key
+-  section: simple_api_key, standard_api_key, complex_api_key
+
+Uses PBKDF2-HMAC-SHA512 key derivation with 210,000 iterations, AES-like stream cipher with HMAC authentication. Master key stored in  (chmod 600).
+
+### CLI Tool
+
+
+
+### Per-Agent Key Lifecycle
+
+1. **Registration**: Agent receives its crypto key encrypted with admin_token
+2. **Storage**: Key stored in SYSTEM_CONFIG (not in agent config files)
+3. **Usage**: Agent uses key to encrypt/decrypt local config and session data
+4. **Rotation**: Admin triggers rotation via API, affected credentials re-encrypted
+5. **Detection**: Agent heartbeat checks key version, triggers local re-encryption on change

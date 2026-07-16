@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Property Graph API
+"""AI Agent Infra v3.10.2 - Community Edition - Property Graph API
 
 Core graph operations using GRAPH_TABLE SQL operator against ORACLE_MEMORY_GRAPH.
 Provides neighbor traversal, path finding, community detection, and graph analytics.

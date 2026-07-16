@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra v3.10.1 (2026-06-18) - Community Edition
+# Migration Guide - AI Agent Infra v3.10.2 (2026-07-16) - Community Edition
 
 ## Version Compatibility
 
@@ -118,16 +118,16 @@ There is no in-place upgrade path from v2.0 to v2.1 due to:
 # Use Data Pump or custom export scripts to preserve data
 
 # 2. Deploy v2.1 schema (Phase 1 drops all tables automatically)
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/1_schema.sql
+JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql your_user/your_password@//host:port/service @scripts/deploy/1_schema.sql
 
 # 3. Deploy v2.1 API packages
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/2_api.sql
+JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql your_user/your_password@//host:port/service @scripts/deploy/2_api.sql
 
 # 4. Deploy v2.1 scheduler jobs
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/3_jobs.sql
+JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql your_user/your_password@//host:port/service @scripts/deploy/3_jobs.sql
 
 # 5. Deploy v2.1 harness templates
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql openclaw/hermes@//10.10.10.130:1521/openclaw @scripts/deploy/4_harness_templates.sql
+JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql your_user/your_password@//host:port/service @scripts/deploy/4_harness_templates.sql
 ```
 
 ### Data Migration (if preserving v2.0 data)
@@ -210,7 +210,7 @@ EXEC DBMS_RLS.DROP_POLICY('AIADMIN', 'ENTITY_ACCESS_LOG', 'ACCESS_LOG_AGENT_VPD'
 This script adds Deep Sec system privileges, removes the SYSTEM_CONFIG grant, and creates DEEP_SEC_SESSION_ROLE:
 
 ```bash
-sql sys/password@//host:port/service AS SYSDBA @scripts/deploy/4_grants.sql
+sqlplus sys/your_sys_password@//host:port/service AS SYSDBA @scripts/deploy/4_grants.sql
 ```
 
 ### Step 3: Create DEEP_SEC_SESSION_ROLE
@@ -228,7 +228,7 @@ GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
 This script creates Data Grants, Data Roles, MAC policies, End User Context, END_USER_MANAGER package, and End Users for existing agents:
 
 ```bash
-sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
+sql aiadmin/your_password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
 ```
 
 ### Step 5: Restart Application Server
@@ -293,7 +293,7 @@ DROP DATA GRANT ws_ctx_agent_insert;
 The script is idempotent — it recreates all 23 Data Grants including the fixed `entities_agent_own`, 2 new COLLAB Data Grants (`collab_member_own`, `collab_group_member_access`), and updated `ws_ctx_agent_access`/`ws_ctx_agent_insert` with visibility-aware predicates:
 
 ```bash
-sql aiadmin/password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
+sql aiadmin/your_password@//host:port/service @scripts/deploy/6_deep_sec_policy.sql
 ```
 
 ### Verification

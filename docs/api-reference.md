@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra v3.10.1 (2026-06-18) - Community Edition
+# API Reference - AI Agent Infra v3.10.2 (2026-07-16) - Community Edition
 
 ## Python API (scripts/lib/)
 

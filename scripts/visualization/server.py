@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Enterprise Edition - Web Visualization Server
+"""AI Agent Infra v3.10.2 - Enterprise Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -28,7 +28,7 @@ from lib import security, config, user_api
 from lib import loop_api
 from lib import message_api, orchestrator, event_bus, trace_api, monitor_api, tool_registry
 
-VERSION = "3.10.1"
+VERSION = "3.10.2"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -563,6 +563,15 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_admin_token_rotate()
             return
 
+        if path == '/api/admin/crypto/rotate':
+            self._handle_admin_crypto_rotate_all()
+            return
+
+        if path.startswith('/api/admin/crypto/rotate/'):
+            agent_id = path.split('/')[-1]
+            self._handle_admin_crypto_rotate_agent(agent_id)
+            return
+
         if path == '/api/admin/skill/create':
             self._handle_admin_skill_create()
             return
@@ -665,8 +674,6 @@ class VisHandler(BaseHTTPRequestHandler):
                     self._send_json({'status': 'ok', 'session': 'active'})
                 else:
                     self._send_json({'status': 'expired'}, 401)
-            elif path == '/api/knowledge':
-                self._send_json({'status': 'ok', 'version': VERSION})
             elif path == '/api/knowledge':
                 self._send_json(_knowledge_to_vis())
             elif path == '/api/memory':
@@ -1748,6 +1755,31 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'admin_token': token})
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
+
+    def _handle_admin_crypto_rotate_all(self):
+        if not self._is_admin_session():
+            self._json_error(403, 'Admin session required')
+            return
+        try:
+            from lib.agent_api import rotate_all_crypto_keys
+            results = rotate_all_crypto_keys()
+            self._json_ok({'rotated': results, 'count': len(results)})
+        except Exception as e:
+            self._json_error(500, str(e))
+
+    def _handle_admin_crypto_rotate_agent(self, agent_id):
+        if not self._is_admin_session():
+            self._json_error(403, 'Admin session required')
+            return
+        try:
+            from lib.agent_api import rotate_agent_crypto_key
+            result = rotate_agent_crypto_key(agent_id)
+            if result:
+                self._json_ok(result)
+            else:
+                self._json_error(404, 'Agent not found: ' + agent_id)
+        except Exception as e:
+            self._json_error(500, str(e))
 
     def _handle_admin_skill_list(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -2912,6 +2944,12 @@ def _generate_sim_reply(message, agent_id, sess):
 
 
 def main():
+    from lib.connection_crypto import auto_encrypt_config
+    from pathlib import Path
+    config_path = Path(__file__).resolve().parent.parent.parent / "config.json"
+    if config_path.exists():
+        auto_encrypt_config(config_path)
+
     cfg = _load_server_config()
     host = getattr(cfg, 'host', '0.0.0.0')
     port = getattr(cfg, 'port', 8000)

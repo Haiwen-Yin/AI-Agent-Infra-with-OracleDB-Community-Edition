@@ -1,4 +1,4 @@
-# Minimum Database Privileges - AI Agent Infra v3.10.1 (2026-06-18) - Community Edition
+# Minimum Database Privileges - AI Agent Infra v3.10.2 (2026-07-16) - Community Edition
 
 ## Current State (openclaw user)
 

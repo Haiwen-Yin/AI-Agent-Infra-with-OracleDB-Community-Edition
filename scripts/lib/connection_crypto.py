@@ -1,8 +1,9 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Connection Crypto Module
+"""AI Agent Infra v3.10.2 - Enterprise Edition - Connection Crypto Module
 
 Encrypts and decrypts database connection information in config.json.
 Uses PBKDF2-HMAC-SHA512 key derivation and stream cipher with HMAC authentication.
 Includes credential distribution functions for Admin/Agent separation.
+v3.10.2: Per-Agent independent crypto keys, LLM/model_routing encryption, key rotation.
 """
 
 import base64
@@ -106,6 +107,28 @@ def rotate_key(old_key: bytes, new_key: bytes, encrypted_blob: str) -> str:
     return encrypt_section(data, new_key)
 
 
+_DB_SENSITIVE_KEYS = {"user", "password", "dsn"}
+_LLM_SENSITIVE_KEYS = {"api_key"}
+_ROUTING_SENSITIVE_KEYS = {"simple_api_key", "standard_api_key", "complex_api_key"}
+
+
+def _encrypt_section_in_config(raw: dict, section_name: str, sensitive_keys: set) -> bool:
+    section = raw.get(section_name, {})
+    if not section or "_encrypted" in section:
+        return False
+    encryptable = {k: v for k, v in section.items() if k in sensitive_keys and v}
+    if not encryptable:
+        return False
+    encrypted = encrypt_section(encryptable)
+    new_section = {}
+    for k, v in section.items():
+        if k not in sensitive_keys:
+            new_section[k] = v
+    new_section["_encrypted"] = encrypted
+    raw[section_name] = new_section
+    return True
+
+
 def auto_encrypt_config(config_path: Path) -> bool:
     if not config_path.exists():
         return False
@@ -114,31 +137,52 @@ def auto_encrypt_config(config_path: Path) -> bool:
             raw = json.load(f)
     except (json.JSONDecodeError, OSError):
         return False
-    db_section = raw.get("database", {})
-    if "_encrypted" in db_section:
+
+    changed = False
+    changed |= _encrypt_section_in_config(raw, "database", _DB_SENSITIVE_KEYS)
+    changed |= _encrypt_section_in_config(raw, "llm", _LLM_SENSITIVE_KEYS)
+    changed |= _encrypt_section_in_config(raw, "model_routing", _ROUTING_SENSITIVE_KEYS)
+
+    if not changed:
         return False
-    sensitive_keys = {"user", "password", "dsn"}
-    if not any(k in db_section for k in sensitive_keys):
-        return False
-    encryptable = {k: v for k, v in db_section.items() if k in sensitive_keys}
-    if not encryptable:
-        return False
-    encrypted = encrypt_section(encryptable)
-    new_db = {}
-    for k, v in db_section.items():
-        if k not in sensitive_keys:
-            new_db[k] = v
-    new_db["_encrypted"] = encrypted
-    raw["database"] = new_db
+
     try:
         with open(config_path, "w") as f:
             json.dump(raw, f, indent=4, ensure_ascii=False)
         os.chmod(str(config_path), 0o600)
-        logger.info("Auto-encrypted database credentials in %s", config_path)
+        logger.info("Auto-encrypted sensitive config sections in %s", config_path)
         return True
     except OSError as e:
         logger.error("Failed to write encrypted config: %s", e)
         return False
+
+
+def _decrypt_section_in_config(section_raw: dict) -> dict:
+    encrypted_blob = section_raw.get("_encrypted")
+    if not encrypted_blob:
+        return section_raw
+    try:
+        decrypted = decrypt_section(encrypted_blob)
+        merged = dict(section_raw)
+        for k, v in decrypted.items():
+            if k not in ("_encrypted", "_key_source"):
+                merged[k] = v
+        return merged
+    except Exception as e:
+        logger.error("Failed to decrypt config section: %s", e)
+        return section_raw
+
+
+def decrypt_database_section(db_raw: dict) -> dict:
+    return _decrypt_section_in_config(db_raw)
+
+
+def decrypt_llm_section(llm_raw: dict) -> dict:
+    return _decrypt_section_in_config(llm_raw)
+
+
+def decrypt_model_routing_section(mr_raw: dict) -> dict:
+    return _decrypt_section_in_config(mr_raw)
 
 
 def encrypt_credential_for_distribution(credential_data: Dict[str, Any], admin_token: str) -> Dict[str, str]:
@@ -188,4 +232,11 @@ def load_agent_config(config_path) -> Dict[str, Any]:
         "username": creds.get("username"),
         "password": creds.get("password"),
         "dsn": creds.get("dsn"),
+        "host": creds.get("host"),
+        "port": creds.get("port"),
+        "dbname": creds.get("dbname"),
     }
+
+
+def generate_agent_crypto_key() -> str:
+    return base64.b64encode(os.urandom(KEY_SIZE)).decode("ascii")

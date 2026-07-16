@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Approval API
+"""AI Agent Infra v3.10.2 - Community Edition - Approval API
 
 Unified approval management for Human-in-the-Loop workflows.
 Supports three entity types: STEP (orchestrator), LOOP (loop runs), TOOL (tool calls).

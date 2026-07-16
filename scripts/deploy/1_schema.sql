@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.10.1 - Community Edition - Schema Deployment
+PROMPT AI Agent Infra v3.10.2 - Community Edition - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -1723,7 +1723,7 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v3.10.1 - Community Edition Schema Deployment Complete
+PROMPT AI Agent Infra v3.10.2 - Community Edition Schema Deployment Complete
 PROMPT ============================================================
 
 -- Grant DBMS_CRYPTO for DB_CRYPTO package

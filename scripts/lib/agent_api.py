@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - Community Edition - Agent API
+"""AI Agent Infra v3.10.2 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, and Admin/Agent separation support.
@@ -635,6 +635,11 @@ def register_agent_via_admin(
     }
     encrypted = encrypt_credential_for_distribution(credential_data, admin_token)
 
+    from .connection_crypto import generate_agent_crypto_key
+    agent_crypto_key = generate_agent_crypto_key()
+    _store_agent_crypto_key(agent_id, agent_crypto_key)
+    _store_agent_crypto_key_version(agent_id, 1)
+
     recovery_codes = generate_recovery_codes(agent_id)
 
     return {
@@ -643,6 +648,8 @@ def register_agent_via_admin(
             "credential_encrypted": encrypted["credential_encrypted"],
             "salt": encrypted["salt"],
         },
+        "crypto_key": agent_crypto_key,
+        "crypto_key_version": 1,
         "recovery_codes": recovery_codes,
     }
 
@@ -804,3 +811,78 @@ def recover_agent_via_admin(
             "salt": encrypted["salt"],
         },
     }
+
+
+def _store_agent_crypto_key(agent_id: str, crypto_key: str) -> None:
+    execute(
+        "INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) "
+        "VALUES (:k, :v, :d) "
+        "ON CONFLICT (CONFIG_KEY) DO UPDATE SET CONFIG_VALUE = :v",
+        {"k": f"agent_crypto_key:{agent_id}", "v": crypto_key, "d": f"Per-Agent encryption key for {agent_id}"},
+    ) if False else execute(
+        "MERGE INTO SYSTEM_CONFIG t "
+        "USING (SELECT :k AS CONFIG_KEY, :v AS CONFIG_VALUE FROM DUAL) s "
+        "ON (t.CONFIG_KEY = s.CONFIG_KEY) "
+        "WHEN MATCHED THEN UPDATE SET t.CONFIG_VALUE = s.CONFIG_VALUE "
+        "WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) "
+        "VALUES (s.CONFIG_KEY, s.CONFIG_VALUE, :d)",
+        {"k": f"agent_crypto_key:{agent_id}", "v": crypto_key, "d": f"Per-Agent encryption key for {agent_id}"},
+    )
+
+
+def _get_agent_crypto_key(agent_id: str) -> Optional[str]:
+    row = execute_query_one(
+        "SELECT config_value FROM system_config WHERE config_key = :k",
+        {"k": f"agent_crypto_key:{agent_id}"},
+    )
+    return row["config_value"] if row else None
+
+
+def _store_agent_crypto_key_version(agent_id: str, version: int) -> None:
+    execute(
+        "MERGE INTO SYSTEM_CONFIG t "
+        "USING (SELECT :k AS CONFIG_KEY, TO_CHAR(:v) AS CONFIG_VALUE FROM DUAL) s "
+        "ON (t.CONFIG_KEY = s.CONFIG_KEY) "
+        "WHEN MATCHED THEN UPDATE SET t.CONFIG_VALUE = s.CONFIG_VALUE "
+        "WHEN NOT MATCHED THEN INSERT (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) "
+        "VALUES (s.CONFIG_KEY, s.CONFIG_VALUE, :d)",
+        {"k": f"agent_crypto_key_version:{agent_id}", "v": version, "d": f"Crypto key version for {agent_id}"},
+    )
+
+
+def get_agent_crypto_key_version(agent_id: str) -> int:
+    row = execute_query_one(
+        "SELECT config_value FROM system_config WHERE config_key = :k",
+        {"k": f"agent_crypto_key_version:{agent_id}"},
+    )
+    try:
+        return int(row["config_value"]) if row else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def rotate_agent_crypto_key(agent_id: str) -> Optional[Dict[str, Any]]:
+    from .connection_crypto import generate_agent_crypto_key
+    new_key = generate_agent_crypto_key()
+    current_version = get_agent_crypto_key_version(agent_id)
+    new_version = current_version + 1
+
+    _store_agent_crypto_key(agent_id, new_key)
+    _store_agent_crypto_key_version(agent_id, new_version)
+
+    logger.info("Rotated crypto key for agent %s to version %d", agent_id, new_version)
+    return {"agent_id": agent_id, "key_version": new_version}
+
+
+def rotate_all_crypto_keys() -> List[Dict[str, Any]]:
+    agents = execute_query(
+        "SELECT DISTINCT agent_id FROM agent_registry WHERE status != 'DELETED'",
+        {},
+    )
+    results = []
+    for row in agents:
+        result = rotate_agent_crypto_key(row["agent_id"])
+        if result:
+            results.append(result)
+    logger.info("Rotated crypto keys for %d agents", len(results))
+    return results

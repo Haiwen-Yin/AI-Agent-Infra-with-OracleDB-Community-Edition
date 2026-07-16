@@ -1,4 +1,4 @@
-"""AI Agent Infra v3.10.1 - MCP Server
+"""AI Agent Infra v3.10.2 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
