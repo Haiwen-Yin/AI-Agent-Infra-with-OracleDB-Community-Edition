@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AI Agent Infra v3.5.0 - Community Edition - Web Server Control Script
+# AI Agent Infra v3.5.0 - Enterprise Edition - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
@@ -59,9 +59,9 @@ print(v)
 }
 
 load_env() {
-    CFG_DB_USER="${MEMORY_DB_USER:-$(_config_val database user openclaw)}"
-    CFG_DB_PASS="${MEMORY_DB_PASSWORD:-$(_config_val database password hermes)}"
-    CFG_DB_DSN="${MEMORY_DB_DSN:-$(_config_val database dsn '10.10.10.130:1521/openclaw')}"
+    CFG_DB_USER="${MEMORY_DB_USER:-$(_config_val database user aiadmin)}"
+    CFG_DB_PASS="${MEMORY_DB_PASSWORD:-$(_config_val database password)}"
+    CFG_DB_DSN="${MEMORY_DB_DSN:-$(_config_val database dsn)}"
     CFG_HOST="${MEMORY_SERVER_HOST:-$(_config_val server host 0.0.0.0)}"
     CFG_PORT="${MEMORY_SERVER_PORT:-$(_config_val server port 8000)}"
     CFG_TIMEOUT="${MEMORY_SESSION_TIMEOUT:-$(_config_val server session_timeout 300)}"
@@ -89,7 +89,7 @@ is_running() {
 do_status() {
     load_env
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}  AI Agent Infra v3.5.0 - Community${NC}"
+    echo -e "${BLUE}  AI Agent Infra v3.5.0 - Enterprise${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     if is_running; then
@@ -112,6 +112,10 @@ do_status() {
 }
 
 do_start() {
+    # First-run config wizard: prompts if config.json still has <PLACEHOLDER> tokens
+    if [ -x "$SCRIPT_DIR/scripts/config_wizard.sh" ]; then
+        "$SCRIPT_DIR/scripts/config_wizard.sh" || true
+    fi
     load_env
     if is_running; then
         echo -e "${YELLOW}Server already running (PID: $(get_pid))${NC}"
@@ -188,7 +192,7 @@ do_start() {
             echo -e "    Agents:     /agents"
             echo -e "    Tasks:      /tasks"
             echo ""
-            echo -e "  Login: ${YELLOW}admin / admin123${NC}"
+            echo -e "  Login: ${YELLOW}admin / <set via config>${NC}"
             echo ""
             echo -e "  Commands: ${0##*/} {start|stop|restart|status|config}"
             return 0
@@ -294,7 +298,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "AI Agent Infra v3.5.0 - Community Edition - Web Server Control"
+        echo "AI Agent Infra v3.5.0 - Enterprise Edition - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

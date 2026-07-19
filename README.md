@@ -1,334 +1,220 @@
-# AI Agent Infra with OracleDB - Community Edition v3.10.2
+# AI-Agent-Infra-with-OracleDB-Community-Edition
 
-[![Version](https://img.shields.io/badge/version-v3.10.2-blue.svg)](CHANGELOG.md)
-[![Oracle AI DB](https://img.shields.io/badge/Oracle-26ai-red.svg)](https://www.oracle.com/database/)
-[![Python](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
+> **v4.0.0 · Community Edition · Oracle**
+>
+> v4.0.0 - Community Edition for Oracle. 121 tests pass.
 
-**AI Agent Infrastructure Architecture — Community Edition with Admin/Agent Separation, Context Branching, Multi-Agent Collaboration, Database Access Security (5+1 layers), Portal user system, Agent pool management, and Loop Engineering — built on Oracle 26ai.**
+![License](https://img.shields.io/badge/License-Apache_2.0-green)
 
-> **v3.10.2 (2026-07-16): Encryption enhancement — per-Agent independent crypto keys stored in SYSTEM_CONFIG, config.json auto-encryption on startup (database + LLM + model_routing), key rotation API (global and per-Agent), encrypt_config.py CLI tool, Portal Markdown rendering. 544/544 tests pass.**
+AI Agent Infra is a multi-agent infrastructure platform that ships in six
+editions — three databases (Oracle, PostgreSQL, YashanDB) times two tiers
+(Community, Enterprise). This package is the **Community Edition for
+Oracle**. It is generated from the unified source repository at
+`/root/ai-agent-infra` by `build.py`.
 
-📄 **Official Website: [https://db4agent.top](https://db4agent.top)**
-
-📄 **[中文完整介绍 / Full Chinese Introduction](docs/introduction_zh_v3.10.2.md)**
-
----
-
-## 5-Signal Unified Hybrid Search
-
-The project provides a 10-strategy unified search API (`search_api.py`) for AI agents to retrieve across all data types. The **recommended production strategy** is `unified_sql` — a single-SQL CTE that fuses 5 signals in one database call:
-
-| Signal | Default Weight | Source |
-|--------|---------------|--------|
-| Vector | 0.40 | `VECTOR_DISTANCE(EMBEDDING, TO_VECTOR(:vec), COSINE)` |
-| Fulltext | 0.25 | Oracle Text `CONTAINS + SCORE(1)` |
-| Relational | 0.20 | `KNOWLEDGE_META` / `SPEC_META` / `ENTITIES` metadata |
-| Tag | (included in relational) | `ENTITY_TAGS` overlap ratio |
-| Graph | 0.15 | `ENTITY_EDGES` BFS proximity (1/depth decay) |
-
-**Why `unified_sql` is recommended**:
-- Eliminates 5 Python-SQL round trips → single database call
-- Server-side scoring → no data transfer overhead
-- 70-85% lower latency in production
-- Returns `engine: "single_sql"` for identification
-
-```python
-from lib.search_api import search
-
-# Recommended: single-SQL 5-signal fusion
-results = search("database partitioning", strategy="unified_sql", top_k=10)
-
-# Alternative: multi-round fusion (for debugging individual signal scores)
-results = search("database partitioning", strategy="unified", top_k=10)
-
-# Auto-detect best strategy
-results = search("encryption", strategy="auto")
-```
-
-All 10 strategies: `vector`, `fulltext`, `keyword`, `graph`, `hybrid`, `unified`, `unified_sql`, `relational`, `multi_type`, `auto`
+- Database: **Oracle** (driver: `oracledb`)
+- Web port: **8001**
+- License: **Apache-2.0**
+- Test count: **121** tests (minimum for this edition:
+  121)
 
 ---
 
-## Portal User System
+## 1. Package Contents
 
-Two independent page systems: **Portal** (user-facing: register/login/chat) and **Dashboard** (admin-facing: data management). Root `/` redirects to Portal.
+```
+AI-Agent-Infra-with-OracleDB-Community-Edition/
+├── config.example.json       # placeholder template (safe to commit)
+├── requirements.txt          # pinned Python deps incl. driver
+├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
+├── SKILL.md                  # project identity reference
+├── CHANGELOG.md              # full version history (v1.0.0 → current)
+├── RELEASE_NOTES_vv4.0.0.md
+├── LICENSE
 
-### Portal Login (`/portal/login`)
-
-- Register/login with local system user authentication
-- Registration checks SYSTEM_USERS (case-insensitive) for duplicates
-- "Enter Admin Portal" button in top-right corner
-
-### Portal Chat (`/portal/chat`)
-
-- **Sidebar**: user info (name + auth type), session list with rename/delete, new chat button
-- **Main area**: chat messages, input box, simulated keyword-based replies
-- **Session management**: create/switch/rename/delete chat sessions
-- **Auto-naming**: new sessions named "New Chat"; auto-renamed to first 60 chars of first message via `WORKSPACE_ALIAS`
-- **Agent lifecycle**: POOL → ACTIVE (assigned) → POOL (released)
-
-#### Agent Timeout Auto-Recall
-
-| Config Key | Default | Description |
-|------------|---------|-------------|
-| `dormant_timeout_min` | 30 min | Agent idle beyond this → auto-recalled to POOL via `DORMANT_AGENT_JOB` |
-| `session_timeout_min` | 60 min | Portal session timeout |
-
-Core logic: `LAST_ACTIVE_AT` older than `dormant_timeout_min` → `STATUS='POOL'`, `CURRENT_USER_ID=NULL`.
-
-Change timeout:
-```sql
-UPDATE SYSTEM_CONFIG SET CONFIG_VALUE = '10' WHERE CONFIG_KEY = 'dormant_timeout_min';
-COMMIT;
+├── docs/                     # architecture, api-reference, security, deployment, ...
+└── scripts/
+    ├── agent_bootstrap.py    # Business Agent registration CLI
+    ├── config_wizard.sh      # first-run interactive config prompt
+    ├── verify_deps.py        # pre-flight dependency checker
+    ├── install_offline.sh    # offline install from vendor/
+    | deploy_oracle.py
+    ├── lib/                  # business modules
+    │   ├── connection.py     # oracledb connection layer (adapter)
+    │   ├── config.py         # reads config.json (adapter, auto-decrypts)
+    │   ├── connection_crypto.py  # auto-encrypt / decrypt config sections
+    │   ├── agent_api.py      # Community Edition API surface (adapter)
+    │   ├── loop_api.py
+    │   └── ...               # memory_api, graph_api, knowledge_api, ...
+    ├── deploy/               # SQL deploy scripts
+    │   ├── 1_schema.sql
+    │   ├── 2_api.sql
+    │   ├── 3_jobs.sql
+    │   └── 4_harness_templates.sql
+    ├── tests/                # pytest suite + parameterized conftest.py
+    ├── tools/                # encrypt_config.py
+    └── visualization/
+        ├── server.py         # HTTP server (single source of VERSION)
+        ├── static/
+        └── templates/
 ```
 
-### Admin Dashboard (`/login`)
+## 2. Requirements
 
-- Only LOCAL users can access admin Dashboard
-- All existing data management pages unchanged
+| Component     | Version                                       |
+|---------------|-----------------------------------------------|
+| Python        | 3.14+                                         |
+| Oracle | Oracle AI Database 26ai 23.26.2+                              |
+| Driver        | `oracledb>= 4.0.1`       |
 
-### Encrypted Credentials
-
-- `config.json`: DB `user`/`password`/`dsn` encrypted as `_encrypted` blob
-- `AGENT_CREDENTIALS.CREDENTIAL_VALUE`: encrypted with master key (fixed from broken random-key encryption)
-- Master key: env `MASTER_DB_KEY` > `~/.oracle-infra/master.key` > auto-generate
-
----
-
-## Loop Engineering
-
-**Loop Engineering** is the 4th generation AI engineering methodology (after Prompt Engineering, Context Engineering, and Harness Engineering), proposed by Peter Steinberger in June 2026. It treats the iterative refinement loop — where an AI agent repeatedly evaluates its output against stop conditions and feeds results back for the next iteration — as a first-class, observable, and manageable engineering artifact.
-
-This project implements Loop Engineering with:
-
-| Component | Description |
-|-----------|-------------|
-| **5 new tables** | `LOOP_META`, `LOOP_RUNS`, `LOOP_ITERATIONS`, `LOOP_HOOKS`, `TASK_LOOP_BINDING` |
-| **LOOP_MANAGER** PL/SQL package | ~22 functions for loop lifecycle management |
-| **loop_api.py** | Python module with evaluation engine supporting 6 evaluation types |
-| **3 scheduler jobs** | `LOOP_TRIGGER_JOB`, `LOOP_STUCK_CHECK_JOB`, `LOOP_CLEANUP_JOB` |
-| **Detail panel close button** | ❌ button in loop detail panel header for quick dismiss |
-| **Lifecycle hooks** | `ON_START`, `PRE_RUN`, `POST_ITERATION`, `ON_STOP`, `ON_FAIL`, `ON_TIMEOUT` |
-
-### Evaluation Types
-
-The evaluation engine supports 6 evaluation types for determining whether an iteration's output meets the stop conditions:
-
-| Type | Description |
-|------|-------------|
-| `TEST` | Run a command; pass if exit code is 0 |
-| `DIFF` | Check git diff for changes |
-| `LLM_JUDGE` | LLM-based scoring of output quality |
-| `MANUAL` | Human review |
-| `SPEC_VALIDATION` | Validate against spec acceptance criteria |
-| `AGGREGATE` | Aggregate child loop run results |
-
-### Stop Conditions
-
-Loops terminate when any of these conditions are met:
-- `max_iterations` — maximum number of iterations
-- `max_tokens` — cumulative token budget exhausted
-- `max_duration_seconds` — wall-clock time limit
-
-### Configuration
-
-The `llm_judge` section in `config.json` configures the LLM evaluation (disabled by default):
-
-```json
-{
-  "llm_judge": {
-    "enabled": false,
-    "model": "gpt-4",
-    "threshold": 0.8
-  }
-}
-```
-
-> **For Enterprise Edition features, see the [Enterprise Edition](https://github.com/Haiwen-Yin/AI-Agent-Infra-with-OracleDB-Enterprise-Edition).**
-
----
-
-## Editions
-
-| Feature | Community Edition | Enterprise Edition |
-|---------|------------------|-------------------|
-| **Core Infrastructure** | | |
-| Memory System & Knowledge Graph | Yes | Yes |
-| 5-Signal Unified Hybrid Search | Yes | Yes |
-| Spec Driven Development | Yes | Yes |
-| Agent Elastic Management | Yes | Yes |
-| Collaboration Groups | Yes | Yes |
-| Multi-Agent Collaboration (Branch+Spec+Plan+Harness) | Yes | Yes |
-| Workspace & Context Continuity | Yes | Yes |
-| Context Branching | Yes | Yes |
-| Property Graph API | Yes | Yes |
-| Harness Templates | Yes | Yes |
-| Web Visualization Dashboard | Yes | Yes |
-| **Portal User System** | | |
-| Portal Login / Register | Yes (System User) | Yes (System User) |
-| Portal Chat with Sessions | Yes | Yes |
-| Session Rename / Delete | Yes | Yes |
-| Agent Pool Assignment | Yes | Yes |
-| **Identity & Authentication** | | |
-| Local System User Auth | Yes | Yes |
-| Admin Dashboard Isolation (LOCAL only) | Yes | Yes |
-| **Skill System** | | |
-| Skill CRUD (skill_api.py) | Yes | Yes |
-| Skill Distribution via Admin API | Yes | Yes |
-| Private Skill Backup (visibility=PRIVATE) | Yes | Yes |
-| Skill Management via Admin API | Yes | Yes |
-| Secure Token Distribution (skill_token_api.py) | No | Yes |
-| **Agent Recovery** | | |
-| Recovery Codes (RC-XXXX-XXXX-XXXX) | Yes | Yes |
-| Agent Recovery (POST /api/admin/agent/recover) | Yes | Yes |
-| **Security & Encryption** | | |
-| Encrypted config.json (DB credentials) | Yes | Yes |
-| Encrypted AGENT_CREDENTIALS | Yes | Yes |
-| Master Key Management | Yes | Yes |
-| Data Masking | Yes | Yes |
-| **Database** | | |
-| Tables | 35 | 41 |
-| PL/SQL Packages | 14 | 17 |
-| Scheduler Jobs | 16 | 20 |
-| Data Grants | 23 | 23 |
-| Tests | 121 | 121 |
-| **License** | Apache 2.0 | BSL 1.1 |
-
----
-
-## Quick Start
-
-### ⚠️ Pre-Deployment Safety Check (REQUIRED)
-
-**Before running ANY deploy script, check whether the database already has an existing deployment. Re-running deploy scripts on an existing database will DESTROY all data.**
-
-```python
-from lib.deploy_api import check_deployment
-result = check_deployment()
-if result["deployed"]:
-    # DO NOT deploy! Only register this Skill.
-    pass
-else:
-    # Safe to deploy from scratch
-    pass
-```
-
-HTTP endpoint (public, no auth):
-```bash
-curl http://localhost:18080/api/agent/deployment-check
-```
-
-The `1_schema.sql` script now includes built-in protection: it auto-aborts if `SYSTEM_CONFIG.schema_version` exists.
-
-### Prerequisites
-
-- **Oracle AI Database 26ai version 23.26.2.0.0 or later** (required for Deep Data Security)
-- **Python 3.8+ with `oracledb 4.0.1+`** (4.0.0 has TCPS/Deep Sec issues; 4.1.0+ recommended when available)
-- SQLcl 26.1+ (for SQL script deployment)
-- `GRANT EXECUTE ON SYS.DBMS_CRYPTO` (required for DB_CRYPTO in-database encryption)
-
-> ⚠️ **Critical**: Oracle AI Database 26ai must be version **23.26.2** or later. Earlier versions (23.26.1) have incomplete Deep Data Security support. Check with: `SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';`
-
-> ⚠️ **Critical**: Python `oracledb` must be version **4.0.1** or later. Install with: `pip install oracledb>=4.0.1`
-
-### 1. Deploy Schema
+Install Python dependencies:
 
 ```bash
-python3.14 scripts/deploy_oracle.py aiadmin oracle host:port/service scripts/deploy/1_schema.sql scripts/deploy/2_api.sql scripts/deploy/3_jobs.sql
-sql user/password@//host:port/service @scripts/deploy/2_api.sql
-sql user/password@//host:port/service @scripts/deploy/3_jobs.sql
-sql user/password@//host:port/service @scripts/deploy/4_harness_templates.sql
+pip install -r requirements.txt
 ```
 
-### 2. Install Python Dependencies
+For offline environments, use the bundled `vendor/` wheels:
 
 ```bash
-pip install oracledb>=4.0.1
+./scripts/install_offline.sh
 ```
 
-### 3. Configure
+## 3. Configuration
 
-Edit `config.json` — database credentials will be auto-encrypted on first run:
+The release ships **`config.example.json`** (placeholder template — safe for
+public distribution). Real credentials are NEVER bundled in the zip. Two paths
+to produce a runnable `config.json`:
+
+### Path A — Interactive wizard (recommended)
 
 ```bash
-# Option A: Environment variable (recommended)
-export MASTER_DB_KEY=$(python3 -c "import base64,os; print(base64.b64encode(os.urandom(32)).decode())")
-export MEMORY_DB_USER=<db_user>
-export MEMORY_DB_PASSWORD=<db_password>
-export MEMORY_DB_DSN=<db_host>:<db_port>/<db_service>
+./start_web_server.sh start
+```
+On first run, the script detects unresolved `<PLACEHOLDER>` tokens in
+`config.json` (or copies the template if missing) and interactively prompts
+for:
 
-# Option B: Edit config.json (will auto-encrypt on first run)
+- **database**: `user`, `password`, `dsn` (Oracle / YashanDB)
+  — or `host`, `port`, `database` (PostgreSQL)
+- **llm**: `api_url`, `model`, `api_key`
+- **embedding**: `api_url`, `model`, `dimension`
+
+You can also run the wizard standalone:
+```bash
+bash scripts/config_wizard.sh
 ```
 
-### 4. Run Tests
+### Path B — Manual edit
 
 ```bash
-cd scripts && python -m tests.test_all
+cp config.example.json config.json
+vim config.json   # replace every <PLACEHOLDER> with a real value
 ```
 
-### 5. Start Visualization Server
+### Auto-encryption on first startup
+
+`config.json` (once filled) is **plaintext on disk only between the wizard
+finishing and the server's first boot**. As soon as the web server starts,
+`auto_encrypt_config()` rewrites the `database`, `llm`, and `model_routing`
+sections in place, replacing the plaintext fields with an `_encrypted` blob
+(PBKDF2-derived key). The original plaintext is discarded; the server
+transparently decrypts on every subsequent read.
+
+Manual encrypt / decrypt is also available:
+```bash
+python3 scripts/tools/encrypt_config.py encrypt config.json
+python3 scripts/tools/encrypt_config.py decrypt config.json
+```
+
+Environment variables override `config.json` values (see `config.py`).
+
+## 4. Deployment
+
+### Database schema
 
 ```bash
-./start_web_server.sh start    # Start (daemon mode)
-./start_web_server.sh status   # Check status
-./start_web_server.sh stop     # Stop
-# Open http://<web_host>:<web_port> — Login: admin / admin123
+python3.14 scripts/deploy_oracle.py <user> <pass> <dsn> scripts/deploy/1_schema.sql
 ```
+
+This runs the deploy scripts in `scripts/deploy/`:
+`1_schema.sql` → `2_api.sql` → `3_jobs.sql` → `4_harness_templates.sql`.
+
+### Start the server
+
+```bash
+./start_web_server.sh
+# or
+python3.14 scripts/visualization/server.py
+```
+
+The portal is served at `http://<host>:8001/`. Default admin login:
+`admin` / `admin`.
+
+## 5. API Surface
+
+All editions implement the contract in
+[api-contract/spec.md](https://github.com/openspec/ai-agent-infra).
+
+| Endpoint                      | Method | Description                       |
+|-------------------------------|--------|-----------------------------------|
+| `/api/health`                 | GET    | Liveness probe, returns version   |
+| `/api/login`                  | POST   | Admin login, returns session_id   |
+| `/api/knowledge`              | GET    | Knowledge entity list             |
+| `/api/memory`                 | GET    | Memory nodes and edges            |
+| `/api/agents`                 | GET    | Registered agents & sessions      |
+| `/api/graph/all`              | GET    | All graph nodes and edges         |
+| `/api/graph/stats`            | GET    | Graph statistics                  |
+| `/api/graph/search?q=...`     | GET    | Entity search                     |
+| `/api/tasks`                  | GET    | Task plans                        |
+| `/api/monitor/overview`       | GET    | Agent overview                    |
+| `/api/monitor/agents`         | GET    | Agent status list                 |
+| `/api/monitor/metrics`        | GET    | Performance metrics               |
+| `/portal/api/login`           | POST   | End-user portal login             |
+| `/portal/api/chat/send`       | POST   | Portal chat (stream or non-stream)|
+
+## 6. Testing
+
+```bash
+python3.14 -m pytest scripts/tests/ -q --tb=no
+```
+
+The release bar (per `test-requirements/spec.md`): zero failures and the test
+count must meet or exceed **121** for this edition. Current
+built-in test count: **121**.
+
+The shared `conftest.py` parameterizes database tests across backends. To
+restrict a run to this edition's backend:
+
+```bash
+AIAGENT_TEST_DB=oracle python3.14 -m pytest scripts/tests/
+```
+
+## 7. Community Edition Features
+
+- Full memory/knowledge/graph APIs
+- Loop Engineering (6 eval types)
+- MCP Server (10+ tools)
+- Portal chat with LLM
+- Offline deployment
+
+## 8. Documentation
+
+See `docs/` for in-depth material: `architecture.md`, `api-reference.md`,
+`security.md`, `deployment.md`, `minimum-privileges.md`, `migration.md`,
+`visualization.md`, `workspace.md`, `harness.md`, `loop-engineering.md`.
+
+For AI agents working on this codebase, see `docs/AGENTS.md`.
+
+## 9. Provenance
+
+This package was generated by `build.py` from the unified source repository.
+To rebuild or customize, see the top-level `CHANGELOG.md` and `AGENTS.md` in
+the source tree.
+
+- Source repository: `/root/ai-agent-infra`
+- Build script: `build.py`
+- Edition config: `editions/oracle-community.json`
+- Spec store: `/root/AI-Agent-Infra-Specs/openspec/specs/`
+- Build timestamp: 2026-07-19T22:00:13.991122
 
 ---
-
-## Project Structure
-
-```
-ai-agent-infra-community/
-  scripts/
-    deploy/
-      1_schema.sql              # 35 tables, JRD views, indexes, property graph, seed data
-      2_api.sql                 # 14 PL/SQL packages
-      3_jobs.sql                # 16 scheduler jobs
-      4_harness_templates.sql   # HARNESS_META + 5 built-in templates
-    lib/
-      config.py                 # Unified Config with encrypted DB credentials
-      connection.py             # oracledb connection pool (decrypts config)
-      connection_crypto.py      # Config encryption/decryption/key rotation
-      memory_api.py             # Memory CRUD (8 functions)
-      knowledge_api.py          # Knowledge CRUD + graph (7 functions)
-      agent_api.py              # Agent, sessions, credentials (17+ functions)
-      task_plan_api.py          # Task plans, steps (6 functions)
-      security.py               # Data masking, encryption, ConfigEncryption
-      harness_api.py            # Harness template CRUD (6 functions)
-      graph_api.py              # Property Graph API (9 functions)
-      workspace_api.py          # Workspace lifecycle (14 functions)
-      spec_api.py               # Spec CRUD + plan linkage (10 functions)
-      collab_api.py             # Collaboration groups (10 functions)
-      embedding_api.py          # Vector embedding + search (14 functions)
-      search_api.py             # Unified search (3 functions)
-      skill_api.py              # Skill CRUD [shared] (Phase 3)
-      skill_acquire_api.py   # Agent skill discovery & acquisition [shared] (Phase 3)
-      branch_api.py            # Context branching lifecycle (9 functions)
-    tests/
-      test_all.py               # Master runner
-      ... (14+ suites)
-    visualization/
-      server.py                 # HTTP server v3.7.5
-      templates/                # 14 HTML templates
-      static/                   # style.css + vis-network.min.js
-  docs/
-  config.json                  # Database connection config (auto-encrypted)
-  LICENSE           # Apache 2.0
-  SKILL.md
-  README.md
-```
-
----
-
-## License
-
-Apache License 2.0 — see [LICENSE](LICENSE)
-
-Non-production use is free.
-
-## Author
-
-**Haiwen Yin** — [GitHub](https://github.com/Haiwen-Yin) | [Blog](https://blog.csdn.net/yhw1809)

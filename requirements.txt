@@ -1,3 +1,5 @@
+oracledb>=4.0.1
+# Shared Python dependencies (all editions)
 annotated-types==0.7.0
 anyio==4.14.2
 attrs==26.1.0
@@ -13,7 +15,6 @@ idna==3.18
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 mcp==1.28.1
-oracledb==4.0.1
 pycparser==3.0
 pydantic==2.13.4
 pydantic-core==2.46.4
