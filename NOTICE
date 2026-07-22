@@ -23,7 +23,13 @@ Use of these trademarks does not imply endorsement by Oracle Corporation.
 
 ---
 
-Bundled third-party Python packages (under vendor/) retain their
+Bundled third-party components retain their upstream licenses.
+JavaScript components under scripts/visualization/static include:
+- Marked - Markdown parser (MIT)
+- DOMPurify - HTML sanitizer (Apache-2.0 or MPL-2.0)
+Their license texts are shipped alongside the corresponding files.
+
+Bundled Python packages (under vendor/) retain their
 upstream licenses. The full list is available in requirements.txt;
 notable packages include:
 - oracledb, psycopg2, yaspy — database drivers (Apache 2.0 / LGPL / proprietary)

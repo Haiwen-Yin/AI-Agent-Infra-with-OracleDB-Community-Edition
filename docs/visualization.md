@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Web Visualization - AI Agent Infra v4.0.1
 
 ## Server
 

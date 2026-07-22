@@ -1,4 +1,31 @@
-# Deployment Guide - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Deployment Guide - AI Agent Infra v4.0.1
+
+## Supported Targets
+
+| Adapter | Validated database | Business Agent account |
+|---|---|---|
+| Oracle | Oracle AI Database 26ai | Native End User |
+| PostgreSQL | PostgreSQL 18 | Dedicated LOGIN role |
+| YashanDB | YashanDB 23.5.4+ | Dedicated database user |
+
+Use Linuxbrew Python 3.14. For a clean v4.0.1 installation, deploy
+`1_schema.sql`, then `7_v4_0_1_migration.sql`, followed by the remaining phase
+scripts. For an existing schema, run the versioned migration only through the
+migration runner so its checksum and ledger record are verified. Then run the
+application with the minimum documented privileges.
+Business Agent configuration must contain only its independent login and must
+never contain a fallback schema-owner credential.
+
+For upgrades, use `7_v4_0_1_migration.sql` through the migration runner. A
+release is ready only when unit/security tests, package validation, live
+capability probes, and the three operating modes pass. Multi-tenant deployment
+and public Internet exposure are outside the v4.0.1 deployment contract.
+
+Existing v4.0.1 installations must then apply
+`8_portal_node_ownership.sql` before deploying or restarting the web service.
+Fresh schemas already contain the Portal node ownership column and index.
+
+## Historical Oracle Deployment Detail
 
 ## Prerequisites
 
@@ -90,7 +117,10 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql aiadmin/your_pa
 - DEEP_SEC_SESSION_ROLE (CREATE SESSION) for End User login
 - Idempotent: re-run is safe
 
-**Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
+**v4.0.1 requirement**: Portal APIs use the authenticated Business Agent's
+independent database identity for the entire request. Missing grants or an
+unavailable Business connection fail closed and never fall back to the Schema
+Owner.
 
 ## Python Setup
 
@@ -186,7 +216,8 @@ For Oracle editions, a pure Python deployment tool is available as an alternativ
 Usage:
 ```bash
 python3.14 scripts/deploy_oracle.py aiadmin oracle <DB_HOST>:1521/ai_agent_ee \
-    scripts/deploy/1_schema.sql scripts/deploy/2_api.sql scripts/deploy/3_jobs.sql
+    scripts/deploy/1_schema.sql scripts/deploy/7_v4_0_1_migration.sql \
+    scripts/deploy/2_api.sql scripts/deploy/3_jobs.sql
 ```
 
 For SYSDBA scripts:

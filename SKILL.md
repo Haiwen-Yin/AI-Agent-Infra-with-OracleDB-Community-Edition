@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.0.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.0.1 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -31,7 +31,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.0.0.md         # this release's notes
+├── RELEASE_NOTES_v4.0.1.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -44,7 +44,7 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 │   ├── security.md
 │   ├── deployment.md
 │   └── ...
-├── vendor/                         # 31 pre-downloaded wheels (offline)
+├── vendor/                         # 30 pre-downloaded wheels (offline)
 └── scripts/
     ├── config_wizard.sh            # first-run interactive config prompt
     ├── install_offline.sh          # install vendor/ wheels (no PyPI)
@@ -90,7 +90,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.0.0.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.0.1.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -100,7 +100,7 @@ bash scripts/install_offline.sh
 python3 scripts/verify_deps.py
 ```
 
-The `install_offline.sh` script installs all 31 wheels from `vendor/`
+The `install_offline.sh` script installs all 30 wheels from `vendor/`
 into the active Python's site-packages, including `oracledb-4.0.1`.
 
 ## 5. Configuration
@@ -132,10 +132,11 @@ vim config.json   # replace every <PLACEHOLDER> with a real value
 ```
 
 ### Auto-encryption
-On first startup, `auto_encrypt_config()` rewrites the `database`, `llm`,
-and `model_routing` sections of `config.json` in place as `_encrypted`
-blobs (PBKDF2-derived key, AES-256-GCM via `DBMS_CRYPTO`). The plaintext
-is discarded; the server decrypts transparently on every read.
+On first startup, `auto_encrypt_config()` encrypts sensitive fields in the
+`database`, `security`, `llm`, and `model_routing` sections of `config.json`
+as AES-256-GCM `_encrypted` blobs. This includes database credentials, API
+keys, and `security.secret_key`; non-sensitive policy remains readable. The
+server enforces owner-only (`0600`) permissions and decrypts transparently.
 
 Manual encrypt / decrypt:
 ```bash
@@ -278,7 +279,7 @@ Tests use the configured `config.json` connection. Set
 | `ORA-01017: invalid credentials` | wrong DB user/password | re-run `bash scripts/config_wizard.sh` |
 | `DBMS_CRYPTO` not found | missing grant | `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>;` |
 | Server starts but `import yaspy` fails | wrong adapter - this is the Oracle edition | use the YashanDB release zip instead |
-| `config.json` has `_encrypted` but server can't decrypt | `MASTER_DB_KEY` env var changed | unset it (key is derived from `secret_key` in config) |
+| `config.json` has `_encrypted` but server can't decrypt | configured master key does not match | restore the matching `MASTER_DB_KEY` or `~/.ai-agent-infra/master.key` backup |
 | Portal chat returns 500 | LLM `api_url` not configured | edit `config.json` -> `llm.api_url` |
 | Deployment fails with "schema_version exists" | DB already has schema | use `--force` flag or drop schema first |
 | `Deep Data Security` not filtering rows | Oracle version < 23.26.2 | upgrade to 26ai 23.26.2+ |
@@ -288,7 +289,7 @@ Server log: `viz_server.log` in the project directory.
 ## 13. Offline Deployment
 
 The release zip is fully self-contained:
-- `vendor/` - 31 wheels (no PyPI access needed)
+- `vendor/` - 30 wheels (no PyPI access needed)
 - `scripts/install_offline.sh` - installs all wheels
 - `scripts/verify_deps.py` - integrity check
 - `scripts/deploy_oracle.py` - SQL deployment (no SQLcl, no Java)

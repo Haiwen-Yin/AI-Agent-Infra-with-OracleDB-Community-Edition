@@ -1,4 +1,33 @@
-# Architecture - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Architecture - AI Agent Infra v4.0.1
+
+## v4.0.1 Control Planes
+
+The database is the durable source of truth for entities, knowledge, memory,
+tasks, complete Skill packages, Agent identity mappings, execution policy,
+approvals, attempts, leases, results, and audit records. The web process
+authenticates and queues side effects; workers claim durable jobs and perform
+bounded execution outside the request thread.
+
+Core behavior is equivalent across Oracle AI Database, PostgreSQL, and
+YashanDB, while native SQL, graph/search facilities, migrations, and identity
+provisioning remain in adapters. Community and Enterprise are build-time
+allowlists rather than runtime branding flags.
+
+Each Business Agent has an independent database identity and cannot use the
+schema owner: Oracle End User plus Data Grants, PostgreSQL LOGIN role plus RLS
+identity, or YashanDB user plus object grants. The authenticated request Agent
+must match the configured database identity, otherwise access fails closed.
+
+Execution jobs progress through approval, pending, running, retry, and terminal
+states. Claims use a lease token; completion is accepted only for the active
+lease. At-least-once delivery is paired with idempotency keys. URL validation
+and command policy are applied before a worker performs a side effect.
+
+Skill ZIP files are parsed into immutable package versions. `SKILL.md` and all
+normalized nested files retain hashes; acquisition verifies visibility and
+integrity before creating a read-only materialized tree.
+
+## Unified Entity Model
 
 ## Unified Entity Model
 
@@ -285,7 +314,7 @@ v3.4.0 uses a layered JSON approach:
 
 This strategy balances: (a) relational integrity for FK constraints and partitioning, (b) document convenience for API consumers, and (c) partial update efficiency for large JSON payloads.
 
-## Deep Data Security Architecture
+## Deep Data Security Architecture (Oracle Adapter)
 
 ### Direct Logon with Local End Users
 
@@ -388,4 +417,7 @@ Each request sets the agent identity via `_set_context_from_session()`:
 
 Portal requests use End User connections with Data Grant filtering. Admin/management operations use the AIADMIN pool connection with unrestricted access.
 
-**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
+Business/Portal requests remain on the End User connection for their complete
+lifetime and fail closed if it is unavailable. Schema Owner access is confined
+to separately authenticated Admin operations; Business requests never switch
+to AIADMIN as a fallback.

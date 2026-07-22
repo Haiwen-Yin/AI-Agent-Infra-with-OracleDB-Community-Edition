@@ -1,4 +1,45 @@
-# API Reference - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# API Reference - AI Agent Infra v4.0.1
+
+## v4.0.1 Authentication Contract
+
+`/api/health`, login, and explicit bootstrap endpoints are public. Other API
+and MCP operations require an authenticated session or Bearer identity;
+administrative operations also require the Admin role. Acting Agent identity
+comes from the authenticated context, not a body or query `agent_id`.
+
+## Execution Control API
+
+```python
+enqueue_job(job_type, agent_id, payload, idempotency_key, requires_approval, max_attempts) -> dict
+get_job(job_id) -> dict | None
+decide_job(job_id, approved, decided_by, reason) -> bool
+cancel_job(job_id, requested_by) -> bool
+claim_job(worker_id, lease_seconds) -> dict | None
+renew_lease(job_id, lease_token, lease_seconds) -> bool
+complete_job(job_id, lease_token, result) -> bool
+fail_job(job_id, lease_token, error, retryable) -> bool
+run_worker_once(worker_id) -> dict | None
+```
+
+Side-effect endpoints return a durable job ID and current approval/execution
+state. The web request does not run an arbitrary command or HTTP call inline.
+
+## Skill Package API
+
+```python
+discover_skills(agent_id, skill_type, runtime, keyword, limit) -> list
+acquire_skill_text(skill_id) -> dict | None
+acquire_skill_full(skill_id, agent_id, session_id) -> dict | None
+materialize_skill(skill_id, install_root) -> dict | None
+```
+
+An uploaded ZIP must contain `SKILL.md`. Versions are immutable; complete
+Markdown, nested paths, package SHA-256, and per-file SHA-256 values are
+preserved. Materialization verifies the installed tree and writes read-only
+files/directories. Equivalent authenticated operations are exposed through
+MCP Skill tools.
+
+## Python API (scripts/lib/)
 
 ## Python API (scripts/lib/)
 
@@ -216,7 +257,10 @@ get_workspace_tasks(workspace_id) -> list
 - `get_end_user_connection(agent_id)` — Get End User connection with Data Grant filtering
 - `get_connection()` — Get AIADMIN pool connection (unrestricted by Data Grants)
 
-**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
+**v4.0.1 identity boundary**: Business/Portal requests use only the authenticated
+Agent's independent database identity. They never call
+`set_agent_context(None)` to obtain a Schema Owner connection. Admin routes use
+the separately authenticated Admin connection path.
 
 ## Admin API (v3.7.0)
 

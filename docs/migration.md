@@ -1,4 +1,40 @@
-# Migration Guide - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Migration Guide - AI Agent Infra v4.0.1
+
+## v4.0.0 to v4.0.1
+
+1. Stop web and worker processes. Back up the database/schema, `config.json`,
+   master-key file, and the exact v4.0.0 archive.
+2. Run `migration_runner.py` with the encrypted local configuration. It creates
+   `AI_SCHEMA_MIGRATIONS`, calculates SHA-256 for
+   `7_v4_0_1_migration.sql`, and rejects a changed script for an applied
+   version. Existing complete v4.0.1 schemas without a ledger are adopted once.
+3. Run the live capability probe. All eight core tables, all eight v4.0.1
+   execution tables, and the Skill Entity contract are mandatory.
+4. Migrate legacy encrypted configuration through the privileged migration
+   API, verify AES-256-GCM decryption, and retain the backup until validation.
+5. Register new independent Business Agent identities. Do not distribute or
+   retain schema-owner credentials in Business Agent configuration.
+6. Run standalone, Admin Agent, and Business Agent validation for the selected
+   edition before accepting traffic.
+
+The migration adds execution jobs, attempts, policies, artifacts, audit,
+dead-letter events, DAG execution logs, alert rules, and the Skill Entity
+contract. PostgreSQL also adds dedicated role-to-Agent identity mapping and
+RLS integration.
+
+Apply `8_portal_node_ownership.sql` to an existing v4.0.1 schema before
+restarting the Portal. It adds the persisted node owner used to reclaim only
+the current Admin Agent node's assignments. Fresh schemas already include this
+structure.
+
+### Rollback
+
+Stop v4.0.1 processes and restore the database/schema, configuration, and
+master key from the coordinated v4.0.0 backup. Database rollback does not undo
+external side effects already completed by workers. Do not edit or delete a
+successful migration ledger row to simulate rollback.
+
+## Historical Migrations
 
 ## Version Compatibility
 
@@ -233,7 +269,10 @@ JAVA_HOME=/usr/lib/jvm/jdk-26.0.1-oracle-x64 /root/sqlcl/bin/sql your_user/your_
 
 ### Step 5: Restart Application Server
 
-Restart the application server to pick up the new connection routing logic. Portal APIs that access WORKSPACES/SYSTEM_USERS tables now use `connection.set_agent_context(None)` to temporarily switch to AIADMIN connection (WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users).
+Restart the application server to pick up the new connection routing logic.
+This historical migration originally used owner context switching; v4.0.1
+supersedes that behavior. Business/Portal requests now remain on independent
+database identities and fail closed without Schema Owner fallback.
 
 ```bash
 systemctl restart aiagent-infra

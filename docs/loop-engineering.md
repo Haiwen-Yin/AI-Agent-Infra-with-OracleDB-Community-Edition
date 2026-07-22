@@ -1,4 +1,4 @@
-# Loop Engineering - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Loop Engineering - AI Agent Infra v4.0.1
 
 ## Overview
 
@@ -23,7 +23,10 @@ A **Loop** is a persistent, observable, self-evaluating execution unit. Instead 
 4. Fires **lifecycle hooks** at key points (PRE_RUN, POST_ITERATION, ON_STOP, ON_FAIL, ON_TIMEOUT, ON_START)
 5. **Stops** automatically when a stop condition is met or the evaluation passes
 
-Loops are durable: a run can be paused, resumed, monitored, and audited. All state lives in Oracle Database tables, so a loop survives agent restarts and can be inspected by humans or other agents.
+Loops are durable: a run can be paused, resumed, monitored, and audited. All
+state lives in the selected Oracle AI Database, PostgreSQL, or YashanDB
+adapter's tables, so a loop survives Agent restarts and can be inspected by
+humans or other Agents.
 
 ---
 

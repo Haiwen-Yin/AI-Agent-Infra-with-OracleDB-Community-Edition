@@ -1,6 +1,6 @@
-# AI Agent Infra with OracleDB — 企业版 v4.0.0
+# AI Agent Infra with OracleDB — 社区版 v4.0.1
 
-**版本**: v4.0.0 | **日期**: 2026-07-19 | **作者**: 尹海文 | **许可**: Business Source License 1.1
+**版本**: v4.0.1 | **日期**: 2026-07-22 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.top**
 
@@ -38,20 +38,21 @@
 
 | 版本 | 日期 | 里程碑 |
 |------|------|--------|
-| **v4.0.0** | 2026-07-19 | 基于 Spec-Driven Development 进行项目结构重构：统一源码仓库（shared/ + adapters/）、build.py 一键打包 6 个版本、参数化测试框架、OpenSpec 规格守护。新增 SDD 功能：MCP 动态工具加载、Spec 版本管理、Harness 继承、DAG 可视化、审批 SLA、事件死信队列。搜索增强：搜索解释、图算法(PageRank/最短路径/社区检测)、批量嵌入、Agent 自动恢复。安全加固：config.json 排除打包、敏感信息自动脱敏、首次启动配置向导 |
-| **v3.10.2** | 2026-07-17 | 企业加密增强：每Agent独立密钥（DB存储+admin_token分发）、config.json启动时自动加密（database+llm+model_routing）、密钥轮换API（全局+单Agent）、PG凭证加密Bug修复、PG Business Agent模式、encrypt_config.py CLI统一、Portal Markdown渲染。544/544测试通过 |
-| **v3.10.1** | 2026-07-14 | 离线部署支持：vendor/目录含30个cp314 wheels、install_offline.sh 一键安装、verify_deps.py 完整性验证。纯Python deploy_oracle.py替代SQLcl（状态机解析PROMPT/DEFINE/&&///）。544/544测试通过 |
+| **v4.0.1** | 2026-07-22 | 安全与发布完整性加固：Business Agent 独立数据库身份且禁止回退；config.json 四类敏感配置使用 AES-256-GCM 并强制 0600；持久执行控制面；无损 Skill 包；严格社区版/企业版边界；Portal Agent 按节点回收 |
+| **v4.0.0** | 2026-07-19 | 基于 Spec-Driven Development 重构构建与规格守护流程。新增 MCP 动态工具加载、Spec 版本管理、Harness 继承、DAG 可视化、审批 SLA、事件死信队列、搜索解释、图算法、批量嵌入与 Agent 自动恢复；强化安全打包与首次启动配置 |
+| **v3.10.2** | 2026-07-17 | 企业加密增强：每 Agent 独立密钥、config.json 自动加密、密钥轮换 API、统一 encrypt_config.py CLI 与 Portal Markdown 渲染 |
+| **v3.10.1** | 2026-07-14 | 离线部署支持：vendor/ 内置依赖、install_offline.sh 安装、verify_deps.py 完整性验证，纯 Python 部署工具替代外部 CLI |
 | **v3.10.0** | 2026-07-09 | 通用属性图：8领域30+函数/23边类型(知识因果/Agent协作/任务编排/Skill依赖/审批传播/数据流/记忆演化/Loop迭代)、组内动态信任、MCP 3新工具。企业版特有：orchestrator审批门控 |
 | **v3.9.0** | 2026-07-05 | 生态连接层：MCP Server(10工具/stdio+SSE)、SSE流式输出、Human-in-the-Loop三级审批(步骤/循环/工具)、Agent Protocol兼容、多模型路由。新增mcp_server.py/approval_api.py/approvals.html。DB: APPROVAL_REQUESTS表+PAUSED状态。企业版特有：orchestrator approve_step/reject_step |
-| **v3.8.0** | 2026-07-02 | 多Agent集成测试：LOOP_MANAGER包体缺失log_loop_audit修复(ENT专有LOOP_AUDIT表)、DB_CRYPTO ORA-14551运行时修复、agent_api硬编码schema前缀移除、4_grants.sql表空间修复；5阶段部署验证全通过(50表/19包/0无效/4 Agent注册/15功能测试) |
+| **v3.8.0** | 2026-07-02 | LOOP_MANAGER、DB_CRYPTO、schema 前缀与授权脚本稳定性修复 |
 | **v3.7.5** | 2026-06-28 | Bug修复：orchestrator空壳执行修复、event_bus webhook/script安全加固、message_api软删除状态修正(FAILED→DELETED)、ENT缺失Data Grants补充与语法修复 |
 | **v3.7.4** | 2026-06-26 | 6大扩展：Agent通信协议(COLLAB_MESSAGES)、多Agent编排(DAG引擎/fan-out/in)、事件驱动(publish/subscribe/LOOP_HOOKS)、高级记忆管理(consolidation/merge/reindex)、可观察性(TRACE_ID/health dashboard/drift detection)、工具生态(OpenAPI导入/TOOL_REGISTRY) |
 | **v3.7.3** | 2026-06-23 | 部署修复：建表外键顺序、DEFINE SCHEMA_OWNER、配置优先级、Embedding模型提示 |
-| **v3.7.2** | 2026-06-26 | 文档一致性修正：LOOP_MANAGER ~33→~22、loop_api 32公共函数、LOOP_CLEANUP Weekly Sunday 06:00、PG PL/SQL→PL/pgSQL、ENTITIES 分区7→8、评估类型4→6、架构图对齐 |
+| **v3.7.2** | 2026-06-26 | 文档一致性修正：LOOP_MANAGER、loop_api、调度计划、分区数量、评估类型与架构图对齐 |
 | **v3.7.1** | 2026-06-26 | 循环工程协同集成：Spec-Driven Loop、Task-Loop Binding、Collaborative Loop、SPEC_VALIDATION/AGGREGATE 评估类型、Skill-Triggered Loop；会话持久化与认证修复 |
 | **v3.7.0** | 2026-06-18 | 循环工程（第4代AI方法论）：4/5张循环表、LOOP_MANAGER包、loop_api.py、6种评估类型、生命周期钩子、3个调度作业 |
-| **v3.6.2** | 2026-06-18 | Portal 聊天发送/切换修复、15 个 PG Bug 修复；ENT: 审计追踪、LDAP 认证、Skill 令牌、合规日志 |
-| **v3.6.1** | 2026-06-16 | PostgreSQL 社区版与企业版初始发布，与 Oracle 完全功能对等；Oracle Bug 修复 |
+| **v3.6.2** | 2026-06-18 | Portal 聊天发送与切换修复；企业版增加审计追踪、LDAP 认证、Skill 令牌和合规日志 |
+| **v3.6.1** | 2026-06-16 | 稳定性修复与版本维护 |
 | **v3.6.0** | 2026-06-13 | Admin/Agent 分离架构：模式系统（standalone/admin/agent）、Admin Token 认证、加密凭证分发、Recovery Code、Agent 恢复、私有 Skill 备份、Skill 管理 API、Skill Token API |
 | **v3.5.0** | 2026-06-11 | SHARED 实体可见性修复、COLLAB 表访问修复、VISIBILITY 隔离 |
 | **v3.4.0** | 2026-06-11 | Oracle Deep Data Security 深度数据安全、Data Grants、MAC、End User Context、零信任安全模型、LDAP 认证 |
@@ -747,13 +748,13 @@ Skill 存储与分发系统提供数据库支持的 Skill 注册中心，社区�
 
 ### 5.10 加密凭证系统
 
-加密凭证系统确保敏感信息在静态存储时始终处于加密状态，采用本地文件加密（connection_crypto）和数据库内加密（DB_CRYPTO）双轨方案，覆盖数据库连接、LDAP 凭证和 Agent 凭证三大场景。
+加密凭证系统确保敏感信息在静态存储时始终处于加密状态，采用本地文件加密（connection_crypto）和数据库内加密（DB_CRYPTO）双轨方案，覆盖数据库连接、API Key、会话签名密钥、LDAP 凭证和 Agent 凭证。
 
 #### 双轨加密分工
 
 | 加密轨道 | 组件 | 加密对象 | 密钥存储 | 依赖 |
 |---------|------|---------|---------|------|
-| **本地文件加密** | connection_crypto.py | config.json 数据库凭证 | 本地 master.key 文件 / 环境变量 | 依赖本地密钥文件 |
+| **本地文件加密** | connection_crypto.py | config.json 数据库凭证、API Key、会话签名密钥 | 本地 master.key 文件 / 环境变量 | 依赖本地密钥文件 |
 | **数据库内加密** | DB_CRYPTO PL/SQL 包 | LDAP BIND_CREDENTIAL、AGENT CREDENTIALS | SYSTEM_CONFIG 表 | 不依赖本地文件 |
 
 #### 本地文件加密方案（connection_crypto）
@@ -761,7 +762,7 @@ Skill 存储与分发系统提供数据库支持的 Skill 注册中心，社区�
 | 组件 | 说明 |
 |------|------|
 | connection_crypto.py | 配置加密/解密/密钥轮换/自动加密 |
-| ConfigEncryption（security.py） | PBKDF2-HMAC-SHA512 密钥派生 + 认证加密（AES-256-GCM 风格） |
+| connection_crypto.py | PBKDF2-HMAC-SHA512 密钥派生 + AES-256-GCM 认证加密 |
 | encrypt_config.py | CLI 工具：encrypt、decrypt、rotate-key、verify |
 
 **加密参数**：
@@ -769,35 +770,35 @@ Skill 存储与分发系统提供数据库支持的 Skill 注册中心，社区�
 | 参数 | 值 |
 |------|-----|
 | 密钥派生 | PBKDF2-HMAC-SHA512，210,000 次迭代 |
-| 加密算法 | AES-256-GCM 风格认证加密 |
+| 加密算法 | AES-256-GCM 认证加密 |
 | 盐值长度 | 32 字节 |
 | Nonce 长度 | 12 字节 |
 | 密钥长度 | 32 字节（256 位） |
-| 认证标签 | 16 字节（SHA-256 前 16 字节） |
+| 认证标签 | 16 字节 GCM Tag |
 
 #### 主密钥管理
 
 主密钥按以下优先级解析：
 
 1. **环境变量** `MASTER_DB_KEY`（推荐，Base64 编码）
-2. **密钥文件** `~/.oracle-infra/master.key`（权限 0o600）
+2. **密钥文件** `~/.ai-agent-infra/master.key`（权限 0o600）
 3. **自动生成** 随机 32 字节密钥，保存到密钥文件
 
 #### 加密覆盖范围
 
 | 加密对象 | 加密轨道 | 说明 |
 |---------|---------|------|
-| config.json 数据库凭证 | connection_crypto（本地文件加密） | `user`/`password`/`dsn` 加密为 `_encrypted` blob，首次运行自动加密 |
+| config.json 敏感配置 | connection_crypto（本地文件加密） | 数据库凭证、LLM/路由 API Key、`security.secret_key` 分段加密为 `_encrypted` blob |
 | LDAP_CONFIG.BIND_CREDENTIAL | DB_CRYPTO（数据库内加密） | `configure_ldap()` 写入时加密，`_get_active_config()` 读取时解密 |
 | AGENT_CREDENTIALS.CREDENTIAL_VALUE | DB_CRYPTO（数据库内加密） | `issue_credential()` / `verify_credential()` 使用数据库密钥加密 |
 
 #### 自动加密流程
 
-1. 首次运行时检测 config.json 中的明文数据库凭证
-2. 提取敏感键值（user、password、dsn）
+1. 启动时检测 config.json 中的明文敏感配置
+2. 提取数据库凭证、API Key 和 `security.secret_key`
 3. 使用 `encrypt_section()` 加密为 `_encrypted` blob
 4. 移除明文键值，写入加密 blob
-5. 设置文件权限为 0o600
+5. 无论是否需要重新加密，均校正 config.json 和 master.key 权限为 0o600
 
 ### 5.10b 数据库原生加密（DB_CRYPTO）
 
@@ -814,7 +815,7 @@ DB_CRYPTO 是数据库端的 PL/SQL 加密包，使用 Oracle DBMS_CRYPTO 实现
 
 | 维度 | connection_crypto | DB_CRYPTO |
 |------|-------------------|-----------|
-| 加密对象 | 本地文件（config.json 数据库凭证） | 数据库内数据（LDAP BIND_CREDENTIAL、AGENT CREDENTIALS） |
+| 加密对象 | 本地文件（config.json 数据库凭证、API Key、会话签名密钥） | 数据库内数据（LDAP BIND_CREDENTIAL、AGENT CREDENTIALS） |
 | 密钥存储 | 本地 master.key 文件 / 环境变量 | SYSTEM_CONFIG 表（db_crypto_master_key / db_crypto_key_salt） |
 | 依赖 | 依赖本地文件系统 | 不依赖本地文件，纯数据库内闭环 |
 | 共享范围 | 单机本地 | 所有连接同一数据库的 Agent 自动共享 |
@@ -846,7 +847,7 @@ v3.3.0 引入多层数据库访问安全策略，防止 Agent 获取数据库连
 | 层级 | 机制 | 防护目标 |
 |------|------|----------|
 | **L1 规范约束** | SKILL.md 明确禁止直接 SQL/DML/DDL | 规范层面禁止绕过 API |
-| **L2 最小权限用户** | AGENT_API 受限数据库用户 | 技术层面限制 DDL/DML 能力 |
+| **L2 独立数据库身份** | 每个 Business Agent 使用专属 End User | 隔离身份并禁止 Schema Owner 回退 |
 | **L3 AUTHID DEFINER** | PL/SQL 包以属主权限执行 | 强制走 PL/SQL API 并执行业务逻辑 |
 | **L4 Deep Data Security** | Data Grants + MAC + Direct Logon End Users | 声明式行/列/单元级访问控制 + 强制访问控制 + 零信任 — ✅ **策略已部署并生效** |
 | **L5 统一审计** | DIRECT_DML_BYPASS_DETECTION 策略 | 审计所有绕过 API 的直接操作 |
@@ -856,18 +857,9 @@ v3.3.0 引入多层数据库访问安全策略，防止 Agent 获取数据库连
 > Deep Sec 通过 **Direct Logon with Local End Users** 模式在数据库层完全执行：
 > - 每个 Pool Agent 对应一个 Deep Sec End User（`UPPER(REPLACE(agent_id, '-', '_'))`）
 > - Portal 用户以 End User 身份连接 → Data Grants 通过 `ORA_END_USER_CONTEXT.username` 自动过滤
-> - Admin Dashboard 使用 AIADMIN 连接池（schema owner，不受 Data Grant 限制）
-> - `connection.py` 自动路由：`set_agent_context()` → End User 连接；无上下文 → AIADMIN 池
+> - Admin Dashboard 使用独立认证的 AIADMIN 管理路径（Schema Owner，不受 Data Grant 限制）
+> - Business/Portal 请求始终使用 End User 连接，连接失败时禁止回退到 AIADMIN
 > - 23 个 Data Grants（含 Portal 写操作授权及协作组访问授权）
->
-> 验证结果（AGENT_001 vs AIADMIN）：
->
-> | 表 | AIADMIN（全量） | AGENT_001（Deep Sec） | 过滤率 |
-> |----|----------------|---------------------|--------|
-> | AGENT_REGISTRY | 14 | 1 | 93% |
-> | ENTITIES | 210 | 40 | 81% |
-> | TASK_PLANS | 32 | 6 | 82% |
-> | SYSTEM_CONFIG | 37 | BLOCKED | 100% |
 >
 > **E2E 修复摘要**：
 > - [v3.5.0] SHARED 实体不可见：ENTITIES_AGENT_OWN 谓词补全 COLLAB 子查询
@@ -875,11 +867,11 @@ v3.3.0 引入多层数据库访问安全策略，防止 Agent 获取数据库连
 > - [v3.5.0] WORKSPACE_CONTEXT 协作隔离：新增 VISIBILITY 列 + 谓词过滤
 > - [v3.4.0] Portal 登录上下文时序修复、新增 3 个 Data Grant、agent context 干扰修复、Portal API End User 阻塞修复
 
-#### 最小权限用户（AGENT_API）
+#### 最小权限身份
 
-`4_grants.sql` 创建受限数据库用户 `AGENT_API`，Agent 运行时应使用此用户连接：
+`4_grants.sql` 创建内部受限主体 `AGENT_API` 作为授权基线；Business Agent 必须使用独立配置的 End User，而不能共享该主体的登录凭证：
 
-| 权限 | AIADMIN（部署用） | AGENT_API（运行时） |
+| 权限 | AIADMIN（部署/管理） | Business Agent End User（运行时） |
 |------|-------------------|---------------------|
 | CREATE SESSION | ✓ | ✓ |
 | EXECUTE PL/SQL 包 | ✓ | ✓（AUTHID DEFINER） |
@@ -1423,13 +1415,12 @@ cd scripts && python -m tests.test_all
 
 ### 许可证
 
-**企业版**：Business Source License 1.1（BSL 1.1）
+**社区版**：Apache License 2.0
 
-- 生产环境使用需商业许可证
-- 非生产环境使用免费
-- **许可证**：Business Source License 1.1（BSL 1.1）
+- 可在 Apache License 2.0 条款下使用、修改和分发。
+- 实际使用、修改和分发条件以当前发行包中的许可证文件为准。
 
-详见 [LICENSE_ENTERPRISE](../LICENSE_ENTERPRISE)
+详见 [LICENSE](../LICENSE)
 
 ### 作者
 

@@ -8,6 +8,53 @@ inherits the entries below; per-edition release notes live in
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the rules in `openspec/specs/documentation-format/spec.md`.
 
+## [4.0.1] - 2026-07-22
+
+See `RELEASE_NOTES_v4.0.1.md` for the complete release contract. This version
+adds fail-closed per-Agent database identities, AES-256-GCM configuration
+envelopes, durable side-effect jobs, lossless Skill packages, strict edition
+allowlists, three-database migrations, and executable release evidence.
+
+Configuration encryption now covers database credentials, LLM and routing API
+keys, and `security.secret_key`. Runtime `config.json` and master-key files are
+enforced as owner-only (`0600`), including already-encrypted configurations;
+verification output never prints the session-signing secret.
+
+### Fixed
+
+- Web dashboards now render the release version instead of stale v3.10.2 labels.
+- Frontend countdowns, backend sessions, and cookies use the configured
+  five-minute default timeout consistently on every protected page.
+- Audit no longer loads Bootstrap into the Dashboard. Its native tabs,
+  responsive statistics grid, typography, and overall scale now match the
+  other Dashboard pages across all three Enterprise editions.
+- Dashboard sidebars use one compact navigation spacing contract, with
+  visualization regression tests covering version, timeout, and layout.
+- Monitor performance metrics use each database's deployed session columns,
+  include sample counts, preserve numeric zeroes, and label absent samples.
+- Portal now assigns Agents from the actual POOL state, reuses a user's active
+  assignment, and returns released Agents to the pool.
+- Portal Markdown rendering now uses a bundled GFM parser and HTML sanitizer
+  for history, non-streaming replies, and streaming replies.
+- Portal session identities are normalized across databases. Exit waits for
+  confirmed release, while Web startup reclaims only Agents persisted with
+  the current Admin node ID and leaves other nodes unchanged.
+- Concurrent Admin nodes claim Pool Agents through conditional status updates.
+- PostgreSQL numeric Workspace IDs are normalized at every Portal history
+  operation, including switch, rename, and delete.
+- PostgreSQL shared APIs now honor BIGINT identity IDs, deployed Spec/Session/
+  Workspace columns, interval arithmetic, and polymorphic graph edge IDs.
+- YashanDB now reuses pooled connections correctly and recovers the same
+  deterministic independent database user created during registration.
+- Cross-database tests now validate integer and string ID contracts without
+  string-only operations, use unique Skill names, and remain repeatable after
+  an interrupted run.
+- Final post-migration evidence records 141 passing tests in each generated
+  package plus explicit passing live contracts for all three databases.
+- Pool lifecycle tests now use an isolated capability tag and return their
+  claimed test Agent in a `finally` block, preventing shared demo pools from
+  being exhausted by release regression.
+
 ## [4.0.0] - 2026-07-19
 
 ### Summary
@@ -51,7 +98,7 @@ spec-driven validator that gates releases on the OpenSpec contracts.
 
 - **Build pipeline**: releases now produced by `python3.14 build.py` from one
   source tree, replacing the prior per-edition copy-and-patch workflow.
-- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "4.0.0"`
+- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "4.0.1"`
   in Python and `vX.Y.Z` literals in `.py`/`.sql`/`.md`/`.html`/`.sh` for
   every file in each built edition; no source file may hardcode a version.
 - **Directory shape of built editions**: loose `.py`/`.sh` files and `lib/`,

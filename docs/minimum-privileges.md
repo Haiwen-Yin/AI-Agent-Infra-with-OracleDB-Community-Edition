@@ -1,6 +1,11 @@
-# Minimum Database Privileges - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Minimum Database Privileges - AI Agent Infra v4.0.1
 
-## Current State (openclaw user)
+## Legacy Oracle Privilege Audit Example
+
+The table below is retained as a historical Oracle audit example, not as the
+v4.0.1 runtime grant set. Current deployments must use the adapter-specific
+least-privilege contract: only Admin may hold Schema Owner credentials;
+Business Agents use independent identities and cannot fall back to the owner.
 
 | Role/Privilege | Status | Needed? |
 |----------------|--------|---------|
@@ -211,4 +216,6 @@ GRANT CREATE SESSION TO DEEP_SEC_SESSION_ROLE;
 GRANT DEEP_SEC_SESSION_ROLE TO AIADMIN WITH ADMIN OPTION;
 ```
 
-**Note**: Portal APIs that access WORKSPACES/SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users.
+**Current boundary**: AIADMIN is available only to authenticated Admin
+operations. Portal and Business Agent requests use End User credentials and
+fail closed instead of switching to AIADMIN.

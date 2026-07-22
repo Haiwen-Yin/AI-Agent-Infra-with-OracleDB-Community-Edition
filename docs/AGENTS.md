@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra v4.0.0 Unified Repository Guide
+# AGENTS.md - AI Agent Infra v4.0.1 Unified Repository Guide
 
-> **v4.0.0** — The unified single-source repository that generates all 6 release
+> **v4.0.1** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 ## 1. Repository Layout
@@ -247,11 +247,11 @@ file and rebuilding. Example (`editions/oracle-enterprise.json`):
 ### Session Cookie Isolation
 - Each server MUST use `session_id_{port}` as cookie name
 - Cookie MUST include `SameSite=Lax` attribute
-- Auto-logout JS timer (`_aloSec`) MUST equal `config.server.session_timeout` (3600, not 300)
+- Auto-logout JS timer (`_aloSec`) MUST equal `config.server.session_timeout` (300 seconds by default)
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.0.0`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.0.1`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

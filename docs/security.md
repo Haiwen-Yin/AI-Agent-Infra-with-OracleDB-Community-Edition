@@ -1,4 +1,28 @@
-# Security - AI Agent Infra v3.10.2 (2026-07-16) - Enterprise Edition
+# Security - AI Agent Infra v4.0.1
+
+## v4.0.1 Security Boundary
+
+Only the Admin Agent may hold a schema-owner credential. A Business Agent uses
+an independent database identity and a server-derived authenticated Agent ID.
+Oracle uses native End Users, PostgreSQL uses dedicated LOGIN roles plus RLS,
+and YashanDB uses dedicated users with least-privilege object grants. Identity
+creation, credential decryption, request identity matching, and connection
+setup all fail closed; none may fall back to the Admin pool.
+
+HTTP routes are centrally classified as public, authenticated, admin, or
+side-effecting. Unclassified API routes require authentication by default.
+Mutation authorization never trusts an `agent_id` supplied only in a request.
+
+Configuration credentials use versioned AES-256-GCM envelopes with a random
+salt and nonce, a derived 256-bit key, and authenticated format metadata.
+Master-key files are mode `0600`. Legacy ciphertext is read only by the
+explicit migration path, which writes and verifies the new envelope before the
+old value is retired. Tampering or a wrong key returns no plaintext.
+
+Outbound HTTP jobs validate scheme, hostname, DNS results, and every redirect.
+Loopback, link-local, metadata, and non-allowlisted private addresses are
+denied. Commands use an argument allowlist, normalized workspace, timeout,
+output bounds, and no implicit shell.
 
 ## Data Masking
 
@@ -30,9 +54,11 @@ safe_text = svc.mask_text("admin@company.com called from 10.0.0.1")
 safe_dict = svc.mask_dict({"password": "secret", "name": "John"})
 ```
 
-## Reversible Encryption
+## Legacy Reversible Encryption
 
-AES-like XOR encryption with PBKDF2 key derivation for storing sensitive values that need later retrieval.
+`ReversibleEncryption` remains only for compatibility with historical data. It
+MUST NOT be used for v4.0.1 credentials or configuration; those use the
+AES-256-GCM envelope in `connection_crypto.py`.
 
 ```python
 from scripts.lib.security import ReversibleEncryption
@@ -168,7 +194,10 @@ Each request sets agent identity for Data Grant predicates:
 3. Data Grant predicates reference `SYS_CONTEXT('END_USER_CTX', 'AGENT_ID')` for filtering
 4. After request completes, `clear_agent_context()` clears the context
 
-**Portal API Context Switching**: Portal APIs that access WORKSPACES or SYSTEM_USERS tables temporarily use `connection.set_agent_context(None)` to switch to the AIADMIN connection, because WORKSPACES.CURRENT_AGENT_ID is NULL for most workspaces, causing Data Grant predicates to reject all rows for End Users. After the operation completes, the End User context is restored.
+**Portal identity rule**: Portal APIs retain the authenticated Business
+Agent's independent connection. Authorization or connection failures fail
+closed; Portal code never switches to AIADMIN or another Schema Owner
+connection.
 
 ### Verification Data
 
