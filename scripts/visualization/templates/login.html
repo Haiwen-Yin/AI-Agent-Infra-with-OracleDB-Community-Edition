@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.1.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chuanxu Oracle Community v4.1.0 - Login</title>
+<link rel="stylesheet" href="/static/pages/login.css">
+<script src="/static/chuanxu-prepaint.js"></script>
+<link rel="stylesheet" href="/static/chuanxu.css">
+<script src="/static/chuanxu.js" defer></script>
+<style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
+</head>
+<body class="cx-ui">
+<button class="lang-toggle" onclick="toggleLang()">
+  <span data-zh>EN</span><span data-en>中文</span>
+</button>
+
+<div class="login-card">
+  <h2><span data-zh>川序 AI Agent 管理平台</span><span data-en>Chuanxu AI Agent Management Platform</span></h2>
+  <p class="subtitle"><span data-zh>请输入用户名和密码登录</span><span data-en>Please enter username and password to login</span></p>
+
+  <div id="errorMsg" class="alert alert-danger d-none"></div>
+
+  <form id="loginForm" onsubmit="handleLogin(event)">
+    <div class="mb-3">
+      <label class="form-label" for="username">
+        <span data-zh>用户名</span><span data-en>Username</span>
+      </label>
+      <input type="text" class="form-control" id="username" required autocomplete="username"
+        placeholder="" data-ph-zh="输入用户名" data-ph-en="Enter username">
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="password">
+        <span data-zh>密码</span><span data-en>Password</span>
+      </label>
+      <input type="password" class="form-control" id="password" required autocomplete="current-password"
+        placeholder="" data-ph-zh="输入密码" data-ph-en="Enter password">
+    </div>
+    <button type="submit" class="btn btn-login" id="submitBtn">
+      <span data-zh>登录</span><span data-en>Login</span>
+    </button>
+  </form>
+
+  <div class="version-badge">Oracle Community Edition v4.1.0</div>
+</div>
+
+<script>
+function toggleLang() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-lang');
+  const next = current === 'en' ? 'zh' : 'en';
+  html.setAttribute('data-lang', next);
+  applyLang(next);
+}
+
+function applyLang(lang) {
+  document.querySelectorAll('[data-zh],[data-en]').forEach(el => {
+    if (el.tagName === 'INPUT') return;
+    el.style.display = '';
+    const zhEl = el.querySelector('[data-zh]') || el;
+    const enEl = el.querySelector('[data-en]') || el;
+  });
+  document.querySelectorAll('[data-zh]').forEach(el => {
+    if (el.closest('[data-en]') && el !== el.closest('[data-en]')) return;
+    el.style.display = lang === 'zh' ? '' : 'none';
+  });
+  document.querySelectorAll('[data-en]').forEach(el => {
+    if (el.closest('[data-zh]') && el !== el.closest('[data-zh]')) return;
+    el.style.display = lang === 'en' ? '' : 'none';
+  });
+  document.querySelectorAll('[data-ph-zh]').forEach(el => {
+    el.placeholder = lang === 'zh' ? el.getAttribute('data-ph-zh') : el.getAttribute('data-ph-en');
+  });
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const errBox = document.getElementById('errorMsg');
+  btn.disabled = true;
+  errBox.classList.add('d-none');
+
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (data.token) {
+        document.cookie = 'session=' + encodeURIComponent(data.token) + '; path=/; SameSite=Strict';
+      }
+      window.location.href = '/knowledge';
+    } else {
+      errBox.textContent = data.error || (document.documentElement.getAttribute('data-lang') === 'zh' ? '登录失败' : 'Login failed');
+      errBox.classList.remove('d-none');
+    }
+  } catch (err) {
+    errBox.textContent = document.documentElement.getAttribute('data-lang') === 'zh' ? '网络错误' : 'Network error';
+    errBox.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+applyLang(document.documentElement.getAttribute('data-lang') || 'en');
+
+(function(){var q=new URLSearchParams(location.search).get('cx_lang'),sl=q||localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
+</script>
+</body>
+</html>

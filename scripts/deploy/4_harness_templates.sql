@@ -1,0 +1,164 @@
+-- AI Agent Infra v4.1.0 - Phase 4: Harness Templates
+
+WHENEVER SQLERROR CONTINUE;
+
+MERGE INTO ENTITIES e
+USING (SELECT 'Research Analyst' AS TITLE, 'HARNESS_TEMPLATE' AS ENTITY_TYPE FROM DUAL) s
+ON (e.TITLE = s.TITLE AND e.ENTITY_TYPE = s.ENTITY_TYPE)
+WHEN NOT MATCHED THEN
+    INSERT (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, CATEGORY, STATUS, VISIBILITY, IMPORTANCE, OWNED_BY_AGENT, SOURCE_AGENT)
+    VALUES (
+        'HARNESS_' || RAWTOHEX(SYS_GUID()),
+        'HARNESS_TEMPLATE',
+        'Research Analyst',
+        'Harness template for research and analysis tasks',
+        'research',
+        'ACTIVE',
+        'SHARED',
+        2,
+        'SYSTEM',
+        'SYSTEM'
+    );
+
+INSERT INTO HARNESS_META (ENTITY_ID, ENTITY_TYPE, TEMPLATE_VERSION, INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE)
+SELECT e.ENTITY_ID, 'HARNESS_TEMPLATE', 1,
+       '{"role":"","domain":"","objective":"","query":""}',
+       '{"findings":"","sources":""}',
+       'SEQUENTIAL'
+FROM ENTITIES e
+WHERE e.TITLE = 'Research Analyst'
+  AND e.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  AND NOT EXISTS (
+      SELECT 1 FROM HARNESS_META hm WHERE hm.ENTITY_ID = e.ENTITY_ID AND hm.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  );
+
+MERGE INTO ENTITIES e
+USING (SELECT 'Code Assistant' AS TITLE, 'HARNESS_TEMPLATE' AS ENTITY_TYPE FROM DUAL) s
+ON (e.TITLE = s.TITLE AND e.ENTITY_TYPE = s.ENTITY_TYPE)
+WHEN NOT MATCHED THEN
+    INSERT (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, CATEGORY, STATUS, VISIBILITY, IMPORTANCE, OWNED_BY_AGENT, SOURCE_AGENT)
+    VALUES (
+        'HARNESS_' || RAWTOHEX(SYS_GUID()),
+        'HARNESS_TEMPLATE',
+        'Code Assistant',
+        'Harness template for code generation and development tasks',
+        'development',
+        'ACTIVE',
+        'SHARED',
+        2,
+        'SYSTEM',
+        'SYSTEM'
+    );
+
+INSERT INTO HARNESS_META (ENTITY_ID, ENTITY_TYPE, TEMPLATE_VERSION, INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE)
+SELECT e.ENTITY_ID, 'HARNESS_TEMPLATE', 1,
+       '{"role":"","language":"","guidelines":"","task":""}',
+       '{"solution":"","explanation":""}',
+       'SEQUENTIAL'
+FROM ENTITIES e
+WHERE e.TITLE = 'Code Assistant'
+  AND e.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  AND NOT EXISTS (
+      SELECT 1 FROM HARNESS_META hm WHERE hm.ENTITY_ID = e.ENTITY_ID AND hm.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  );
+
+MERGE INTO ENTITIES e
+USING (SELECT 'Data Analyst' AS TITLE, 'HARNESS_TEMPLATE' AS ENTITY_TYPE FROM DUAL) s
+ON (e.TITLE = s.TITLE AND e.ENTITY_TYPE = s.ENTITY_TYPE)
+WHEN NOT MATCHED THEN
+    INSERT (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, CATEGORY, STATUS, VISIBILITY, IMPORTANCE, OWNED_BY_AGENT, SOURCE_AGENT)
+    VALUES (
+        'HARNESS_' || RAWTOHEX(SYS_GUID()),
+        'HARNESS_TEMPLATE',
+        'Data Analyst',
+        'Harness template for data analysis and reporting tasks',
+        'analytics',
+        'ACTIVE',
+        'SHARED',
+        2,
+        'SYSTEM',
+        'SYSTEM'
+    );
+
+INSERT INTO HARNESS_META (ENTITY_ID, ENTITY_TYPE, TEMPLATE_VERSION, INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE)
+SELECT e.ENTITY_ID, 'HARNESS_TEMPLATE', 1,
+       '{"role":"","focus_area":"","data_query":""}',
+       '{"analysis":"","recommendations":""}',
+       'PARALLEL'
+FROM ENTITIES e
+WHERE e.TITLE = 'Data Analyst'
+  AND e.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  AND NOT EXISTS (
+      SELECT 1 FROM HARNESS_META hm WHERE hm.ENTITY_ID = e.ENTITY_ID AND hm.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  );
+
+MERGE INTO ENTITIES e
+USING (SELECT 'Task Planner' AS TITLE, 'HARNESS_TEMPLATE' AS ENTITY_TYPE FROM DUAL) s
+ON (e.TITLE = s.TITLE AND e.ENTITY_TYPE = s.ENTITY_TYPE)
+WHEN NOT MATCHED THEN
+    INSERT (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, CATEGORY, STATUS, VISIBILITY, IMPORTANCE, OWNED_BY_AGENT, SOURCE_AGENT)
+    VALUES (
+        'HARNESS_' || RAWTOHEX(SYS_GUID()),
+        'HARNESS_TEMPLATE',
+        'Task Planner',
+        'Harness template for task decomposition and planning',
+        'orchestration',
+        'ACTIVE',
+        'SHARED',
+        2,
+        'SYSTEM',
+        'SYSTEM'
+    );
+
+INSERT INTO HARNESS_META (ENTITY_ID, ENTITY_TYPE, TEMPLATE_VERSION, INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE)
+SELECT e.ENTITY_ID, 'HARNESS_TEMPLATE', 1,
+       '{"role":"","constraints":"","objective":""}',
+       '{"plan":"","dependencies":""}',
+       'CONDITIONAL'
+FROM ENTITIES e
+WHERE e.TITLE = 'Task Planner'
+  AND e.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  AND NOT EXISTS (
+      SELECT 1 FROM HARNESS_META hm WHERE hm.ENTITY_ID = e.ENTITY_ID AND hm.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  );
+
+MERGE INTO ENTITIES e
+USING (SELECT 'Security Auditor' AS TITLE, 'HARNESS_TEMPLATE' AS ENTITY_TYPE FROM DUAL) s
+ON (e.TITLE = s.TITLE AND e.ENTITY_TYPE = s.ENTITY_TYPE)
+WHEN NOT MATCHED THEN
+    INSERT (ENTITY_ID, ENTITY_TYPE, TITLE, SUMMARY, CATEGORY, STATUS, VISIBILITY, IMPORTANCE, OWNED_BY_AGENT, SOURCE_AGENT)
+    VALUES (
+        'HARNESS_' || RAWTOHEX(SYS_GUID()),
+        'HARNESS_TEMPLATE',
+        'Security Auditor',
+        'Harness template for security review and compliance auditing',
+        'security',
+        'ACTIVE',
+        'SHARED',
+        2,
+        'SYSTEM',
+        'SYSTEM'
+    );
+
+INSERT INTO HARNESS_META (ENTITY_ID, ENTITY_TYPE, TEMPLATE_VERSION, INPUT_SCHEMA, OUTPUT_SCHEMA, EXECUTION_MODE)
+SELECT e.ENTITY_ID, 'HARNESS_TEMPLATE', 1,
+       '{"role":"","policies":"","action":""}',
+       '{"assessment":"","risks":"","mitigations":""}',
+       'SEQUENTIAL'
+FROM ENTITIES e
+WHERE e.TITLE = 'Security Auditor'
+  AND e.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  AND NOT EXISTS (
+      SELECT 1 FROM HARNESS_META hm WHERE hm.ENTITY_ID = e.ENTITY_ID AND hm.ENTITY_TYPE = 'HARNESS_TEMPLATE'
+  );
+
+MERGE INTO SYSTEM_CONFIG t
+USING (SELECT 'harness.builtin_templates' AS CONFIG_KEY FROM DUAL) s
+ON (t.CONFIG_KEY = s.CONFIG_KEY)
+WHEN NOT MATCHED THEN
+    INSERT (CONFIG_KEY, CONFIG_VALUE)
+    VALUES ('harness.builtin_templates', '5')
+WHEN MATCHED THEN
+    UPDATE SET CONFIG_VALUE = '5';
+
+COMMIT;

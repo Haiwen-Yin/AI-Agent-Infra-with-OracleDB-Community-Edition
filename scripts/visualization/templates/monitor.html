@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.1.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chuanxu Oracle Community v4.1.0 - Monitor</title>
+<link rel="stylesheet" href="/static/pages/monitor.css">
+<script src="/static/chuanxu-prepaint.js"></script>
+<link rel="stylesheet" href="/static/chuanxu.css">
+<script src="/static/chuanxu.js" defer></script>
+<style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
+</head>
+<body class="cx-ui">
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>Chuanxu</h5>
+    <small>Oracle Community</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#book"></use></svg></span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#brain"></use></svg></span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#agent"></use></svg></span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#task"></use></svg></span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#workspace"></use></svg></span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#graph"></use></svg></span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#spec"></use></svg></span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#skill"></use></svg></span><span data-zh>技能</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#branch"></use></svg></span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#collab"></use></svg></span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#loop"></use></svg></span><span data-zh>循环</span><span data-en>Loops</span></a>
+    <a href="/monitor" class="active"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#monitor"></use></svg></span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+    <div class="sidebar-footer">
+        <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+        <a href="/logout" class="logout-btn"><span><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#logout"></use></svg></span><span data-zh>登出</span><span data-en>Logout</span></a>
+        <div class="timer-display" id="autoLogoutTimer">05:00</div>
+    </div>
+</div>
+<div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>系统监控</span><span data-en>System Monitor</span></h4>
+    <button class="btn-action" onclick="loadAll()"><span data-zh>刷新</span><span data-en>Refresh</span></button>
+  </div>
+  <div class="content-area">
+    <div class="list-panel" style="padding:0 20px 20px">
+      <div class="section-title" style="margin-top:20px"><span data-zh>性能指标</span><span data-en>Performance Metrics</span></div>
+      <div id="metricsContent" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px"></div>
+      <div class="section-title" style="margin-top:20px"><span data-zh>Agent 列表</span><span data-en>Agent List</span></div>
+      <div class="filter-bar" id="filterBar">
+        <span class="filter-label"><span data-zh>筛选:</span><span data-en>Filter:</span></span>
+        <button class="filter-badge badge-online active" type="button" data-status="ONLINE" data-tone="success" aria-pressed="true" onclick="toggleFilter('ONLINE',this)"><span data-zh>在线</span><span data-en>Online</span><span class="count">0</span></button>
+        <button class="filter-badge badge-busy active" type="button" data-status="BUSY" data-tone="info" aria-pressed="true" onclick="toggleFilter('BUSY',this)"><span data-zh>忙碌</span><span data-en>Busy</span><span class="count">0</span></button>
+        <button class="filter-badge badge-idle active" type="button" data-status="IDLE" data-tone="warning" aria-pressed="true" onclick="toggleFilter('IDLE',this)"><span data-zh>空闲</span><span data-en>Idle</span><span class="count">0</span></button>
+        <button class="filter-badge badge-dormant active" type="button" data-status="DORMANT" data-tone="muted" aria-pressed="true" onclick="toggleFilter('DORMANT',this)"><span data-zh>休眠</span><span data-en>Dormant</span><span class="count">0</span></button>
+        <button class="filter-badge badge-stalled active" type="button" data-status="STALLED" data-tone="danger" aria-pressed="true" onclick="toggleFilter('STALLED',this)"><span data-zh>停滞</span><span data-en>Stalled</span><span class="count">0</span></button>
+      </div>
+      <table class="data-table">
+        <thead><tr><th><span data-zh>Agent ID</span><span data-en>Agent ID</span></th><th><span data-zh>名称</span><span data-en>Name</span></th><th><span data-zh>状态</span><span data-en>Status</span></th><th><span data-zh>活跃计划</span><span data-en>Active Plans</span></th><th><span data-zh>运行循环</span><span data-en>Running Loops</span></th><th><span data-zh>最后活跃</span><span data-en>Last Active</span></th><th><span data-zh>闲置(秒)</span><span data-en>Stale (s)</span></th></tr></thead>
+        <tbody id="agentTable"></tbody>
+      </table>
+
+    </div>
+  </div>
+</div>
+<script>
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n);var t=document.querySelector('.lang-toggle');if(t)t.textContent=(n==='zh'?'EN':'中文')}
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl)}})();
+ document.addEventListener('visibilitychange',function(){if(!document.hidden){fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+
+
+function statusColor(s){var m={'ONLINE':'#00a38e','IDLE':'#a85d00','BUSY':'#1769d2','STALLED':'#c83c4a','DORMANT':'#9ca8c0'};return m[s]||'#9ca8c0'}
+function valueLabel(value){return window.ChuanxuUI?window.ChuanxuUI.valueLabel(value):String(value==null?'':value)}
+function statusBadge(s){return '<span class="badge-status" title="'+s+'" style="background:'+statusColor(s)+'20;color:'+statusColor(s)+'">'+valueLabel(s)+'</span>'}
+
+async function loadAgents(){
+  try{var r=await fetch('/api/monitor/agents');var d=await r.json();
+    var agents=d.agents||[];
+    _agents=agents;renderAgents();
+  }catch(e){console.error(e)}
+}
+
+var _agents=[],_activeFilters=new Set(['ONLINE','BUSY','IDLE','DORMANT','STALLED']);
+function toggleFilter(s,el){
+  if(_activeFilters.has(s)){_activeFilters.delete(s);el.classList.remove('active');el.setAttribute('aria-pressed','false')}
+  else{_activeFilters.add(s);el.classList.add('active');el.setAttribute('aria-pressed','true')}
+  renderAgents();
+}
+function renderAgents(){
+  var rows=_agents.filter(function(a){return _activeFilters.has(a.status)}).map(function(a){
+    return '<tr><td><span class="truncate-id">'+(a.agent_id||'')+'</span></td><td>'+(a.agent_name||'')+'</td><td>'+statusBadge(a.status)+'</td><td>'+(a.active_plan_count||0)+'</td><td>'+(a.running_loop_count||0)+'</td><td>'+(a.last_active_at||valueLabel('NEVER'))+'</td><td>'+(a.stale_seconds||'-')+'</td></tr>';
+  });
+  document.getElementById('agentTable').innerHTML=rows.join('');
+  // Update filter counts
+  var counts={ONLINE:0,BUSY:0,IDLE:0,DORMANT:0,STALLED:0};
+  _agents.forEach(function(a){counts[a.status]=(counts[a.status]||0)+1});
+  document.querySelectorAll('.filter-badge').forEach(function(b){
+    var s=b.getAttribute('data-status');
+    var c=b.querySelector('.count');
+    if(c)c.textContent=counts[s]||0;
+  });
+}
+
+async function loadMetrics(){
+  try{var r=await fetch('/api/monitor/metrics');var d=await r.json();
+    var zh=document.documentElement.getAttribute('data-lang')==='zh';
+    function hasValue(v){return v!==null&&v!==undefined&&v!==''&&!Number.isNaN(Number(v))}
+    function noSamples(){return zh?'无样本':'No samples'}
+    function duration(v){
+      var seconds=Math.max(0,Number(v));
+      if(seconds<60)return seconds.toFixed(1)+' s';
+      var minutes=Math.floor(seconds/60),remaining=Math.round(seconds%60);
+      return minutes+' min '+remaining+' s';
+    }
+    function sampled(value,count,formatter){return Number(count)>0&&hasValue(value)?formatter(value):noSamples()}
+    var boxes=[
+      {label:zh?'平均会话时长（7天）':'Avg Session Duration (7d)',value:sampled(d.avg_session_duration,d.session_sample_count,duration)},
+      {label:zh?'平均循环时长（7天）':'Avg Loop Duration (7d)',value:sampled(d.avg_loop_duration,d.loop_sample_count,duration)},
+      {label:zh?'平均迭代次数（7天）':'Avg Iterations (7d)',value:sampled(d.avg_iteration_count,d.iteration_sample_count,function(v){return Number(v).toFixed(1)})},
+      {label:zh?'平均工具耗时（7天）':'Avg Tool Duration (7d)',value:sampled(d.avg_tool_duration_ms,d.tool_sample_count,function(v){return Number(v).toFixed(1)+' ms'})},
+      {label:zh?'实体访问量（24小时）':'Entity Accesses (24h)',value:Number(d.entity_access_count_24h||0).toLocaleString()}
+    ];
+    document.getElementById('metricsContent').innerHTML=boxes.map(b=>
+      '<div class="metric-box"><div class="metric-label">'+b.label+'</div><div class="metric-value">'+b.value+'</div></div>'
+    ).join('');
+  }catch(e){console.error(e)}
+}
+
+function loadAll(){loadAgents();loadMetrics()}
+window.addEventListener('chuanxu-language-change',function(){renderAgents();loadMetrics();});
+loadAll();
+setInterval(loadAll,30000);
+
+var _aloSec=300;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+</script>
+</body>
+</html>
