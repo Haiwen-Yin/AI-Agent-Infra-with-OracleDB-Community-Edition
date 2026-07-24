@@ -8,6 +8,56 @@ inherits the entries below; per-edition release notes live in
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the rules in `openspec/specs/documentation-format/spec.md`.
 
+The released technical packages are distributions of **Chuanxu (川序)**, the
+**AI Agent Management Platform**. `AI Agent Infra with DB` remains the unified
+technical project name.
+
+## [4.1.0] - 2026-07-24
+
+See `RELEASE_NOTES_v4.1.0.md` for the current release contract.
+
+### Enterprise governance
+
+- Added registered-Agent admission with stable identity, credential digest,
+  heartbeat, lifecycle status, expiry, and administrator import.
+- Added Enterprise resource catalog, policy decisions, bounded grants,
+  multi-party approvals, separation of duties, emergency controls, retention,
+  legal hold, masking, integrity evidence, and scoped export.
+- Added three-database v4.1.0 governance migrations and capability evidence.
+
+### Product UI
+
+- Applied the Chuanxu brand system to all 17 product templates.
+- Added local light-first Chinese defaults, persisted language/theme preferences,
+  local logo and line-icon assets, and offline UI resources.
+- Unified the Enterprise Approval/Audit navigation labels, language controls,
+  feature divider, and row-detail interaction. Expandable Dashboard lists now
+  explain the row interaction, while Audit uses the full row instead of a
+  redundant detail column.
+- Moved the management-platform identity into the sidebar brand, normalized
+  footer geometry, unified graph-label contrast, and added bilingual filter
+  chips for Agent status, graph type, approval status, audit level, and task
+  status. Approval empty states now follow the selected status, and Audit
+  documents the exact legal-hold scope behavior.
+- Localized dynamic status, action, decision, audit, resource, emergency, and
+  Skill enum values without changing their stored/API representations. Chinese
+  navigation now consistently labels Skills as `技能`, while raw audit evidence
+  and identifiers remain unchanged.
+- Extended display-only enum localization to Agents, Workspaces, Specs,
+  Branches, Collaboration, and Loops, including detail badges and Branch/Loop
+  form choices. Language switching refreshes rendered values without changing
+  API payloads or stored state.
+- Unified the Enterprise Approval/Audit sidebar footer geometry with every
+  other Dashboard page, including language, logout, and countdown spacing.
+- Community packages physically exclude Enterprise governance modules, routes,
+  templates, tests, documentation overlays, and SQL overlays.
+
+### Release packaging
+
+- Builds contain only the current release notes file.
+- Version, database, edition, and license labels are generated from package
+  metadata and the v4.1.0 release date is 2026-07-24.
+
 ## [4.0.1] - 2026-07-22
 
 See `RELEASE_NOTES_v4.0.1.md` for the complete release contract. This version
@@ -98,7 +148,7 @@ spec-driven validator that gates releases on the OpenSpec contracts.
 
 - **Build pipeline**: releases now produced by `python3.14 build.py` from one
   source tree, replacing the prior per-edition copy-and-patch workflow.
-- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "4.0.1"`
+- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "4.1.0"`
   in Python and `vX.Y.Z` literals in `.py`/`.sql`/`.md`/`.html`/`.sh` for
   every file in each built edition; no source file may hardcode a version.
 - **Directory shape of built editions**: loose `.py`/`.sh` files and `lib/`,

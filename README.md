@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.0.1 · Community Edition · Oracle**
+> **v4.1.0 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -8,13 +8,35 @@
 
 ---
 
+## Product and Technical Naming
+
+This technical release package belongs to **Chuanxu (川序)**, the **AI Agent
+Management Platform**. `AI Agent Infra with DB` remains the unified technical
+project and source-repository name; per-database names such as `AI Agent Infra
+with OracleDB` identify the adapter and edition of this package. Use **Chuanxu / 川序** for
+user-facing product references and the technical names for repository,
+package, and implementation references.
+
 ## Product Overview
 
 AI Agent Infra with Oracle is a database-backed infrastructure layer for operating AI Agents on Oracle AI Database 26ai. It persists Agent identities, memory, knowledge, graph relationships, workspaces, specifications, task plans, Skills, and execution state in the database so that Agents can share governed context across sessions.
 
+This release is a **Skill-first, framework-neutral integration package**.
+Any Agent runtime that can install or read `SKILL.md` and execute the packaged
+HTTP, MCP, or CLI workflows can use the platform; OpenClaw and Hermes Agent
+are confirmed integration examples. The runtime does not need to be created
+by this platform. Registration and authentication are still required before
+an Agent enters the managed inventory, identity, permission, and audit scope.
+
+The platform is designed to make Agent operation observable, controllable, and
+traceable. The database is the durable source of truth for Agent identity,
+memory, knowledge, workspaces, task plans, Skills, execution state, and, in
+Enterprise, governed resources, authorization decisions, multi-party approval,
+emergency control, bounded audit, and evidence export.
+
 The runtime combines Oracle vector search, full-text search, property graph queries, JSON-relational data, PL/SQL APIs, and database scheduling. Admin and Business Agent identities are separated, and Business Agent requests fail closed instead of falling back to schema-owner access.
 
-This Community Edition provides the complete core runtime, including memory and knowledge management, hybrid search, Agent lifecycle management, workspaces and branches, specification and Loop workflows, collaboration, Harness templates, MCP integration, Portal chat, and the management Dashboard.
+This Community Edition provides the complete core runtime, including memory and knowledge management, hybrid search, Agent lifecycle management, workspaces and branches, specification and Loop workflows, collaboration, Harness templates, MCP integration, Portal chat, the management Dashboard, and the registered-Agent admission boundary for external Skill-first runtimes.
 
 ## 1. Package Contents
 
@@ -25,7 +47,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.0.1.md   # release notes for this version
+├── RELEASE_NOTES_v4.1.0.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -34,6 +56,9 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     ├── config_wizard.sh      # first-run interactive config prompt
     ├── verify_deps.py        # pre-flight dependency checker
     ├── install_offline.sh    # offline install from vendor/
+    ├── poc_readiness.py      # non-destructive POC prerequisite check
+    ├── poc_evidence.py       # four-week acceptance evidence assembly
+    ├── support_bundle.py     # bounded, redacted support archive
     ├── deploy_oracle.py
     ├── lib/                  # business modules
     │   ├── connection.py     # oracledb connection layer (adapter)
@@ -46,7 +71,10 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     │   ├── 1_schema.sql
     │   ├── 2_api.sql
     │   ├── 3_jobs.sql
-    │   └── 4_harness_templates.sql
+    │   ├── 4_harness_templates.sql
+    │   ├── 7_v4_0_1_migration.sql
+    │   ├── 8_v4_1_0_registration.sql # registered-Agent identity (all editions)
+    │   └── 8_v4_1_0_governance.sql  # Enterprise governance only
     ├── tests/                # pytest suite
     ├── tools/                # encrypt_config.py
     └── visualization/
@@ -134,7 +162,11 @@ python3.14 scripts/deploy_oracle.py <user> <pass> <dsn> scripts/deploy/1_schema.
 ```
 
 This runs the deploy scripts in `scripts/deploy/`:
-`1_schema.sql` → `7_v4_0_1_migration.sql` → `2_api.sql` → `3_jobs.sql` → `4_harness_templates.sql`.
+`1_schema.sql` → `7_v4_0_1_migration.sql` → `2_api.sql` → `3_jobs.sql` →
+`4_harness_templates.sql`. Community packages then run
+`8_v4_1_0_registration.sql`; Enterprise packages run
+`8_v4_1_0_governance.sql` (which includes the registered-Agent table) and the
+database-specific Enterprise security scripts.
 
 ### Start the server
 
@@ -177,16 +209,18 @@ python3.14 -m pytest scripts/tests/ -q --tb=no
 ## 7. Community Edition Features
 
 - Full memory/knowledge/graph APIs
-- Loop Engineering (6 eval types)
-- MCP Server (10+ tools)
+- Loop Engineering and Task Plan workflows
+- MCP Server and Skill-first external Agent integration
 - Portal chat with LLM
+- Registered-Agent inventory and lifecycle admission
 - Offline deployment
 
 ## 8. Documentation
 
 See `docs/` for in-depth material: `architecture.md`, `api-reference.md`,
 `security.md`, `deployment.md`, `minimum-privileges.md`, `migration.md`,
-`visualization.md`, `workspace.md`, `harness.md`, `loop-engineering.md`.
+`visualization.md`, `workspace.md`, `harness.md`, `loop-engineering.md`,
+`poc-readiness.md`.
 
 For AI agents working on this codebase, see `docs/AGENTS.md`.
 

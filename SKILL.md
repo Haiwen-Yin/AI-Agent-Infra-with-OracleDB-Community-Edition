@@ -1,15 +1,29 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.0.1 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.1.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
 deploy, configure, start, register against, and operate this edition.
 
+> **Product brand:** Chuanxu (川序) · **Product:** AI Agent Management Platform
+>
+> **Technical project:** AI Agent Infra with DB. The database-specific package name
+> identifies the OracleDB adapter and edition; it is not a separate product
+> brand.
+
+This package is **Skill-first and framework-neutral**. Any Agent runtime that
+can install or read `SKILL.md` and execute the packaged HTTP, MCP, or CLI
+workflows can use the platform; OpenClaw and Hermes Agent are confirmed
+integration examples. The runtime does not need to be created by this
+platform. Registration and authentication are still required before an Agent
+enters the managed inventory, identity, permission, and audit scope.
+
 ## 1. Overview
 
-AI Agent Infra is a **database-native agent infrastructure** built on
-**Oracle AI Database 26ai**. It collapses the conventional
+AI Agent Infra with DB is the technical foundation of the **Chuanxu AI Agent
+Management Platform**, built on **Oracle AI Database 26ai**. It collapses the
+conventional
 "Redis + vector DB + graph DB + object store" stack into a single Oracle
 database kernel - leveraging reference partitioning, JSON-Relational
 Duality Views, property graph (SQL PGQ), in-database vector search, and
@@ -17,11 +31,20 @@ Deep Data Security.
 
 | Edition             | Port | License          |
 |---------------------|------|------------------|
-| Community           | 8001 (默认，可配置) | Apache 2.0       |
-| Enterprise          | 8000 (默认，可配置) | BSL 1.1          |
+| Community           | 8001 (default, configurable) | Apache 2.0       |
+| Enterprise          | 8000 (default, configurable) | BSL 1.1          |
 
-Enterprise adds: per-agent encryption keys, LDAP auth, audit trail,
-compliance logs, skill tokens, orchestrator approvals.
+Enterprise adds: registered-Agent governance, resource policies and bounded
+grants, server-attributed N-of-M approvals, emergency control, risk-based audit
+and evidence export, per-agent encryption keys, LDAP auth, compliance logs,
+skill tokens, and orchestrator approvals.
+
+v4.1.0 requires every external or platform-hosted Agent to register and
+authenticate before using non-bootstrap APIs. The Enterprise resource catalog
+is authoritative for classification; unknown or sensitive resources without an
+explicit policy are denied. Approval, emergency, audit, retention, legal-hold,
+and evidence-export controls are enforced by the server and database rather
+than by Dashboard visibility.
 
 ## 2. Package Contents
 
@@ -31,14 +54,14 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.0.1.md   # this release's notes
+├── RELEASE_NOTES_v4.1.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
 ├── config.example.json             # placeholder config template
 ├── start_web_server.sh             # server control script
 ├── docs/                           # deep-dive docs
-│   ├── introduction_zh.md          # 中文项目介绍
+│   ├── introduction_zh.md          # Chinese project introduction
 │   ├── architecture.md
 │   ├── api-reference.md
 │   ├── security.md
@@ -58,7 +81,9 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
     │   ├── 4_harness_templates.sql #   agent harness templates
     │   ├── 4_grants.sql            #   Deep Data Security grants
     │   ├── 5_audit_policy.sql      #   unified audit (Enterprise)
-    │   └── 6_deep_sec_policy.sql   #   Deep Sec policies (Enterprise)
+    │   ├── 6_deep_sec_policy.sql   #   Deep Sec policies (Enterprise)
+    │   ├── 8_v4_1_0_registration.sql # registered-Agent boundary
+    │   └── 8_v4_1_0_governance.sql   # Enterprise governance objects
     ├── lib/                        # business modules
     │   ├── connection.py           #   oracledb thin-mode pool
     │   ├── config.py               #   config loader (auto-decrypts)
@@ -90,7 +115,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.0.1.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.1.0.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -162,7 +187,11 @@ python3 scripts/deploy_oracle.py <user> <password> <host>:1521/<service> \
     scripts/deploy/6_deep_sec_policy.sql
 ```
 
-For Community Edition, skip `5_audit_policy.sql` and `6_deep_sec_policy.sql`.
+For Community Edition, skip `5_audit_policy.sql`, `6_deep_sec_policy.sql`, and
+`8_v4_1_0_governance.sql`; deploy `8_v4_1_0_registration.sql` after the common
+schema scripts. Enterprise deploys the governance script instead of the
+registration overlay because it creates both registration and governance
+objects.
 
 Verify deployment:
 ```bash
@@ -241,6 +270,11 @@ Once the server is running, these endpoints are available:
 | **Enterprise** | `/api/admin/crypto/rotate` | POST | Rotate encryption keys |
 | **Enterprise** | `/api/approvals` | GET/POST | Approval requests |
 | **Enterprise** | `/api/audit` | GET | Audit trail |
+| **Enterprise** | `/api/governance/resources` | GET/POST | Governed resource catalog |
+| **Enterprise** | `/api/governance/decide` | POST | Server-side policy decision |
+| **Enterprise** | `/api/governance/approvals/{id}/decision` | POST | N-of-M approval decision |
+| **Enterprise** | `/api/governance/emergency` | GET/POST | Emergency disable and retry |
+| **Enterprise** | `/api/governance/evidence/export` | GET | Scoped evidence export |
 | **Agent Protocol** | `/ap/v1/agent/tasks` | POST | Agent Protocol compat |
 
 Full API details: `docs/api-reference.md`.
@@ -253,10 +287,13 @@ Full API details: `docs/api-reference.md`.
 | Column encryption | `DBMS_CRYPTO` (AES-256-GCM) |
 | Auth | Local users + LDAP (Enterprise) |
 | Audit | Unified Audit + `audit_api` (Enterprise) |
+| Governance | Resource policy, bounded grants, approvals, emergency control (Enterprise) |
 
 Each Business Agent gets its own Oracle END_USER. The End User password
 is stored encrypted in `SYSTEM_CONFIG` and distributed via the
-registration API (encrypted with `admin_token`).
+registration API (encrypted with `admin_token`). The Schema Owner credential is
+Admin-only; Business Agent authentication and failed policy checks never fall
+back to the Admin pool.
 
 ## 11. Testing
 
