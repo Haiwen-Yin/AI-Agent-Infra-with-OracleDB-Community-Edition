@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.1.0
+# Security - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -264,3 +264,43 @@ Uses PBKDF2-HMAC-SHA512 key derivation with 210,000 iterations, AES-like stream 
 3. **Usage**: Agent uses key to encrypt/decrypt local config and session data
 4. **Rotation**: Admin triggers rotation via API, affected credentials re-encrypted
 5. **Detection**: Agent heartbeat checks key version, triggers local re-encryption on change
+
+## v4.2.0 Graph Security Boundary
+
+Graph ownership does not grant access to every resource connected to a graph.
+Each Node declares an execution subject, capability, resource/action,
+State/Secret scope, environment, purpose, and side-effect class. The Compiler
+performs a preflight check; the Runtime repeats registration, grant, policy,
+and revocation checks before a Worker can claim or complete the Node.
+
+Dynamic versions and subgraphs inherit a maximum permission and budget envelope
+and cannot silently expand it. A topology change that adds data/API/Skill/Tool
+access, increases a hard budget, introduces an untrusted extension, or adds a
+non-idempotent effect is high risk and uses the existing Enterprise policy and
+approval boundary.
+
+State Events are recovery authority, Trace is operational control-flow
+evidence, and Compliance Audit is the security/governance record. Large or
+sensitive content is stored once as a classified Artifact and referenced by
+hash. Export is redacted by default; retention and legal hold prevent expiry
+or purge until an authorized release operation with a reason.
+
+Graph triggers are registered against an immutable published Graph Version and
+carry an explicit actor and reason. The common trigger contract covers manual,
+API, scheduled, database, external, and internal sources; delivery enters the
+authenticated, idempotent Event Inbox before an optional Run is created. The
+registration table is an additive migration step
+(`14_v4_2_0_graph_triggers.sql`) so trigger history remains intact when an
+earlier v4.2 draft is upgraded.
+
+Workers use short-lived Lease Tokens with fencing. A stale token cannot commit
+a checkpoint or result. Event Inbox/Outbox operations require idempotency keys;
+unauthenticated events may be received for later inspection but cannot activate
+waiting work. Non-idempotent external effects are never retried blindly after
+an uncertain outcome.
+
+Trigger registration is also governed: the target Graph Version must be
+published, the caller and reason are mandatory, and the trigger configuration
+is validated before it is stored. Trigger delivery uses the same authenticated
+Inbox and idempotency boundary as direct events. The database trigger table is
+created by the additive `14_v4_2_0_graph_triggers.sql` step.

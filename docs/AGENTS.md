@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.1.0 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.2.0 Unified Repository Guide
 
-> **v4.1.0** - The unified single-source repository that generates all 6 release
+> **v4.2.0** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -88,9 +88,24 @@ To cut a new release:
 
 ```bash
 echo "4.1.0" > VERSION
-python3.14 build.py            # rebuilds all 6 editions at v4.1.0
-python3.14 spec_validator.py   # confirm all still pass
+python3.14 build.py --profile stable-4.1  # rebuilds the protected Stable line
+python3.14 spec_validator.py              # confirm the Stable line passes
 ```
+
+## Experimental v4.2.x Build Profile
+
+The repository `VERSION` remains the Stable-line source of truth while the
+experimental Graph line is built explicitly from the same source:
+
+```bash
+python3.14 build.py --version 4.2.0 --profile experimental-4.2 \
+  --output-root build_output/v4.2.0
+python3.14 spec_validator.py --build-output build_output/v4.2.0 --release
+```
+
+The v4.2.x line is independently maintained as Experimental Graph Engineering.
+When its contracts stabilize, the latest validated v4.2.x baseline can graduate
+to the next Stable release; a second long-lived source fork is not maintained.
 
 Never hardcode version numbers in source — `build.py` rewrites them.
 
@@ -255,7 +270,7 @@ file and rebuilding. Example (`editions/oracle-enterprise.json`):
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.1.0`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.2.0`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.1.0
+# Architecture - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -461,3 +461,62 @@ Business/Portal requests remain on the End User connection for their complete
 lifetime and fail closed if it is unavailable. Schema Owner access is confined
 to separately authenticated Admin operations; Business requests never switch
 to AIADMIN as a fallback.
+
+## v4.2.0 Experimental Graph Engineering Plane
+
+The experimental-4.2 profile adds a versioned execution graph without
+replacing the v4.1.0 domain graph. The existing `ENTITIES` and `ENTITY_EDGES`
+tables continue to represent knowledge, memory, and provenance relationships.
+The new `GRAPH_*` tables represent executable topology and runtime evidence:
+
+```text
+Graph Definition -> Graph Version -> Compiler Plan -> Graph Run
+                                              |-> Node Run -> Attempt -> Worker lease
+                                              |-> State Event -> Checkpoint
+                                              |-> Transition -> Trace / Evaluation
+                                              |-> Artifact / Event Inbox / Outbox
+```
+
+Definitions are canonical JSON at the service boundary. A Draft may be
+edited; a Published version is immutable. The Compiler validates registered
+node and edge types, dependencies, typed condition ASTs, side-effect classes,
+join strategies, cycle bounds, capabilities, resource scopes, and hard
+budgets. It never evaluates arbitrary Python, SQL, shell, network, credential,
+or secret expressions.
+
+The Runtime is database-authoritative. A Transition commits the accepted
+result reference, State Event, Checkpoint, selected edge evidence, budget
+accounting, and downstream activation as one controlled transaction. Workers
+receive scoped input and a short Lease Token. Heartbeats and completion compare
+the fencing token, so a late or expired Worker cannot overwrite a newer
+Attempt. A Worker never receives Schema Owner credentials.
+
+Community uses a simple priority/concurrency scheduler. Enterprise adds
+governed quotas, weighted fairness, multi-Scheduler coordination, advanced
+evaluation, retention/legal hold, and evidence export. Both profiles keep
+identity admission and Business Agent fail-closed behavior from v4.1.0.
+
+## Database Graph Projection Boundary
+
+The portable runtime tables are the execution authority. Each adapter may
+project the same versioned topology into its native Property Graph for query
+and visualization:
+
+| Adapter | Projection | v4.2.0 boundary |
+|---|---|---|
+| Oracle | Oracle Property Graph / SQL PGQ | Native graph queries are used for graph capabilities while state commits remain relational. |
+| PostgreSQL 18 | Apache AGE | AGE/Cypher projection is used where available; relational metadata and runtime operations remain portable. |
+| YashanDB | Native Property Graph projection | Native graph capability is exposed; relational edge operations remain the fallback for supported runtime queries. |
+
+PostgreSQL 19 native Property Graph is intentionally a future adapter target.
+It is not required for the PostgreSQL 18 v4.2.0 release and does not change
+the shared service contract.
+
+## Profile Boundary
+
+`stable-4.1` and `experimental-4.2` are build-time profiles generated from
+one source line. Stable packages retain the v4.1.0 Graph Explorer and omit
+Graph Definition, Compiler, Runtime, Worker, Event, State/Checkpoint, and
+Graph migration assets. Experimental packages include those assets and label
+the Dashboard and release documentation as Experimental. Shared fixes are
+tested in both profiles; there is no long-lived source fork.

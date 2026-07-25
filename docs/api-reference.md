@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.1.0
+# API Reference - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -507,3 +507,77 @@ Download skill resource using a valid download token. One-time use — token inv
 | download_token | path | Yes | Download token from consume_skill_token |
 
 Response: Resource ZIP file (binary)
+
+## v4.2.0 Experimental Graph API
+
+The following routes exist only in the `experimental-4.2` profile. They use
+the same authenticated session, registered-Agent identity, policy decision,
+and audit boundary as the rest of the platform. Normal callers must use these
+service routes rather than direct `GRAPH_*` table DML.
+
+### Definitions and Versions
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/graphs` | GET/POST | List or create a Graph Definition. |
+| `/api/graphs/{graph_id}` | GET | Read definition metadata. |
+| `/api/graphs/{graph_id}/versions` | GET/POST | List versions or create a Draft topology. |
+| `/api/graphs/{graph_id}/aliases` | GET/POST | Read or set a governed version alias. |
+| `/api/graphs/{graph_id}/import` | POST | Import canonical JSON as a new Draft. |
+| `/api/graph-versions/{version_id}` | GET | Read a version and topology. |
+| `/api/graph-versions/{version_id}/export` | GET | Export canonical JSON with redaction by default. |
+| `/api/graph-versions/{version_id}/compile` | POST | Validate and persist a deterministic Compiler plan. |
+| `/api/graph-versions/{version_id}/publish` | POST | Publish after validation, reason required. |
+| `/api/graph-versions/{version_id}/archive` | POST | Archive an eligible version, reason required. |
+| `/api/graph-types` | GET | List installed node, edge, reducer, evaluator, and codec types. |
+
+### Runs, State, and Evidence
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/graph-runs` | GET/POST | List or start a run from a published version. |
+| `/api/graph-runs/{run_id}` | GET | Read run status, ready work, and runtime summary. |
+| `/api/graph-runs/{run_id}/state` | GET | Recover current state from Events and Checkpoints. |
+| `/api/graph-runs/{run_id}/snapshot` | GET | Read a bounded diagnostic snapshot. |
+| `/api/graph-runs/{run_id}/nodes` | GET | List Node Runs. |
+| `/api/graph-runs/{run_id}/attempts` | GET | List Worker Attempts and fencing state. |
+| `/api/graph-runs/{run_id}/checkpoints` | GET | List logical checkpoints. |
+| `/api/graph-runs/{run_id}/state-events` | GET | List authoritative State Events. |
+| `/api/graph-runs/{run_id}/transitions` | GET | List immutable routing transitions. |
+| `/api/graph-runs/{run_id}/trace` | GET | Read operational control-flow Trace. |
+| `/api/graph-runs/{run_id}/evaluations` | GET | Read registered evaluator results. |
+| `/api/graph-runs/{run_id}/interventions` | GET | Read human controls and reasons. |
+| `/api/graph-runs/{run_id}/pause` | POST | Pause at a safe barrier. |
+| `/api/graph-runs/{run_id}/resume` | POST | Resume after authorization. |
+| `/api/graph-runs/{run_id}/cancel` | POST | Cancel with immutable reason. |
+| `/api/graph-runs/{run_id}/fork` | POST | Create a checkpoint branch. |
+| `/api/graph-runs/{run_id}/migrate` | POST | Migrate a quiescent run to a published version. |
+| `/api/graph-worker/{operation}` | POST | Advertise, claim, heartbeat, checkpoint, complete, or fail work. |
+| `/api/graph/workers` | GET | Inspect registered Worker metadata. |
+| `/api/graph/events` | POST | Receive an authenticated idempotent event. |
+| `/api/graph/events/inbox` | GET | Inspect bounded pending inbound events. |
+| `/api/graph/events/outbox` | GET | Inspect pending outbound events. |
+| `/api/graph/capabilities` | GET | Probe the database graph adapter. |
+| `/api/graph-artifacts` | GET/POST | List or store content by hash reference. |
+
+Run control actions require an authenticated actor and non-empty reason. High
+risk changes are routed through the existing Enterprise resource policy and
+N-of-M approval contracts. State recovery uses the database; the web process
+does not become the source of truth.
+
+## Skill Workflow
+
+An external Agent reads the adapter `SKILL.md`, registers once, and uses the
+HTTP or MCP operations below. It never receives or edits database credentials:
+
+1. Discover capabilities and registered types.
+2. Create or import a Draft Graph Definition.
+3. Compile, inspect diagnostics and risk, then publish with a reason.
+4. Start a Run and observe state, nodes, Checkpoints, Trace, and budgets.
+5. For Worker execution, advertise capabilities, claim a Lease Token,
+   heartbeat, checkpoint, and complete/fail using the token.
+6. Use intervention or migration only with an authenticated actor, reason,
+   and applicable policy/approval.
+
+The same workflow is framework-neutral and can be driven by OpenClaw, Hermes
+Agent, or another runtime that can consume `SKILL.md`.

@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.1.0
+# Deployment Guide - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -260,3 +260,41 @@ python3.14 scripts/deploy_oracle.py --sysdba sys oracle <DB_HOST>:1521/ai_agent_
 ```
 
 Handles SQLcl syntax: PROMPT removal, DEFINE/&& variable substitution, / block terminator for PL/SQL blocks.
+
+## v4.2.0 Experimental Profile
+
+The v4.2.0 package is marked Experimental because its Graph Engineering
+contracts may evolve in v4.2.x. It is still subject to the complete release
+gate and is not a reduced or best-effort build.
+
+After the v4.1 schema is available, apply the five core Graph scripts in order.
+Enterprise packages additionally insert the scheduler HA overlay between the
+edge-scope and trigger scripts:
+
+```bash
+python3.14 scripts/migrate_release.py preflight --backup-evidence backup.json
+python3.14 scripts/migrate_release.py dry-run --backup-evidence backup.json
+python3.14 scripts/migrate_release.py apply --backup-evidence backup.json
+```
+
+Use the adapter-specific deploy command documented in the package when the
+database requires a client wrapper. PostgreSQL 18 must have Apache AGE
+installed and available to the configured database before the Graph scripts
+are applied. PostgreSQL 19 native Property Graph is not required by this
+release.
+
+### Runtime Roles
+
+Run the web process with the Admin identity only for management operations.
+Business Agents and external Workers use registered identities, independent
+database users/roles, and scoped HTTP or MCP credentials. A Worker receives a
+Lease Token and bounded input, not a Schema Owner password. Multiple Enterprise
+Schedulers may run concurrently; the database claim/fencing protocol is the
+authority for ownership.
+
+### Health Checks
+
+Verify `/api/health`, `/api/graph/capabilities`, registered Worker status,
+pending Event Inbox/Outbox rows, current Checkpoints, and the migration ledger
+after deployment. Keep database replication, backup, and failover configured
+according to the database vendor's production guidance.

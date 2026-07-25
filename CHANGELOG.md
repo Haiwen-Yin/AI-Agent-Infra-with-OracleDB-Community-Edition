@@ -12,6 +12,32 @@ The released technical packages are distributions of **Chuanxu (川序)**, the
 **AI Agent Management Platform**. `AI Agent Infra with DB` remains the unified
 technical project name.
 
+## [4.2.0] - 2026-07-25
+
+See `RELEASE_NOTES_v4.2.0.md` for the current Experimental Graph Engineering
+release contract.
+
+### Experimental Graph Engineering
+
+- Added versioned Graph Definitions, deterministic compilation, durable Runs,
+  Node Runs, Attempts, Transitions, Checkpoints, Artifacts, and evaluations.
+- Added leased and fenced Worker execution, authenticated Event Inbox/Outbox,
+  compatibility wrappers for v4.1 Task/Loop workflows, and governed runtime
+  intervention with immutable evidence.
+- Added five additive core Graph migrations for Oracle AI Database 26ai,
+  PostgreSQL 18 with Apache AGE, and YashanDB 23.5.4+ native Property Graph
+  projection; Enterprise adds a separate scheduler HA overlay.
+- Added governed manual, API, schedule, database, external, and internal Graph
+  trigger registration and idempotent Event Inbox delivery.
+- Kept v4.1.x as an independently buildable Stable line; the latest validated
+  v4.2.x baseline may graduate to the next Stable release when Graph contracts
+  stabilize.
+
+### Release packaging
+
+- v4.2.0 is built with the `experimental-4.2` profile and dated 2026-07-25.
+- Each archive contains only `RELEASE_NOTES_v4.2.0.md`.
+
 ## [4.1.0] - 2026-07-24
 
 See `RELEASE_NOTES_v4.1.0.md` for the current release contract.
@@ -148,7 +174,7 @@ spec-driven validator that gates releases on the OpenSpec contracts.
 
 - **Build pipeline**: releases now produced by `python3.14 build.py` from one
   source tree, replacing the prior per-edition copy-and-patch workflow.
-- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "4.1.0"`
+- **Version injection**: `build.py:inject_version()` rewrites `VERSION = "..."`
   in Python and `vX.Y.Z` literals in `.py`/`.sql`/`.md`/`.html`/`.sh` for
   every file in each built edition; no source file may hardcode a version.
 - **Directory shape of built editions**: loose `.py`/`.sh` files and `lib/`,

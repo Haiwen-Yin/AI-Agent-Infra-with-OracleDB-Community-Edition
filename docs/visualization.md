@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra with DB v4.1.0
+# Web Visualization - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -122,3 +122,24 @@ Via `config.json` or environment variables:
 - `MEMORY_SERVER_HOST` (default: 0.0.0.0)
 - `MEMORY_SERVER_PORT` (default: 8000)
 - `MEMORY_SESSION_TIMEOUT` (default: 300 seconds)
+
+## v4.2.0 Experimental Graph Views
+
+The experimental Graph page keeps the v4.1 Graph Explorer and adds four
+working views: Graph Definitions, Run Monitor, Artifacts, and runtime evidence.
+Definitions use the same canonical JSON contract as the REST and Skill
+interfaces. The page calls the Graph service; it is not a direct database
+editor.
+
+The Definition view supports Draft creation/import, version selection,
+compile/diagnostic inspection, publication, archive, and Run start. The Run
+Monitor shows Node Runs, Trace, current State, and control actions. Artifact
+metadata exposes classification, retention, and legal-hold state without
+loading content by default. Worker, Event, Checkpoint, Transition, evaluator,
+and migration details remain available through the API for bounded diagnostics.
+
+The `stable-4.1` profile intentionally ships only the legacy Graph Explorer.
+The `experimental-4.2` profile ships the complete Graph views and marks the
+page Experimental. Both profiles use the Chuanxu shared shell, bilingual
+controls, light-first defaults, dark theme, local assets, and responsive
+layouts.

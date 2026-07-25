@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.1.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.2.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -54,7 +54,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.1.0.md   # this release's notes
+├── RELEASE_NOTES_v4.2.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -115,7 +115,7 @@ The release zip is self-contained - no PyPI access needed.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.1.0.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.2.0.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # 2. Install Python dependencies from the bundled wheels
@@ -322,6 +322,53 @@ Tests use the configured `config.json` connection. Set
 | `Deep Data Security` not filtering rows | Oracle version < 23.26.2 | upgrade to 26ai 23.26.2+ |
 
 Server log: `viz_server.log` in the project directory.
+
+## 14. v4.2.0 Experimental Graph Engineering
+
+This package uses the `experimental-4.2` profile. In addition to the v4.1
+runtime, it provides versioned Graph Definitions, deterministic compilation,
+durable Graph Runs, State Events, Checkpoints, Workers, Event Inbox/Outbox,
+Artifacts, evaluators, and reason-required interventions. The existing Graph
+Explorer remains available in the Dashboard.
+
+Oracle AI Database 26ai exposes the execution topology through the native
+Property Graph / SQL PGQ adapter. Relational `GRAPH_*` runtime tables remain
+the transaction and recovery authority. This is not a direct-DML workflow.
+
+### Agent Skill Workflow
+
+After registration and authentication, an external Agent can use the common
+HTTP or MCP contract:
+
+```bash
+# Discover the adapter and registered Graph types
+curl -b cookies.txt http://localhost:<port>/api/graph/capabilities
+curl -b cookies.txt http://localhost:<port>/api/graph-types
+
+# Create a definition, then create a Draft version
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"name":"support-flow"}' \
+  http://localhost:<port>/api/graphs
+curl -b cookies.txt -H 'Content-Type: application/json' -d @graph-version.json \
+  http://localhost:<port>/api/graphs/<graph_id>/versions
+
+# Compile and publish with an explicit reason, then start a Run
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"reason":"validated POC topology"}' \
+  http://localhost:<port>/api/graph-versions/<version_id>/compile
+curl -b cookies.txt -H 'Content-Type: application/json' -d '{"reason":"approved for test execution"}' \
+  http://localhost:<port>/api/graph-versions/<version_id>/publish
+```
+
+Workers claim only scoped work and receive a short Lease Token. They must
+heartbeat, checkpoint, and complete/fail with that token; stale fencing tokens
+are rejected. A Worker never receives the Schema Owner credential. Use
+`/api/graph-runs/<run_id>/state` and `/snapshot` to recover after a process
+restart. Existing Task Plan and Loop behavior remains available through the
+v4.1 compatibility bridge.
+
+The v4.2.x Graph contract is experimental and may evolve. Breaking changes
+require a new definition/schema version, migration or review state, and new
+release evidence. The latest validated v4.2.x release can graduate to the next
+Stable line without maintaining a second implementation.
 
 ## 13. Offline Deployment
 

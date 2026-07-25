@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# AI Agent Infra v3.5.0 - Enterprise Edition - Web Server Control Script
+# AI Agent Infra v4.2.0 - Community Edition - Web Server Control Script
 # Usage: ./start_web_server.sh {start|stop|restart|status|config}
 # ============================================================================
 
@@ -298,7 +298,7 @@ case "${1:-}" in
     config)  do_config ;;
     log)     do_log ;;
     *)
-        echo "AI Agent Infra v3.5.0 - Enterprise Edition - Web Server Control"
+        echo "AI Agent Infra v4.2.0 - Community Edition - Web Server Control"
         echo ""
         echo "Usage: ${0##*/} {start|stop|restart|status|config|log}"
         echo ""

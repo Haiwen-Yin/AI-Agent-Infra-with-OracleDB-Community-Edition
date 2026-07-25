@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra with DB v4.1.0
+# Migration Guide - AI Agent Infra with DB v4.2.0
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -373,3 +373,58 @@ SELECT COUNT(*) FROM USER_DATA_GRANTS;
 -- Verify COLLAB Data Grants exist
 SELECT GRANT_NAME FROM USER_DATA_GRANTS WHERE GRANT_NAME LIKE 'COLLAB%';
 ```
+
+## v4.1.0 to v4.2.0 Experimental Graph Migration
+
+The Graph migration is additive. It does not rewrite the v4.1.0 entity graph
+or remove Task/Loop history. Before applying it, create a recoverable database
+backup and record the backup reference in the migration evidence file.
+
+### Preflight and Dry Run
+
+Run the migration tool in preflight/Dry Run mode first. It verifies database
+identity, required v4.1 objects, migration checksums, capacity tier, and the
+database-specific graph capability. A Dry Run without verified backup evidence
+is intentionally blocked and must not be described as a successful migration.
+
+### Apply Order
+
+Apply the five core scripts in numeric order:
+
+```text
+9_v4_2_0_graph_engineering.sql
+10_v4_2_0_graph_runtime.sql
+11_v4_2_0_graph_control.sql
+12_v4_2_0_graph_edge_scope.sql
+14_v4_2_0_graph_triggers.sql
+```
+
+Enterprise packages insert `13_v4_2_0_scheduler_ha.sql` between the edge-scope
+and trigger scripts as an additional Enterprise-only overlay. Community
+packages exclude it. The trigger objects were deliberately split from the base
+definition migration: a database that already contains `GRAPH_TRIGGERS` from an
+earlier v4.2 draft can apply the new trigger step without changing existing
+rows.
+
+The migration ledger records script checksum, statement progress, backup
+verification, and terminal status. Re-running after interruption is safe and
+does not repeat an applied statement. The final check must verify Graph
+Definition, Runtime, Worker, Event, Checkpoint, Artifact, control, and
+version-scoped edge objects.
+
+### Legacy Compatibility
+
+Completed v4.1 Task Plans and Loops remain readable. New or explicitly
+migrated work may receive a versioned compatibility wrapper through
+`graph_compat`; the wrapper records the legacy ID and mapping. Unknown or
+ambiguous topology is not inferred: it is placed in a review-required state.
+An active migration requires a quiescence barrier, no active attempts, a
+pre-migration Checkpoint, a mapping, and an immutable migration Transition.
+
+### Rollback and Recovery
+
+Application rollback means stopping v4.2 services and restoring the prior
+application/profile against the pre-upgrade database backup. Direct destructive
+schema downgrade is not required. Worker and Scheduler crashes recover from
+leases and Checkpoints; database outage pauses new side effects until
+authorization and fencing are revalidated after reconnect.

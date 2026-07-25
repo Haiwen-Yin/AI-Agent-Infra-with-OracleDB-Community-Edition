@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.1.0 · Community Edition · Oracle**
+> **v4.2.0 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -38,6 +38,10 @@ The runtime combines Oracle vector search, full-text search, property graph quer
 
 This Community Edition provides the complete core runtime, including memory and knowledge management, hybrid search, Agent lifecycle management, workspaces and branches, specification and Loop workflows, collaboration, Harness templates, MCP integration, Portal chat, the management Dashboard, and the registered-Agent admission boundary for external Skill-first runtimes.
 
+## v4.2.x Experimental Graph Engineering
+
+This package uses the experimental-4.2 profile. It includes versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the execution authority. Contracts may evolve within v4.2.x and can graduate from the latest validated v4.2.x baseline to the next Stable release.
+
 ## 1. Package Contents
 
 ```
@@ -47,7 +51,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.1.0.md   # release notes for this version
+├── RELEASE_NOTES_v4.2.0.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
