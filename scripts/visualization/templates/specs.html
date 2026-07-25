@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.2.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chuanxu Oracle Community v4.2.0 - Specs</title>
+<link rel="stylesheet" href="/static/pages/specs.css">
+<script src="/static/chuanxu-prepaint.js"></script>
+<link rel="stylesheet" href="/static/chuanxu.css">
+<script src="/static/chuanxu.js" defer></script>
+<style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
+</head><body class="cx-ui">
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>Chuanxu</h5>
+    <small>Oracle Community</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#book"></use></svg></span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#brain"></use></svg></span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#agent"></use></svg></span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#task"></use></svg></span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#workspace"></use></svg></span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#graph"></use></svg></span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs" class="active"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#spec"></use></svg></span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#skill"></use></svg></span><span data-zh>技能</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#branch"></use></svg></span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#collab"></use></svg></span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#loop"></use></svg></span><span data-zh>循环</span><span data-en>Loops</span></a>
+    <a href="/monitor"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#monitor"></use></svg></span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><span><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#logout"></use></svg></span><span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div><div class="main-content">
+  <div class="top-bar">
+    <h4><span data-zh>规格管理</span><span data-en>Specification Management</span></h4>
+  </div>
+  <div class="content-area">
+    <div class="list-panel" id="listPanel">
+      <div class="cx-list-guide"><span class="cx-guide-mark">i</span><span data-zh>点击条目查看详情</span><span data-en>Click a row to view details</span></div>
+      <table class="data-table" id="specTable"><thead><tr>
+        <th><span data-zh>标题</span><span data-en>Title</span></th>
+        <th><span data-zh>范围</span><span data-en>Scope</span></th>
+        <th><span data-zh>状态</span><span data-en>Status</span></th>
+        <th><span data-zh>复杂度</span><span data-en>Complexity</span></th>
+        <th><span data-zh>版本</span><span data-en>Version</span></th>
+        <th><span data-zh>关联计划</span><span data-en>Plans</span></th>
+        <th><span data-zh>分支</span><span data-en>Branch</span></th>
+      </tr></thead><tbody id="specBody"></tbody></table>
+      <div id="pagination" class="pagination"></div>
+    </div>
+    <div class="loading-overlay" id="loading"><div class="spinner"></div></div>
+  </div>
+</div>
+<script>
+var allSpecs=[];var PAGE_SIZE=30;var currentPage=1;var filteredItems=[];
+
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang');var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);localStorage.setItem('lang',n)}
+function escapeHtml(s){if(s==null)return '';var d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function valueLabel(value){return window.ChuanxuUI?window.ChuanxuUI.valueLabel(value):String(value==null?'':value)}
+function detailValue(key,value){return /(^|_)(status|type|runtime|environment|mode|scope|complexity|visibility|role|policy)$/.test(key)?valueLabel(value):String(value)}
+function truncId(id){if(!id)return '-';var s=String(id);return s.length>12?'<span title="'+escapeHtml(s)+'" class="truncate-id">'+escapeHtml(s.substring(0,12))+'&hellip;</span>':escapeHtml(s)}
+function fmtTime(ts){if(!ts)return '-';try{return new Date(ts).toLocaleString()}catch(e){return escapeHtml(String(ts))}}
+function buildDetailFields(item){var h='';for(var key in item){if(item[key]!=null&&typeof item[key]!=='object'){h+='<p><strong>'+escapeHtml(key)+'</strong> <span title="'+escapeHtml(String(item[key]))+'">'+escapeHtml(detailValue(key,item[key]))+'</span></p>'}};return h}
+
+function renderPagination(totalCount,pagId,curPage,goFn){
+  var pagDiv=document.getElementById(pagId);if(!pagDiv)return;
+  var totalPages=Math.ceil(totalCount/PAGE_SIZE)||1;
+  if(totalPages<=1){pagDiv.innerHTML='';return}
+  var h='';
+  h+='<button onclick="'+goFn+'('+(curPage-1)+')"'+(curPage<=1?' disabled':'')+'>&laquo; Prev</button>';
+  var startPage=Math.max(1,curPage-3);var endPage=Math.min(totalPages,curPage+3);
+  if(startPage>1)h+='<button onclick="'+goFn+'(1)">1</button>';
+  if(startPage>2)h+='<button disabled>...</button>';
+  for(var p=startPage;p<=endPage;p++){h+='<button onclick="'+goFn+'('+p+')"'+(p===curPage?' class="active"':'')+'>'+p+'</button>'}
+  if(endPage<totalPages-1)h+='<button disabled>...</button>';
+  if(endPage<totalPages)h+='<button onclick="'+goFn+'('+totalPages+')">'+totalPages+'</button>';
+  h+='<button onclick="'+goFn+'('+(curPage+1)+')"'+(curPage>=totalPages?' disabled':'')+' >Next &raquo;</button>';
+  pagDiv.innerHTML=h;
+}
+function statusBadge(s){var cls=s==='APPROVED'?'badge-active':s==='DRAFT'?'badge-inactive':'badge-decommissioned',raw=s||'UNKNOWN';return '<span class="badge-status '+cls+'" title="'+escapeHtml(raw)+'">'+escapeHtml(valueLabel(raw))+'</span>'}
+
+function closeDetail(){var allD=document.querySelectorAll('.detail-row');for(var i=0;i<allD.length;i++)allD[i].style.display='none';var rows=document.querySelectorAll('.data-table tbody tr.selected');for(var i=0;i<rows.length;i++)rows[i].classList.remove('selected')}
+
+
+function renderTable(specs){
+  filteredItems=specs||[];
+  var tb=document.getElementById('specBody');tb.innerHTML='';
+  if(!filteredItems.length){renderPagination(0,'pagination',1,'goPage');return;}
+  var totalPages=Math.ceil(filteredItems.length/PAGE_SIZE)||1;if(currentPage>totalPages)currentPage=totalPages;
+  var start=(currentPage-1)*PAGE_SIZE;var pageItems=filteredItems.slice(start,start+PAGE_SIZE);
+  var h='';
+  for(var i=0;i<pageItems.length;i++){
+    var s=pageItems[i];
+    h+='<tr onclick="toggleDetail('+i+')">';
+    h+='<td>'+escapeHtml(s.title||'')+'</td>';
+    h+='<td title="'+escapeHtml(s.spec_scope||'')+'">'+escapeHtml(valueLabel(s.spec_scope||''))+'</td>';
+    h+='<td>'+statusBadge(s.spec_status)+'</td>';
+    h+='<td title="'+escapeHtml(s.complexity||'')+'">'+escapeHtml(valueLabel(s.complexity||''))+'</td>';
+    h+='<td>'+(s.spec_version||1)+'</td>';
+    h+='<td>'+(s.plan_links||[]).length+'</td>';
+    h+='<td>'+(s.branch_id?'<span style="background:#6546d7;color:#fff;padding:1px 6px;border-radius:3px;font-size:.78rem">'+escapeHtml(s.branch_id.substring(0,8))+'…</span>':'<span style="color:var(--cx-text-secondary)">-</span>')+'</td>';
+    h+='</tr>';h+='<tr id="detail-'+i+'" class="detail-row" style="display:none"><td colspan="7"><div class="detail-content">'+buildDetailFields(pageItems[i])+'</div></td></tr>';
+  }
+  tb.innerHTML=h;
+  renderPagination(filteredItems.length,'pagination',currentPage,'goPage');
+}
+function goPage(p){var tp=Math.ceil(filteredItems.length/PAGE_SIZE)||1;if(p<1||p>tp)return;currentPage=p;renderTable(filteredItems)}
+window.addEventListener('chuanxu-language-change',function(){renderTable(filteredItems);});
+
+
+function toggleDetail(idx){var el=document.getElementById('detail-'+idx);if(!el)return;if(el.style.display==='table-row'){el.style.display='none';return}closeDetail();el.style.display='table-row'}
+
+async function loadSpecs(){
+  document.getElementById('loading').style.display='flex';
+  try{var r=await fetch('/api/specs');var d=await r.json();allSpecs=d.specs||[];filteredItems=allSpecs;renderTable(filteredItems);}catch(e){console.error(e);}
+  document.getElementById('loading').style.display='none';
+}
+
+(function(){var s=localStorage.getItem('lang');if(s)document.documentElement.setAttribute('data-lang',s)})();
+loadSpecs();
+var _aloSec=300,_aloInt=null;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}
+var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');
+if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}
+if(_aloSec<=30){document.title='['+_aloSec+'s] Session Expiring'}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+_aloInt=setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+</script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.2.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chuanxu Oracle Community v4.2.0 - Portal Login</title>
+<link rel="stylesheet" href="/static/pages/portal_login.css">
+<script src="/static/chuanxu-prepaint.js"></script>
+<link rel="stylesheet" href="/static/chuanxu.css">
+<script src="/static/chuanxu.js" defer></script>
+<style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
+</head>
+<body class="cx-ui">
+<div class="portal-card">
+  <a href="/login" class="admin-link" title="Admin Dashboard">
+    <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+    <span data-zh>进入管理页面</span><span data-en>Admin Dashboard</span>
+  </a>
+  <button class="lang-toggle" onclick="toggleLang()">
+    <span data-zh>切换至 English</span><span data-en>Switch to 中文</span>
+  </button>
+  <h2><span data-zh>川序 AI Agent 管理平台</span><span data-en>Chuanxu AI Agent Management Platform</span></h2>
+  <p class="subtitle"><span data-zh>用户入口</span><span data-en>User Portal</span></p>
+
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" onclick="switchTab('login')">
+      <span data-zh>登录</span><span data-en>Login</span>
+    </button>
+    <button class="tab-btn" id="regTabBtn" onclick="switchTab('register')">
+      <span data-zh>注册</span><span data-en>Register</span>
+    </button>
+  </div>
+
+  <div class="form-panel active" id="loginPanel">
+    <form onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label><span data-zh>用户名</span><span data-en>Username</span></label>
+        <input type="text" class="form-input" id="loginUsername" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label><span data-zh>密码</span><span data-en>Password</span></label>
+        <input type="password" class="form-input" id="loginPassword" required autocomplete="current-password">
+      </div>
+      <div class="form-group auth-mode-group">
+        <label class="auth-mode-label" for="authMode"><span data-zh>用户类型</span><span data-en>User Type</span></label>
+        <div class="auth-mode-select">
+          <select class="form-select" id="authMode" onchange="switchAuthMode()">
+            <option value="local" id="optLocal">系统用户</option>
+          </select>
+          <span class="select-arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          </span>
+        </div>
+      </div>
+      <button type="submit" class="submit-btn" id="loginBtn">
+        <span data-zh>登录并连接 Agent</span><span data-en>Login & Connect to Agent</span>
+      </button>
+    </form>
+    <div class="error-msg" id="loginError"></div>
+  </div>
+
+  <div class="form-panel" id="registerPanel">
+    <div class="hint-text"><span data-zh>注册为本地系统用户</span><span data-en>Register as a local system user</span></div>
+    <form onsubmit="handleRegister(event)">
+      <div class="form-group">
+        <label><span data-zh>用户名</span><span data-en>Username</span></label>
+        <input type="text" class="form-input" id="regUsername" required minlength="3" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label><span data-zh>密码</span><span data-en>Password</span></label>
+        <input type="password" class="form-input" id="regPassword" required minlength="6" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label><span data-zh>确认密码</span><span data-en>Confirm Password</span></label>
+        <input type="password" class="form-input" id="regConfirm" required minlength="6" autocomplete="new-password">
+      </div>
+      <button type="submit" class="submit-btn" id="regBtn">
+        <span data-zh>注册并连接 Agent</span><span data-en>Register & Connect to Agent</span>
+      </button>
+    </form>
+    <div class="error-msg" id="regError"></div>
+  </div>
+
+  <div class="version-badge">Oracle Community v4.2.0</div>
+</div>
+
+<script>
+var _langTexts={
+  optLocal:{zh:'系统用户',en:'System User'},
+  optLdap:{zh:'LDAP 统一认证',en:'LDAP Authentication'}
+};
+
+function updateLangTexts(){
+  var lang=document.documentElement.getAttribute('data-lang')||'en';
+  document.getElementById('optLocal').textContent=_langTexts.optLocal[lang];
+  document.getElementById('optLdap').textContent=_langTexts.optLdap[lang];
+}
+
+function switchAuthMode(){}
+
+function switchTab(tab){
+  document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active')});
+  document.querySelectorAll('.form-panel').forEach(function(p){p.classList.remove('active')});
+  if(tab==='login'){
+    document.querySelectorAll('.tab-btn')[0].classList.add('active');
+    document.getElementById('loginPanel').classList.add('active');
+  }else{
+    document.querySelectorAll('.tab-btn')[1].classList.add('active');
+    document.getElementById('registerPanel').classList.add('active');
+  }
+}
+
+function handleLogin(e){
+  e.preventDefault();
+  var btn=document.getElementById('loginBtn');
+  btn.disabled=true;
+  document.getElementById('loginError').textContent='';
+  var username=document.getElementById('loginUsername').value;
+  var password=document.getElementById('loginPassword').value;
+  var authMode=document.getElementById('authMode').value;
+  fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password,auth_mode:authMode})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    btn.disabled=false;
+    if(d.success){
+      if(d.has_agent){
+        window.location.href='/portal/chat';
+      }else{
+        document.getElementById('loginError').textContent=document.documentElement.getAttribute('data-lang')==='zh'?'暂无可用 Agent，请稍后再试':'No agent available, please try again later';
+      }
+    }else{
+      document.getElementById('loginError').textContent=d.error||'Login failed';
+    }
+  })
+  .catch(function(err){
+    btn.disabled=false;
+    document.getElementById('loginError').textContent='Connection error';
+  });
+}
+
+function handleRegister(e){
+  e.preventDefault();
+  var btn=document.getElementById('regBtn');
+  btn.disabled=true;
+  document.getElementById('regError').textContent='';
+  var username=document.getElementById('regUsername').value;
+  var password=document.getElementById('regPassword').value;
+  var confirm=document.getElementById('regConfirm').value;
+  if(password!==confirm){
+    btn.disabled=false;
+    document.getElementById('regError').textContent=document.documentElement.getAttribute('data-lang')==='zh'?'两次密码不一致':'Passwords do not match';
+    return;
+  }
+  fetch('/portal/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    btn.disabled=false;
+    if(d.success){
+      fetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password,auth_mode:'local'})})
+      .then(function(r2){return r2.json()})
+      .then(function(d2){
+        if(d2.success&&d2.has_agent){
+          window.location.href='/portal/chat';
+        }else{
+          switchTab('login');
+          document.getElementById('loginUsername').value=username;
+          document.getElementById('loginError').textContent=document.documentElement.getAttribute('data-lang')==='zh'?'注册成功，但暂无可用 Agent':'Registered, but no agent available';
+        }
+      });
+    }else{
+      document.getElementById('regError').textContent=d.error||'Registration failed';
+    }
+  })
+  .catch(function(err){
+    btn.disabled=false;
+    document.getElementById('regError').textContent='Connection error';
+  });
+}
+
+function toggleLang(){
+  var html=document.documentElement;
+  var cur=html.getAttribute('data-lang');
+  var next=cur==='en'?'zh':'en';
+  html.setAttribute('data-lang',next);
+  localStorage.setItem('lang',next);
+  updateLangTexts();
+}
+(function(){
+  var saved=localStorage.getItem('lang');
+  if(saved)document.documentElement.setAttribute('data-lang',saved);
+  updateLangTexts();
+})();
+</script>
+</body>
+</html>

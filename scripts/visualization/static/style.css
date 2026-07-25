@@ -1,0 +1,3 @@
+/* Compatibility entry point for older integrations. Product pages use the
+   Chuanxu foundation and page extensions directly. */
+@import url("chuanxu.css");
