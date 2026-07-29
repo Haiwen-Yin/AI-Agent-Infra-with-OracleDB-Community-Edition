@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.2.0 · Community Edition · Oracle**
+> **v4.3.0 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -19,7 +19,7 @@ package, and implementation references.
 
 ## Product Overview
 
-AI Agent Infra with Oracle is a database-backed infrastructure layer for operating AI Agents on Oracle AI Database 26ai. It persists Agent identities, memory, knowledge, graph relationships, workspaces, specifications, task plans, Skills, and execution state in the database so that Agents can share governed context across sessions.
+Chuanxu (川序) is an AI Agent Management Platform whose technical project name is AI Agent Infra with DB. It makes Agent operation observable, controllable, and traceable by keeping identity, memory, knowledge, workspaces, Skills, execution state, and governance facts in a database. This package provides the Oracle adapter and its Community or Enterprise edition boundary.
 
 This release is a **Skill-first, framework-neutral integration package**.
 Any Agent runtime that can install or read `SKILL.md` and execute the packaged
@@ -34,13 +34,11 @@ memory, knowledge, workspaces, task plans, Skills, execution state, and, in
 Enterprise, governed resources, authorization decisions, multi-party approval,
 emergency control, bounded audit, and evidence export.
 
-The runtime combines Oracle vector search, full-text search, property graph queries, JSON-relational data, PL/SQL APIs, and database scheduling. Admin and Business Agent identities are separated, and Business Agent requests fail closed instead of falling back to schema-owner access.
+This Community Edition provides the complete core runtime, including memory and knowledge management, hybrid search, Agent lifecycle management, workspaces and branches, specification and Loop workflows, collaboration, Harness templates, MCP integration, Portal chat, the management Dashboard, Channels, Barriers, and the registered-Agent admission boundary for external Skill-first runtimes.
 
-This Community Edition provides the complete core runtime, including memory and knowledge management, hybrid search, Agent lifecycle management, workspaces and branches, specification and Loop workflows, collaboration, Harness templates, MCP integration, Portal chat, the management Dashboard, and the registered-Agent admission boundary for external Skill-first runtimes.
+## Graph Engineering and Runtime Profiles
 
-## v4.2.x Experimental Graph Engineering
-
-This package uses the experimental-4.2 profile. It includes versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the execution authority. Contracts may evolve within v4.2.x and can graduate from the latest validated v4.2.x baseline to the next Stable release.
+This package uses the `production` profile in v4.3.0. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. `production` enables the validated stable core, `graph-preview` exposes preview Graph controls, and `development` enables diagnostics.
 
 ## 1. Package Contents
 
@@ -51,7 +49,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.2.0.md   # release notes for this version
+├── RELEASE_NOTES_v4.3.0.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -63,6 +61,8 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     ├── poc_readiness.py      # non-destructive POC prerequisite check
     ├── poc_evidence.py       # four-week acceptance evidence assembly
     ├── support_bundle.py     # bounded, redacted support archive
+    ├── migration_runner.py   # additive migration, retry, and ledger runner
+    ├── live_db_validator.py  # read-only database capability probe
     ├── deploy_oracle.py
     ├── lib/                  # business modules
     │   ├── connection.py     # oracledb connection layer (adapter)
@@ -79,8 +79,20 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     │   ├── 7_v4_0_1_migration.sql
     │   ├── 8_v4_1_0_registration.sql # registered-Agent identity (all editions)
     │   └── 8_v4_1_0_governance.sql  # Enterprise governance only
+    │   ├── 9_v4_2_0_graph_engineering.sql
+    │   ├── 10_v4_2_0_graph_runtime.sql
+    │   ├── 11_v4_2_0_graph_control.sql
+    │   ├── 12_v4_2_0_graph_edge_scope.sql
+    │   ├── 13_v4_2_0_scheduler_ha.sql # Enterprise overlay only
+    │   ├── 14_v4_2_0_graph_triggers.sql
+    │   ├── 15_v4_2_1_executor_registry.sql # internal closure
+    │   ├── 16_v4_3_0_identity_channels.sql
+    │   ├── 17_v4_3_0_governance_lifecycle.sql
+    │   └── 18_v4_3_0_security_lifecycle.sql
     ├── tests/                # pytest suite
-    ├── tools/                # encrypt_config.py
+    ├── tools/                # runtime encryption and release build helpers
+    │   ├── encrypt_config.py
+    │   └── build_cryptography_wheel.sh # optional RHEL 8 wheel build
     └── visualization/
         ├── server.py         # HTTP server
         ├── static/
@@ -106,6 +118,19 @@ For offline environments, use the bundled `vendor/` wheels:
 ```bash
 ./scripts/install_offline.sh
 ```
+
+The release may carry two `cryptography==49.0.0` wheels: a source-built
+`manylinux_2_28` wheel for RHEL 8/glibc 2.28 and the upstream `manylinux_2_34`
+wheel for newer systems. `pip` and `scripts/verify_deps.py` select the wheel
+that matches the host. See `docs/cryptography-build.md` for the reproducible
+RHEL 8 build procedure; customers on newer systems do not need to rebuild it.
+The verifier also walks the mandatory `Requires-Dist` metadata of selected
+wheels. Any transitive wheel required by the base installation must therefore
+be present and compatible, even when it is not repeated as a direct pin in
+`requirements.txt`; optional extras are excluded.
+The current v4.3.0 package contains the verified glibc 2.28 compatibility
+wheel, so it is offline-complete on this baseline; `verify_deps.py` still
+fails closed rather than using an incompatible newer-host wheel.
 
 ## 3. Configuration
 
@@ -151,8 +176,8 @@ master key are always restricted to owner-only (`0600`) access.
 
 Manual encrypt / decrypt is also available:
 ```bash
-python3 scripts/tools/encrypt_config.py encrypt config.json
-python3 scripts/tools/encrypt_config.py decrypt config.json
+"$PYTHON_BIN" scripts/tools/encrypt_config.py encrypt config.json
+"$PYTHON_BIN" scripts/tools/encrypt_config.py decrypt config.json
 ```
 
 Environment variables override `config.json` values (see `config.py`).
@@ -162,7 +187,7 @@ Environment variables override `config.json` values (see `config.py`).
 ### Database schema
 
 ```bash
-python3.14 scripts/deploy_oracle.py <user> <pass> <dsn> scripts/deploy/1_schema.sql
+"$PYTHON_BIN" scripts/deploy_oracle.py <user> <pass> <dsn> scripts/deploy/1_schema.sql
 ```
 
 This runs the deploy scripts in `scripts/deploy/`:
@@ -170,45 +195,59 @@ This runs the deploy scripts in `scripts/deploy/`:
 `4_harness_templates.sql`. Community packages then run
 `8_v4_1_0_registration.sql`; Enterprise packages run
 `8_v4_1_0_governance.sql` (which includes the registered-Agent table) and the
-database-specific Enterprise security scripts.
+database-specific Enterprise security scripts. For the integrated v4.3.0
+profile, the migration runner then applies the nine common Graph/lifecycle
+scripts `9`, `10`, `11`, `12`, `14`, `15`, `16`, `17`, and `18` in numeric dependency
+order. Enterprise packages additionally apply
+`13_v4_2_0_scheduler_ha.sql` between `12` and `14`; this makes the total nine
+scripts for Community and ten for Enterprise in this migration tail.
 
 ### Start the server
 
 ```bash
 ./start_web_server.sh
-# or
-python3.14 scripts/visualization/server.py
+# or, after selecting any Python 3.14+ runtime
+source scripts/python_runtime.sh
+export PYTHON_BIN="$(cx_resolve_python)"
+cx_prepare_python_environment "$PYTHON_BIN"
+PYTHONPATH=scripts "$PYTHON_BIN" -m uvicorn web_app:app --host 0.0.0.0 --port 8001
 ```
 
-The portal is served at `http://<host>:8001/`. Default admin login:
-`admin` / `admin`.
+The Chuanxu application is served at `http://<host>:8001/app/monitor`.
+There is no universal default password. Create or approve the first
+administrator through the deployment bootstrap procedure, then use the
+registration and role workflow documented in `docs/api-reference.md`.
 
-## 5. API Surface
+## 5. Using the package
 
-The primary management and Portal endpoints are listed below.
+1. Fill `config.json` with the target database and model endpoint settings.
+2. Deploy the database schema with the adapter-specific command above.
+3. Start the server, complete human login, and create a one-time Agent
+   Enrollment Token before registering an external Agent.
 
-| Endpoint                      | Method | Description                       |
-|-------------------------------|--------|-----------------------------------|
-| `/api/health`                 | GET    | Liveness probe, returns version   |
-| `/api/login`                  | POST   | Admin login, returns session_id   |
-| `/api/knowledge`              | GET    | Knowledge entity list             |
-| `/api/memory`                 | GET    | Memory nodes and edges            |
-| `/api/agents`                 | GET    | Registered agents & sessions      |
-| `/api/graph/all`              | GET    | All graph nodes and edges         |
-| `/api/graph/stats`            | GET    | Graph statistics                  |
-| `/api/graph/search?q=...`     | GET    | Entity search                     |
-| `/api/tasks`                  | GET    | Task plans                        |
-| `/api/monitor/overview`       | GET    | Agent overview                    |
-| `/api/monitor/agents`         | GET    | Agent status list                 |
-| `/api/monitor/metrics`        | GET    | Performance metrics               |
-| `/portal/api/login`           | POST   | End-user portal login             |
-| `/portal/api/chat/send`       | POST   | Portal chat (stream or non-stream)|
+The complete HTTP, MCP, Skill, Channel, Barrier, Gateway, and governance
+contracts are documented in `SKILL.md` and `docs/api-reference.md`. The package
+does not require Node.js at runtime; the offline Web assets are already built.
+
+New integrations should use the canonical Principal-aware v4.3.0 API and its
+REST, MCP, or Skill credentials. Established v4.1 routes and Python facades are
+legacy compatibility entry points; they remain available during migration but
+must not be treated as an authorization bypass or as direct database APIs.
 
 ## 6. Testing
 
 ```bash
-python3.14 -m pytest scripts/tests/ -q --tb=no
+source scripts/python_runtime.sh
+export PYTHON_BIN="$(cx_resolve_python)"
+cx_prepare_python_environment "$PYTHON_BIN"
+"$PYTHON_BIN" -m pytest scripts/tests/ -q --tb=no
 ```
+
+The generated adapter loads the database connection from a local
+owner-only (`0600`) `config.json` in the package root. The shared pytest
+fixture environment variables do not replace that runtime file; use the
+config wizard or a temporary package copy for database-backed tests, and do
+not commit or package the real configuration.
 
 ## 7. Community Edition Features
 
@@ -224,7 +263,7 @@ python3.14 -m pytest scripts/tests/ -q --tb=no
 See `docs/` for in-depth material: `architecture.md`, `api-reference.md`,
 `security.md`, `deployment.md`, `minimum-privileges.md`, `migration.md`,
 `visualization.md`, `workspace.md`, `harness.md`, `loop-engineering.md`,
-`poc-readiness.md`.
+`poc-readiness.md`, `cryptography-build.md`, `python-runtime.md`.
 
 For AI agents working on this codebase, see `docs/AGENTS.md`.
 

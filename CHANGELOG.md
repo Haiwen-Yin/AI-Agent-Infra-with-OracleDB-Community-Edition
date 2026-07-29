@@ -12,6 +12,58 @@ The released technical packages are distributions of **Chuanxu (川序)**, the
 **AI Agent Management Platform**. `AI Agent Infra with DB` remains the unified
 technical project name.
 
+## [4.3.0] - 2026-07-29
+
+See `RELEASE_NOTES_v4.3.0.md` for the integrated release contract. The former
+v4.2.1 Graph closure is an internal milestone consumed by this release and is
+not published as a separate edition or archive.
+
+### Identity, enrollment, and controlled collaboration
+
+- Added database-backed Human and Agent Principals, Sessions, CSRF, Argon2id
+  password handling, registration approval, organizations, Security Domains,
+  delegated roles, scopes, permission versions, and fail-closed access checks.
+- Added one-time user-sponsored Enrollment Tokens that bind Agent owner,
+  sponsor, runtime, environment, domain, risk tier, quota, and credential
+  metadata without storing reusable plaintext secrets.
+- Added Channel, mixed human/Agent messages, Action Cards, Barrier arrivals,
+  participant snapshots, and node-scoped Agent Gateway instance fencing.
+- Added local-node restart recovery that never revokes another Dashboard node's
+  active Agent instances.
+
+### Graph integration and packaging
+
+- Integrated the internal Graph Executor, durable runtime, event delivery,
+  evidence, retry, fencing, and v4.1 Task/Loop compatibility work into the
+  shared v4.3.0 source line.
+- Added the configurable Graph maturity boundary: the v4.3.0 production
+  profile is the current production recommendation after the complete live
+  evidence gate passed; Graph preview controls require explicit enablement.
+- Builds contain only `RELEASE_NOTES_v4.3.0.md`, with six edition-specific
+  license and feature boundaries checked by the release gate.
+- Offline dependency packaging now accepts multiple platform wheels for one
+  pinned version. `cryptography==49.0.0` is documented with a source-built
+  `manylinux_2_28` RHEL 8 wheel alongside the upstream `manylinux_2_34` wheel;
+  the installer and verifier select the compatible artifact. `verify_deps.py`
+  also walks mandatory wheel metadata recursively, including platform markers,
+  so an incomplete transitive wheelhouse fails closed.
+- Fixed PostgreSQL Graph traversal predicates for legacy text edge endpoints:
+  numeric entity IDs and historical values such as `PG_AGENT_001` now share a
+  text comparison boundary, so invalid numeric casts cannot abort Graph
+  queries while valid numeric edges continue to resolve.
+- Redirected the legacy Dashboard login route to the Principal-aware
+  application shell so authentication cannot fall into a legacy
+  password-session loop.
+- Changed MFA enforcement to an explicit User Management policy. Administrator
+  roles no longer force MFA before the first Dashboard login, while enabling
+  enforcement requires an already confirmed factor and revokes existing
+  Sessions.
+- Fixed Portal SSE buffering across both the FastAPI compatibility bridge and
+  the upstream LLM reader; token chunks now remain incremental end to end.
+- Fixed unrestricted user-list and Principal-visibility queries on Oracle and
+  YashanDB by omitting bind values that are absent after `ALL`-scope SQL
+  simplification.
+
 ## [4.2.0] - 2026-07-25
 
 See `RELEASE_NOTES_v4.2.0.md` for the current Experimental Graph Engineering
