@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.3.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chuanxu Oracle Community v4.3.0 - Graph</title>
+<script src="/static/vis-network.min.js"></script>
+<link rel="stylesheet" href="/static/pages/graph.css">
+<script src="/static/chuanxu-prepaint.js"></script>
+<link rel="stylesheet" href="/static/chuanxu.css">
+<script src="/static/chuanxu.js" defer></script>
+<style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
+</head>
+<body class="cx-ui">
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <h5>Chuanxu</h5>
+    <small>Oracle Community</small>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/knowledge"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#book"></use></svg></span><span data-zh>知识</span><span data-en>Knowledge</span></a>
+    <a href="/memory"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#brain"></use></svg></span><span data-zh>记忆</span><span data-en>Memory</span></a>
+    <a href="/agents"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#agent"></use></svg></span><span data-zh>智能体</span><span data-en>Agents</span></a>
+    <a href="/tasks"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#task"></use></svg></span><span data-zh>任务</span><span data-en>Tasks</span></a>
+    <a href="/workspaces"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#workspace"></use></svg></span><span data-zh>工作区</span><span data-en>Workspaces</span></a>
+    <a href="/graph" class="active"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#graph"></use></svg></span><span data-zh>图探索</span><span data-en>Graph Explorer</span></a>
+    <a href="/specs"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#spec"></use></svg></span><span data-zh>规格</span><span data-en>Specs</span></a>
+    <a href="/skills"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#skill"></use></svg></span><span data-zh>技能</span><span data-en>Skills</span></a>
+    <a href="/branches"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#branch"></use></svg></span><span data-zh>分支</span><span data-en>Branches</span></a>
+    <a href="/collab"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#collab"></use></svg></span><span data-zh>协作</span><span data-en>Collab</span></a>
+    <a href="/loops"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#loop"></use></svg></span><span data-zh>循环</span><span data-en>Loops</span></a>
+    <a href="/monitor"><span class="icon"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#monitor"></use></svg></span><span data-zh>监控</span><span data-en>Monitor</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="lang-toggle" onclick="toggleLang()"><span data-zh>English</span><span data-en>中文</span></button>
+    <a href="/logout" class="logout-btn"><svg class="cx-nav-icon" aria-hidden="true"><use href="/static/chuanxu-icons.svg#logout"></use></svg> <span data-zh>登出</span><span data-en>Logout</span></a>
+    <div class="timer-display" id="autoLogoutTimer">05:00</div>
+  </div>
+</div>
+<div class="main-content">
+  <div class="top-bar">
+    <div><h4><span data-zh>Graph Engineering</span><span data-en>Graph Engineering</span></h4><small class="cx-experimental-badge">Experimental v4.3.0</small></div>
+    <div class="stats-bar">
+      <span id="vertexCount">-</span>
+      <span id="edgeCount">-</span>
+      <span id="avgDegree">-</span>
+    </div>
+  </div>
+  <div class="content-area graph-page-content">
+    <nav class="cx-page-tabs graph-tabs" aria-label="Graph views">
+      <button class="cx-page-tab active" type="button" data-graph-view="explorer"><span data-zh>图探索</span><span data-en>Explorer</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="definitions"><span data-zh>执行图</span><span data-en>Definitions</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="runs"><span data-zh>运行监控</span><span data-en>Run Monitor</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="executors"><span data-zh>执行器</span><span data-en>Executors</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="events"><span data-zh>事件与死信</span><span data-en>Events &amp; Dead Letters</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="artifacts"><span data-zh>产物</span><span data-en>Artifacts</span></button>
+    </nav>
+    <section class="graph-view active" id="graph-view-explorer">
+    <div class="search-row">
+      <input type="text" id="searchInput" data-ph-zh="搜索实体..." data-ph-en="Search entities..." onkeydown="if(event.key==='Enter')doSearch()">
+      <select id="typeSelect">
+        <option value="" data-label-zh="所有类型" data-label-en="All types">所有类型</option>
+        <option value="MEMORY" data-label-zh="记忆" data-label-en="Memory">记忆</option>
+        <option value="KNOWLEDGE" data-label-zh="知识" data-label-en="Knowledge">知识</option>
+        <option value="TASK_OUTPUT" data-label-zh="任务输出" data-label-en="Task output">任务输出</option>
+        <option value="EXPERIENCE" data-label-zh="经验" data-label-en="Experience">经验</option>
+        <option value="HARNESS_TEMPLATE" data-label-zh="模板" data-label-en="Harness template">模板</option>
+        <option value="SPEC" data-label-zh="规格" data-label-en="Spec">规格</option>
+        <option value="SKILL" data-label-zh="技能" data-label-en="Skill">技能</option>
+        <option value="LOOP_DEFINITION" data-label-zh="循环定义" data-label-en="Loop definition">循环定义</option>
+      </select>
+      <button onclick="doSearch()"><span data-zh>搜索</span><span data-en>Search</span></button>
+    </div>
+    <div class="filter-bar" id="graphTypeFilters"><span class="filter-label"><span data-zh>显示类型</span><span data-en>Visible types</span></span><button class="filter-badge active" type="button" data-graph-type="MEMORY" data-tone="info" aria-pressed="true"><span data-zh>记忆</span><span data-en>Memory</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="KNOWLEDGE" data-tone="success" aria-pressed="true"><span data-zh>知识</span><span data-en>Knowledge</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="TASK_OUTPUT" data-tone="warning" aria-pressed="true"><span data-zh>任务输出</span><span data-en>Task output</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="EXPERIENCE" data-tone="danger" aria-pressed="true"><span data-zh>经验</span><span data-en>Experience</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="HARNESS_TEMPLATE" aria-pressed="true"><span data-zh>模板</span><span data-en>Template</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="SPEC" data-tone="warning" aria-pressed="true"><span data-zh>规格</span><span data-en>Spec</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="SKILL" data-tone="success" aria-pressed="true"><span data-zh>技能</span><span data-en>Skill</span><span class="count">0</span></button><button class="filter-badge active" type="button" data-graph-type="LOOP_DEFINITION" data-tone="muted" aria-pressed="true"><span data-zh>循环定义</span><span data-en>Loop definition</span><span class="count">0</span></button></div>
+    <div class="graph-canvas-wrap"><div id="visNetwork"></div>
+    <div class="detail-panel" id="nodeDetail">
+      <h5><span data-zh>节点详情</span><span data-en>Node Detail</span><button onclick="document.getElementById('nodeDetail').style.display='none'" aria-label="Close" style="float:right;cursor:pointer;background:none;border:none;color:var(--cx-text-secondary)">&times;</button></h5>
+      <div id="nodeDetailContent"></div>
+    </div></div>
+    </section>
+    <section class="graph-view" id="graph-view-definitions">
+      <div class="execution-filter-panel cx-panel" id="executionFilterPanel">
+        <div class="execution-filter-group">
+          <span class="filter-label"><span data-zh>图类型</span><span data-en>Graph types</span></span>
+          <div class="execution-filter-options" id="executionGraphTypeFilters"><span class="muted"><span data-zh>选择执行图版本后加载</span><span data-en>Load after selecting a graph version</span></span></div>
+        </div>
+        <div class="execution-filter-group">
+          <span class="filter-label"><span data-zh>节点类型</span><span data-en>Node types</span></span>
+          <div class="execution-filter-options" id="executionNodeTypeFilters"><span class="muted"><span data-zh>选择执行图版本后加载</span><span data-en>Load after selecting a graph version</span></span></div>
+        </div>
+        <div class="execution-filter-summary" id="executionFilterSummary"><span data-zh>尚未选择执行图版本</span><span data-en>No execution graph version selected</span></div>
+      </div>
+      <div class="graph-definition-layout">
+        <aside class="cx-panel graph-registry-panel">
+          <div class="panel-heading"><h5><span data-zh>图定义</span><span data-en>Graph Definitions</span></h5><button class="btn-sm btn-info" type="button" id="refreshGraphs"><span data-zh>刷新</span><span data-en>Refresh</span></button></div>
+          <div class="inline-form"><input id="newGraphName" data-ph-zh="图名称" data-ph-en="Graph name"><button class="btn-sm btn-success" type="button" id="createGraph"><span data-zh>新建</span><span data-en>New</span></button></div>
+          <div id="graphList" class="registry-list"><div class="cx-empty"><span data-zh>正在加载...</span><span data-en>Loading...</span></div></div>
+          <div class="registry-types"><h6><span data-zh>已注册类型</span><span data-en>Registered Types</span></h6><div id="graphTypeList" class="type-list"></div></div>
+        </aside>
+        <section class="cx-panel graph-editor-panel">
+          <div class="panel-heading"><div><h5><span data-zh>版本编辑器</span><span data-en>Version Editor</span></h5><span class="panel-subtitle" id="definitionSelection">-</span></div><div class="editor-actions"><button class="btn-sm btn-info" type="button" id="loadVersion"><span data-zh>载入</span><span data-en>Load</span></button><button class="btn-sm btn-success" type="button" id="createDraft"><span data-zh>创建 Draft</span><span data-en>Create Draft</span></button><button class="btn-sm btn-muted" type="button" id="exportVersion"><span data-zh>导出 JSON</span><span data-en>Export JSON</span></button><button class="btn-sm btn-muted" type="button" id="importVersion"><span data-zh>导入 Draft</span><span data-en>Import Draft</span></button></div></div>
+          <div class="editor-meta"><label><span data-zh>图</span><span data-en>Graph</span><select id="graphSelect"></select></label><label><span data-zh>版本</span><span data-en>Version</span><select id="versionSelect"></select></label></div>
+          <textarea id="definitionEditor" class="json-editor" spellcheck="false" aria-label="Graph JSON"></textarea>
+          <div class="editor-footer"><span class="risk-indicator" id="definitionRisk">-</span><div class="editor-actions"><button class="btn-sm btn-info" type="button" id="compileVersion"><span data-zh>编译与校验</span><span data-en>Compile &amp; Validate</span></button><button class="btn-sm btn-success" type="button" id="publishVersion"><span data-zh>发布</span><span data-en>Publish</span></button><button class="btn-sm btn-warn" type="button" id="archiveVersion"><span data-zh>归档</span><span data-en>Archive</span></button><button class="btn-sm btn-purple" type="button" id="startRun"><span data-zh>启动运行</span><span data-en>Start Run</span></button></div></div>
+          <pre id="definitionDiagnostics" class="diagnostic-panel" aria-live="polite"></pre>
+        </section>
+      </div>
+      <section class="cx-panel execution-preview-panel">
+        <div class="panel-heading"><div><h5><span data-zh>执行图预览</span><span data-en>Execution Graph Preview</span></h5><span class="panel-subtitle" id="executionSelection"><span data-zh>选择版本后显示节点与边</span><span data-en>Select a version to display nodes and edges</span></span></div></div>
+        <div id="executionGraphNetwork" class="execution-graph-network"><div class="cx-empty"><span data-zh>暂无执行图数据</span><span data-en>No execution graph data</span></div></div>
+      </section>
+    </section>
+    <section class="graph-view" id="graph-view-runs">
+      <div class="run-monitor-layout">
+        <aside class="cx-panel run-list-panel"><div class="panel-heading"><h5><span data-zh>Graph Runs</span><span data-en>Graph Runs</span></h5><button class="btn-sm btn-info" type="button" id="refreshRuns"><span data-zh>刷新</span><span data-en>Refresh</span></button></div><div id="runList" class="registry-list"><div class="cx-empty"><span data-zh>正在加载...</span><span data-en>Loading...</span></div></div></aside>
+        <section class="cx-panel run-detail-panel"><div class="panel-heading"><div><h5><span data-zh>运行详情</span><span data-en>Run Detail</span></h5><span class="panel-subtitle" id="runSelection">-</span></div><div class="editor-actions"><button class="btn-sm btn-warn" type="button" data-run-action="pause"><span data-zh>暂停</span><span data-en>Pause</span></button><button class="btn-sm btn-success" type="button" data-run-action="resume"><span data-zh>恢复</span><span data-en>Resume</span></button><button class="btn-sm btn-danger" type="button" data-run-action="cancel"><span data-zh>取消</span><span data-en>Cancel</span></button><button class="btn-sm btn-muted" type="button" data-run-action="fork"><span data-zh>分叉</span><span data-en>Fork</span></button></div></div><div id="runSummary" class="run-summary"></div><div class="run-monitor-grid"><div><h6><span data-zh>节点</span><span data-en>Nodes</span></h6><div class="table-responsive"><table class="data-table"><thead><tr><th>Node</th><th>Status</th><th>Iteration</th><th>Updated</th></tr></thead><tbody id="runNodes"></tbody></table></div></div><div><h6><span data-zh>Trace</span><span data-en>Trace</span></h6><div class="table-responsive"><table class="data-table"><thead><tr><th>Event</th><th>Status</th><th>Created</th></tr></thead><tbody id="runTrace"></tbody></table></div></div></div><div class="snapshot-block"><h6><span data-zh>当前状态</span><span data-en>Current State</span></h6><pre id="runSnapshot" class="state-preview">-</pre></div></section>
+        <div class="run-evidence-grid">
+          <div><h6><span data-zh>运行指标</span><span data-en>Run Metrics</span></h6><pre id="runMetrics" class="state-preview">-</pre></div>
+          <div><h6><span data-zh>评估结果</span><span data-en>Evaluations</span></h6><div class="table-responsive"><table class="data-table"><thead><tr><th>Evaluator</th><th>Level</th><th>Route</th><th>Created</th></tr></thead><tbody id="runEvaluations"></tbody></table></div></div>
+          <div><h6><span data-zh>治理事件</span><span data-en>Governance Events</span></h6><div class="table-responsive"><table class="data-table"><thead><tr><th>Type</th><th>Actor</th><th>Reason</th><th>Created</th></tr></thead><tbody id="runGovernanceEvents"></tbody></table></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="graph-view" id="graph-view-executors">
+      <section class="cx-panel graph-ops-panel">
+        <div class="panel-heading"><div><h5><span data-zh>执行器注册表</span><span data-en>Executor Registry</span></h5><span class="panel-subtitle"><span data-zh>内置执行器不可变；扩展执行器必须使用声明式契约</span><span data-en>Built-ins are immutable; extensions use declarative contracts</span></span></div><button class="btn-sm btn-info" type="button" id="refreshExecutorsTop"><span data-zh>刷新</span><span data-en>Refresh</span></button></div>
+        <div class="inline-form executor-form"><input id="executorNameTop" data-ph-zh="执行器名称" data-ph-en="Executor name"><input id="executorVersionTop" value="1.0" data-ph-zh="版本" data-ph-en="Version"><select id="executorKindTop"><option value="WORKER">WORKER</option><option value="CONTROL">CONTROL</option><option value="WAIT">WAIT</option></select><input id="executorNodeTypesTop" data-ph-zh="节点类型（逗号分隔）" data-ph-en="Node types (comma separated)"><input id="executorEffectsTop" value="NONE" data-ph-zh="副作用类型（逗号分隔）" data-ph-en="Side effects (comma separated)"><button class="btn-sm btn-success" type="button" id="registerExecutorTop"><span data-zh>注册</span><span data-en>Register</span></button></div>
+        <div class="panel-subtitle executor-guidance"><span data-zh>注册和状态变更均要求管理员身份及操作原因；执行器本身不接受 Python、SQL、Shell 或任意回调代码。</span><span data-en>Registration and status changes require administrator identity and a reason; executors never accept Python, SQL, shell, or arbitrary callbacks.</span></div>
+        <div class="table-responsive"><table class="data-table"><thead><tr><th><span data-zh>名称</span><span data-en>Name</span></th><th><span data-zh>版本</span><span data-en>Version</span></th><th><span data-zh>类型</span><span data-en>Kind</span></th><th><span data-zh>节点</span><span data-en>Nodes</span></th><th><span data-zh>状态</span><span data-en>Status</span></th><th><span data-zh>来源</span><span data-en>Source</span></th><th><span data-zh>操作</span><span data-en>Action</span></th></tr></thead><tbody id="executorListTop"></tbody></table></div>
+      </section>
+    </section>
+    <section class="graph-view" id="graph-view-events">
+      <div class="graph-ops-layout event-ops-layout">
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>Inbox 待处理</span><span data-en>Pending Inbox</span></h5><span class="panel-subtitle"><span data-zh>失败事件按退避时间重试，毒事件进入死信</span><span data-en>Failed events retry with backoff; poison events go to dead letters</span></span></div><button class="btn-sm btn-info" type="button" id="refreshEvents"><span data-zh>刷新</span><span data-en>Refresh</span></button></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Event</th><th>Status</th><th>Attempts</th><th>Available</th><th>Error</th></tr></thead><tbody id="inboxList"></tbody></table></div></section>
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>死信</span><span data-en>Dead Letters</span></h5><span class="panel-subtitle"><span data-zh>仅通过带原因的显式重放恢复</span><span data-en>Replay is explicit and requires a reason</span></span></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Event</th><th>Attempts</th><th>Error</th><th>Action</th></tr></thead><tbody id="deadLetterList"></tbody></table></div></section>
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>Outbox 待发送</span><span data-en>Pending Outbox</span></h5><span class="panel-subtitle"><span data-zh>发送器先领取，再以 SENT、RETRY 或 DEAD_LETTER 结束</span><span data-en>Dispatchers claim first, then finish as SENT, RETRY, or DEAD_LETTER</span></span></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Event</th><th>Status</th><th>Attempts</th><th>Max</th><th>Available</th></tr></thead><tbody id="outboxList"></tbody></table></div></section>
+      </div>
+    </section>
+    <section class="graph-view" id="graph-view-artifacts">
+      <section class="cx-panel artifacts-panel"><div class="panel-heading"><div><h5><span data-zh>运行产物与证据</span><span data-en>Run Artifacts &amp; Evidence</span></h5><span class="panel-subtitle"><span data-zh>内容通过引用、保留期限和法律保全管理</span><span data-en>Content is managed by reference, retention, and legal hold</span></span></div><button class="btn-sm btn-info" type="button" id="refreshArtifacts"><span data-zh>刷新</span><span data-en>Refresh</span></button></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Media</th><th>Classification</th><th>Size</th><th>Retention</th><th>Hold</th></tr></thead><tbody id="artifactList"></tbody></table></div></section>
+    </section>
+    <div id="graphToast" class="graph-toast" role="status" aria-live="polite"></div>
+  </div>
+</div>
+<script>
+function toggleLang(){var h=document.documentElement;var c=h.getAttribute('data-lang')||'zh';var n=c==='en'?'zh':'en';h.setAttribute('data-lang',n);h.lang=n==='en'?'en':'zh-CN';localStorage.setItem('lang',n);updateGraphSelectLabels();window.dispatchEvent(new CustomEvent('chuanxu-language-change'));}
+
+function graphCurrentLang(){return document.documentElement.getAttribute('data-lang')==='en'?'en':'zh'}
+function graphLabel(zh,en){return graphCurrentLang()==='en'?en:zh}
+function graphEsc(value){return String(value===null||value===undefined?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function graphApi(path,options){return fetch(path,Object.assign({headers:{'Content-Type':'application/json'}},options||{})).then(function(response){return response.json().catch(function(){return {}}).then(function(data){if(!response.ok)throw new Error(data.error||data.message||('HTTP '+response.status));return data})})}
+function graphToast(message,error){var el=document.getElementById('graphToast');if(!el)return;el.textContent=message||'';el.classList.toggle('error',!!error);el.classList.add('show');window.clearTimeout(graphToast.timer);graphToast.timer=window.setTimeout(function(){el.classList.remove('show')},3200)}
+function updateGraphSelectLabels(){document.querySelectorAll('select option[data-label-zh]').forEach(function(option){option.textContent=option.getAttribute('data-label-'+graphCurrentLang())||option.textContent})}
+var riskLevelLabels={LOW:['低','Low'],MEDIUM:['中','Medium'],HIGH:['高','High']};
+function graphRiskLevelLabel(level){var normalized=String(level||'').toUpperCase(),labels=riskLevelLabels[normalized];return labels?graphLabel(labels[0],labels[1]):String(level||'-')}
+function updateDefinitionRisk(level){selectedGraphRiskLevel=String(level||'').toUpperCase();var element=document.getElementById('definitionRisk');if(!element)return;element.textContent=selectedGraphRiskLevel?graphLabel('风险等级: ','Risk level: ')+graphRiskLevelLabel(selectedGraphRiskLevel):'-'}
+
+document.querySelectorAll('[data-graph-view]').forEach(function(button){button.addEventListener('click',function(){var view=button.getAttribute('data-graph-view');document.querySelectorAll('[data-graph-view]').forEach(function(item){item.classList.toggle('active',item===button)});document.querySelectorAll('.graph-view').forEach(function(item){item.classList.toggle('active',item.id==='graph-view-'+view)});if(view==='definitions')loadGraphDefinitions();if(view==='runs')loadGraphRuns();if(view==='executors')loadGraphExecutors();if(view==='events')loadGraphEvents();if(view==='artifacts')loadGraphArtifacts()})})
+
+var typeColors={MEMORY:'#1dd6f6',KNOWLEDGE:'#00a38e',TASK_OUTPUT:'#ffb74d',EXPERIENCE:'#c83c4a',HARNESS_TEMPLATE:'#ba68c8',SPEC:'#ff9800',SKILL:'#007f6f',LOOP_DEFINITION:'#78909c'};
+var network=null,nodes=null,edges=null,graphSourceNodes=[],graphSourceEdges=[];
+var activeGraphTypes=new Set(Object.keys(typeColors));
+var graphVisibleCounts={nodes:0,edges:0};
+var executionNodeColors={START:'#6b7f95',END:'#34495e',AGENT:'#1769d2',MODEL:'#7b4bb5',LOOP:'#008c75',SKILL:'#007f6f',TOOL:'#c06b13',HUMAN:'#b13b54',TIMER:'#64748b',SUBGRAPH:'#0b7285'};
+var executionNodeTypeLabels={START:['开始','Start'],END:['结束','End'],AGENT:['智能体','Agent'],MODEL:['模型','Model'],LOOP:['循环','Loop'],SKILL:['技能','Skill'],TOOL:['工具','Tool'],HUMAN:['人工','Human'],TIMER:['定时器','Timer'],SUBGRAPH:['子图','Subgraph']};
+var executionGraphTypeKindLabels={NODE:['节点','Node'],DECISION:['决策','Decision'],REDUCER:['归约','Reducer'],EVALUATOR:['评估器','Evaluator']};
+var registeredGraphTypes=[],executionGraphTypes=[],executionGraphTypeKeys=new Set(),executionTypeOccurrences={},activeExecutionGraphTypes=new Set();
+var executionDefinitionNodes=[],executionDefinitionEdges=[],activeExecutionNodeTypes=new Set();
+var executionNetwork=null,executionNodes=null,executionEdges=null,selectedGraphRiskLevel='';
+
+function graphPalette(){
+  var styles=getComputedStyle(document.documentElement);
+  var dark=document.documentElement.getAttribute('data-theme')==='dark';
+  return {
+    canvas:styles.getPropertyValue('--cx-canvas').trim()||'#d3dbe4',
+    labelBackground:styles.getPropertyValue('--cx-surface-strong').trim()||(dark?'#172033':'#f4f6f8'),
+    text:styles.getPropertyValue('--cx-text').trim()||'#102033',
+    muted:styles.getPropertyValue('--cx-text-secondary').trim()||'#465a73',
+    edge:dark?'#8296b5':'#6d8096'
+  };
+}
+function graphLabelFont(palette,size,background,foreground){
+  var labelBackground=background||palette.labelBackground;
+  return {color:foreground||palette.text,background:labelBackground,size:size,strokeWidth:5,strokeColor:labelBackground};
+}
+function nodeTextColor(background){
+  var hex=String(background||'').replace('#','');
+  if(hex.length!==6)return '#fff';
+  var rgb=[0,2,4].map(function(i){return parseInt(hex.substring(i,i+2),16)/255;});
+  rgb=rgb.map(function(v){return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});
+  var luminance=.2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];
+  return luminance>.36?'#102033':'#fff';
+}
+function applyGraphTheme(){
+  if(!network||!nodes||!edges)return;
+  var palette=graphPalette();
+  nodes.forEach(function(node){
+    var nodeColor=node.color&&node.color.background||'#666';
+    nodes.update({id:node.id,font:graphLabelFont(palette,14,nodeColor,nodeTextColor(nodeColor))});
+  });
+  edges.forEach(function(edge){
+    edges.update({id:edge.id,color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10)});
+  });
+  network.setOptions({edges:{color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10)}});
+}
+window.addEventListener('chuanxu-theme-change',function(){applyGraphTheme();applyExecutionGraphTheme()});
+
+function updateGraphStats(nodeCount,edgeCount){
+  var zh=document.documentElement.getAttribute('data-lang')==='zh',avg=nodeCount?2*edgeCount/nodeCount:0;
+  graphVisibleCounts={nodes:nodeCount,edges:edgeCount};
+  document.getElementById('vertexCount').textContent=(zh?'节点: ':'Nodes: ')+nodeCount;
+  document.getElementById('edgeCount').textContent=(zh?'边: ':'Edges: ')+edgeCount;
+  document.getElementById('avgDegree').textContent=(zh?'平均度: ':'Avg Degree: ')+avg.toFixed(2);
+}
+window.addEventListener('chuanxu-language-change',function(){updateGraphStats(graphVisibleCounts.nodes,graphVisibleCounts.edges);updateDefinitionRisk(selectedGraphRiskLevel);renderExecutionGraphTypeFilters();renderExecutionNodeTypeFilters();renderExecutionGraph()});
+
+function graphNode(n){
+  var palette=graphPalette(),c=typeColors[n.entity_type]||(n.color&&n.color.background)||'#666';
+  return {id:n.id,label:n.label||n.title||n.id,color:{background:c,border:c,highlight:{background:c,border:'#fff'}},font:graphLabelFont(palette,14,c,nodeTextColor(c)),size:parseInt(n.size)||20,title:n.title||n.entity_type||'',entity_type:n.entity_type||''};
+}
+function graphEdge(e){var palette=graphPalette();return {id:e.id,from:e.from,to:e.to,label:e.label||'',color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10),arrows:'to'};}
+function executionTypeValue(item,name,fallback){return String((item&&item[name])||fallback||'').trim()}
+function executionTypeKey(kind,name,version){return [kind,name,version||'1.0'].map(function(value){return String(value||'').toUpperCase()}).join('/')}
+function executionTypeKindLabel(kind){var labels=executionGraphTypeKindLabels[String(kind||'').toUpperCase()];return labels||[String(kind||'-'),String(kind||'-')]}
+function executionNodeTypeLabel(type){var normalized=String(type||'CONTROL').toUpperCase(),labels=executionNodeTypeLabels[normalized];return labels||[normalized.replace(/_/g,' '),normalized.replace(/_/g,' ')]}
+function executionNodeTypeKey(node){return executionTypeKey('NODE',executionTypeValue(node,'node_type','CONTROL'),executionTypeValue(node,'type_version','1.0'))}
+function executionEdgeTypeKeys(edge){var keys=[executionTypeKey('DECISION',executionTypeValue(edge,'decision_type','FIXED'),'1.0')],config=edge&&edge.config||{},reducer=config.reducer||config.join_reducer||config.reducer_type;if(reducer)keys.push(executionTypeKey('REDUCER',reducer,'1.0'));return keys}
+function executionTypeTone(kind){return {NODE:'info',DECISION:'warning',REDUCER:'success',EVALUATOR:'purple'}[String(kind||'').toUpperCase()]||'muted'}
+function executionTypeLabels(item){var kind=executionTypeValue(item,'type_kind','TYPE'),name=executionTypeValue(item,'type_name','-'),version=executionTypeValue(item,'type_version','1.0'),kindLabels=executionTypeKindLabel(kind);return [kindLabels[0]+'/'+name+' v'+version,kindLabels[1]+'/'+name+' v'+version]}
+function executionTypeFilterMarkup(item,count){var kind=executionTypeValue(item,'type_kind','TYPE'),key=executionTypeKey(kind,executionTypeValue(item,'type_name','-'),executionTypeValue(item,'type_version','1.0')),labels=executionTypeLabels(item),active=activeExecutionGraphTypes.has(key);return '<button class="filter-badge '+(active?'active':'')+'" type="button" data-execution-graph-type="'+graphEsc(key)+'" data-tone="'+executionTypeTone(kind)+'" aria-pressed="'+(active?'true':'false')+'"><span data-zh>'+graphEsc(labels[0])+'</span><span data-en>'+graphEsc(labels[1])+'</span><span class="count">'+count+'</span></button>'}
+function executionNodeTypeFilterMarkup(type,count){var normalized=String(type||'CONTROL').toUpperCase(),labels=executionNodeTypeLabel(normalized),active=activeExecutionNodeTypes.has(normalized);return '<button class="filter-badge '+(active?'active':'')+'" type="button" data-execution-node-type="'+graphEsc(normalized)+'" aria-pressed="'+(active?'true':'false')+'"><span data-zh>'+graphEsc(labels[0])+'</span><span data-en>'+graphEsc(labels[1])+'</span><span class="count">'+count+'</span></button>'}
+function renderExecutionGraphTypeFilters(){var host=document.getElementById('executionGraphTypeFilters');if(!host)return;if(!executionGraphTypes.length){host.innerHTML='<span class="muted"><span data-zh>当前版本未使用已注册图类型</span><span data-en>No registered graph type is used by this version</span></span>';return}host.innerHTML=executionGraphTypes.map(function(item){var key=executionTypeKey(executionTypeValue(item,'type_kind','TYPE'),executionTypeValue(item,'type_name','-'),executionTypeValue(item,'type_version','1.0'));return executionTypeFilterMarkup(item,executionTypeOccurrences[key]||0)}).join('');host.querySelectorAll('[data-execution-graph-type]').forEach(function(button){button.onclick=function(){var key=button.dataset.executionGraphType;if(activeExecutionGraphTypes.has(key))activeExecutionGraphTypes.delete(key);else activeExecutionGraphTypes.add(key);renderExecutionGraphTypeFilters();renderExecutionGraph()}})}
+function renderExecutionNodeTypeFilters(){var host=document.getElementById('executionNodeTypeFilters');if(!host)return;var types=[];executionDefinitionNodes.forEach(function(node){var type=executionTypeValue(node,'node_type','CONTROL').toUpperCase();if(types.indexOf(type)<0)types.push(type)});if(!types.length){host.innerHTML='<span class="muted"><span data-zh>当前版本没有节点</span><span data-en>This version has no nodes</span></span>';return}host.innerHTML=types.map(function(type){var count=executionDefinitionNodes.filter(function(node){return executionTypeValue(node,'node_type','CONTROL').toUpperCase()===type}).length;return executionNodeTypeFilterMarkup(type,count)}).join('');host.querySelectorAll('[data-execution-node-type]').forEach(function(button){button.onclick=function(){var type=button.dataset.executionNodeType;if(activeExecutionNodeTypes.has(type))activeExecutionNodeTypes.delete(type);else activeExecutionNodeTypes.add(type);renderExecutionNodeTypeFilters();renderExecutionGraph()}})}
+function executionNodeMatchesFilters(node){var type=executionTypeValue(node,'node_type','CONTROL').toUpperCase(),key=executionNodeTypeKey(node);return activeExecutionNodeTypes.has(type)&&(!executionGraphTypeKeys.has(key)||activeExecutionGraphTypes.has(key))}
+function executionEdgeMatchesFilters(edge){return executionEdgeTypeKeys(edge).every(function(key){return !executionGraphTypeKeys.has(key)||activeExecutionGraphTypes.has(key)})}
+function executionNodeColor(type){return executionNodeColors[String(type||'CONTROL').toUpperCase()]||'#52657d'}
+function executionGraphNode(node){var type=executionTypeValue(node,'node_type','CONTROL').toUpperCase(),labels=executionNodeTypeLabel(type),color=executionNodeColor(type),palette=graphPalette(),key=executionTypeValue(node,'node_key',executionTypeValue(node,'id',''));return {id:key,label:key+'\n'+graphLabel(labels[0],labels[1]),title:key+' · '+graphLabel(labels[0],labels[1]),color:{background:color,border:color,highlight:{background:color,border:'#fff'}},font:graphLabelFont(palette,12,color,nodeTextColor(color)),shape:'box',margin:8}}
+function executionGraphEdge(edge){var palette=graphPalette();return {id:executionTypeValue(edge,'edge_id',executionTypeValue(edge,'id','')),from:executionTypeValue(edge,'source_node_key',executionTypeValue(edge,'source','')),to:executionTypeValue(edge,'target_node_key',executionTypeValue(edge,'target','')),label:executionTypeValue(edge,'edge_kind','NORMAL'),color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10),arrows:'to'} }
+function applyExecutionGraphTheme(){if(!executionNetwork||!executionNodes||!executionEdges)return;var palette=graphPalette();executionNodes.forEach(function(node){var color=node.color&&node.color.background||'#52657d';executionNodes.update({id:node.id,font:graphLabelFont(palette,12,color,nodeTextColor(color))})});executionEdges.forEach(function(edge){executionEdges.update({id:edge.id,color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10)})});executionNetwork.setOptions({edges:{color:{color:palette.edge,highlight:'#1dd6f6'},font:graphLabelFont(palette,10)}})}
+function updateExecutionFilterSummary(visibleNodes,visibleEdges){var element=document.getElementById('executionFilterSummary');if(!element)return;if(!executionDefinitionNodes.length){element.innerHTML='<span data-zh>尚未选择执行图版本</span><span data-en>No execution graph version selected</span>';return}element.textContent=graphLabel('显示 '+visibleNodes+' / '+executionDefinitionNodes.length+' 个节点，'+visibleEdges+' 条边','Showing '+visibleNodes+' / '+executionDefinitionNodes.length+' nodes, '+visibleEdges+' edges')}
+function renderExecutionGraph(){var element=document.getElementById('executionGraphNetwork');if(!element)return;if(!executionDefinitionNodes.length){if(executionNetwork){executionNetwork.destroy();executionNetwork=null;executionNodes=null;executionEdges=null}element.innerHTML='<div class="cx-empty"><span data-zh>暂无执行图数据</span><span data-en>No execution graph data</span></div>';updateExecutionFilterSummary(0,0);return}if(!executionNetwork){element.innerHTML='';executionNodes=new vis.DataSet();executionEdges=new vis.DataSet();executionNetwork=new vis.Network(element,{nodes:executionNodes,edges:executionEdges},{physics:{solver:'forceAtlas2Based',forceAtlas2Based:{gravitationalConstant:-80,springLength:130}},interaction:{hover:true},nodes:{shape:'box',borderWidth:2},edges:{width:1.5,smooth:{type:'continuous'}}})}var visibleNodes=executionDefinitionNodes.filter(executionNodeMatchesFilters),ids={};visibleNodes.forEach(function(node){ids[executionTypeValue(node,'node_key',executionTypeValue(node,'id',''))]=true});var visibleEdges=executionDefinitionEdges.filter(function(edge){return ids[executionTypeValue(edge,'source_node_key',executionTypeValue(edge,'source',''))]&&ids[executionTypeValue(edge,'target_node_key',executionTypeValue(edge,'target',''))]&&executionEdgeMatchesFilters(edge)});executionNodes.clear();executionEdges.clear();executionNodes.add(visibleNodes.map(executionGraphNode));executionEdges.add(visibleEdges.map(executionGraphEdge));updateExecutionFilterSummary(visibleNodes.length,visibleEdges.length);applyExecutionGraphTheme()}
+function updateExecutionDefinition(payload){var parts=payload?graphDefinitionParts(payload):{nodes:[],edges:[]};executionDefinitionNodes=Array.isArray(parts.nodes)?parts.nodes:[];executionDefinitionEdges=Array.isArray(parts.edges)?parts.edges:[];executionTypeOccurrences={};executionDefinitionNodes.forEach(function(node){var key=executionNodeTypeKey(node);executionTypeOccurrences[key]=(executionTypeOccurrences[key]||0)+1});executionDefinitionEdges.forEach(function(edge){executionEdgeTypeKeys(edge).forEach(function(key){executionTypeOccurrences[key]=(executionTypeOccurrences[key]||0)+1})});executionGraphTypes=registeredGraphTypes.filter(function(item){var key=executionTypeKey(executionTypeValue(item,'type_kind','TYPE'),executionTypeValue(item,'type_name','-'),executionTypeValue(item,'type_version','1.0'));return executionTypeOccurrences[key]>0});executionGraphTypeKeys=new Set(executionGraphTypes.map(function(item){return executionTypeKey(executionTypeValue(item,'type_kind','TYPE'),executionTypeValue(item,'type_name','-'),executionTypeValue(item,'type_version','1.0'))}));activeExecutionGraphTypes=new Set(executionGraphTypeKeys);var nodeTypes=[];executionDefinitionNodes.forEach(function(node){var type=executionTypeValue(node,'node_type','CONTROL').toUpperCase();if(nodeTypes.indexOf(type)<0)nodeTypes.push(type)});activeExecutionNodeTypes=new Set(nodeTypes);renderExecutionGraphTypeFilters();renderExecutionNodeTypeFilters();renderExecutionGraph()}
+function applyGraphTypeFilter(){
+  if(!nodes||!edges)return;
+  var visible=graphSourceNodes.filter(function(n){return !n.entity_type||activeGraphTypes.has(n.entity_type);}),ids={};
+  visible.forEach(function(n){ids[n.id]=true;});
+  var visibleEdges=graphSourceEdges.filter(function(e){return ids[e.from]&&ids[e.to];});
+  nodes.clear();nodes.add(visible.map(graphNode));edges.clear();edges.add(visibleEdges.map(graphEdge));
+  updateGraphStats(visible.length,visibleEdges.length);applyGraphTheme();
+}
+function updateGraphFilterCounts(){document.querySelectorAll('[data-graph-type]').forEach(function(button){var type=button.dataset.graphType,count=graphSourceNodes.filter(function(n){return n.entity_type===type;}).length,target=button.querySelector('.count');if(target)target.textContent=count;});}
+document.querySelectorAll('[data-graph-type]').forEach(function(button){button.onclick=function(){var type=button.dataset.graphType;if(activeGraphTypes.has(type))activeGraphTypes.delete(type);else activeGraphTypes.add(type);var active=activeGraphTypes.has(type);button.classList.toggle('active',active);button.setAttribute('aria-pressed',active?'true':'false');applyGraphTypeFilter();};});
+
+// Load and render graph
+fetch('/api/graph/all').then(function(r){return r.json()}).then(function(d){
+  nodes=new vis.DataSet();
+  edges=new vis.DataSet();
+
+  graphSourceNodes=d.nodes||[];
+  graphSourceEdges=d.edges||[];
+  graphSourceNodes.forEach(function(node){if(node.entity_type)activeGraphTypes.add(node.entity_type);});
+  updateGraphFilterCounts();
+  applyGraphTypeFilter();
+
+  var container=document.getElementById('visNetwork');
+  network=new vis.Network(container,{nodes:nodes,edges:edges},{
+    physics:{solver:'forceAtlas2Based',forceAtlas2Based:{gravitationalConstant:-50,springLength:100}},
+    interaction:{hover:true},
+    nodes:{shape:'dot',borderWidth:2},
+    edges:{width:1.5,smooth:{type:'continuous'}}
+  });
+  applyGraphTheme();
+
+  network.on('click',function(params){
+    if(params.nodes.length>0){
+      var node=nodes.get(params.nodes[0]);
+      var d=(node&&node.title)?node.title:'No details';
+      document.getElementById('nodeDetailContent').innerHTML='<pre style="color:var(--cx-text);white-space:pre-wrap">'+d+'</pre>';
+      document.getElementById('nodeDetail').style.display='block';
+    }else{
+      document.getElementById('nodeDetail').style.display='none';
+    }
+  });
+
+}).catch(function(e){
+  console.error('Graph load error:',e);
+  document.getElementById('visNetwork').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--cx-text-secondary)">Failed to load graph: '+e.message+'</div>';
+});
+
+// Search
+function doSearch(){
+  var q=document.getElementById('searchInput').value.trim();
+  if(!q)return;
+  var t=document.getElementById('typeSelect').value;
+  var url='/api/graph/search?q='+encodeURIComponent(q);
+  if(t)url+='&type='+encodeURIComponent(t);
+  fetch(url).then(function(r){return r.json()}).then(function(d){
+    var results=d.results||d||[];
+    if(results.length>0){
+      var firstId=results[0].entity_id||results[0].id;
+      if(network&&firstId){
+        network.focus(firstId,{scale:1.5,animation:true});
+        network.selectNodes([firstId]);
+      }
+    }
+  }).catch(function(e){console.error('Search:',e)});
+}
+
+var graphDefinitions=[],graphVersions=[],selectedGraphId='',selectedGraphVersionId='',selectedGraphPlanId='';
+function renderGraphDefinitions(){var list=document.getElementById('graphList');list.innerHTML=graphDefinitions.length?graphDefinitions.map(function(item){return '<button type="button" class="registry-item '+(item.graph_id===selectedGraphId?'selected':'')+'" data-graph-id="'+graphEsc(item.graph_id)+'"><strong>'+graphEsc(item.graph_name)+'</strong><small>'+graphEsc(item.graph_id)+'</small></button>'}).join(''):'<div class="cx-empty">'+graphEsc(graphLabel('暂无图定义','No graph definitions'))+'</div>';list.querySelectorAll('[data-graph-id]').forEach(function(item){item.onclick=function(){selectedGraphId=item.dataset.graphId;selectedGraphVersionId='';renderGraphDefinitions();loadGraphVersions()}})}
+function renderGraphSelectors(){var graphSelect=document.getElementById('graphSelect');graphSelect.innerHTML=graphDefinitions.map(function(item){return '<option value="'+graphEsc(item.graph_id)+'">'+graphEsc(item.graph_name)+'</option>'}).join('');if(selectedGraphId)graphSelect.value=selectedGraphId;var versionSelect=document.getElementById('versionSelect');versionSelect.innerHTML=graphVersions.map(function(item){return '<option value="'+graphEsc(item.graph_version_id)+'">'+graphEsc((item.version_label||('v'+item.version_no))+' · '+item.status)+'</option>'}).join('');if(selectedGraphVersionId)versionSelect.value=selectedGraphVersionId;selectedGraphVersionId=versionSelect.value||'';document.getElementById('definitionSelection').textContent=selectedGraphVersionId||graphLabel('请选择版本','Select a version')}
+function loadGraphDefinitions(){return Promise.all([graphApi('/api/graphs'),graphApi('/api/graph-types')]).then(function(result){graphDefinitions=result[0].graphs||[];registeredGraphTypes=result[1].types||[];if(!selectedGraphId&&graphDefinitions.length)selectedGraphId=graphDefinitions[0].graph_id;renderGraphDefinitions();renderGraphSelectors();document.getElementById('graphTypeList').innerHTML=registeredGraphTypes.map(function(item){return '<span class="type-chip">'+graphEsc(item.type_kind+'/'+item.type_name)+' '+graphEsc(item.type_version)+'</span>'}).join('')||'<span class="muted">-</span>';renderExecutionGraphTypeFilters();return loadGraphVersions()}).catch(function(error){graphToast(error.message,true)})}
+function loadGraphVersions(){if(!selectedGraphId){graphVersions=[];selectedGraphVersionId='';renderGraphSelectors();updateDefinitionRisk('');updateExecutionDefinition(null);return Promise.resolve()};return graphApi('/api/graphs/'+encodeURIComponent(selectedGraphId)+'/versions').then(function(data){graphVersions=data.versions||[];if(!selectedGraphVersionId&&graphVersions.length)selectedGraphVersionId=graphVersions[0].graph_version_id;renderGraphSelectors();return selectedGraphVersionId?loadGraphVersion():(updateDefinitionRisk(''),updateExecutionDefinition(null))}).catch(function(error){graphToast(error.message,true)})}
+function loadGraphVersion(){if(!selectedGraphVersionId){updateDefinitionRisk('');updateExecutionDefinition(null);return Promise.resolve()}return graphApi('/api/graph-versions/'+encodeURIComponent(selectedGraphVersionId)+'/export').then(function(payload){document.getElementById('definitionEditor').value=JSON.stringify(payload,null,2);selectedGraphPlanId=(payload.source||{}).plan_id||'';var version=graphVersions.find(function(item){return item.graph_version_id===selectedGraphVersionId});updateDefinitionRisk(version&&version.risk_level||'');document.getElementById('executionSelection').textContent=graphLabel('版本 '+selectedGraphVersionId,'Version '+selectedGraphVersionId);updateExecutionDefinition(payload);return payload}).catch(function(error){graphToast(error.message,true)})}
+function createGraphDefinition(){var name=document.getElementById('newGraphName').value.trim();if(!name){graphToast(graphLabel('请输入图名称','Enter a graph name'),true);return}graphApi('/api/graphs',{method:'POST',body:JSON.stringify({name:name})}).then(function(result){selectedGraphId=result.graph_id;document.getElementById('newGraphName').value='';graphToast(graphLabel('图定义已创建','Graph created'));return loadGraphDefinitions()}).catch(function(error){graphToast(error.message,true)})}
+function editorGraphDocument(){var value=document.getElementById('definitionEditor').value.trim();if(!value)throw new Error(graphLabel('JSON 编辑器为空','JSON editor is empty'));var payload=JSON.parse(value);if(!payload.format)payload={format:'chuanxu-graph-definition',format_version:'1',definition:payload};return payload}
+function importGraphDraft(){if(!selectedGraphId){graphToast(graphLabel('请先选择图','Select a graph first'),true);return}var payload;try{payload=editorGraphDocument()}catch(error){graphToast(error.message,true);return}graphApi('/api/graphs/'+encodeURIComponent(selectedGraphId)+'/import',{method:'POST',body:JSON.stringify({document:payload,reason:graphLabel('通过 Graph 页面导入','Imported from Graph UI')})}).then(function(result){selectedGraphVersionId=result.graph_version_id;graphToast(graphLabel('已导入新的 Draft','New Draft imported'));return loadGraphDefinitions()}).catch(function(error){graphToast(error.message,true)})}
+function graphDefinitionParts(payload){var definition=payload.definition||payload;var version=definition.version||definition;return {nodes:version.nodes||[],edges:version.edges||[],version_label:version.label||definition.version_label,input_schema:version.input_schema||definition.input_schema||{},output_schema:version.output_schema||definition.output_schema||{},budget:version.budget||definition.budget||{}}}
+function createGraphDraft(){if(!selectedGraphId){graphToast(graphLabel('请先选择图','Select a graph first'),true);return}var payload;try{payload=editorGraphDocument()}catch(error){graphToast(error.message,true);return}var parts=graphDefinitionParts(payload);if(!parts.nodes.length){graphToast(graphLabel('定义至少需要一个节点','The definition needs at least one node'),true);return}graphApi('/api/graphs/'+encodeURIComponent(selectedGraphId)+'/versions',{method:'POST',body:JSON.stringify(parts)}).then(function(result){selectedGraphVersionId=result.graph_version_id;graphToast(graphLabel('Draft 已创建','Draft created'));return loadGraphDefinitions()}).catch(function(error){graphToast(error.message,true)})}
+function exportGraphVersion(){if(!selectedGraphVersionId){graphToast(graphLabel('请先选择版本','Select a version first'),true);return}graphApi('/api/graph-versions/'+encodeURIComponent(selectedGraphVersionId)+'/export').then(function(payload){document.getElementById('definitionEditor').value=JSON.stringify(payload,null,2);var blob=new Blob([JSON.stringify(payload,null,2)+'\n'],{type:'application/json'});var link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=(selectedGraphVersionId||'graph-definition')+'.json';link.click();URL.revokeObjectURL(link.href);graphToast(graphLabel('JSON 已导出','JSON exported'))}).catch(function(error){graphToast(error.message,true)})}
+function graphVersionAction(action){if(!selectedGraphVersionId){graphToast(graphLabel('请先选择版本','Select a version first'),true);return}var reason=window.prompt(graphLabel('请输入操作原因','Enter a reason'));if(!reason)return;graphApi('/api/graph-versions/'+encodeURIComponent(selectedGraphVersionId)+'/'+action,{method:'POST',body:JSON.stringify({reason:reason})}).then(function(result){document.getElementById('definitionDiagnostics').textContent=JSON.stringify(result,null,2);graphToast(graphLabel('操作已完成','Operation completed'));return loadGraphDefinitions()}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshGraphs').onclick=loadGraphDefinitions;
+document.getElementById('createGraph').onclick=createGraphDefinition;
+document.getElementById('graphSelect').onchange=function(){selectedGraphId=this.value;selectedGraphVersionId='';renderGraphDefinitions();loadGraphVersions()};
+document.getElementById('versionSelect').onchange=function(){selectedGraphVersionId=this.value;loadGraphVersion()};
+document.getElementById('loadVersion').onclick=loadGraphVersion;
+document.getElementById('createDraft').onclick=createGraphDraft;
+document.getElementById('exportVersion').onclick=exportGraphVersion;
+document.getElementById('importVersion').onclick=importGraphDraft;
+document.getElementById('compileVersion').onclick=function(){graphVersionAction('compile')};
+document.getElementById('publishVersion').onclick=function(){graphVersionAction('publish')};
+document.getElementById('archiveVersion').onclick=function(){graphVersionAction('archive')};
+document.getElementById('startRun').onclick=function(){if(!selectedGraphVersionId||!selectedGraphPlanId){graphToast(graphLabel('请先编译并发布版本','Compile and publish a version first'),true);return}var initial={};var value=window.prompt(graphLabel('输入初始状态 JSON，可留空','Initial state JSON, optional'),'{}');if(value===null)return;try{initial=value.trim()?JSON.parse(value):{}}catch(error){graphToast(graphLabel('初始状态 JSON 无效','Initial state JSON is invalid'),true);return}graphApi('/api/graph-runs',{method:'POST',body:JSON.stringify({graph_version_id:selectedGraphVersionId,plan_id:selectedGraphPlanId,initial_state:initial})}).then(function(result){graphToast(graphLabel('运行已创建','Run created'));selectedGraphRunId=result.run_id;document.querySelector('[data-graph-view="runs"]').click()}).catch(function(error){graphToast(error.message,true)})};
+
+var graphRuns=[],selectedGraphRunId='';
+function renderGraphRuns(){var list=document.getElementById('runList');list.innerHTML=graphRuns.length?graphRuns.map(function(item){return '<button type="button" class="registry-item '+(item.run_id===selectedGraphRunId?'selected':'')+'" data-run-id="'+graphEsc(item.run_id)+'"><strong>'+graphEsc(item.status)+'</strong><small>'+graphEsc(item.run_id)+' · '+graphEsc(item.graph_version_id)+'</small></button>'}).join(''):'<div class="cx-empty">'+graphEsc(graphLabel('暂无运行','No runs'))+'</div>';list.querySelectorAll('[data-run-id]').forEach(function(item){item.onclick=function(){selectedGraphRunId=item.dataset.runId;renderGraphRuns();loadGraphRun()}})}
+function graphTableRows(items,fields){return (items||[]).map(function(item){return '<tr>'+fields.map(function(field){return '<td>'+graphEsc(item[field])+'</td>'}).join('')+'</tr>'}).join('')||'<tr><td colspan="4" class="muted">'+graphEsc(graphLabel('暂无数据','No data'))+'</td></tr>'}
+function loadGraphRuns(){return graphApi('/api/graph-runs').then(function(data){graphRuns=data.runs||[];if(!selectedGraphRunId&&graphRuns.length)selectedGraphRunId=graphRuns[0].run_id;renderGraphRuns();return selectedGraphRunId?loadGraphRun():null}).catch(function(error){graphToast(error.message,true)})}
+function loadGraphRun(){if(!selectedGraphRunId)return Promise.resolve();var base='/api/graph-runs/'+encodeURIComponent(selectedGraphRunId);return Promise.all([graphApi(base),graphApi(base+'/nodes'),graphApi(base+'/trace'),graphApi(base+'/state'),graphApi(base+'/metrics'),graphApi(base+'/evaluations'),graphApi('/api/graph-governance/events?run_id='+encodeURIComponent(selectedGraphRunId))]).then(function(result){var run=result[0]||{},metrics=result[4]||{},evaluations=result[5].evaluations||[],governance=result[6].events||[];document.getElementById('runSelection').textContent=selectedGraphRunId+' · '+(run.status||'-');document.getElementById('runSummary').textContent=graphLabel('状态: ','Status: ')+(run.status||'-')+'  |  '+graphLabel('执行者: ','Actor: ')+(run.actor_id||'-')+'  |  '+graphLabel('检查点: ','Checkpoint: ')+(run.current_checkpoint_id||'-');document.getElementById('runNodes').innerHTML=graphTableRows(result[1].nodes,['node_key','status','iteration_no','updated_at']);document.getElementById('runTrace').innerHTML=graphTableRows(result[2].trace,['event_type','status','created_at']);document.getElementById('runSnapshot').textContent=JSON.stringify(result[3].state||{},null,2);document.getElementById('runMetrics').textContent=JSON.stringify(metrics,null,2);document.getElementById('runEvaluations').innerHTML=graphTableRows(evaluations,['evaluator_name','level_name','route_decision','created_at']);document.getElementById('runGovernanceEvents').innerHTML=graphTableRows(governance,['event_type','actor_id','reason','created_at'])}).catch(function(error){graphToast(error.message,true)})}
+function graphRunAction(action){if(!selectedGraphRunId){graphToast(graphLabel('请先选择运行','Select a run first'),true);return}var reason=window.prompt(graphLabel('请输入操作原因','Enter a reason'));if(!reason)return;graphApi('/api/graph-runs/'+encodeURIComponent(selectedGraphRunId)+'/'+action,{method:'POST',body:JSON.stringify({reason:reason})}).then(function(){graphToast(graphLabel('运行控制已提交','Run control submitted'));return loadGraphRuns()}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshRuns').onclick=loadGraphRuns;
+document.querySelectorAll('[data-run-action]').forEach(function(button){button.onclick=function(){graphRunAction(button.dataset.runAction)}});
+
+var graphExecutors=[];
+function executorValue(item,key){return item&&item[key]!==undefined?item[key]:(item&&item[key.toUpperCase()]!==undefined?item[key.toUpperCase()]:'')}
+function executorAction(executorId,action){var reason=window.prompt(graphLabel('请输入状态变更原因','Enter a reason for this status change'));if(!reason)return;graphApi('/api/graph-executors/'+encodeURIComponent(executorId)+'/'+action,{method:'POST',body:JSON.stringify({reason:reason})}).then(function(){graphToast(graphLabel('执行器状态已更新','Executor status updated'));return loadGraphExecutors()}).catch(function(error){graphToast(error.message,true)})}
+function renderExecutorList(targetId){var target=document.getElementById(targetId);if(!target)return;target.innerHTML=graphExecutors.map(function(item){var id=executorValue(item,'executor_id'),name=executorValue(item,'name')||executorValue(item,'executor_name'),version=executorValue(item,'version')||executorValue(item,'executor_version'),kind=executorValue(item,'executor_kind'),types=executorValue(item,'node_types')||[],status=executorValue(item,'status')||'ACTIVE',source=executorValue(item,'source')||'DATABASE',immutable=!!item.immutable;var actions=immutable?'<span class="muted">'+graphEsc(graphLabel('内置','Built-in'))+'</span>':(status==='ACTIVE'?'<button class="btn-xs btn-warn" type="button" data-executor-action="disable" data-executor-id="'+graphEsc(id)+'">'+graphEsc(graphLabel('禁用','Disable'))+'</button>':'<button class="btn-xs btn-success" type="button" data-executor-action="activate" data-executor-id="'+graphEsc(id)+'">'+graphEsc(graphLabel('启用','Activate'))+'</button>');return '<tr><td>'+graphEsc(name)+'</td><td>'+graphEsc(version)+'</td><td>'+graphEsc(kind)+'</td><td>'+graphEsc(Array.isArray(types)?types.join(', '):types)+'</td><td>'+graphEsc(status)+'</td><td>'+graphEsc(source)+'</td><td>'+actions+'</td></tr>'}).join('')||'<tr><td colspan="7" class="muted">'+graphEsc(graphLabel('暂无执行器','No executors'))+'</td></tr>';target.querySelectorAll('[data-executor-action]').forEach(function(button){button.onclick=function(){executorAction(button.dataset.executorId,button.dataset.executorAction)}})}
+function loadGraphExecutors(){return graphApi('/api/graph-executors?include_inactive=true').then(function(data){graphExecutors=data.executors||[];renderExecutorList('executorListTop')}).catch(function(error){graphToast(error.message,true)})}
+function registerGraphExecutor(){var name=document.getElementById('executorNameTop').value.trim(),version=document.getElementById('executorVersionTop').value.trim(),kind=document.getElementById('executorKindTop').value,types=document.getElementById('executorNodeTypesTop').value.split(',').map(function(v){return v.trim().toUpperCase()}).filter(Boolean),effects=document.getElementById('executorEffectsTop').value.split(',').map(function(v){return v.trim().toUpperCase()}).filter(Boolean);if(!name||!version||!types.length){graphToast(graphLabel('名称、版本和节点类型不能为空','Name, version, and node types are required'),true);return}graphApi('/api/graph-executors',{method:'POST',body:JSON.stringify({manifest:{kind:'EXECUTOR',name:name,version:version,executor_kind:kind,node_types:types,side_effect_classes:effects,description:'Registered from Graph UI'}})}).then(function(){graphToast(graphLabel('执行器已注册','Executor registered'));return loadGraphExecutors()}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshExecutorsTop').onclick=loadGraphExecutors;
+document.getElementById('registerExecutorTop').onclick=registerGraphExecutor;
+
+function eventValue(item,key){return item&&item[key]!==undefined?item[key]:(item&&item[key.toUpperCase()]!==undefined?item[key.toUpperCase()]:'')}
+function loadGraphEvents(){return Promise.all([graphApi('/api/graph/events/inbox'),graphApi('/api/graph/events/dead-letter'),graphApi('/api/graph/events/outbox')]).then(function(result){var inbox=result[0].events||[],dead=result[1].events||[],outbox=result[2].events||[];document.getElementById('inboxList').innerHTML=graphTableRows(inbox,['inbox_id','event_type','status','attempts','available_at','error_message']);document.getElementById('outboxList').innerHTML=graphTableRows(outbox,['outbox_id','event_type','status','attempts','max_attempts','available_at']);document.getElementById('deadLetterList').innerHTML=dead.map(function(item){var id=eventValue(item,'inbox_id');return '<tr><td>'+graphEsc(id)+'</td><td>'+graphEsc(eventValue(item,'event_type'))+'</td><td>'+graphEsc(eventValue(item,'attempts'))+'</td><td>'+graphEsc(eventValue(item,'error_message'))+'</td><td><button class="btn-xs btn-warn" type="button" data-replay-inbox="'+graphEsc(id)+'">'+graphEsc(graphLabel('重放','Replay'))+'</button></td></tr>'}).join('')||'<tr><td colspan="5" class="muted">'+graphEsc(graphLabel('暂无死信','No dead letters'))+'</td></tr>';document.querySelectorAll('[data-replay-inbox]').forEach(function(button){button.onclick=function(){var reason=window.prompt(graphLabel('请输入重放原因','Enter a replay reason'));if(!reason)return;graphApi('/api/graph/events/inbox/'+encodeURIComponent(button.dataset.replayInbox)+'/replay',{method:'POST',body:JSON.stringify({reason:reason})}).then(function(){graphToast(graphLabel('事件已提交重放','Event replay submitted'));return loadGraphEvents()}).catch(function(error){graphToast(error.message,true)})}})}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshEvents').onclick=loadGraphEvents;
+function loadGraphArtifacts(){return graphApi('/api/graph-artifacts').then(function(data){document.getElementById('artifactList').innerHTML=(data.artifacts||[]).map(function(item){return '<tr><td>'+graphEsc(item.artifact_id)+'</td><td>'+graphEsc(item.media_type)+'</td><td>'+graphEsc(item.classification)+'</td><td>'+graphEsc(item.size_bytes)+'</td><td>'+graphEsc(item.retention_until||'-')+'</td><td>'+graphEsc(item.legal_hold||'-')+'</td></tr>'}).join('')||'<tr><td colspan="6" class="muted">'+graphEsc(graphLabel('暂无产物','No artifacts'))+'</td></tr>'}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshArtifacts').onclick=loadGraphArtifacts;
+
+(function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
+
+var _aloSec=300;
+function _aloTick(){_aloSec--;if(_aloSec<=0){window.location.href='/logout';return}var m=Math.floor(_aloSec/60),s=_aloSec%60,el=document.getElementById('autoLogoutTimer');if(el){el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;if(_aloSec<=60){el.classList.add('warn')}else{el.classList.remove('warn')}}}
+function _aloReset(){_aloSec=300;var el=document.getElementById('autoLogoutTimer');if(el)el.classList.remove('warn')}
+setInterval(_aloTick,1000);
+document.addEventListener('mousemove',_aloReset);document.addEventListener('keydown',_aloReset);document.addEventListener('click',_aloReset);document.addEventListener('visibilitychange',function(){if(!document.hidden){_aloReset();fetch('/api/session/heartbeat').catch(function(){})}});
+var _hbInt=setInterval(function(){fetch('/api/session/heartbeat').catch(function(){})},120000);
+</script>
+</body>
+</html>
