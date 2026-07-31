@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.3.0 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.3.1 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -29,12 +29,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle
+    from lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle, organization_api
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle
+    from shared.lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle, organization_api
 
 
-VERSION = "4.3.0"
+VERSION = "4.3.1"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -413,6 +413,12 @@ def _legacy_gate(request: Request, path: str) -> Optional[Response]:
     session = _session_from_request(request)
     if not session:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
+    entry = "PORTAL" if path.startswith("/portal/api/") else "APP"
+    try:
+        if not identity_api.entry_allowed(str(session["principal_id"]), entry):
+            return JSONResponse({"error": f"{entry.title()} access is disabled"}, status_code=403)
+    except Exception:
+        return JSONResponse({"error": "Entry-access policy is unavailable"}, status_code=503)
     if str(session.get("mfa_level") or "NONE").upper() == "SETUP":
         return JSONResponse({"error": "MFA setup required"}, status_code=403)
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -445,6 +451,7 @@ def static_file(file_path: str) -> Response:
 
 
 class RegistrationBody(BaseModel):
+    display_name: str = Field(min_length=1, max_length=256)
     username: str = Field(min_length=3, max_length=128)
     password: str = Field(min_length=12, max_length=1024)
     email: str = Field(default="", max_length=320)
@@ -488,6 +495,16 @@ class MfaEnrollBody(BaseModel):
 class MfaConfirmBody(BaseModel):
     factor_id: str = Field(min_length=1, max_length=128)
     code: str = Field(min_length=6, max_length=32)
+
+
+class OrganizationChangeBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    operations: list[Dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    idempotency_key: str = Field(default="", max_length=256)
+
+
+class OrganizationOperationBody(BaseModel):
+    operation: Dict[str, Any]
     reason: str = Field(default="MFA enrollment confirmation", max_length=2000)
 
 
@@ -624,12 +641,21 @@ class DecisionBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class RegistrationApprovalBody(DecisionBody):
+    organization_id: str = Field(min_length=1, max_length=128)
+
+
 class RoleBody(BaseModel):
     role_code: str = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=2000)
 
 
 class RoleRevokeBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class EntryAccessBody(BaseModel):
+    app_enabled: bool
     reason: str = Field(min_length=1, max_length=2000)
 
 
@@ -773,6 +799,13 @@ def principal(request: Request) -> Dict[str, Any]:
     session = _session_from_request(request)
     if not session:
         raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        if not identity_api.entry_allowed(str(session["principal_id"]), "APP"):
+            raise HTTPException(status_code=403, detail="Application access is disabled")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Entry-access policy is unavailable") from exc
     return session
 
 
@@ -870,7 +903,10 @@ def legacy_login_redirect() -> RedirectResponse:
 @app.post("/api/auth/register", status_code=202)
 def register(body: RegistrationBody) -> Dict[str, Any]:
     try:
-        result = identity_api.register_human(body.username, body.password, body.email, body.invite_code)
+        result = identity_api.register_human(
+            body.username, body.password, body.email, body.invite_code,
+            display_name=body.display_name,
+        )
     except identity_api.IdentityError as exc:
         raise HTTPException(status_code=400, detail="Registration could not be completed") from exc
     return {"success": True, "status": result.get("status"), "request_id": result.get("request_id"), "username": result.get("username")}
@@ -892,6 +928,13 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
         except Exception:
             pass
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        if not identity_api.entry_allowed(str(user["principal_id"]), "APP"):
+            raise HTTPException(status_code=403, detail="Application access is disabled")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Entry-access policy is unavailable") from exc
     mfa_level = "NONE"
     try:
         required = security_lifecycle.mfa_required(str(user["principal_id"]))
@@ -1049,6 +1092,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
     if str(session.get("mfa_level") or "NONE").upper() == "SETUP":
         return {
             "version": session.get("permission_version"),
+            "release_version": VERSION,
             "profile": _runtime_profile(),
             "pages": [],
             "actions": {},
@@ -1064,6 +1108,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "collab": "channels.read", "loops": "tasks.read", "graph": "graphs.read",
         "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read",
         "audit": "audit.read", "users": "users.read",
+        "organization": "organizations.read",
     }
     feature_map = {
         "approvals": "approvals", "audit": "audit",
@@ -1079,6 +1124,11 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "users.approve", "users.roles.manage", "users.permissions.manage",
         "users.identity.link", "users.security.manage", "users.sessions.read",
         "sessions.revoke", "users.delegations.read", "users.delegations.manage",
+        "organizations.manage", "organizations.changes.create", "organizations.changes.write",
+        "organizations.changes.submit", "organizations.changes.approve",
+        "organizations.history.read", "organizations.members.manage",
+        "organizations.reporting.manage", "organizations.sync.manage",
+        "organizations.emergency", "organizations.export",
     }
     features = _edition_features()
     try:
@@ -1095,12 +1145,183 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
     ]
     profile = _runtime_profile()
     return {
-        "version": session.get("permission_version"), "profile": profile,
+        "version": session.get("permission_version"), "release_version": VERSION,
+        "profile": profile,
         "pages": allowed, "actions": access_by_action,
         "maturity": {"core": "stable", "graph": "experimental", "channel": "active"},
         "features": sorted(getattr(features, "FEATURES", set()) if features else set()),
         "session_timeout_seconds": _session_timeout_seconds(),
     }
+
+
+def _organization_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=403, detail="Organization permission denied")
+    if isinstance(exc, organization_api.OrganizationConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, organization_api.OrganizationError):
+        return HTTPException(status_code=400, detail=str(exc))
+    return HTTPException(status_code=503, detail="Organization governance service unavailable")
+
+
+def _organization_id(value: str) -> str:
+    value = str(value or "")
+    return value[4:] if value.startswith("org:") else value
+
+
+def _organization_operation(value: Dict[str, Any]) -> tuple[str, str, str, Dict[str, Any], Optional[int]]:
+    item = dict(value or {})
+    requested = str(item.get("operation_type") or "").upper()
+    subject = _organization_id(str(item.get("subject_id") or item.get("organization_id") or item.get("target_id") or ""))
+    target = _organization_id(str(item.get("target_id") or ""))
+    expected = item.get("expected_row_version", item.get("row_version"))
+    if requested == "MOVE_ORGANIZATION":
+        return requested, "ORGANIZATION", subject, {"parent_id": _organization_id(str(item.get("new_parent_id") or target)) or None}, expected
+    if requested == "CREATE_ORGANIZATION":
+        command = {
+            "organization_id": subject or identity_api._id("ORG"),
+            "parent_id": target or None,
+            "organization_code": str(item.get("organization_code") or item.get("name") or subject or "ORG")[:128],
+            "organization_name": str(item.get("organization_name") or item.get("name") or subject or "Organization")[:256],
+            "organization_type": str(item.get("organization_type") or "DEPARTMENT"),
+        }
+        return requested, "ORGANIZATION", "", command, expected
+    if requested == "UPDATE_ORGANIZATION" and item.get("name"):
+        return "RENAME_ORGANIZATION", "ORGANIZATION", subject, {"organization_name": item["name"]}, expected
+    if requested == "ASSIGN_PERSON":
+        membership_id = identity_api._id("OMEM")
+        return "ADD_MEMBERSHIP", "MEMBERSHIP", membership_id, {
+            "membership_id": membership_id, "organization_id": target,
+            "principal_id": str(item.get("subject_id") or ""),
+            "membership_kind": str(item.get("membership_kind") or "PRIMARY"),
+            "source_type": "MANUAL",
+        }, expected
+    if requested == "ASSIGN_AGENT":
+        relationship_id = identity_api._id("AREL")
+        return "SET_AGENT_RELATIONSHIP", "AGENT_RELATIONSHIP", relationship_id, {
+            "relationship_id": relationship_id, "agent_id": str(item.get("subject_id") or ""),
+            "principal_id": str(item.get("principal_id") or ""),
+            "relationship_role": str(item.get("relationship_role") or "PRIMARY_OWNER"),
+            "responsible_organization_id": target,
+        }, expected
+    command = {key: item[key] for key in (
+        "organization_code", "organization_type", "sort_order",
+        "responsible_principal_id", "security_domain_id",
+    ) if key in item}
+    return requested, "ORGANIZATION", subject, command, expected
+
+
+@app.get("/api/organization/roots")
+def organization_roots(limit: int = 100, session: Dict[str, Any] = Depends(require_action("organizations.read"))) -> Dict[str, Any]:
+    try:
+        return {"roots": organization_api.list_roots(str(session["principal_id"]), limit=limit)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/options")
+def organization_options(limit: int = 500, session: Dict[str, Any] = Depends(require_action("organizations.members.manage"))) -> Dict[str, Any]:
+    try:
+        rows = organization_api.list_options(str(session["principal_id"]), limit=limit)
+        return {"items": rows, "count": len(rows)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/graph")
+def organization_graph(mode: str = "organization", focus_id: str = "", depth: int = 2, limit: int = 300, session: Dict[str, Any] = Depends(require_action("organizations.read"))) -> Dict[str, Any]:
+    try:
+        return organization_api.organization_graph(str(session["principal_id"]), _organization_id(focus_id), mode, depth, limit)
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/search")
+def organization_search(q: str, limit: int = 50, session: Dict[str, Any] = Depends(require_action("organizations.read"))) -> Dict[str, Any]:
+    try:
+        return {"results": organization_api.search(str(session["principal_id"]), q, limit)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/nodes/{organization_id}")
+def organization_node(organization_id: str, session: Dict[str, Any] = Depends(require_action("organizations.read"))) -> Dict[str, Any]:
+    try:
+        return organization_api.get_detail(str(session["principal_id"]), _organization_id(organization_id))
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/changes")
+def organization_changes(status: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("organizations.changes.write"))) -> Dict[str, Any]:
+    try:
+        return {"change_sets": organization_api.list_changes(str(session["principal_id"]), limit, status=status)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.post("/api/organization/changes")
+def organization_change_create(body: OrganizationChangeBody, session: Dict[str, Any] = Depends(require_action("organizations.changes.create"))) -> Dict[str, Any]:
+    actor = str(session["principal_id"])
+    try:
+        change = organization_api.create_change_set(actor, body.reason, body.idempotency_key or identity_api._id("ORGWEB"))
+        change_id = str(change["change_id"])
+        for item in body.operations:
+            operation_type, target_type, target_id, command, expected = _organization_operation(item)
+            organization_api.append_operation(actor, change_id, operation_type, target_type, target_id, command, expected)
+        return {"change_set": organization_api.get_change_set(actor, change_id)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.post("/api/organization/changes/{change_id}/operations")
+def organization_change_operation(change_id: str, body: OrganizationOperationBody, session: Dict[str, Any] = Depends(require_action("organizations.changes.write"))) -> Dict[str, Any]:
+    actor = str(session["principal_id"])
+    try:
+        operation_type, target_type, target_id, command, expected = _organization_operation(body.operation)
+        organization_api.append_operation(actor, change_id, operation_type, target_type, target_id, command, expected)
+        return {"change_set": organization_api.get_change_set(actor, change_id)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.post("/api/organization/changes/{change_id}/{action}")
+def organization_change_action(change_id: str, action: str, session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, Any]:
+    actor = str(session["principal_id"])
+    try:
+        if action == "undo":
+            result = organization_api.undo_operation(actor, change_id)
+        elif action == "redo":
+            result = organization_api.redo_operation(actor, change_id)
+        elif action == "validate":
+            organization_api.validate_change_set(actor, change_id)
+            organization_api.calculate_impact(actor, change_id)
+            result = organization_api.get_change_set(actor, change_id)
+        elif action == "submit":
+            result = organization_api.submit_change_set(actor, change_id)
+        else:
+            raise HTTPException(status_code=404, detail="Organization action not found")
+        return {"change_set": result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/history")
+def organization_history(focus_id: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("organizations.history.read"))) -> Dict[str, Any]:
+    try:
+        return {"history": organization_api.list_history(str(session["principal_id"]), limit, organization_id=_organization_id(focus_id))}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
+
+
+@app.get("/api/organization/sync/conflicts")
+def organization_sync_conflicts(batch_id: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("organizations.sync.manage"))) -> Dict[str, Any]:
+    try:
+        return {"conflicts": organization_api.list_sync_conflicts(str(session["principal_id"]), limit, batch_id=batch_id)}
+    except Exception as exc:
+        raise _organization_http_error(exc) from exc
 
 
 @app.get("/api/approvals")
@@ -1235,9 +1456,11 @@ def registration_requests(status: str = "", session: Dict[str, Any] = Depends(re
 
 
 @app.post("/api/registration/requests/{request_id}/approve")
-def registration_approve(request_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("users.approve"))) -> Dict[str, Any]:
+def registration_approve(request_id: str, body: RegistrationApprovalBody, session: Dict[str, Any] = Depends(require_action("users.approve"))) -> Dict[str, Any]:
     try:
-        result = identity_api.approve_registration(request_id, str(session["principal_id"]), body.reason)
+        result = identity_api.approve_registration(
+            request_id, str(session["principal_id"]), body.reason, body.organization_id,
+        )
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Registration decision failed") from exc
     return result
@@ -1269,6 +1492,26 @@ def user_roles(principal_id: str, session: Dict[str, Any] = Depends(require_acti
         raise HTTPException(status_code=403, detail="User roles are outside the delegated scope") from exc
     except identity_api.IdentityError as exc:
         raise HTTPException(status_code=503, detail="Role service unavailable") from exc
+
+
+@app.get("/api/users/{principal_id}/entry-access")
+def user_entry_access(principal_id: str, session: Dict[str, Any] = Depends(require_action("users.read"))) -> Dict[str, Any]:
+    try:
+        return identity_api.get_entry_access(str(session["principal_id"]), principal_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Entry access is outside the delegated scope") from exc
+    except identity_api.IdentityError as exc:
+        raise HTTPException(status_code=503, detail="Entry-access policy is unavailable") from exc
+
+
+@app.post("/api/users/{principal_id}/entry-access")
+def user_entry_access_update(principal_id: str, body: EntryAccessBody, session: Dict[str, Any] = Depends(require_action("users.permissions.manage"))) -> Dict[str, Any]:
+    try:
+        return identity_api.set_entry_access(
+            str(session["principal_id"]), principal_id, body.app_enabled, body.reason,
+        )
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Entry-access change was denied") from exc
 
 
 @app.post("/api/users/{principal_id}/roles")

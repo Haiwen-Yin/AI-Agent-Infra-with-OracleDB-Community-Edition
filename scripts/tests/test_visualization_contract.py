@@ -1,6 +1,7 @@
 """Regression tests for version and web-session rendering contracts."""
 
 import json
+import re
 from pathlib import Path
 
 
@@ -757,3 +758,96 @@ def test_remaining_dashboard_enum_data_uses_shared_localized_labels():
     assert "valueLabel(raw)" in branches and 'data-label-zh="探索"' in branches
     assert "valueLabel(g.group_type" in collab and "valueLabel(g.sharing_policy" in collab
     assert 'data-cx-value="' in loops and 'data-label-zh="手动评估"' in loops
+
+
+def test_organization_graph_loading_tracks_focus_and_mode_without_duplicate_requests():
+    source, is_source = _react_ui_source()
+    if not is_source:
+        return
+
+    assert "}, [focusId, mode]);" in source
+    roots_callback = source.split('api<Row>("/api/organization/roots")', 1)[1].split(
+        "void loadChanges();", 1
+    )[0]
+    focus_callback = source.split("const focusNode = (node: Row) => {", 1)[1].split(
+        "};", 1
+    )[0]
+    assert "loadGraph(firstId" not in roots_callback
+    assert "loadGraph(id, mode)" not in focus_callback
+
+
+def test_dashboard_navigation_is_centered_against_equal_header_side_columns():
+    css = re.sub(r"\s+", "", _react_css_source())
+    assert "grid-template-columns:minmax(280px,1fr)autominmax(280px,1fr);" in css
+    assert ".cx-nav-stack{min-width:0;justify-self:center" in css
+    assert "@media(max-width:1100px)" in css
+    assert "grid-template-columns:repeat(6,max-content);justify-content:center" in css
+
+
+def test_organization_workspace_marks_each_governed_region_as_protected():
+    source, is_source = _react_ui_source()
+    css = _react_css_source()
+    if not is_source:
+        assert "Protected view" in source
+        return
+    organization = source.split('<section className="organization-page">', 1)[1].split(
+        "function ApprovalsPage", 1
+    )[0]
+    assert organization.count('text("受保护视图", "Protected view")') == 3
+    assert "organization-protected-title" in organization
+    assert "organization-inspector-protection" in organization
+    assert ".organization-protected-label" in css
+
+
+def test_dashboard_uses_one_global_release_version_without_versioned_profile_copy():
+    source, is_source = _react_ui_source()
+    if not is_source:
+        return
+    web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    css = _react_css_source()
+
+    assert '"release_version": VERSION' in web_app
+    assert 'releaseVersion={String(capabilities?.release_version || "")}' in source
+    assert 'className="cx-release-version"' in source
+    assert ".cx-release-version" in css
+    assert "v4.3.0" not in source
+    assert "v4.3.1" not in source
+    assert "<strong>4.3.1</strong>" not in source
+
+
+def test_user_management_exposes_entry_surfaces_and_protects_bootstrap_role():
+    source, is_source = _react_ui_source()
+    if not is_source:
+        return
+    assert 'text("仅 Portal", "Portal only")' in source
+    assert 'text("Portal + App", "Portal + App")' in source
+    assert "/entry-access" in source
+    assert "entryAccess.protected_system_admin" in source
+    assert 'text("Portal + App（系统保护）", "Portal + App (protected)")' in source
+    assert "setEntryAccess(null)" in source
+    assert "requestId !== userRequest.current" in source
+    assert 'text("正在读取入口策略", "Loading access policy")' in source
+    assert "const entryRequest = api<Row>(" in source
+    choose_source = source.split("const choose = async (user: Row) => {", 1)[1].split("const run = async", 1)[0]
+    users_source = source.split("function UsersPage(", 1)[1].split("const choose = async", 1)[0]
+    mfa_source = source.split("function MfaSetupScreen(", 1)[1].split("function PageView(", 1)[0]
+    assert "const userRequest = useRef(0);" in users_source
+    assert "userRequest" not in mfa_source
+    detail_batch = choose_source.split("Promise.all([", 1)[1].split("]);", 1)[0]
+    assert "/entry-access" not in detail_batch
+    protected_branch = source.split("entryAccess.protected_system_admin ? (", 1)[1].split(") : (", 1)[0]
+    assert "changeEntryAccess" not in protected_branch
+    assert 'role.role_code !== "END_USER" && !role.protected' in source
+    assert 'api<Row>("/api/organization/options")' in source
+    assert "organization_id: organizationId" in source
+    assert 'text("主组织", "Primary organization")' in source
+
+
+def test_entry_access_is_enforced_by_dashboard_and_portal_backends():
+    web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    assert 'entry_allowed(str(user["principal_id"]), "APP")' in web_app
+    assert 'entry_allowed(str(session["principal_id"]), "APP")' in web_app
+    assert 'entry = "PORTAL" if path.startswith("/portal/api/") else "APP"' in web_app
+    assert "identity_api.entry_allowed(principal_id, 'PORTAL')" in server
+    assert "identity_api.entry_allowed(" in server and "'PORTAL'" in server

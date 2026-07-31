@@ -15,8 +15,12 @@ from typing import Any, Callable
 from live_db_validator import (
     REPO_ROOT,
     V43_MIGRATION_SCRIPTS,
+    V431_MIGRATION_SCRIPTS,
+    V431_ORGANIZATION_REQUIRED_COLUMNS,
+    V431_ORGANIZATION_TABLES,
     _load_database_config,
     validate_v43_static_contract,
+    validate_v431_static_contract,
 )
 
 
@@ -44,7 +48,10 @@ MIGRATION_VERSION = "4.1.0"
 MIGRATION_EDITION = "community"
 GRAPH_MIGRATION_VERSIONS = frozenset({"4.2.0", "4.2.1"})
 CHANNEL_MIGRATION_VERSIONS = frozenset({"4.3.0"})
-JOURNALED_MIGRATION_VERSIONS = GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS
+ORGANIZATION_MIGRATION_VERSIONS = frozenset({"4.3.1"})
+JOURNALED_MIGRATION_VERSIONS = (
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS
+)
 
 CHANNEL_REQUIRED_TABLES = frozenset({
     "CX_PRINCIPALS", "CX_HUMAN_IDENTITIES", "CX_REGISTRATION_REQUESTS", "CX_WEB_SESSIONS",
@@ -482,6 +489,10 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V43_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V43_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v43_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.3.1":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V431_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V431_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v431_static_contract(database, full_scripts)
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
@@ -571,7 +582,56 @@ def _security_lifecycle_complete(cursor: Any, database: str) -> bool:
     )
 
 
+def _organization_governance_complete(cursor: Any, database: str) -> bool:
+    """Check the additive v4.3.1 organization step independently."""
+    present = _schema_tables(cursor, database)
+    base_columns = {
+        table: columns for table, columns in V431_ORGANIZATION_REQUIRED_COLUMNS.items()
+        if table not in {"CX_PRINCIPALS", "CX_REGISTRATION_REQUESTS"}
+    }
+    return set(V431_ORGANIZATION_TABLES) <= present and _schema_columns_complete(
+        cursor, database, base_columns, present,
+    )
+
+
+def _human_display_name_complete(cursor: Any, database: str) -> bool:
+    present = _schema_tables(cursor, database)
+    required = {
+        table: V431_ORGANIZATION_REQUIRED_COLUMNS[table]
+        for table in ("CX_PRINCIPALS", "CX_REGISTRATION_REQUESTS")
+    }
+    return _schema_columns_complete(cursor, database, required, present)
+
+
+def _entry_access_complete(cursor: Any, database: str) -> bool:
+    present = _schema_tables(cursor, database)
+    return _schema_columns_complete(
+        cursor, database,
+        {"CX_PRINCIPALS": frozenset({"PORTAL_ACCESS", "APP_ACCESS"})},
+        present,
+    )
+
+
+def _identity_organization_alignment_complete(cursor: Any, database: str) -> bool:
+    present = _schema_tables(cursor, database)
+    return _schema_columns_complete(
+        cursor, database,
+        {"CX_PRINCIPALS": frozenset({"ORGANIZATION_REQUIRED"})},
+        present,
+    )
+
+
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in ORGANIZATION_MIGRATION_VERSIONS:
+        return (
+            _channel_objects_complete(cursor, database)
+            and _governance_lifecycle_complete(cursor, database)
+            and _security_lifecycle_complete(cursor, database)
+            and _organization_governance_complete(cursor, database)
+            and _human_display_name_complete(cursor, database)
+            and _entry_access_complete(cursor, database)
+            and _identity_organization_alignment_complete(cursor, database)
+        )
     if MIGRATION_VERSION in CHANNEL_MIGRATION_VERSIONS:
         # v4.3.0 is a single public integration point, but its scripts are
         # deliberately selected and retried as three independent steps.
@@ -691,7 +751,7 @@ def _pg_thread_runtime_permissions_complete(cursor: Any) -> bool:
 
 def _channel_schema_incomplete(cursor: Any, database: str) -> bool:
     """Reject an existing partial v4.3 schema instead of silently adopting it."""
-    if MIGRATION_VERSION not in CHANNEL_MIGRATION_VERSIONS:
+    if MIGRATION_VERSION not in (CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS):
         return False
     if database == "pg":
         cursor.execute(
@@ -724,7 +784,7 @@ def _channel_schema_incomplete(cursor: Any, database: str) -> bool:
 
 def _channel_additive_columns_missing(cursor: Any, database: str) -> bool:
     """Return true only for an existing, otherwise complete early v4.3 schema."""
-    if MIGRATION_VERSION not in CHANNEL_MIGRATION_VERSIONS:
+    if MIGRATION_VERSION not in (CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS):
         return False
     if database == "pg":
         cursor.execute(
@@ -826,6 +886,14 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         return _governance_lifecycle_complete(cursor, database)
     if key == "18_v4_3_0_security_lifecycle":
         return _security_lifecycle_complete(cursor, database)
+    if key == "19_v4_3_1_organization_governance":
+        return _organization_governance_complete(cursor, database)
+    if key == "20_v4_3_1_human_display_name":
+        return _human_display_name_complete(cursor, database)
+    if key == "21_v4_3_1_entry_access":
+        return _entry_access_complete(cursor, database)
+    if key == "22_v4_3_1_identity_organization_alignment":
+        return _identity_organization_alignment_complete(cursor, database)
     return True
 
 
@@ -879,6 +947,40 @@ def _v43_script_names(database: str, config_path: Path, edition: str) -> list[st
     # Keep a concrete idempotent lifecycle step for a fully applied database
     # so the ledger/preflight output still proves the current release target.
     return names or ["18_v4_3_0_security_lifecycle.sql"]
+
+
+def _v431_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    """Select the v4.3 prerequisite chain and the organization step."""
+    names = _v43_script_names(database, config_path, edition)
+    try:
+        config = _load_database_config(config_path)
+        probe = _connect_for_preflight(database, config)
+        try:
+            with probe.cursor() as cursor:
+                v43_complete = (
+                    _channel_objects_complete(cursor, database)
+                    and _governance_lifecycle_complete(cursor, database)
+                    and _security_lifecycle_complete(cursor, database)
+                )
+                organization_complete = v43_complete and _organization_governance_complete(cursor, database)
+                display_name_complete = v43_complete and _human_display_name_complete(cursor, database)
+                entry_access_complete = v43_complete and _entry_access_complete(cursor, database)
+                identity_org_complete = v43_complete and _identity_organization_alignment_complete(cursor, database)
+        finally:
+            probe.close()
+    except Exception:
+        v43_complete = organization_complete = display_name_complete = entry_access_complete = identity_org_complete = False
+    if v43_complete and names == ["18_v4_3_0_security_lifecycle.sql"]:
+        names = []
+    if not organization_complete:
+        names.append("19_v4_3_1_organization_governance.sql")
+    if not display_name_complete:
+        names.append("20_v4_3_1_human_display_name.sql")
+    if not entry_access_complete:
+        names.append("21_v4_3_1_entry_access.sql")
+    if not identity_org_complete:
+        names.append("22_v4_3_1_identity_organization_alignment.sql")
+    return names or ["22_v4_3_1_identity_organization_alignment.sql"]
 
 
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
@@ -1034,7 +1136,7 @@ def _apply_statement_migration(
     conn = connect(config)
     try:
         result.checksum = _checksum(script)
-        if MIGRATION_VERSION in CHANNEL_MIGRATION_VERSIONS:
+        if MIGRATION_VERSION in (CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS):
             with conn.cursor() as cursor:
                 if _channel_schema_incomplete(cursor, database):
                     result.error_type = "SchemaIncomplete"
@@ -1162,7 +1264,7 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
     try:
         result.checksum = _checksum(script)
         statements = _statements(script)
-        if MIGRATION_VERSION in CHANNEL_MIGRATION_VERSIONS:
+        if MIGRATION_VERSION in (CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS):
             with conn.cursor() as cursor:
                 if _channel_schema_incomplete(cursor, "pg"):
                     result.error_type = "SchemaIncomplete"
@@ -1258,7 +1360,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1300,6 +1402,8 @@ def main() -> int:
             script_names = ["8_v4_1_0_governance.sql"]
         elif MIGRATION_VERSION == "4.3.0":
             script_names = _v43_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.3.1":
+            script_names = _v431_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

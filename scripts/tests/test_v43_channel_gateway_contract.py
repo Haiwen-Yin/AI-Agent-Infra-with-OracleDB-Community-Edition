@@ -229,7 +229,9 @@ def test_frontend_dist_is_current_offline_shell():
     assert "/static/assets/" in html
     assert re.search(r"/static/assets/index-[^\"']+\.js", html)
     assert re.search(r"/static/assets/index-[^\"']+\.css", html)
-    assert "v4.3.0" in javascript or "v4.3.0" in stylesheet
+    assert "Runtime boundary" in javascript
+    assert "cx-release-version" in stylesheet
+    assert "v4.3.0" not in javascript and "v4.3.1" not in javascript
     assert "api/auth/login" in javascript
     assert "api/channels" in javascript
     assert "api/enrollment/grants" in javascript

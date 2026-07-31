@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.0 - Unified Hybrid Search Tests
+"""AI Agent Infra v4.3.1 - Unified Hybrid Search Tests
 
 Tests the 5-signal unified search: vector + fulltext (Oracle Text) + relational metadata + graph proximity.
 Uses seeded test data with 50+ entities, embeddings, edges, and tags.
