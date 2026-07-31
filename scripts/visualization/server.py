@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.3.1 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -49,7 +49,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.3.0"
+VERSION = "4.3.1"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -665,6 +665,14 @@ class VisHandler(BaseHTTPRequestHandler):
         if result is None:
             self._send_error(401, 'Authentication required')
             return None
+        entry = 'PORTAL' if self.path.startswith('/portal') else 'APP'
+        try:
+            if not identity_api.entry_allowed(str(result[1].get('principal_id') or ''), entry):
+                self._send_error(403, '{} access is disabled'.format(entry.title()))
+                return None
+        except Exception:
+            self._send_error(503, 'Entry-access policy is unavailable')
+            return None
         return result
 
     def _require_admin(self):
@@ -843,7 +851,15 @@ class VisHandler(BaseHTTPRequestHandler):
 
         if path == '/portal/chat':
             session_data = _get_session(self)
-            if session_data is None or str(session_data[1].get('mfa_level') or 'NONE').upper() == 'SETUP':
+            try:
+                portal_allowed = bool(
+                    session_data and identity_api.entry_allowed(
+                        str(session_data[1].get('principal_id') or ''), 'PORTAL'
+                    )
+                )
+            except Exception:
+                portal_allowed = False
+            if not portal_allowed or str(session_data[1].get('mfa_level') or 'NONE').upper() == 'SETUP':
                 self._send_redirect('/portal/login')
                 return
             self._serve_template('portal_chat.html')
@@ -3071,6 +3087,9 @@ class VisHandler(BaseHTTPRequestHandler):
 
         try:
             principal_id = str(user['principal_id'])
+            if not identity_api.entry_allowed(principal_id, 'PORTAL'):
+                self._send_json({'success': False, 'error': 'Portal access is disabled'}, 403)
+                return
             required = security_lifecycle.mfa_required(principal_id)
             method = security_lifecycle.verify_mfa(principal_id, mfa_code) if mfa_code else ''
             if required and not method and not security_lifecycle.has_active_mfa_factor(principal_id):
@@ -4072,8 +4091,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.3.0', VERSION)
-            html = html.replace('2026-07-29', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.3.1', VERSION)
+            html = html.replace('2026-07-31', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(
