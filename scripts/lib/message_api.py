@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.0 - Community Edition - Agent Communication Protocol
+"""AI Agent Infra v4.3.1 - Community Edition - Agent Communication Protocol
 
 Inter-agent messaging for collaboration groups. Supports direct messages,
 broadcast, threaded replies, priority levels, and attachment references.

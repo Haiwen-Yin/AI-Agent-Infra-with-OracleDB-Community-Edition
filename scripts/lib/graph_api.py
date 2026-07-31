@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.0 - Property Graph API
+"""AI Agent Infra v4.3.1 - Property Graph API
 
 Database-neutral relational edge traversal, path finding, community detection,
 and graph analytics over the shared entity graph contract.

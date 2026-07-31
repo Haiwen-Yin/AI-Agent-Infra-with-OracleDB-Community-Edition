@@ -35,6 +35,7 @@ ROLE_FALLBACKS = {
             "branches.read", "collab.read", "loops.read", "graphs.read",
             "notifications.read", "users.read", "users.sessions.read",
             "sessions.revoke", "users.identity.link", "users.security.manage",
+            "organizations.read",
         },
         "scopes": {"OWNED", "ASSIGNED"},
     },
@@ -60,6 +61,20 @@ ROLE_FALLBACKS = {
             "agents.transfer", "agents.offboard", "channels.read", "channels.create",
             "channels.manage_members", "channels.lifecycle", "users.read",
             "notifications.manage", "profile.update",
+            "organizations.read",
+        },
+        "scopes": {"ORG_SUBTREE"},
+    },
+    "ORG_MANAGER": {
+        "permissions": {
+            "organizations.read", "organizations.manage",
+            "organizations.people.read", "organizations.agents.read",
+            "organizations.anomalies.read",
+            "organizations.changes.create", "organizations.changes.write",
+            "organizations.changes.submit", "organizations.history.read",
+            "organizations.members.manage", "organizations.reporting.manage",
+            "organizations.sync.manage",
+            "agents.read", "users.read", "profile.update",
         },
         "scopes": {"ORG_SUBTREE"},
     },
@@ -68,7 +83,7 @@ ROLE_FALLBACKS = {
     "OPERATOR": {"permissions": {"agents.read", "agents.operate", "channels.write", "barriers.arrive", "profile.update"}, "scopes": {"ASSIGNED"}},
     "DEVELOPER": {"permissions": {"skills.read", "tools.read", "graphs.read", "barriers.create", "profile.update"}, "scopes": {"OWNED"}},
     "USER_ADMIN": {
-        "permissions": {"users.read", "users.read.all", "users.approve", "users.roles.manage", "users.permissions.manage", "users.identity.link", "users.security.manage", "users.sessions.read", "users.delegations.read", "users.delegations.manage"},
+        "permissions": {"users.read", "users.read.all", "users.approve", "users.roles.manage", "users.permissions.manage", "users.identity.link", "users.security.manage", "users.sessions.read", "users.delegations.read", "users.delegations.manage", "organizations.read", "organizations.members.manage", "organizations.reporting.manage"},
         "scopes": {"ORG_SUBTREE"},
     },
     "ROLE_ADMIN": {
@@ -191,7 +206,7 @@ def _required_query(sql: str, params: Optional[Dict[str, Any]] = None) -> List[D
 def principal_summary(principal_id: str) -> Dict[str, Any]:
     """Return non-secret identity metadata for the authenticated console."""
     row = _row(connection.execute_query_one(
-        "SELECT p.PRINCIPAL_ID, p.PRINCIPAL_TYPE, p.STATUS, p.PERMISSION_VERSION, "
+        "SELECT p.PRINCIPAL_ID, p.PRINCIPAL_TYPE, p.DISPLAY_NAME, p.STATUS, p.PERMISSION_VERSION, "
         "i.USERNAME, i.EMAIL, i.IDENTITY_TYPE "
         "FROM CX_PRINCIPALS p LEFT JOIN CX_HUMAN_IDENTITIES i "
         "ON i.PRINCIPAL_ID = p.PRINCIPAL_ID AND i.STATUS = 'ACTIVE' "
@@ -385,16 +400,29 @@ def _ensure_principal(
     status: str = "ACTIVE",
     role_code: str = "END_USER",
     email: str = "",
+    display_name: str = "",
+    app_access: bool = True,
 ) -> str:
+    display_name = str(display_name or username).strip()[:256]
     existing = _local_identity(username)
     if existing:
         principal_id = str(existing["principal_id"])
+        connection.execute(
+            "UPDATE CX_PRINCIPALS SET DISPLAY_NAME = COALESCE(:display_name, DISPLAY_NAME) "
+            "WHERE PRINCIPAL_ID = :principal_id",
+            {"display_name": display_name or None, "principal_id": principal_id},
+        )
         connection.execute(
             "UPDATE CX_HUMAN_IDENTITIES SET PROVIDER = :provider, PASSWORD_HASH = :password_hash, EMAIL = COALESCE(:email, EMAIL), STATUS = :status, "
             "UPDATED_AT = CURRENT_TIMESTAMP WHERE IDENTITY_ID = :identity_id",
             {"provider": LOCAL_PROVIDER, "password_hash": password_hash, "email": email or None, "status": status, "identity_id": existing["identity_id"]},
         )
         if str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"}:
+            connection.execute(
+                "UPDATE CX_PRINCIPALS SET PORTAL_ACCESS = 'Y', APP_ACCESS = 'Y' "
+                "WHERE PRINCIPAL_ID = :principal_id",
+                {"principal_id": principal_id},
+            )
             assigned = _row(connection.execute_query_one(
                 "SELECT USER_ROLE_ID FROM CX_USER_ROLES WHERE PRINCIPAL_ID = :principal_id "
                 "AND ROLE_CODE = 'SYSTEM_ADMIN' AND STATUS = 'ACTIVE'",
@@ -410,8 +438,10 @@ def _ensure_principal(
         return principal_id
     principal_id = _id("HP")
     connection.execute(
-        "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, STATUS) VALUES (:principal_id, 'HUMAN', :status)",
-        {"principal_id": principal_id, "status": status},
+        "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, DISPLAY_NAME, STATUS, PORTAL_ACCESS, APP_ACCESS) "
+        "VALUES (:principal_id, 'HUMAN', :display_name, :status, 'Y', :app_access)",
+        {"principal_id": principal_id, "display_name": display_name, "status": status,
+         "app_access": "Y" if app_access or str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"} else "N"},
     )
     connection.execute(
         "INSERT INTO CX_HUMAN_IDENTITIES(IDENTITY_ID, PRINCIPAL_ID, IDENTITY_TYPE, PROVIDER, SUBJECT_KEY, USERNAME, EMAIL, PASSWORD_HASH, PASSWORD_VERSION, STATUS) "
@@ -421,8 +451,10 @@ def _ensure_principal(
     )
     role = "SYSTEM_ADMIN" if str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"} else "END_USER"
     connection.execute(
-        "INSERT INTO CX_USER_ROLES(USER_ROLE_ID, PRINCIPAL_ID, ROLE_CODE, SOURCE) VALUES (:id, :principal_id, :role_code, 'DEFAULT')",
-        {"id": _id("UR"), "principal_id": principal_id, "role_code": role},
+        "INSERT INTO CX_USER_ROLES(USER_ROLE_ID, PRINCIPAL_ID, ROLE_CODE, SOURCE) "
+        "VALUES (:id, :principal_id, :role_code, :source)",
+        {"id": _id("UR"), "principal_id": principal_id, "role_code": role,
+         "source": "BOOTSTRAP_ADMIN" if role == "SYSTEM_ADMIN" and username == "admin" else "DEFAULT"},
     )
     ensure_principal_defaults(principal_id)
     return principal_id
@@ -455,9 +487,34 @@ def bootstrap_existing_admins() -> int:
     return adopted
 
 
-def register_human(username: str, password: str, email: str = "", invite_code: str = "") -> Dict[str, Any]:
+def _default_registration_organization() -> str:
+    """Resolve the sole server-selected organization used only by OPEN mode."""
+    configured = str(os.environ.get("CX_DEFAULT_ORGANIZATION_ID", "")).strip()
+    if configured:
+        row = _row(connection.execute_query_one(
+            "SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS "
+            "WHERE ORGANIZATION_ID = :organization_id AND STATUS = 'ACTIVE'",
+            {"organization_id": configured},
+        ))
+        if not row:
+            raise IdentityError("Default registration organization is unavailable")
+        return str(row["organization_id"])
+    rows = _rows(connection.execute_query(
+        "SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS "
+        "WHERE PARENT_ID IS NULL AND STATUS = 'ACTIVE' ORDER BY ORGANIZATION_ID"
+    ))
+    if len(rows) != 1:
+        raise IdentityError("OPEN registration requires one default root organization")
+    return str(rows[0]["organization_id"])
+
+
+def register_human(
+    username: str, password: str, email: str = "", invite_code: str = "", *,
+    display_name: str = "",
+) -> Dict[str, Any]:
     username = _normalize_username(username)
-    if not username or len(username) > 128 or not password:
+    display_name = str(display_name or username).strip()
+    if not username or len(username) > 128 or not password or not display_name or len(display_name) > 256:
         raise IdentityError("Registration data is invalid")
     mode = registration_mode()
     if mode == "CLOSED":
@@ -475,14 +532,32 @@ def register_human(username: str, password: str, email: str = "", invite_code: s
     password_hash = hash_password_argon2id(password)
     request_id = _id("REG")
     if mode == "OPEN":
-        user_id = _create_system_user(username, password_hash)
-        principal_id = _ensure_principal(user_id, username, password_hash, "ACTIVE", "USER", email)
+        organization_id = _default_registration_organization()
+        def activate(tx: Any) -> tuple[str, str]:
+            user_id = _create_system_user_tx(tx, username, password_hash)
+            principal_id = _ensure_principal_tx(
+                tx, user_id, username, password_hash, "ACTIVE", "USER", email,
+                display_name, app_access=False,
+            )
+            tx.execute(
+                "INSERT INTO CX_ORGANIZATION_MEMBERS(MEMBERSHIP_ID, ORGANIZATION_ID, PRINCIPAL_ID, "
+                "MEMBERSHIP_KIND, MEMBERSHIP_ROLE, VALID_FROM, SOURCE_TYPE, STATUS, ROW_VERSION, UPDATED_BY) "
+                "VALUES (:membership_id, :organization_id, :principal_id, 'PRIMARY', 'MEMBER', "
+                "CURRENT_TIMESTAMP, 'SYSTEM', 'ACTIVE', 1, :updated_by)",
+                {"membership_id": _id("OM"), "organization_id": organization_id,
+                 "principal_id": principal_id, "updated_by": principal_id},
+            )
+            return user_id, principal_id
+        user_id, principal_id = connection.execute_transaction_callback(activate)
         _audit(principal_id, "HUMAN_REGISTER", "HUMAN", principal_id, "ALLOW", "open registration")
-        return {"request_id": request_id, "user_id": user_id, "principal_id": principal_id, "username": username, "status": "ACTIVE", "role": "USER"}
+        return {"request_id": request_id, "user_id": user_id, "principal_id": principal_id,
+                "organization_id": organization_id, "username": username,
+                "status": "ACTIVE", "role": "USER"}
     connection.execute(
-        "INSERT INTO CX_REGISTRATION_REQUESTS(REQUEST_ID, USERNAME, EMAIL, PASSWORD_HASH, AUTH_SOURCE, REGISTRATION_MODE, STATUS) "
-        "VALUES (:request_id, :username, :email, :password_hash, 'LOCAL', :mode, 'PENDING')",
-        {"request_id": request_id, "username": username, "email": email or None, "password_hash": password_hash, "mode": mode},
+        "INSERT INTO CX_REGISTRATION_REQUESTS(REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, PASSWORD_HASH, AUTH_SOURCE, REGISTRATION_MODE, STATUS) "
+        "VALUES (:request_id, :username, :display_name, :email, :password_hash, 'LOCAL', :mode, 'PENDING')",
+        {"request_id": request_id, "username": username, "display_name": display_name,
+         "email": email or None, "password_hash": password_hash, "mode": mode},
     )
     _audit(None, "HUMAN_REGISTER", "HUMAN", request_id, "PENDING", "approval registration")
     return {"request_id": request_id, "username": username, "status": "PENDING", "role": "USER"}
@@ -520,8 +595,11 @@ def _ensure_principal_tx(
     status: str = "ACTIVE",
     role_code: str = "END_USER",
     email: str = "",
+    display_name: str = "",
+    app_access: bool = True,
 ) -> str:
     """Create the Principal and default-domain membership on one DB session."""
+    display_name = str(display_name or username).strip()[:256]
     existing = _row(tx.query_one(
         "SELECT IDENTITY_ID, PRINCIPAL_ID FROM CX_HUMAN_IDENTITIES "
         "WHERE IDENTITY_TYPE = 'LOCAL' AND " + _LOCAL_PROVIDER_PREDICATE + " AND SUBJECT_KEY = :username",
@@ -529,6 +607,11 @@ def _ensure_principal_tx(
     ))
     if existing:
         principal_id = str(existing["principal_id"])
+        tx.execute(
+            "UPDATE CX_PRINCIPALS SET DISPLAY_NAME = COALESCE(:display_name, DISPLAY_NAME) "
+            "WHERE PRINCIPAL_ID = :principal_id",
+            {"display_name": display_name or None, "principal_id": principal_id},
+        )
         tx.execute(
             "UPDATE CX_HUMAN_IDENTITIES SET PROVIDER = :provider, PASSWORD_HASH = :password_hash, "
             "EMAIL = COALESCE(:email, EMAIL), STATUS = :status, "
@@ -538,6 +621,11 @@ def _ensure_principal_tx(
              "identity_id": existing["identity_id"]},
         )
         if str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"}:
+            tx.execute(
+                "UPDATE CX_PRINCIPALS SET PORTAL_ACCESS = 'Y', APP_ACCESS = 'Y' "
+                "WHERE PRINCIPAL_ID = :principal_id",
+                {"principal_id": principal_id},
+            )
             assigned = _row(tx.query_one(
                 "SELECT USER_ROLE_ID FROM CX_USER_ROLES WHERE PRINCIPAL_ID = :principal_id "
                 "AND ROLE_CODE = 'SYSTEM_ADMIN' AND STATUS = 'ACTIVE'",
@@ -553,9 +641,10 @@ def _ensure_principal_tx(
 
     principal_id = _id("HP")
     tx.execute(
-        "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, STATUS) "
-        "VALUES (:principal_id, 'HUMAN', :status)",
-        {"principal_id": principal_id, "status": status},
+        "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, DISPLAY_NAME, STATUS, PORTAL_ACCESS, APP_ACCESS) "
+        "VALUES (:principal_id, 'HUMAN', :display_name, :status, 'Y', :app_access)",
+        {"principal_id": principal_id, "display_name": display_name, "status": status,
+         "app_access": "Y" if app_access or str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"} else "N"},
     )
     tx.execute(
         "INSERT INTO CX_HUMAN_IDENTITIES(IDENTITY_ID, PRINCIPAL_ID, IDENTITY_TYPE, PROVIDER, "
@@ -570,8 +659,9 @@ def _ensure_principal_tx(
     role = "SYSTEM_ADMIN" if str(role_code or "").upper() in {"ADMIN", "ADMINISTRATOR", "SYSTEM_ADMIN"} else "END_USER"
     tx.execute(
         "INSERT INTO CX_USER_ROLES(USER_ROLE_ID, PRINCIPAL_ID, ROLE_CODE, SOURCE) "
-        "VALUES (:id, :principal_id, :role_code, 'DEFAULT')",
-        {"id": _id("UR"), "principal_id": principal_id, "role_code": role},
+        "VALUES (:id, :principal_id, :role_code, :source)",
+        {"id": _id("UR"), "principal_id": principal_id, "role_code": role,
+         "source": "BOOTSTRAP_ADMIN" if role == "SYSTEM_ADMIN" and username == "admin" else "DEFAULT"},
     )
     domain = _row(tx.query_one(
         "SELECT SECURITY_DOMAIN_ID FROM CX_SECURITY_DOMAINS "
@@ -591,13 +681,38 @@ def _ensure_principal_tx(
     return principal_id
 
 
-def approve_registration(request_id: str, actor_principal_id: str, reason: str) -> Dict[str, Any]:
+def approve_registration(
+    request_id: str, actor_principal_id: str, reason: str, organization_id: str,
+) -> Dict[str, Any]:
     _require(actor_principal_id, "users.approve")
+    _require(actor_principal_id, "organizations.members.manage")
     if not reason.strip():
         raise IdentityError("Approval reason is required")
+    organization_id = str(organization_id or "").strip()
+    if not organization_id:
+        raise IdentityError("Primary organization is required")
+    organization_access = effective_access(actor_principal_id, "organizations.members.manage")
+    organization_scopes = {str(item).upper() for item in organization_access.get("scopes", [])}
     def work(tx: Any) -> Dict[str, Any]:
+        scope_clause = ""
+        params = {"organization_id": organization_id, "actor_principal_id": actor_principal_id}
+        if "ALL" not in organization_scopes:
+            scope_clause = (
+                " AND EXISTS (SELECT 1 FROM CX_ORGANIZATION_MEMBERS actor_org "
+                "JOIN CX_ORGANIZATION_CLOSURE path ON path.ANCESTOR_ID = actor_org.ORGANIZATION_ID "
+                "WHERE actor_org.PRINCIPAL_ID = :actor_principal_id "
+                "AND actor_org.MEMBERSHIP_KIND = 'PRIMARY' AND actor_org.STATUS = 'ACTIVE' "
+                "AND path.DESCENDANT_ID = CX_ORGANIZATIONS.ORGANIZATION_ID)"
+            )
+        organization = _row(tx.query_one(
+            "SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS "
+            "WHERE ORGANIZATION_ID = :organization_id AND STATUS = 'ACTIVE'" + scope_clause + " FOR UPDATE",
+            params,
+        ))
+        if not organization:
+            raise IdentityError("Primary organization is unavailable")
         row = _row(tx.query_one(
-            "SELECT REQUEST_ID, USERNAME, EMAIL, PASSWORD_HASH, STATUS "
+            "SELECT REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, PASSWORD_HASH, STATUS "
             "FROM CX_REGISTRATION_REQUESTS WHERE REQUEST_ID = :request_id FOR UPDATE",
             {"request_id": request_id},
         ))
@@ -605,7 +720,17 @@ def approve_registration(request_id: str, actor_principal_id: str, reason: str) 
             raise IdentityError("Registration request is unavailable")
         user_id = _create_system_user_tx(tx, row["username"], row["password_hash"])
         principal_id = _ensure_principal_tx(
-            tx, user_id, row["username"], row["password_hash"], "ACTIVE", "USER", row.get("email") or "",
+            tx, user_id, row["username"], row["password_hash"], "ACTIVE", "USER",
+            row.get("email") or "", row.get("display_name") or row["username"],
+            app_access=False,
+        )
+        tx.execute(
+            "INSERT INTO CX_ORGANIZATION_MEMBERS(MEMBERSHIP_ID, ORGANIZATION_ID, PRINCIPAL_ID, "
+            "MEMBERSHIP_KIND, MEMBERSHIP_ROLE, VALID_FROM, SOURCE_TYPE, STATUS, ROW_VERSION, UPDATED_BY) "
+            "VALUES (:membership_id, :organization_id, :principal_id, 'PRIMARY', 'MEMBER', "
+            "CURRENT_TIMESTAMP, 'MANUAL', 'ACTIVE', 1, :updated_by)",
+            {"membership_id": _id("OM"), "organization_id": organization_id,
+             "principal_id": principal_id, "updated_by": actor_principal_id},
         )
         changed = tx.execute(
             "UPDATE CX_REGISTRATION_REQUESTS SET STATUS = 'APPROVED', DECISION_BY = :actor, "
@@ -616,7 +741,8 @@ def approve_registration(request_id: str, actor_principal_id: str, reason: str) 
         if changed != 1:
             raise IdentityError("Registration request is unavailable")
         return {"request_id": request_id, "user_id": user_id, "principal_id": principal_id,
-                "username": row["username"], "status": "ACTIVE", "role": "USER"}
+                "organization_id": organization_id, "username": row["username"],
+                "status": "ACTIVE", "role": "USER"}
 
     result = connection.execute_transaction_callback(work)
     _audit(actor_principal_id, "HUMAN_REGISTER_APPROVE", "REGISTRATION", request_id, "ALLOW", reason)
@@ -646,29 +772,21 @@ def _active_scopes(principal_id: str) -> set[str]:
 
 
 def _organization_scope_clause(target_principal_sql: str, principal_id_param: str = ":principal_id") -> str:
-    """Build a portable organization scope with bounded hierarchy expansion."""
-    # The bounded form works on all three adapters and prevents an accidental
-    # unbounded recursive query from turning a user inventory into a graph
-    # traversal.  Organizations deeper than four levels should be assigned a
-    # dedicated scope or queried by an administrator.
+    """Build the portable v4.3.1 primary-membership organization scope."""
     return (
         "EXISTS (SELECT 1 FROM CX_ORGANIZATION_MEMBERS actor_org "
+        "JOIN CX_ORGANIZATION_CLOSURE org_path "
+        "ON org_path.ANCESTOR_ID = actor_org.ORGANIZATION_ID "
         "JOIN CX_ORGANIZATION_MEMBERS target_org "
-        "ON target_org.PRINCIPAL_ID = " + target_principal_sql + " "
+        "ON target_org.ORGANIZATION_ID = org_path.DESCENDANT_ID "
+        "AND target_org.PRINCIPAL_ID = " + target_principal_sql + " "
         "WHERE actor_org.PRINCIPAL_ID = " + principal_id_param + " "
         "AND actor_org.STATUS = 'ACTIVE' AND target_org.STATUS = 'ACTIVE' "
+        "AND actor_org.MEMBERSHIP_KIND = 'PRIMARY' "
+        "AND target_org.MEMBERSHIP_KIND = 'PRIMARY' "
         "AND (actor_org.VALID_UNTIL IS NULL OR actor_org.VALID_UNTIL > CURRENT_TIMESTAMP) "
         "AND (target_org.VALID_UNTIL IS NULL OR target_org.VALID_UNTIL > CURRENT_TIMESTAMP) "
-        "AND (target_org.ORGANIZATION_ID = actor_org.ORGANIZATION_ID OR target_org.ORGANIZATION_ID IN ("
-        "SELECT child1.ORGANIZATION_ID FROM CX_ORGANIZATIONS child1 "
-        "WHERE child1.PARENT_ID = actor_org.ORGANIZATION_ID "
-        "UNION SELECT child2.ORGANIZATION_ID FROM CX_ORGANIZATIONS child2 "
-        "WHERE child2.PARENT_ID IN (SELECT child1b.ORGANIZATION_ID FROM CX_ORGANIZATIONS child1b WHERE child1b.PARENT_ID = actor_org.ORGANIZATION_ID) "
-        "UNION SELECT child3.ORGANIZATION_ID FROM CX_ORGANIZATIONS child3 "
-        "WHERE child3.PARENT_ID IN (SELECT child2b.ORGANIZATION_ID FROM CX_ORGANIZATIONS child2b WHERE child2b.PARENT_ID IN (SELECT child1c.ORGANIZATION_ID FROM CX_ORGANIZATIONS child1c WHERE child1c.PARENT_ID = actor_org.ORGANIZATION_ID)) "
-        "UNION SELECT child4.ORGANIZATION_ID FROM CX_ORGANIZATIONS child4 "
-        "WHERE child4.PARENT_ID IN (SELECT child3b.ORGANIZATION_ID FROM CX_ORGANIZATIONS child3b WHERE child3b.PARENT_ID IN (SELECT child2c.ORGANIZATION_ID FROM CX_ORGANIZATIONS child2c WHERE child2c.PARENT_ID IN (SELECT child1d.ORGANIZATION_ID FROM CX_ORGANIZATIONS child1d WHERE child1d.PARENT_ID = actor_org.ORGANIZATION_ID)))"
-        ")))"
+        ")"
     )
 
 
@@ -678,7 +796,9 @@ def _ensure_scope_tables(scopes: set[str]) -> None:
     if "DIRECT_REPORTS" in scopes or "ORG_SUBTREE" in scopes:
         required.update({"CX_ORGANIZATION_MEMBERS"})
     if "ORG_SUBTREE" in scopes:
-        required.add("CX_ORGANIZATIONS")
+        required.update({"CX_ORGANIZATIONS", "CX_ORGANIZATION_CLOSURE"})
+    if "DIRECT_REPORTS" in scopes:
+        required.add("CX_REPORTING_RELATIONSHIPS")
     if "RESPONSIBLE_GROUP" in scopes:
         required.update({"CX_RESPONSIBLE_GROUPS", "CX_RESPONSIBLE_GROUP_MEMBERS"})
     if "SECURITY_DOMAIN" in scopes:
@@ -698,10 +818,12 @@ def _principal_visibility_clause(principal_id: str, target_principal_sql: str = 
     clauses: list[str] = [f"{target_principal_sql} = :principal_id"] if scopes & {"OWNED", "ASSIGNED"} else []
     if "DIRECT_REPORTS" in scopes:
         clauses.append(
-            "EXISTS (SELECT 1 FROM CX_ORGANIZATION_MEMBERS direct_member "
-            "WHERE direct_member.PRINCIPAL_ID = " + target_principal_sql + " "
-            "AND direct_member.MANAGER_PRINCIPAL_ID = :principal_id "
-            "AND direct_member.STATUS = 'ACTIVE' AND (direct_member.VALID_UNTIL IS NULL OR direct_member.VALID_UNTIL > CURRENT_TIMESTAMP))"
+            "EXISTS (SELECT 1 FROM CX_REPORTING_RELATIONSHIPS direct_report "
+            "WHERE direct_report.PRINCIPAL_ID = " + target_principal_sql + " "
+            "AND direct_report.MANAGER_PRINCIPAL_ID = :principal_id "
+            "AND direct_report.RELATIONSHIP_TYPE = 'DIRECT' "
+            "AND direct_report.STATUS = 'ACTIVE' "
+            "AND (direct_report.VALID_UNTIL IS NULL OR direct_report.VALID_UNTIL > CURRENT_TIMESTAMP))"
         )
     if "RESPONSIBLE_GROUP" in scopes:
         clauses.append(
@@ -717,15 +839,17 @@ def _principal_visibility_clause(principal_id: str, target_principal_sql: str = 
         )
     if "ORG_SUBTREE" in scopes:
         clauses.append(_organization_scope_clause(target_principal_sql))
+    domain_clause = ""
     if "SECURITY_DOMAIN" in scopes:
-        clauses.append(
+        domain_clause = (
             "EXISTS (SELECT 1 FROM CX_DOMAIN_MEMBERS actor_domain "
             "JOIN CX_DOMAIN_MEMBERS target_domain ON target_domain.SECURITY_DOMAIN_ID = actor_domain.SECURITY_DOMAIN_ID "
             "WHERE actor_domain.PRINCIPAL_ID = :principal_id "
             "AND target_domain.PRINCIPAL_ID = " + target_principal_sql + " "
             "AND actor_domain.STATUS = 'ACTIVE' AND target_domain.STATUS = 'ACTIVE')"
         )
-    return "(" + " OR ".join(clauses) + ")" if clauses else "1 = 0"
+    scoped = "(" + " OR ".join(clauses) + ")" if clauses else ("1 = 1" if domain_clause else "1 = 0")
+    return f"({scoped} AND {domain_clause})" if domain_clause else scoped
 
 
 def _agent_visibility_clause(principal_id: str) -> str:
@@ -749,9 +873,10 @@ def _agent_visibility_clause(principal_id: str) -> str:
     if "DIRECT_REPORTS" in scopes:
         clauses.append(
             "EXISTS (SELECT 1 FROM CX_AGENT_RELATIONSHIPS report_r "
-            "JOIN CX_ORGANIZATION_MEMBERS report_member ON report_member.PRINCIPAL_ID = report_r.PRINCIPAL_ID "
+            "JOIN CX_REPORTING_RELATIONSHIPS report_member ON report_member.PRINCIPAL_ID = report_r.PRINCIPAL_ID "
             "WHERE report_r.AGENT_ID = p.PRINCIPAL_ID AND report_r.STATUS = 'ACTIVE' "
-            "AND report_member.MANAGER_PRINCIPAL_ID = :principal_id AND report_member.STATUS = 'ACTIVE' "
+            "AND report_member.MANAGER_PRINCIPAL_ID = :principal_id "
+            "AND report_member.RELATIONSHIP_TYPE = 'DIRECT' AND report_member.STATUS = 'ACTIVE' "
             "AND (report_member.VALID_UNTIL IS NULL OR report_member.VALID_UNTIL > CURRENT_TIMESTAMP))"
         )
     if "RESPONSIBLE_GROUP" in scopes:
@@ -767,23 +892,114 @@ def _agent_visibility_clause(principal_id: str) -> str:
             "AND group_r.RESPONSIBLE_GROUP_ID = actor_group.GROUP_ID)"
         )
     if "ORG_SUBTREE" in scopes:
-        clauses.append(_organization_scope_clause("agent_org_target.PRINCIPAL_ID"))
-    if "SECURITY_DOMAIN" in scopes:
         clauses.append(
+            "EXISTS (SELECT 1 FROM CX_AGENT_RELATIONSHIPS org_r "
+            "WHERE org_r.AGENT_ID = p.PRINCIPAL_ID AND org_r.STATUS = 'ACTIVE' AND "
+            + _organization_scope_clause("org_r.PRINCIPAL_ID") + ")"
+        )
+    domain_clause = ""
+    if "SECURITY_DOMAIN" in scopes:
+        domain_clause = (
             "EXISTS (SELECT 1 FROM CX_DOMAIN_MEMBERS actor_domain "
             "JOIN CX_DOMAIN_MEMBERS agent_domain ON agent_domain.SECURITY_DOMAIN_ID = actor_domain.SECURITY_DOMAIN_ID "
             "WHERE actor_domain.PRINCIPAL_ID = :principal_id AND agent_domain.PRINCIPAL_ID = p.PRINCIPAL_ID "
             "AND actor_domain.STATUS = 'ACTIVE' AND agent_domain.STATUS = 'ACTIVE')"
         )
-    # ORG_SUBTREE needs a target alias; keep it as a correlated EXISTS here.
-    if "ORG_SUBTREE" in scopes:
-        clauses[-1] = (
-            "EXISTS (SELECT 1 FROM CX_AGENT_RELATIONSHIPS org_r "
-            "JOIN CX_ORGANIZATION_MEMBERS agent_org_target ON agent_org_target.PRINCIPAL_ID = org_r.PRINCIPAL_ID "
-            "WHERE org_r.AGENT_ID = p.PRINCIPAL_ID AND org_r.STATUS = 'ACTIVE' AND "
-            + _organization_scope_clause("org_r.PRINCIPAL_ID") + ")"
-        )
-    return "(" + " OR ".join(clauses) + ")" if clauses else "1 = 0"
+    scoped = "(" + " OR ".join(clauses) + ")" if clauses else ("1 = 1" if domain_clause else "1 = 0")
+    return f"({scoped} AND {domain_clause})" if domain_clause else scoped
+
+
+def _protected_bootstrap_admin(principal_id: str) -> bool:
+    row = _row(connection.execute_query_one(
+        "SELECT 1 FROM CX_HUMAN_IDENTITIES i JOIN CX_USER_ROLES r "
+        "ON r.PRINCIPAL_ID = i.PRINCIPAL_ID "
+        "WHERE i.PRINCIPAL_ID = :principal_id AND i.IDENTITY_TYPE = 'LOCAL' "
+        "AND i.SUBJECT_KEY = 'admin' AND i.STATUS = 'ACTIVE' "
+        "AND r.ROLE_CODE = 'SYSTEM_ADMIN' AND r.STATUS = 'ACTIVE' "
+        "AND r.SOURCE = 'BOOTSTRAP_ADMIN'",
+        {"principal_id": principal_id},
+    ))
+    return bool(row)
+
+
+def has_active_login_identity(principal_id: str, executor: Any = None) -> bool:
+    """Return whether a Human Principal has a usable proven login identity."""
+    executor = executor or connection
+    query_one = getattr(executor, "query_one", None) or executor.execute_query_one
+    return bool(_row(query_one(
+        "SELECT IDENTITY_ID FROM CX_HUMAN_IDENTITIES "
+        "WHERE PRINCIPAL_ID = :principal_id AND STATUS = 'ACTIVE'",
+        {"principal_id": principal_id},
+    )))
+
+
+def has_active_primary_organization(principal_id: str, executor: Any = None) -> bool:
+    """Return whether a Human Principal has its authoritative placement."""
+    executor = executor or connection
+    query_one = getattr(executor, "query_one", None) or executor.execute_query_one
+    return bool(_row(query_one(
+        "SELECT MEMBERSHIP_ID FROM CX_ORGANIZATION_MEMBERS "
+        "WHERE PRINCIPAL_ID = :principal_id AND MEMBERSHIP_KIND = 'PRIMARY' "
+        "AND STATUS = 'ACTIVE' AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP)",
+        {"principal_id": principal_id},
+    )))
+
+
+def entry_access(principal_id: str) -> Dict[str, Any]:
+    row = _row(connection.execute_query_one(
+        "SELECT PORTAL_ACCESS, APP_ACCESS, STATUS FROM CX_PRINCIPALS "
+        "WHERE PRINCIPAL_ID = :principal_id AND PRINCIPAL_TYPE = 'HUMAN'",
+        {"principal_id": principal_id},
+    ))
+    active = bool(row and str(row.get("status") or "").upper() == "ACTIVE")
+    protected = active and _protected_bootstrap_admin(principal_id)
+    organization_ready = protected or (active and has_active_primary_organization(principal_id))
+    return {
+        "principal_id": principal_id,
+        "portal_enabled": organization_ready and (protected or str(row.get("portal_access") or "N").upper() == "Y"),
+        "app_enabled": organization_ready and (protected or str(row.get("app_access") or "N").upper() == "Y"),
+        "protected_system_admin": protected,
+        "organization_ready": organization_ready,
+    }
+
+
+def entry_allowed(principal_id: str, entry: str) -> bool:
+    code = str(entry or "").strip().upper()
+    if code not in {"PORTAL", "APP"}:
+        return False
+    access = entry_access(principal_id)
+    return bool(access["portal_enabled" if code == "PORTAL" else "app_enabled"])
+
+
+def get_entry_access(actor_principal_id: str, target_principal_id: str) -> Dict[str, Any]:
+    _require(actor_principal_id, "users.read")
+    if not _principal_visible_to(actor_principal_id, target_principal_id):
+        raise PermissionError("user is outside the delegated scope")
+    return entry_access(target_principal_id)
+
+
+def set_entry_access(
+    actor_principal_id: str, target_principal_id: str, app_enabled: bool, reason: str,
+) -> Dict[str, Any]:
+    if not reason.strip():
+        raise IdentityError("Entry-access change reason is required")
+    _require(actor_principal_id, "users.permissions.manage")
+    if not _principal_visible_to(actor_principal_id, target_principal_id):
+        raise PermissionError("user is outside the delegated scope")
+    current = entry_access(target_principal_id)
+    if current["protected_system_admin"] and not app_enabled:
+        raise PermissionError("bootstrap administrator entry access is protected")
+    changed = connection.execute(
+        "UPDATE CX_PRINCIPALS SET PORTAL_ACCESS = 'Y', APP_ACCESS = :app_access, "
+        "PERMISSION_VERSION = PERMISSION_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
+        "WHERE PRINCIPAL_ID = :principal_id AND PRINCIPAL_TYPE = 'HUMAN' AND STATUS = 'ACTIVE'",
+        {"app_access": "Y" if app_enabled else "N", "principal_id": target_principal_id},
+    )
+    if changed != 1:
+        raise IdentityError("Entry-access target is unavailable")
+    revoke_principal_sessions(target_principal_id, "entry-access policy changed")
+    _audit(actor_principal_id, "USER_ENTRY_ACCESS_UPDATE", "HUMAN", target_principal_id, "ALLOW", reason)
+    return entry_access(target_principal_id)
 
 
 def list_users(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -799,13 +1015,39 @@ def list_users(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     params: Dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
     if ":principal_id" in visibility:
         params["principal_id"] = principal_id
-    return _required_query(
-        "SELECT p.PRINCIPAL_ID, p.PRINCIPAL_TYPE, p.STATUS, p.PERMISSION_VERSION, "
-        "i.USERNAME, i.EMAIL, i.IDENTITY_TYPE, i.LAST_LOGIN_AT "
-        "FROM CX_PRINCIPALS p JOIN CX_HUMAN_IDENTITIES i ON i.PRINCIPAL_ID = p.PRINCIPAL_ID "
-        "WHERE p.PRINCIPAL_TYPE = 'HUMAN' AND " + visibility + " ORDER BY i.USERNAME " + suffix,
+    rows = _required_query(
+        "SELECT p.PRINCIPAL_ID, p.PRINCIPAL_TYPE, p.DISPLAY_NAME, p.STATUS, p.PERMISSION_VERSION, "
+        "p.PORTAL_ACCESS, p.APP_ACCESS, "
+        "(SELECT MIN(i.USERNAME) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND i.STATUS = 'ACTIVE') AS USERNAME, "
+        "(SELECT MIN(i.EMAIL) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND i.STATUS = 'ACTIVE') AS EMAIL, "
+        "(SELECT MIN(i.IDENTITY_TYPE) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND i.STATUS = 'ACTIVE') AS IDENTITY_TYPE, "
+        "(SELECT MAX(i.LAST_LOGIN_AT) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND i.STATUS = 'ACTIVE') AS LAST_LOGIN_AT, "
+        "(SELECT COUNT(*) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND i.STATUS = 'ACTIVE') AS LOGIN_IDENTITY_COUNT, "
+        "m.ORGANIZATION_ID, o.ORGANIZATION_NAME "
+        "FROM CX_PRINCIPALS p LEFT JOIN CX_ORGANIZATION_MEMBERS m ON m.PRINCIPAL_ID = p.PRINCIPAL_ID "
+        "AND m.MEMBERSHIP_KIND = 'PRIMARY' AND m.STATUS = 'ACTIVE' "
+        "AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL > CURRENT_TIMESTAMP) "
+        "LEFT JOIN CX_ORGANIZATIONS o ON o.ORGANIZATION_ID = m.ORGANIZATION_ID "
+        "WHERE p.PRINCIPAL_TYPE = 'HUMAN' AND " + visibility + " "
+        "ORDER BY p.DISPLAY_NAME, p.PRINCIPAL_ID " + suffix,
         params,
     )
+    for row in rows:
+        protected = _protected_bootstrap_admin(str(row["principal_id"]))
+        if protected:
+            row["display_name"] = "管理员"
+        organization_ready = protected or bool(row.get("organization_id"))
+        row["portal_enabled"] = organization_ready and (protected or str(row.get("portal_access") or "N").upper() == "Y")
+        row["app_enabled"] = organization_ready and (protected or str(row.get("app_access") or "N").upper() == "Y")
+        row["protected_system_admin"] = protected
+        row["account_ready"] = protected or int(row.get("login_identity_count") or 0) > 0
+        row["organization_ready"] = organization_ready
+    return rows
 
 
 def _principal_visible_to(actor_principal_id: str, target_principal_id: str) -> bool:
@@ -837,7 +1079,7 @@ def list_registration_requests(principal_id: str, status: str = "", limit: int =
         where = " WHERE STATUS = :status"
         params["status"] = status.upper()[:32]
     return _required_query(
-        "SELECT REQUEST_ID, USERNAME, EMAIL, AUTH_SOURCE, REGISTRATION_MODE, STATUS, "
+        "SELECT REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, AUTH_SOURCE, REGISTRATION_MODE, STATUS, "
         "DECISION_BY, DECISION_REASON, CREATED_AT, DECIDED_AT FROM CX_REGISTRATION_REQUESTS" +
         where + " ORDER BY CREATED_AT DESC " + _limit_clause(), params,
     )
@@ -847,12 +1089,16 @@ def list_user_roles(actor_principal_id: str, target_principal_id: str) -> List[D
     _require(actor_principal_id, "users.read")
     if not _principal_visible_to(actor_principal_id, target_principal_id):
         raise PermissionError("user is outside the delegated scope")
-    return _required_query(
+    rows = _required_query(
         "SELECT USER_ROLE_ID, PRINCIPAL_ID, ROLE_CODE, SOURCE, VALID_FROM, VALID_UNTIL, "
         "GRANTED_BY, STATUS FROM CX_USER_ROLES WHERE PRINCIPAL_ID = :principal_id "
         "ORDER BY ROLE_CODE",
         {"principal_id": target_principal_id},
     )
+    protected = _protected_bootstrap_admin(target_principal_id)
+    for row in rows:
+        row["protected"] = protected and str(row.get("role_code") or "").upper() == "SYSTEM_ADMIN"
+    return rows
 
 
 def assign_user_role(actor_principal_id: str, target_principal_id: str, role_code: str, reason: str) -> Dict[str, Any]:
@@ -903,6 +1149,8 @@ def revoke_user_role(actor_principal_id: str, target_principal_id: str, user_rol
     ))
     if not assigned:
         return False
+    if str(assigned.get("role_code") or "").upper() == "SYSTEM_ADMIN" and _protected_bootstrap_admin(target_principal_id):
+        raise PermissionError("bootstrap administrator system role is protected")
     if (
         str(assigned.get("role_code") or "").upper()
         in {"SYSTEM_ADMIN", "SECURITY_ADMIN", "USER_ADMIN", "ORG_MANAGER", "ROLE_ADMIN"}
@@ -959,6 +1207,8 @@ def assign_permission_override(
         raise PermissionError("user is outside the delegated scope")
     if target == actor_principal_id and target_effect == "ALLOW":
         raise PermissionError("self permission elevation is not allowed")
+    if target_effect == "DENY" and _protected_bootstrap_admin(target):
+        raise PermissionError("bootstrap administrator authority is protected")
     if action in {"*", "users.roles.manage", "users.permissions.manage", "security.*"} and effective_access(actor_principal_id, "users.roles.manage.all")["decision"] != "ALLOW":
         raise PermissionError("elevated permission requires role-administration delegation")
     override_id = _id("PO")
