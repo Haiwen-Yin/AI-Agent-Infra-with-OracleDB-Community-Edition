@@ -1,4 +1,4 @@
-# Python Runtime Policy - AI Agent Infra with DB v4.3.0
+# Python Runtime Policy - AI Agent Infra with DB v4.3.1
 
 The release requires an accessible CPython **3.14 or newer** interpreter.
 There is no preferred vendor or installation source.
@@ -84,7 +84,7 @@ The offline installer also checks the host glibc floor. The release may carry
 both the upstream `cryptography==49.0.0` `manylinux_2_34` wheel and a verified
 source-built `manylinux_2_28` wheel. The latter must be built on a glibc 2.28
 baseline and verified with `auditwheel`; it must never be created by renaming
-the upstream wheel. The current v4.3.0 package contains both verified wheels,
+the upstream wheel. The current v4.3.1 package contains both verified wheels,
 so `verify_deps.py` selects the glibc 2.28 artifact on this host and the
 `manylinux_2_34` artifact on newer systems.
 

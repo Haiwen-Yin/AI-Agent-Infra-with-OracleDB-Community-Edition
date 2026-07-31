@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.0
+# Deployment Guide - AI Agent Infra with DB v4.3.1
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -33,7 +33,7 @@ on newer operating systems use the upstream wheel. See
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
 The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.0 artifact includes the verified
+integrity before install. The current v4.3.1 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
@@ -339,7 +339,7 @@ internal `15` step is included in the v4.3.0 package and is not a public
 v4.2.1 release.
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.0 --edition enterprise \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.1 --edition enterprise \
     --oracle-config /path/to/oracle-config.json \
     --pg-config /path/to/pg-config.json \
     --yashandb-config /path/to/yashandb-config.json \

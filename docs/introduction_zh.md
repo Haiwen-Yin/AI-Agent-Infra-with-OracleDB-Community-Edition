@@ -1,10 +1,12 @@
-# AI Agent Infra with OracleDB — 社区版 v4.3.0
+# AI Agent Infra with OracleDB — 社区版 v4.3.1
 
-**版本**: v4.3.0 | **日期**: 2026-07-29 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.3.1 | **日期**: 2026-07-31 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.top**
 
 ---
+
+> v4.3.1 身份与组织规则：除受保护的内置 `admin` 系统账号外，一个平台账号、一个 Human Principal 与一个组织人员表示同一主体。注册审批必须选择主组织，并在同一事务中激活账号和主组织归属；没有有效登录身份的 Principal 不能加入组织架构。
 
 ## 品牌与技术名称
 
@@ -40,6 +42,7 @@
 | 加密存储 | PBKDF2+AES-256-GCM、DB_CRYPTO 数据库原生加密、主密钥管理、自动加密 |
 | 数据库访问安全 | 规范约束 + 最小权限用户 + AUTHID DEFINER + Deep Data Security + 审计 + 脱敏 |
 | 企业治理 | 资源目录、策略决策、限时授权、多人审批、应急控制、风险审计与证据导出 |
+| 组织治理 | 图形化组织检索与配置、主/兼职组织、汇报关系、Agent 归属、语义变更草稿与版本历史 |
 
 ---
 
@@ -53,6 +56,7 @@
 
 | 版本 | 日期 | 里程碑 |
 |------|------|--------|
+| **v4.3.1** | 2026-07-31 | 新增数据库权威的图形化组织治理；支持组织、人员归属、Agent 责任与异常视图，闭包范围授权，语义草稿、校验、影响分析和审批提交 |
 | **v4.3.0** | 2026-07-29 | 集成内部 Graph Engineering 收口；统一 Human/Agent Principal、用户注册审批、一次性 Agent Enrollment、Security Domain、Channel、Barrier、Gateway、数据库会话与节点级回收；生产 profile 门禁通过，保留 v4.1.x 兼容基线，不单独发布 v4.2.1 |
 | **v4.1.0** | 2026-07-24 | 注册 Agent 统一纳管；企业版增加资源目录、策略决策、限时授权、N-of-M 审批、职责分离、应急控制、风险型审计与范围化证据导出；统一川序产品界面 |
 | **v4.0.1** | 2026-07-22 | 安全与发布完整性加固：Business Agent 独立数据库身份且禁止回退；config.json 四类敏感配置使用 AES-256-GCM 并强制 0600；持久执行控制面；无损 Skill 包；严格社区版/企业版边界；Portal Agent 按节点回收 |
@@ -1492,7 +1496,7 @@ Graph 条件必须使用受管的 typed AST。缺少 operand、非 AST 子项、
 校验节点/边身份、端点、父版本以及动态来源 Run/Checkpoint 的同图关系。
 
 v4.3.0 的生产 profile 已通过数据库、浏览器、容量、故障恢复、清洁部署和
-长时间运行证据门禁，生产部署使用 v4.3.0 production profile。Graph Preview、
+长时间运行证据门禁，生产部署使用 v4.3.1 production profile。Graph Preview、
 Channel、Barrier 和 Gateway 通过 profile 与数据库权限显式控制；Channel 不能扩大
 数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。待 Graph
 Engineering 行业规范和项目合约稳定后，最新验证通过的实现可直接毕业为正式

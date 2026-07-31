@@ -2,30 +2,39 @@ import React, { FormEvent, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  AlertTriangle,
+  ArrowDownUp,
   Bot,
+  Building2,
   Check,
   ChevronRight,
   CircleHelp,
   Database,
+  GitCompareArrows,
   FileKey2,
   Download,
   GitBranch,
+  History,
   Layers3,
   List,
   LogOut,
+  Maximize2,
   MessageSquare,
   Moon,
   Network,
   PauseCircle,
   PlayCircle,
   Plus,
+  Redo2,
   RefreshCw,
+  Search,
   ShieldCheck,
   StopCircle,
   Sun,
   Upload,
   UserPlus,
   Users,
+  Undo2,
   X,
 } from "lucide-react";
 import "./app.css";
@@ -36,6 +45,7 @@ type Row = Record<string, any>;
 type VisNetwork = {
   destroy: () => void;
   fit: (options?: Row) => void;
+  getPositions: (nodeIds?: string[]) => Record<string, { x: number; y: number }>;
   on: (event: string, handler: (params: Row) => void) => void;
 };
 
@@ -78,6 +88,7 @@ const nav = [
   ["approvals", "审批", "Approvals", ShieldCheck],
   ["audit", "审计", "Audit", FileKey2],
   ["users", "用户管理", "Users", Users],
+  ["organization", "组织架构", "Organization", Building2],
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -244,6 +255,7 @@ function App() {
         theme={theme}
         page={page}
         allowedPages={allowedPages}
+        releaseVersion={String(capabilities?.release_version || "")}
         expiresAt={me.expires_at}
         onNavigate={navigate}
         onLang={() => setLang(lang === "zh" ? "en" : "zh")}
@@ -289,6 +301,7 @@ function Header({
   theme,
   page,
   allowedPages,
+  releaseVersion,
   expiresAt,
   onNavigate,
   onLang,
@@ -300,6 +313,7 @@ function Header({
   theme: Theme;
   page: string;
   allowedPages: Set<string>;
+  releaseVersion: string;
   expiresAt?: string;
   onNavigate: (page: string) => void;
   onLang: () => void;
@@ -360,7 +374,17 @@ function Header({
         <span>
           <strong>{text("川序", "Chuanxu")}</strong>
           <small>
-            {text("AI Agent 管理平台", "AI Agent Management Platform")}
+            <span className="cx-brand-product">
+              {text("AI Agent 管理平台", "AI Agent Management Platform")}
+            </span>
+            {releaseVersion && (
+              <span
+                className="cx-release-version"
+                title={text("产品版本", "Product version")}
+              >
+                v{releaseVersion}
+              </span>
+            )}
           </small>
         </span>
         <span
@@ -540,6 +564,17 @@ function AuthScreen({
           </button>
         </div>
         <form onSubmit={submit} className="cx-form">
+          {mode === "register" && (
+            <label>
+              {text("姓名", "Full name")}
+              <input
+                name="display_name"
+                autoComplete="name"
+                required
+                maxLength={256}
+              />
+            </label>
+          )}
           <label>
             {text("用户名", "Username")}
             <input
@@ -790,6 +825,15 @@ function PageView({
   if (page === "users")
     return (
       <UsersPage
+        lang={lang}
+        capabilities={capabilities}
+        text={text}
+        onNotice={onNotice}
+      />
+    );
+  if (page === "organization")
+    return (
+      <OrganizationPage
         lang={lang}
         capabilities={capabilities}
         text={text}
@@ -1854,6 +1898,11 @@ function GraphPage({
               rowField(row, ["kind", "type", "graph_type"]),
             ).toUpperCase() === filter.toUpperCase(),
         );
+  const activeRunCount = runs.filter((row) =>
+    ["RUNNING", "ACTIVE", "WAITING"].includes(
+      String(rowField(row, ["status", "run_status"])).toUpperCase(),
+    ),
+  ).length;
   const tabs: [string, string, React.ComponentType<{ size?: number }>?][] = [
     ["overview", text("概览", "Overview"), Activity],
     ["definitions", text("图定义", "Definitions"), Network],
@@ -1891,8 +1940,8 @@ function GraphPage({
                 <strong>{runs.length}</strong>
               </div>
               <div className="metric">
-                <span>{text("版本", "Release")}</span>
-                <strong>4.3.0</strong>
+                <span>{text("活动运行", "Active runs")}</span>
+                <strong>{activeRunCount}</strong>
               </div>
             </div>
           )}
@@ -2026,6 +2075,954 @@ function GraphPage({
         </p>
         <pre>{JSON.stringify(detail, null, 2)}</pre>
       </DetailDrawer>
+    </section>
+  );
+}
+
+type OrganizationMode = "organization" | "people" | "agents" | "anomalies";
+type OrganizationOrientation = "UD" | "LR";
+
+const organizationModeLabels: Record<OrganizationMode, [string, string]> = {
+  organization: ["组织", "Organization"],
+  people: ["人员归属", "People assignment"],
+  agents: ["智能体归属", "Agent responsibility"],
+  anomalies: ["异常关系", "Anomalies"],
+};
+
+function organizationItems(payload: any, keys: string[]): Row[] {
+  return listPayload(payload, [...keys, "items", "results", "organizations"]);
+}
+
+function organizationNodeId(row: Row): string {
+  return String(
+    rowField(row, [
+      "id",
+      "node_id",
+      "organization_id",
+      "principal_id",
+      "agent_id",
+    ]),
+  );
+}
+
+function organizationNodeType(row: Row): string {
+  return String(
+    rowField(row, ["entity_type", "node_type", "kind", "type"]),
+  ).toUpperCase();
+}
+
+function organizationResourceId(row: Row): string {
+  const explicit = rowField(row, [
+    "organization_id",
+    "principal_id",
+    "agent_id",
+  ]);
+  if (explicit && explicit !== "-") return String(explicit);
+  const nodeId = organizationNodeId(row);
+  return organizationNodeType(row).includes("ORG") && nodeId.startsWith("org:")
+    ? nodeId.slice(4)
+    : nodeId;
+}
+
+function organizationNodeLabel(row: Row): string {
+  return String(
+    rowField(row, [
+      "label",
+      "organization_name",
+      "display_name",
+      "agent_name",
+      "username",
+      "name",
+      "id",
+    ]),
+  );
+}
+
+function organizationCanvasLabel(
+  row: Row,
+  text: (zh: string, en: string) => string,
+): string {
+  const type = organizationNodeType(row);
+  const raw = organizationNodeLabel(row).trim();
+  const resourceId = organizationResourceId(row);
+  let label = raw;
+
+  // Machine identifiers remain available in the inspector. The canvas uses a
+  // compact alias so unbroken Principal and Agent IDs cannot widen the layout.
+  if (
+    (type.includes("PERSON") || type.includes("HUMAN") || type.includes("ANOMAL")) &&
+    (raw === resourceId || /^HP_[A-Za-z0-9_-]+$/.test(raw))
+  ) {
+    label = `${text("人员", "Person")} · ${resourceId.slice(-7)}`;
+  } else if (type.includes("AGENT")) {
+    label = raw.replace(/^AGENT_/i, "") || raw;
+  }
+
+  const characters = Array.from(label);
+  return characters.length <= 16
+    ? label
+    : `${characters.slice(0, 9).join("")}…${characters.slice(-6).join("")}`;
+}
+
+function organizationDetailValue(
+  lang: Lang,
+  row: Row,
+  key: string,
+  value: unknown,
+  text: (zh: string, en: string) => string,
+): string {
+  const normalized = key.toLowerCase();
+  const type = organizationNodeType(row);
+  if (
+    typeof value === "string" &&
+    value.length > 20 &&
+    ["id", "label", "principal_id", "subject_id", "agent_id"].includes(normalized) &&
+    (type.includes("PERSON") || type.includes("HUMAN") || type.includes("AGENT") || type.includes("ANOMAL"))
+  ) {
+    const kind = type.includes("AGENT") || normalized === "agent_id" ? "AGENT" : "PERSON";
+    const identifier = value.replace(/^(?:person|agent|anomaly):/i, "");
+    return organizationCanvasLabel(
+      {
+        ...row,
+        id: identifier,
+        kind,
+        label: identifier,
+        [kind === "AGENT" ? "agent_id" : "principal_id"]: identifier,
+      },
+      text,
+    );
+  }
+  return typeof value === "object"
+    ? JSON.stringify(value)
+    : displayRowValue(lang, value);
+}
+
+function organizationActionAllowed(
+  capabilities: Row | null,
+  ...actions: string[]
+): boolean {
+  return actions.some((action) => canAction(capabilities, action));
+}
+
+const organizationFieldLabels: Record<string, [string, string]> = {
+  display_name: ["姓名", "Full name"],
+  organization_id: ["组织 ID", "Organization ID"],
+  organization_name: ["组织名称", "Organization name"],
+  organization_code: ["组织编码", "Organization code"],
+  organization_type: ["组织类型", "Organization type"],
+  parent_id: ["上级组织", "Parent organization"],
+  responsible_principal_id: ["负责人", "Responsible person"],
+  security_domain_id: ["安全域", "Security Domain"],
+  membership_kind: ["成员关系", "Membership kind"],
+  relationship_type: ["关系类型", "Relationship type"],
+  people_count: ["人员数量", "People"],
+  agent_count: ["智能体数量", "Agents"],
+  anomaly_count: ["异常数量", "Anomalies"],
+  status: ["状态", "Status"],
+  source_type: ["数据来源", "Source"],
+  valid_from: ["生效时间", "Valid from"],
+  valid_until: ["失效时间", "Valid until"],
+  row_version: ["数据版本", "Row version"],
+  updated_at: ["更新时间", "Updated at"],
+};
+
+function organizationFieldLabel(lang: Lang, key: string): string {
+  const label = organizationFieldLabels[key.toLowerCase()];
+  return label ? tx(lang, ...label) : key.replaceAll("_", " ");
+}
+
+function OrganizationCanvas({
+  nodes,
+  edges,
+  mode,
+  orientation,
+  loading,
+  editable,
+  layoutVersion,
+  text,
+  onSelect,
+  onFocus,
+  onMove,
+}: {
+  nodes: Row[];
+  edges: Row[];
+  mode: OrganizationMode;
+  orientation: OrganizationOrientation;
+  loading: boolean;
+  editable: boolean;
+  layoutVersion: number;
+  text: (zh: string, en: string) => string;
+  onSelect: (row: Row) => void;
+  onFocus: (row: Row) => void;
+  onMove: (source: Row, target: Row) => void;
+}) {
+  const container = useRef<HTMLDivElement | null>(null);
+  const network = useRef<VisNetwork | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadVisNetwork()
+      .then(() => {
+        if (cancelled || !container.current || !window.vis) return;
+        network.current?.destroy();
+        const dark = document.documentElement.dataset.theme === "dark";
+        const sortedNodes = [...nodes].sort((left, right) => {
+          const leftOrder = Number(left.sort_order ?? left.order ?? 0);
+          const rightOrder = Number(right.sort_order ?? right.order ?? 0);
+          return (
+            leftOrder - rightOrder ||
+            organizationNodeLabel(left).localeCompare(
+              organizationNodeLabel(right),
+            )
+          );
+        });
+        const graphNodes = sortedNodes.map((node) => {
+          const type = organizationNodeType(node);
+          const anomaly = Boolean(
+            node.anomaly || node.anomaly_count || type.includes("ANOMAL"),
+          );
+          const colors = anomaly
+            ? { background: "#a84842", border: "#7f302c" }
+            : type.includes("AGENT")
+              ? { background: "#557866", border: "#355445" }
+              : type.includes("PERSON") || type.includes("HUMAN")
+                ? { background: "#b36b2c", border: "#75431d" }
+                : { background: "#0f6f82", border: "#0b4d5c" };
+          const countParts = [
+            node.people_count !== undefined
+              ? `${node.people_count} ${text("人", "people")}`
+              : "",
+            node.agent_count !== undefined
+              ? `${node.agent_count} ${text("智能体", "Agents")}`
+              : "",
+            node.anomaly_count
+              ? `${node.anomaly_count} ${text("异常", "anomalies")}`
+              : "",
+          ].filter(Boolean);
+          return {
+            ...node,
+            id: organizationNodeId(node),
+            label: `${organizationCanvasLabel(node, text)}${countParts.length ? `\n${countParts.join(" · ")}` : ""}`,
+            shape: "box",
+            margin: { top: 11, right: 14, bottom: 11, left: 14 },
+            widthConstraint: { minimum: 135, maximum: 180 },
+            color: colors,
+            borderWidth: anomaly ? 3 : 1,
+            font: {
+              color: "#ffffff",
+              size: 12,
+              face: "Noto Sans SC, Source Sans 3, sans-serif",
+              multi: false,
+            },
+          };
+        });
+        const known = new Set(graphNodes.map((node) => String(node.id)));
+        const graphEdges = edges
+          .map((edge, index) => ({
+            ...edge,
+            id: edge.id || edge.edge_id || `organization-edge-${index}`,
+            from: String(edge.from ?? edge.source ?? edge.parent_id),
+            to: String(edge.to ?? edge.target ?? edge.child_id),
+            arrows: edge.arrows || "to",
+            label: String(edge.label || edge.relationship_type || ""),
+            color: { color: dark ? "#9eb1b5" : "#61777d" },
+            font: {
+              color: dark ? "#e7eff0" : "#263b45",
+              size: 10,
+              strokeWidth: 4,
+              strokeColor: dark ? "#223238" : "#f0f2f2",
+            },
+          }))
+          .filter((edge) => known.has(edge.from) && known.has(edge.to));
+        const instance = new window.vis.Network(
+          container.current,
+          {
+            nodes: new window.vis.DataSet(graphNodes),
+            edges: new window.vis.DataSet(graphEdges),
+          },
+          {
+            autoResize: true,
+            layout: {
+              hierarchical: {
+                enabled: true,
+                direction: orientation,
+                sortMethod: "directed",
+                shakeTowards: "roots",
+                // Spacing must exceed the constrained node size. Long Human or
+                // Agent identifiers otherwise overlap adjacent organization nodes.
+                levelSeparation: orientation === "UD" ? 155 : 240,
+                nodeSpacing: orientation === "UD" ? 230 : 125,
+                treeSpacing: 260,
+                blockShifting: true,
+                edgeMinimization: true,
+                parentCentralization: true,
+              },
+            },
+            interaction: {
+              dragNodes: editable,
+              dragView: true,
+              hover: true,
+              keyboard: true,
+              navigationButtons: true,
+              selectable: true,
+              zoomView: true,
+            },
+            physics: false,
+            nodes: { chosen: true },
+            edges: {
+              smooth: {
+                enabled: true,
+                type: "cubicBezier",
+                forceDirection: orientation === "UD" ? "vertical" : "horizontal",
+                roundness: 0.45,
+              },
+            },
+          },
+        );
+        network.current = instance;
+        instance.on("click", (params) => {
+          const selected = nodes.find(
+            (node) => organizationNodeId(node) === String(params.nodes?.[0]),
+          );
+          if (selected) onSelect(selected);
+        });
+        instance.on("doubleClick", (params) => {
+          const selected = nodes.find(
+            (node) => organizationNodeId(node) === String(params.nodes?.[0]),
+          );
+          if (selected && organizationNodeType(selected).includes("ORG"))
+            onFocus(selected);
+        });
+        if (editable) {
+          instance.on("dragEnd", (params) => {
+            const sourceId = String(params.nodes?.[0] ?? "");
+            const source = nodes.find(
+              (node) => organizationNodeId(node) === sourceId,
+            );
+            if (!source || !params.pointer?.canvas) return;
+            const pointer = params.pointer.canvas as { x: number; y: number };
+            const positions = instance.getPositions();
+            let target: Row | undefined;
+            let nearest = Number.POSITIVE_INFINITY;
+            nodes.forEach((candidate) => {
+              const candidateId = organizationNodeId(candidate);
+              if (
+                candidateId === sourceId ||
+                !organizationNodeType(candidate).includes("ORG")
+              )
+                return;
+              const position = positions[candidateId];
+              if (!position) return;
+              const distance = Math.hypot(
+                position.x - pointer.x,
+                position.y - pointer.y,
+              );
+              if (distance < nearest) {
+                nearest = distance;
+                target = candidate;
+              }
+            });
+            if (target && nearest < 140) onMove(source, target);
+            else window.setTimeout(() => instance.fit({ animation: false }), 0);
+          });
+        }
+        setError("");
+      })
+      .catch((reason) =>
+        setError(reason instanceof Error ? reason.message : String(reason)),
+      );
+    return () => {
+      cancelled = true;
+      network.current?.destroy();
+      network.current = null;
+    };
+  }, [nodes, edges, orientation, editable, layoutVersion]);
+
+  return (
+    <div className="organization-canvas-frame">
+      {loading ? (
+        <PageLoading text={text} />
+      ) : error ? (
+        <div className="empty-state">{error}</div>
+      ) : !nodes.length ? (
+        <div className="empty-state">
+          {mode === "anomalies"
+            ? text(
+                "当前范围未发现异常关系",
+                "No anomalous relationships were found in this scope",
+              )
+            : text(
+                "当前范围内没有可显示的组织关系",
+                "No organization relationships are visible in this scope",
+              )}
+        </div>
+      ) : null}
+      <div ref={container} className="organization-canvas" />
+    </div>
+  );
+}
+
+function OrganizationPage({
+  lang,
+  capabilities,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  capabilities: Row | null;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [roots, setRoots] = useState<Row[]>([]);
+  const [scopeNodes, setScopeNodes] = useState<Row[]>([]);
+  const [graph, setGraph] = useState<Row>({ nodes: [], edges: [] });
+  const [focusId, setFocusId] = useState("");
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [detail, setDetail] = useState<Row | null>(null);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<Row[]>([]);
+  const [mode, setMode] = useState<OrganizationMode>("organization");
+  const [orientation, setOrientation] =
+    useState<OrganizationOrientation>("UD");
+  const [panel, setPanel] = useState("details");
+  const [changes, setChanges] = useState<Row[]>([]);
+  const [draft, setDraft] = useState<Row | null>(null);
+  const [historyRows, setHistoryRows] = useState<Row[]>([]);
+  const [conflicts, setConflicts] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sideLoading, setSideLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const graphRequest = useRef(0);
+  const [desktopEditing, setDesktopEditing] = useState(() =>
+    !window.matchMedia("(max-width: 780px)").matches,
+  );
+  const canEdit = organizationActionAllowed(
+    capabilities,
+    "organizations.changes.write",
+    "organizations.changes.create",
+    "organizations.manage",
+  );
+  const canvasEditable = canEdit && desktopEditing;
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 780px)");
+    const update = () => setDesktopEditing(!media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const loadChanges = async () => {
+    try {
+      const value = await api<Row>("/api/organization/changes");
+      const rows = organizationItems(value, ["changes", "change_sets"]);
+      setChanges(rows);
+      const active = rows.find((row) =>
+        ["DRAFT", "VALIDATING", "APPROVAL_REQUIRED"].includes(
+          String(row.status || "").toUpperCase(),
+        ),
+      );
+      if (active && !draft) setDraft(active);
+    } catch {
+      setChanges([]);
+    }
+  };
+
+  const loadGraph = async (nextFocus = focusId, nextMode = mode) => {
+    const requestId = ++graphRequest.current;
+    setLoading(true);
+    try {
+      const query = new URLSearchParams({ mode: nextMode, limit: "250" });
+      if (nextFocus) query.set("focus_id", nextFocus);
+      const value = await api<Row>(`/api/organization/graph?${query}`);
+      if (requestId !== graphRequest.current) return;
+      setGraph({
+        ...value,
+        nodes: organizationItems(value, ["nodes"]),
+        edges: value.edges || value.relationships || [],
+      });
+    } catch (error) {
+      if (requestId !== graphRequest.current) return;
+      setGraph({ nodes: [], edges: [] });
+      onNotice(
+        error instanceof Error
+          ? error.message
+          : text("组织图加载失败", "Organization graph could not be loaded"),
+      );
+    } finally {
+      if (requestId === graphRequest.current) setLoading(false);
+    }
+  };
+
+  const loadAuthorizedScope = async () => {
+    try {
+      const query = new URLSearchParams({
+        mode: "organization",
+        depth: "10",
+        limit: "250",
+      });
+      const value = await api<Row>(`/api/organization/graph?${query}`);
+      setScopeNodes(
+        organizationItems(value, ["nodes"]).filter((node) =>
+          organizationNodeType(node).includes("ORG"),
+        ),
+      );
+    } catch {
+      // Roots remain a safe fallback when the complete authorized tree fails.
+      setScopeNodes([]);
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    api<Row>("/api/organization/roots")
+      .then((value) => {
+        const rows = organizationItems(value, ["roots", "nodes"]);
+        setRoots(rows);
+        const firstId = rows[0] ? organizationResourceId(rows[0]) : "";
+        setFocusId(firstId);
+      })
+      .catch((error) => {
+        setLoading(false);
+        onNotice(
+          error instanceof Error
+            ? error.message
+            : text("组织根节点加载失败", "Organization roots could not be loaded"),
+        );
+      });
+    void loadChanges();
+    void loadAuthorizedScope();
+  }, []);
+
+  useEffect(() => {
+    if (focusId) void loadGraph(focusId, mode);
+  }, [focusId, mode]);
+
+  const focusNode = (node: Row) => {
+    const id = organizationResourceId(node);
+    setFocusId(id);
+    setSelected(node);
+    setDetail(node);
+  };
+
+  const selectNode = async (node: Row) => {
+    setSelected(node);
+    setDetail(node);
+    setPanel("details");
+    setSideLoading(true);
+    try {
+      setDetail(
+        await api<Row>(
+          `/api/organization/nodes/${encodeURIComponent(organizationResourceId(node))}`,
+        ),
+      );
+    } catch {
+      setDetail(node);
+    } finally {
+      setSideLoading(false);
+    }
+  };
+
+  const runSearch = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!search.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSideLoading(true);
+    try {
+      const value = await api<Row>(
+        `/api/organization/search?q=${encodeURIComponent(search.trim())}&limit=30`,
+      );
+      setSearchResults(organizationItems(value, ["results", "nodes"]));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("搜索失败", "Search failed"));
+    } finally {
+      setSideLoading(false);
+    }
+  };
+
+  const addOperation = async (operation: Row, reason = "") => {
+    if (!canEdit) return;
+    setBusy(true);
+    try {
+      let value: Row;
+      const draftId = draft
+        ? String(rowField(draft, ["change_set_id", "change_id", "id"]))
+        : "";
+      if (draftId && draftId !== "-") {
+        value = await api<Row>(
+          `/api/organization/changes/${encodeURIComponent(draftId)}/operations`,
+          { method: "POST", body: JSON.stringify({ operation }) },
+        );
+      } else {
+        value = await api<Row>("/api/organization/changes", {
+          method: "POST",
+          body: JSON.stringify({ reason, operations: [operation] }),
+        });
+      }
+      setDraft(value.change || value.change_set || value);
+      setPanel("draft");
+      setLayoutVersion((current) => current + 1);
+      await loadChanges();
+      onNotice(text("变更已加入草稿，尚未发布", "Change added to draft and not published"));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("草稿更新失败", "Draft update failed"));
+      setLayoutVersion((current) => current + 1);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const moveByDrag = (source: Row, target: Row) => {
+    const confirmed = window.confirm(
+      text(
+        `将“${organizationNodeLabel(source)}”移动至“${organizationNodeLabel(target)}”下方并加入草稿？`,
+        `Move “${organizationNodeLabel(source)}” under “${organizationNodeLabel(target)}” in the draft?`,
+      ),
+    );
+    if (!confirmed) {
+      setLayoutVersion((current) => current + 1);
+      return;
+    }
+    void addOperation({
+      operation_type: "MOVE_ORGANIZATION",
+      organization_id: organizationResourceId(source),
+      new_parent_id: organizationResourceId(target),
+    });
+  };
+
+  const submitOperation = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const operationType = String(data.operation_type || "MOVE_ORGANIZATION");
+    const operation: Row = {
+      operation_type: operationType,
+      subject_id: data.subject_id || organizationResourceId(selected || {}),
+      target_id: data.target_id || undefined,
+      name: data.name || undefined,
+      membership_kind: data.membership_kind || undefined,
+      effective_at: data.effective_at || undefined,
+    };
+    if (operationType === "MOVE_ORGANIZATION") {
+      operation.organization_id = operation.subject_id;
+      operation.new_parent_id = operation.target_id;
+    }
+    void addOperation(operation, String(data.reason || ""));
+  };
+
+  const draftAction = async (action: "undo" | "redo" | "validate" | "submit") => {
+    if (!draft) return;
+    const id = String(rowField(draft, ["change_set_id", "change_id", "id"]));
+    if (!id || id === "-") return;
+    setBusy(true);
+    try {
+      const value = await api<Row>(
+        `/api/organization/changes/${encodeURIComponent(id)}/${action}`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      setDraft(value.change || value.change_set || value);
+      setPanel(action === "validate" ? "impact" : "draft");
+      await loadChanges();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("操作失败", "Operation failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openPanel = async (next: string) => {
+    setPanel(next);
+    if (next === "history") {
+      setSideLoading(true);
+      try {
+        const query = focusId ? `?focus_id=${encodeURIComponent(focusId)}` : "";
+        const value = await api<Row>(`/api/organization/history${query}`);
+        setHistoryRows(organizationItems(value, ["history", "versions"]));
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : text("历史加载失败", "History loading failed"));
+      } finally {
+        setSideLoading(false);
+      }
+    }
+    if (next === "sync") {
+      setSideLoading(true);
+      try {
+        const value = await api<Row>("/api/organization/sync/conflicts");
+        setConflicts(organizationItems(value, ["conflicts"]));
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : text("同步冲突加载失败", "Sync conflicts loading failed"));
+      } finally {
+        setSideLoading(false);
+      }
+    }
+  };
+
+  const organizationNodes = (graph.nodes || []).filter((node: Row) =>
+    organizationNodeType(node).includes("ORG"),
+  );
+  const treeNodes = Array.from(
+    new Map(
+      [...roots, ...scopeNodes].map((node) => [
+        organizationResourceId(node),
+        node,
+      ]),
+    ).values(),
+  );
+  const targetNodes = treeNodes;
+  const operations = organizationItems(draft, ["operations"]);
+  const diffRows = organizationItems(draft?.diff, ["diff", "items", "operations"]);
+  const impact = draft?.impact || draft?.impact_summary || {};
+  const breadcrumbs = organizationItems(graph, ["breadcrumbs", "ancestors"]);
+
+  return (
+    <section className="organization-page">
+      <SectionHeading
+        title={text("组织架构", "Organization")}
+        subtitle={text(
+          "以数据库中的组织、人员与智能体责任事实为基础，检索、查看并通过受治理草稿配置企业关系。",
+          "Search, inspect, and configure governed enterprise relationships from database-backed organization, people, and Agent responsibility facts.",
+        )}
+        text={text}
+      />
+      <div className="organization-modebar">
+        <ViewToggle
+          value={mode}
+          options={(Object.keys(organizationModeLabels) as OrganizationMode[]).map(
+            (key) => [
+              key,
+              text(...organizationModeLabels[key]),
+              key === "organization"
+                ? Building2
+                : key === "people"
+                  ? Users
+                  : key === "agents"
+                    ? Bot
+                    : AlertTriangle,
+            ],
+          )}
+          onChange={(value) => setMode(value as OrganizationMode)}
+        />
+        <div className="organization-layout-actions">
+          <button
+            className={`filter-button ${orientation === "UD" ? "active" : ""}`}
+            onClick={() => setOrientation("UD")}
+          >
+            <ArrowDownUp size={14} />
+            {text("纵向", "Vertical")}
+          </button>
+          <button
+            className={`filter-button ${orientation === "LR" ? "active" : ""}`}
+            onClick={() => setOrientation("LR")}
+          >
+            <GitBranch size={14} />
+            {text("横向", "Horizontal")}
+          </button>
+          <button
+            className="icon-button"
+            onClick={() => setLayoutVersion((current) => current + 1)}
+            title={text("重新规整画布", "Refit regular layout")}
+          >
+            <Maximize2 size={15} />
+            {text("规整", "Refit")}
+          </button>
+        </div>
+      </div>
+
+      <div className="organization-workspace">
+        <aside className="organization-browser" aria-label={text("组织浏览", "Organization browser")}>
+          <form className="organization-search" onSubmit={runSearch}>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={text("搜索组织、人员或智能体", "Search organization, person, or Agent")}
+            />
+            <button className="icon-button" aria-label={text("搜索", "Search")}>
+              <Search size={15} />
+            </button>
+          </form>
+          {sideLoading && <span className="organization-inline-loading"><RefreshCw className="spin" size={13} />{text("读取中", "Loading")}</span>}
+          {searchResults.length > 0 && (
+            <div className="organization-search-results">
+              <b>{text("搜索结果", "Search results")}</b>
+              {searchResults.map((row) => (
+                <button key={organizationNodeId(row)} onClick={() => focusNode(row)}>
+                  <span>{organizationNodeLabel(row)}</span>
+                  <small>{displayRowValue(lang, organizationNodeType(row))}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="organization-tree-head">
+            <div className="organization-protected-title">
+              <b>{text("授权组织范围", "Authorized organization scope")}</b>
+              <span className="organization-protected-label"><ShieldCheck size={11} />{text("受保护视图", "Protected view")}</span>
+            </div>
+            <button
+              className="icon-button"
+              onClick={() => {
+                void loadAuthorizedScope();
+                void loadGraph();
+              }}
+              title={text("刷新", "Refresh")}
+            >
+              <RefreshCw className={loading ? "spin" : ""} size={14} />
+            </button>
+          </div>
+          <div className="organization-tree" role="tree">
+            {treeNodes.map((row) => {
+              const id = organizationResourceId(row);
+              const depth = Math.max(0, Number(row.depth ?? row.level ?? 0));
+              return (
+                <button
+                  role="treeitem"
+                  aria-selected={id === focusId}
+                  className={id === focusId ? "active" : ""}
+                  style={{ paddingLeft: `${10 + Math.min(depth, 5) * 13}px` }}
+                  key={id}
+                  onClick={() => focusNode(row)}
+                >
+                  <ChevronRight size={13} />
+                  <span>
+                    <b>{organizationNodeLabel(row)}</b>
+                    <small>{row.organization_type ? displayRowValue(lang, row.organization_type) : text("组织单元", "Organization unit")}</small>
+                  </span>
+                </button>
+              );
+            })}
+            {!treeNodes.length && !loading && <p className="empty-text">{text("当前范围内没有组织", "No organizations in the current scope")}</p>}
+          </div>
+        </aside>
+
+        <div className="organization-stage">
+          <div className="organization-breadcrumbs" aria-label={text("当前位置", "Current location")}>
+            {(breadcrumbs.length ? breadcrumbs : roots.filter((row) => organizationResourceId(row) === focusId)).map((row, index) => (
+              <React.Fragment key={organizationResourceId(row)}>
+                {index > 0 && <ChevronRight size={12} />}
+                <button onClick={() => focusNode(row)}>{organizationNodeLabel(row)}</button>
+              </React.Fragment>
+            ))}
+            <span className="organization-protected-label"><ShieldCheck size={11} />{text("受保护视图", "Protected view")}</span>
+            <span className="organization-metrics">{(graph.nodes || []).length} {text("节点", "nodes")} · {(graph.edges || []).length} {text("关系", "relationships")}</span>
+          </div>
+          <OrganizationCanvas
+            nodes={graph.nodes || []}
+            edges={graph.edges || []}
+            mode={mode}
+            orientation={orientation}
+            loading={loading}
+            editable={canvasEditable}
+            layoutVersion={layoutVersion}
+            text={text}
+            onSelect={(row) => void selectNode(row)}
+            onFocus={focusNode}
+            onMove={moveByDrag}
+          />
+          <p className="organization-canvas-help">
+            {canvasEditable
+              ? text("双击组织聚焦子树；拖动节点到新父组织只会生成草稿，不会保存画布坐标。", "Double-click an organization to focus its subtree. Dropping a node on a new parent creates a draft and never persists canvas coordinates.")
+              : canEdit
+                ? text("双击组织聚焦子树；移动端为查询与审批模式，请在桌面端进行复杂编辑。", "Double-click an organization to focus its subtree. Mobile is intended for search and approval; use desktop for complex editing.")
+                : text("双击组织聚焦子树；当前权限仅允许查询。", "Double-click an organization to focus its subtree. Current access is read-only.")}
+          </p>
+        </div>
+
+        <aside className="organization-inspector">
+          <div className="organization-inspector-protection">
+            <span className="organization-protected-label"><ShieldCheck size={11} />{text("受保护视图", "Protected view")}</span>
+          </div>
+          <div className="organization-tabs" role="tablist">
+            {[
+              ["details", text("详情", "Details"), List],
+              ["draft", text("草稿", "Draft"), GitBranch],
+              ["diff", text("差异", "Diff"), GitCompareArrows],
+              ["impact", text("影响", "Impact"), AlertTriangle],
+              ["history", text("历史", "History"), History],
+              ["sync", text("同步", "Sync"), RefreshCw],
+            ].map(([key, label, Icon]: any) => (
+              <button key={key} role="tab" aria-selected={panel === key} className={panel === key ? "active" : ""} onClick={() => void openPanel(key)}>
+                <Icon size={13} /><span>{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="organization-panel-content">
+            {panel === "details" && (
+              <>
+                <h2>{selected ? organizationCanvasLabel(selected, text) : text("选择一个节点", "Select a node")}</h2>
+                {sideLoading ? <PageLoading text={text} /> : detail ? (
+                  <div className="organization-detail-list">
+                    {Object.entries(detail).slice(0, 18).map(([key, value]) => (
+                      <div key={key}>
+                        <span>{organizationFieldLabel(lang, key)}</span>
+                        <b title={typeof value === "string" ? value : undefined}>
+                          {organizationDetailValue(lang, detail, key, value, text)}
+                        </b>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="empty-text">{text("在画布或左侧组织树中选择节点查看详情。", "Select a node in the canvas or organization tree to inspect it.")}</p>}
+              </>
+            )}
+            {panel === "draft" && (
+              <>
+                <div className="organization-panel-heading">
+                  <h2>{text("语义变更草稿", "Semantic change draft")}</h2>
+                  {draft && <span className="tag">{displayRowValue(lang, draft.status || "DRAFT")}</span>}
+                </div>
+                {!canEdit && <p className="organization-readonly-note"><ShieldCheck size={14} />{text("当前权限不允许配置组织关系。", "Current access cannot configure organization relationships.")}</p>}
+                <form className="compact-form organization-change-form org-edit-only" onSubmit={submitOperation}>
+                  <label>{text("操作", "Operation")}
+                    <select name="operation_type" disabled={!canEdit || busy}>
+                      <option value="MOVE_ORGANIZATION">{text("移动组织", "Move organization")}</option>
+                      <option value="CREATE_ORGANIZATION">{text("创建组织", "Create organization")}</option>
+                      <option value="UPDATE_ORGANIZATION">{text("修改组织", "Update organization")}</option>
+                      <option value="ASSIGN_PERSON">{text("分配人员", "Assign person")}</option>
+                      <option value="ASSIGN_AGENT">{text("配置智能体责任", "Configure Agent responsibility")}</option>
+                    </select>
+                  </label>
+                  <label>{text("对象 ID", "Subject ID")}<input name="subject_id" defaultValue={selected ? organizationResourceId(selected) : ""} disabled={!canEdit || busy} required /></label>
+                  <label>{text("目标组织", "Target organization")}
+                    <select name="target_id" disabled={!canEdit || busy}>
+                      <option value="">{text("请选择", "Select")}</option>
+                      {targetNodes.map((node) => <option key={organizationNodeId(node)} value={organizationResourceId(node)}>{organizationNodeLabel(node)}</option>)}
+                    </select>
+                  </label>
+                  <label>{text("名称或配置值（按需）", "Name or configuration value (when needed)")}<input name="name" disabled={!canEdit || busy} /></label>
+                  <label>{text("成员关系", "Membership kind")}
+                    <select name="membership_kind" disabled={!canEdit || busy}><option value="">-</option><option value="PRIMARY">{text("主组织", "Primary")}</option><option value="SECONDARY">{text("兼职组织", "Secondary")}</option></select>
+                  </label>
+                  {!draft && <label>{text("变更原因", "Change reason")}<textarea name="reason" required disabled={!canEdit || busy} /></label>}
+                  <button className="primary-button" disabled={!canEdit || busy}><Plus size={14} />{text("加入草稿", "Add to draft")}</button>
+                </form>
+                <div className="organization-draft-actions org-edit-only">
+                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("undo")}><Undo2 size={13} />{text("撤销", "Undo")}</button>
+                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("redo")}><Redo2 size={13} />{text("重做", "Redo")}</button>
+                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("validate")}><Check size={13} />{text("校验与影响分析", "Validate and analyze")}</button>
+                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("submit")}><ShieldCheck size={13} />{text("提交审批", "Submit for approval")}</button>
+                </div>
+                <div className="organization-operation-list">
+                  {operations.map((row, index) => <div key={String(row.operation_id || index)}><b>{displayRowValue(lang, row.operation_type || row.type)}</b><small>{String(row.subject_id || row.organization_id || "-")} → {String(row.target_id || row.new_parent_id || "-")}</small></div>)}
+                  {!operations.length && <p className="empty-text">{text("当前没有草稿操作", "No draft operations")}</p>}
+                </div>
+                {changes.length > 0 && <select className="organization-change-picker" value={draft ? String(rowField(draft, ["change_set_id", "change_id", "id"])) : ""} onChange={(event) => setDraft(changes.find((row) => String(rowField(row, ["change_set_id", "change_id", "id"])) === event.target.value) || null)}><option value="">{text("选择变更集", "Select change set")}</option>{changes.map((row) => { const id = String(rowField(row, ["change_set_id", "change_id", "id"])); return <option value={id} key={id}>{id} · {displayRowValue(lang, row.status)}</option>; })}</select>}
+              </>
+            )}
+            {panel === "diff" && (
+              <><h2>{text("提交前差异", "Pre-publication diff")}</h2>{diffRows.length ? <div className="organization-operation-list">{diffRows.map((row, index) => <div key={index}><b>{displayRowValue(lang, row.operation_type || row.type || row.field)}</b><small>{String(row.before ?? row.old_value ?? "-")} → {String(row.after ?? row.new_value ?? "-")}</small></div>)}</div> : <pre className="organization-json">{draft?.diff ? JSON.stringify(draft.diff, null, 2) : text("校验草稿后显示权威差异。", "Validate the draft to display the authoritative diff.")}</pre>}</>
+            )}
+            {panel === "impact" && (
+              <><h2>{text("权限与责任影响", "Authority and responsibility impact")}</h2><pre className="organization-json">{Object.keys(impact).length ? JSON.stringify(impact, null, 2) : text("校验后显示受影响的组织、人员、会话、智能体及工作。", "Validation shows affected organizations, people, sessions, Agents, and work.")}</pre></>
+            )}
+            {panel === "history" && (
+              <><h2>{text("组织版本历史", "Organization version history")}</h2>{sideLoading ? <PageLoading text={text} /> : <div className="organization-operation-list">{historyRows.map((row, index) => <div key={String(row.version_id || index)}><b>{String(row.version || row.version_id || row.effective_at || "-")}</b><small>{displayRowValue(lang, row.status || row.change_type)} · {String(row.created_at || row.effective_at || "-")}</small></div>)}{!historyRows.length && <p className="empty-text">{text("暂无可见历史", "No visible history")}</p>}</div>}</>
+            )}
+            {panel === "sync" && (
+              <><h2>{text("目录同步冲突", "Directory sync conflicts")}</h2><p className="cx-form-hint">{text("同步差异先形成变更集；未解决的高风险冲突不会直接覆盖平台事实。", "Synchronization differences become change sets; unresolved high-risk conflicts never overwrite platform facts directly.")}</p>{sideLoading ? <PageLoading text={text} /> : <div className="organization-operation-list">{conflicts.map((row, index) => <div key={String(row.conflict_id || index)}><b>{String(row.field_name || row.conflict_type || row.conflict_id)}</b><small>{displayRowValue(lang, row.status)} · {String(row.source || row.connector_type || "-")}</small></div>)}{!conflicts.length && <p className="empty-text">{text("当前没有可见同步冲突", "No visible sync conflicts")}</p>}</div>}</>
+            )}
+          </div>
+        </aside>
+      </div>
     </section>
   );
 }
@@ -2491,8 +3488,8 @@ function MonitorPage({
       <SectionHeading
         title={text("运行概览", "Runtime overview")}
         subtitle={text(
-          "统一观察身份、运行状态和数据库持久化边界。v4.3.0 生产配置可用于生产，图预览等实验能力按受控配置启用。",
-          "Observe identity, runtime state, and database persistence boundaries. The v4.3.0 production profile is validated for production use; Graph Preview and other experimental capabilities remain explicitly controlled.",
+          "统一观察身份、运行状态和数据库持久化边界。生产配置承载稳定能力，图预览等实验能力按受控配置启用。",
+          "Observe identity, runtime state, and database persistence boundaries. The production profile carries stable capabilities; Graph Preview and other experimental capabilities remain explicitly controlled.",
         )}
         text={text}
       />
@@ -2533,7 +3530,7 @@ function MonitorPage({
               </p>
             </InfoPanel>
             <InfoPanel
-              title={text("v4.3.0 运行边界", "v4.3.0 runtime boundary")}
+              title={text("运行边界", "Runtime boundary")}
               text={text}
             >
               <p>
@@ -4083,21 +5080,38 @@ function UsersPage({
 }) {
   const [users, setUsers] = useState<Row[]>([]);
   const [requests, setRequests] = useState<Row[]>([]);
+  const [organizations, setOrganizations] = useState<Row[]>([]);
+  const [approvalOrganizations, setApprovalOrganizations] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Row | null>(null);
   const [roles, setRoles] = useState<Row[]>([]);
   const [security, setSecurity] = useState<Row | null>(null);
+  const [entryAccess, setEntryAccess] = useState<Row | null>(null);
   const [access, setAccess] = useState<Row | null>(null);
   const [factor, setFactor] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
+  const userRequest = useRef(0);
 
   const load = () =>
     Promise.all([
       api<Row>("/api/users"),
       api<Row>("/api/registration/requests?status=PENDING"),
+      api<Row>("/api/organization/options"),
     ])
-      .then(([userResponse, requestResponse]) => {
+      .then(([userResponse, requestResponse, organizationResponse]) => {
+        const pending = requestResponse.items || [];
+        const options = organizationResponse.items || [];
         setUsers(userResponse.items || []);
-        setRequests(requestResponse.items || []);
+        setRequests(pending);
+        setOrganizations(options);
+        setApprovalOrganizations((current) => {
+          const next = { ...current };
+          for (const item of pending) {
+            const key = String(item.request_id);
+            if (!next[key] && options[0]?.organization_id)
+              next[key] = String(options[0].organization_id);
+          }
+          return next;
+        });
       })
       .catch((error) =>
         onNotice(
@@ -4112,9 +5126,25 @@ function UsersPage({
   }, []);
 
   const choose = async (user: Row) => {
+    const requestId = ++userRequest.current;
     setSelected(user);
+    setEntryAccess(null);
     setAccess(null);
     setFactor(null);
+    const entryRequest = api<Row>(
+      `/api/users/${encodeURIComponent(String(user.principal_id))}/entry-access`,
+    )
+      .then((entryResponse) => {
+        if (requestId === userRequest.current) setEntryAccess(entryResponse);
+      })
+      .catch((error) => {
+        if (requestId !== userRequest.current) return;
+        onNotice(
+          error instanceof Error
+            ? error.message
+            : text("入口策略加载失败", "Unable to load access policy"),
+        );
+      });
     try {
       const [roleResponse, securityResponse] = await Promise.all([
         api<Row>(
@@ -4124,15 +5154,18 @@ function UsersPage({
           `/api/users/${encodeURIComponent(String(user.principal_id))}/security`,
         ),
       ]);
+      if (requestId !== userRequest.current) return;
       setRoles(roleResponse.items || []);
       setSecurity(securityResponse);
     } catch (error) {
+      if (requestId !== userRequest.current) return;
       onNotice(
         error instanceof Error
           ? error.message
           : text("用户安全信息加载失败", "Unable to load user security data"),
       );
     }
+    await entryRequest;
   };
 
   const run = async (request: Promise<Row>, success: string) => {
@@ -4154,6 +5187,11 @@ function UsersPage({
   };
 
   const approve = async (requestId: string) => {
+    const organizationId = approvalOrganizations[requestId];
+    if (!organizationId) {
+      onNotice(text("请先选择主组织", "Select a primary organization first"));
+      return;
+    }
     const reason = window.prompt(
       text("请输入审批原因", "Enter approval reason"),
       text("完成注册审核", "Registration reviewed"),
@@ -4164,7 +5202,11 @@ function UsersPage({
         `/api/registration/requests/${encodeURIComponent(requestId)}/approve`,
         {
           method: "POST",
-          body: JSON.stringify({ decision: "APPROVE", reason }),
+          body: JSON.stringify({
+            decision: "APPROVE",
+            reason,
+            organization_id: organizationId,
+          }),
         },
       ),
       text("注册已批准", "Registration approved"),
@@ -4223,6 +5265,35 @@ function UsersPage({
       text("角色已撤销", "Role revoked"),
     );
     if (value) await choose(selected);
+  };
+
+  const changeEntryAccess = async (appEnabled: boolean) => {
+    if (!selected || entryAccess?.protected_system_admin) return;
+    if (Boolean(entryAccess?.app_enabled) === appEnabled) return;
+    const reason = window.prompt(
+      text("请输入登录入口变更原因", "Enter the access-surface change reason"),
+    );
+    if (!reason?.trim()) return;
+    const value = await run(
+      api(
+        `/api/users/${encodeURIComponent(String(selected.principal_id))}/entry-access`,
+        {
+          method: "POST",
+          body: JSON.stringify({ app_enabled: appEnabled, reason }),
+        },
+      ),
+      text("登录入口已更新", "Access surfaces updated"),
+    );
+    if (value) {
+      setEntryAccess(value);
+      setUsers((current) =>
+        current.map((item) =>
+          item.principal_id === selected.principal_id
+            ? { ...item, ...value }
+            : item,
+        ),
+      );
+    }
   };
 
   const toggleMfa = async () => {
@@ -4445,12 +5516,30 @@ function UsersPage({
             headers={[
               text("用户", "User"),
               text("邮箱", "Email"),
+              text("主组织", "Primary organization"),
               text("状态", "Status"),
               text("操作", "Action"),
             ]}
             rows={requests.map((item) => [
               item.username,
               item.email || "-",
+              <select
+                aria-label={text("主组织", "Primary organization")}
+                value={approvalOrganizations[String(item.request_id)] || ""}
+                onChange={(event) =>
+                  setApprovalOrganizations((current) => ({
+                    ...current,
+                    [String(item.request_id)]: event.target.value,
+                  }))
+                }
+              >
+                {!organizations.length && <option value="">{text("无可用组织", "No organization available")}</option>}
+                {organizations.map((organization) => (
+                  <option key={organization.organization_id} value={organization.organization_id}>
+                    {organization.organization_name}
+                  </option>
+                ))}
+              </select>,
               displayRowValue(lang, item.status),
               <span className="row-actions">
                 <button
@@ -4485,10 +5574,16 @@ function UsersPage({
               >
                 <Users size={15} />
                 <span>
-                  <b>{user.username}</b>
+                  <b>{user.display_name || user.username}</b>
                   <small>
-                    {displayRowValue(lang, user.status)} · v
-                    {user.permission_version}
+                    {user.username ? `${user.username} · ` : ""}
+                    {user.protected_system_admin
+                      ? text("系统账号", "System account")
+                      : user.organization_name || text("组织待修复", "Organization required")} {" · "}
+                    {user.app_enabled
+                      ? text("Portal + App", "Portal + App")
+                      : text("仅 Portal", "Portal only")}{" "}
+                    · {displayRowValue(lang, user.status)} · v{user.permission_version}
                   </small>
                 </span>
               </button>
@@ -4501,15 +5596,62 @@ function UsersPage({
       </div>
       {selected && (
         <>
+          <InfoPanel title={text("登录入口", "Access surfaces")} text={text}>
+            <div className="governance-row">
+              <span>
+                <b>{text("允许使用的页面", "Allowed surfaces")}</b>
+                <small>
+                  {entryAccess?.protected_system_admin
+                    ? text(
+                        "受保护的内置系统管理员必须同时保留 Portal 与 App。",
+                        "The protected bootstrap administrator must retain both Portal and App access.",
+                      )
+                    : text(
+                        "Portal 始终可用；App 包含 Dashboard 及其应用接口。变更会立即终止该用户的现有会话。",
+                        "Portal remains available. App includes the Dashboard and its application APIs. A change immediately revokes the user's active sessions.",
+                      )}
+                </small>
+              </span>
+              {entryAccess === null ? (
+                <span className="secure-badge" role="status">
+                  <RefreshCw className="spin" size={14} />
+                  {text("正在读取入口策略", "Loading access policy")}
+                </span>
+              ) : entryAccess.protected_system_admin ? (
+                <span className="secure-badge">
+                  <ShieldCheck size={14} />
+                  {text("Portal + App（系统保护）", "Portal + App (protected)")}
+                </span>
+              ) : (
+                <span className="view-toggle entry-access-toggle">
+                  <button
+                    className={!entryAccess.app_enabled ? "active" : ""}
+                    disabled={busy || !canAction(capabilities, "users.permissions.manage")}
+                    onClick={() => void changeEntryAccess(false)}
+                  >
+                    {text("仅 Portal", "Portal only")}
+                  </button>
+                  <button
+                    className={entryAccess.app_enabled ? "active" : ""}
+                    disabled={busy || !canAction(capabilities, "users.permissions.manage")}
+                    onClick={() => void changeEntryAccess(true)}
+                  >
+                    {text("Portal + App", "Portal + App")}
+                  </button>
+                </span>
+              )}
+            </div>
+          </InfoPanel>
           <InfoPanel
-            title={`${selected.username} · ${text("身份与角色", "Identity and roles")}`}
+            title={`${selected.display_name || selected.username} · ${text("身份与角色", "Identity and roles")}`}
             text={text}
           >
             <div className="role-tags">
               {roles.map((role) => (
                 <span className="tag" key={role.user_role_id}>
+                  {role.protected && <ShieldCheck size={13} />}
                   {displayRowValue(lang, role.role_code)}{" "}
-                  {role.role_code !== "END_USER" && (
+                  {role.role_code !== "END_USER" && !role.protected && (
                     <button
                       className="text-button"
                       onClick={() => void revokeRole(role)}

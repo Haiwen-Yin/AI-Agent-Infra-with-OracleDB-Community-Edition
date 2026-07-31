@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.3.1 - 2026-07-31
+
+- Added database-authoritative graphical organization governance, canonical
+  memberships and reporting, organization versions/history, semantic change
+  sets, directory staging, closure-backed authorization, and the Organization
+  Dashboard workspace across all database adapters and editions.
+
 All notable changes to the AI Agent Infra unified repository are documented in
 this file. Each released edition (Oracle/PG/YashanDB × Community/Enterprise)
 inherits the entries below; per-edition release notes live in

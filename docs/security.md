@@ -1,4 +1,53 @@
-# Security - AI Agent Infra with DB v4.3.0
+# Security - AI Agent Infra with DB v4.3.1
+
+## v4.3.1 Organization Scope
+
+Organization diagrams do not grant authority. `ORG_SUBTREE` uses the
+database-maintained closure table and active primary membership; secondary
+membership and dotted/project reporting never widen it. Direct reports use
+canonical active direct-manager facts. Security Domain scope intersects
+organization scope when both apply. Results are filtered before leaving the
+database-backed service.
+
+Organization publication invalidates affected permission versions and active
+credentials in the same transaction as current facts and history. Prompt
+instructions, UI visibility, and client-side filtering are not boundaries.
+
+### Human Entry Surfaces And Bootstrap Authority
+
+Human entry admission is separate from role and data scope. `PORTAL_ACCESS`
+permits the Portal surface; `APP_ACCESS` additionally permits the Dashboard and
+App APIs. Existing active users receive both during migration for compatibility.
+New registrations approved by an administrator start as Portal-only until App
+access is explicitly enabled in User Management with a required reason.
+
+The server evaluates the entry policy after password verification and before
+MFA Session creation, and repeats it for every protected request. A policy
+change increments `PERMISSION_VERSION`, revokes the target Human's active
+Sessions, and records an audit event. Hiding an App link is never treated as an
+authorization boundary.
+
+The local bootstrap `admin` Principal is a protected recovery authority. Its
+Portal and App admission and active `SYSTEM_ADMIN` role cannot be revoked by
+the application APIs, and a DENY override cannot be assigned to it. Direct
+database emergency changes remain outside the application contract and must
+follow the deployment's audited break-glass procedure.
+
+### Human Account And Organization Identity
+
+One ordinary platform account, one Human Principal, and one organization
+person are the same governed subject. An active ordinary Human must have at
+least one proven login identity and exactly one active primary organization
+membership. Registration approval selects that organization and commits the
+account and membership together. Organization changes reject Principals that
+do not have an active login identity; the database membership trigger repeats
+that check against direct writes.
+
+The protected bootstrap `admin` is the sole exception. It is a system-recovery
+account, not a natural person, and cannot be assigned to the organization
+hierarchy or used as a responsible person. Multiple local, LDAP, or OIDC login
+identities may still bind to one Human Principal after proof and authorization;
+they do not create additional people.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project

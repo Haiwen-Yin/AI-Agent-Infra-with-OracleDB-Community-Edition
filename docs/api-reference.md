@@ -1,4 +1,18 @@
-# API Reference - AI Agent Infra with DB v4.3.0
+# API Reference - AI Agent Infra with DB v4.3.1
+
+## v4.3.1 Organization Governance
+
+Authenticated organization reads are available at `/api/organization/roots`,
+`/api/organization/graph`, `/api/organization/search`, and
+`/api/organization/nodes/{organization_id}`. Authorization and scope filtering
+occur before nodes, edges, counts, or identifiers are returned.
+
+Semantic drafts use `/api/organization/changes`, the operations endpoint, and
+the `undo`, `redo`, `validate`, and `submit` action endpoints. History and
+directory conflicts use `/api/organization/history` and
+`/api/organization/sync/conflicts`. Mutations require a Human Session, CSRF,
+explicit `organizations.*` permission, and server-side scope validation. See
+`organization-governance.md`.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -74,6 +88,9 @@ administrative permissions implicitly.
 | `/api/auth/me` | GET | Read the current Principal and effective access summary. |
 | `/api/users` | GET | List only users within the authenticated administrator scope. |
 | `/api/users/{principal_id}/roles` | GET/POST | Inspect or assign a delegated role with a required reason. |
+| `/api/users/{principal_id}/entry-access` | GET/POST | Inspect or set Portal-only versus Portal-and-App admission; changes require a reason and revoke active Sessions. |
+| `/api/organization/options` | GET | Return active organizations within the caller's membership-management scope for governed assignment forms. |
+| `/api/registration/requests/{request_id}/approve` | POST | Approve a registration with a reason and required `organization_id`; account and primary membership commit atomically. |
 | `/api/enrollment/grants` | GET/POST | Create or list one-time Agent Enrollment grants. |
 | `/api/enrollment/redeem` | POST | Redeem a token once and bind the Agent owner and domain. |
 | `/api/channels` | GET/POST | List or create Security Domain-bound Channels. |

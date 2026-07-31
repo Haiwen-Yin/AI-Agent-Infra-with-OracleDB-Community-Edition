@@ -1,4 +1,35 @@
-# Migration Guide - AI Agent Infra with DB v4.3.0
+# Migration Guide - AI Agent Infra with DB v4.3.1
+
+## v4.3.1 Organization Step
+
+`19_v4_3_1_organization_governance.sql` follows the v4.3.0 identity,
+governance, and security steps. It adds canonical reporting, closure, versions,
+history, semantic change sets, directory staging, conflicts, and lifecycle
+disposition objects. It refuses ambiguous active primary memberships, direct
+managers, Agent primary owners, or organization cycles rather than inventing
+authority.
+
+`20_v4_3_1_human_display_name.sql` normalizes Human display-name support.
+`21_v4_3_1_entry_access.sql` adds independent Portal and App admission flags,
+preserves both surfaces for migrated users, and marks the active local
+`admin` system role as `BOOTSTRAP_ADMIN`. New registrations approved after the
+upgrade default to Portal-only in application code. Verify that the bootstrap
+administrator has `PORTAL_ACCESS='Y'`, `APP_ACCESS='Y'`, and one active
+`SYSTEM_ADMIN` assignment sourced from `BOOTSTRAP_ADMIN` before accepting
+traffic.
+
+`22_v4_3_1_identity_organization_alignment.sql` marks ordinary Human
+Principals as organization-required, ends any legacy organization membership
+held by the protected bootstrap `admin`, clears that system account from
+organization responsibility fields, and adds a database trigger that rejects
+an organization member without an active platform login identity. After the
+step, verify every active ordinary Human has one active primary organization
+membership and at least one active login identity. Resolve any legacy anomaly
+in User Management before enabling Portal or App admission.
+
+Do not edit or re-checksum prior migration files. Run `migration_runner.py
+--version 4.3.1` and then `live_db_validator.py`; interrupted execution must be
+retried through the journaled runner.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -492,7 +523,7 @@ a verified recoverable backup evidence record:
 source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.0 --edition enterprise \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.1 --edition enterprise \
   --oracle-config /path/to/oracle-config.json \
   --pg-config /path/to/pg-config.json \
   --yashandb-config /path/to/yashandb-config.json \
@@ -500,7 +531,7 @@ cx_prepare_python_environment "$PYTHON_BIN"
   --output release_evidence/migrations-v4.3.0.json
 ```
 
-For a clean v4.1.x deployment, `--version 4.3.0` detects the installed schema
+For a clean v4.1.x deployment, `--version 4.3.1` detects the installed schema
 and applies the nine common scripts in numeric order, the Enterprise scheduler
 overlay where applicable, the internal Executor closure, and the v4.3 identity,
 Channel, and governance lifecycle steps. A failed statement remains in the step
