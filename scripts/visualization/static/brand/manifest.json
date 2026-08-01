@@ -1,0 +1,24 @@
+{
+  "schema": "chuanxu-product-assets/v1",
+  "brand": "Chuanxu",
+  "brand_zh": "\u5ddd\u5e8f",
+  "product": "AI Agent Management Platform",
+  "technical_project": "AI Agent Infra with DB",
+  "database": "Oracle",
+  "edition": "Community",
+  "version": "4.3.2",
+  "release_date": "2026-08-01",
+  "assets": {
+    "chuanxu-mark.svg": "20740b21f737fa9ca677486fabdd5d5b7875cd5f5bd98e8295304cc4674a5318",
+    "chuanxu-mark.png": "f3f5bd568299d394ffed81dcce303de069d5a1809e5b25815e0d993c6a8a3757",
+    "chuanxu-logo-zh.svg": "86c4bb21b8b146a68bb7ec2f0350b5d53c0ab446dd28412a970d15b059886a8c",
+    "chuanxu-logo-zh.png": "2b91d723ed20a0ae433b9d5f3a73a7db774b27eac81bde01ede28fac70ca9e71",
+    "chuanxu-logo-zh-on-dark.svg": "a717de60a6306d5489e8ccf3c8d64b2c6325d582e1fbf7054b8ccca812dbcfee",
+    "chuanxu-logo-zh-on-dark.png": "e37d01eb57f98ba9d890aa9115e96b80f510f706cc13ad499d72ba89f1ac233a",
+    "chuanxu-logo-en.svg": "1e0e167c49ade667954d2f0f7f9d644fd7d5593a413d08070edf2faba9a9b062",
+    "chuanxu-logo-en.png": "f4428607dfdae06782258079005c46a6946fc7a8715fb4f902b65891d04ce5bf",
+    "chuanxu-logo-en-on-dark.svg": "1881844286f7b58622de866e73b5995b6375f5cf89766944982657f36f9dd864",
+    "chuanxu-logo-en-on-dark.png": "06e7325b4e483053700ede31be5b1cea6abf9c06146aa6dd565a00aa203a5eb7"
+  },
+  "icon_sprite": "../chuanxu-icons.svg"
+}
