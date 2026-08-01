@@ -1,12 +1,14 @@
-# AI Agent Infra with OracleDB — 社区版 v4.3.1
+# AI Agent Infra with OracleDB — 社区版 v4.3.2
 
-**版本**: v4.3.1 | **日期**: 2026-07-31 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.3.2 | **日期**: 2026-08-01 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.top**
 
 ---
 
 > v4.3.1 身份与组织规则：除受保护的内置 `admin` 系统账号外，一个平台账号、一个 Human Principal 与一个组织人员表示同一主体。注册审批必须选择主组织，并在同一事务中激活账号和主组织归属；没有有效登录身份的 Principal 不能加入组织架构。
+
+> v4.3.2 记忆生命周期：记忆采用稳定族与不可变版本；日常整理、压缩、归档和遗忘使用受控候选、版本切换与逻辑不可用，不以物理删除替代审计证据。记忆正文、图关系与模型输出均是不受信任的数据，不能作为授权边界。
 
 ## 品牌与技术名称
 
@@ -56,6 +58,7 @@
 
 | 版本 | 日期 | 里程碑 |
 |------|------|--------|
+| **v4.3.2** | 2026-08-01 | 新增受治理的版本化记忆生命周期：稳定Family、不可变Version、当前版本指针、关系链、快照、候选复核、持久作业和带理由的逻辑不可用；第23、24步支持可重试升级 |
 | **v4.3.1** | 2026-07-31 | 新增数据库权威的图形化组织治理；支持组织、人员归属、Agent 责任与异常视图，闭包范围授权，语义草稿、校验、影响分析和审批提交 |
 | **v4.3.0** | 2026-07-29 | 集成内部 Graph Engineering 收口；统一 Human/Agent Principal、用户注册审批、一次性 Agent Enrollment、Security Domain、Channel、Barrier、Gateway、数据库会话与节点级回收；生产 profile 门禁通过，保留 v4.1.x 兼容基线，不单独发布 v4.2.1 |
 | **v4.1.0** | 2026-07-24 | 注册 Agent 统一纳管；企业版增加资源目录、策略决策、限时授权、N-of-M 审批、职责分离、应急控制、风险型审计与范围化证据导出；统一川序产品界面 |
@@ -1296,11 +1299,10 @@ Web 可视化系统提供统一的 Portal 与 Dashboard 管理界面，共 17 �
 | DB_CRYPTO | 5 | 数据库原生加密（DBMS_CRYPTO AES-256-CBC），密钥轮换 |
 | BRANCH_MANAGER | 11 | 上下文分支管理：fork/merge/abandon/pause/resume/diff/conflicts/lesson |
 
-### 8.3 调度作业（17 个）
+### 8.3 调度作业（16 个）
 
 | 作业 | 调度 | 说明 |
 |------|------|------|
-| MEMORY_FUSION_JOB | 每日 02:00 | 融合相似记忆 + 衰减旧记忆 |
 | KNOWLEDGE_EXTRACTION_JOB | 每日 03:00 | 从记忆提取知识 |
 | KNOWLEDGE_REVIEW_JOB | 每日 06:00 | 知识审查与验证 |
 | SESSION_CLEANUP_JOB | 每 30 分钟 | 清理过期会话 |
@@ -1496,7 +1498,7 @@ Graph 条件必须使用受管的 typed AST。缺少 operand、非 AST 子项、
 校验节点/边身份、端点、父版本以及动态来源 Run/Checkpoint 的同图关系。
 
 v4.3.0 的生产 profile 已通过数据库、浏览器、容量、故障恢复、清洁部署和
-长时间运行证据门禁，生产部署使用 v4.3.1 production profile。Graph Preview、
+长时间运行证据门禁，生产部署使用 v4.3.2 production profile。Graph Preview、
 Channel、Barrier 和 Gateway 通过 profile 与数据库权限显式控制；Channel 不能扩大
 数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。待 Graph
 Engineering 行业规范和项目合约稳定后，最新验证通过的实现可直接毕业为正式

@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.3.2 - 2026-08-01
+
+- Added database-authoritative versioned Memory Families, immutable Versions,
+  current pointers, representations, relationships, snapshots, candidates,
+  reviews, jobs, usage events, and projection outbox facts across all three
+  adapters.
+- Made normal Memory deletion a reasoned logical-unavailability transition;
+  physical erasure remains a separate compliance workflow.
+- Added the Dashboard Memory lifecycle workspace and bounded current-version
+  Library/Chain, Consolidation Workbench, and Policies and Jobs views.
+
 ## v4.3.1 - 2026-07-31
 
 - Added database-authoritative graphical organization governance, canonical

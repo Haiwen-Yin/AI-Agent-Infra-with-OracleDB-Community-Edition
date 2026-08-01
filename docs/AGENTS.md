@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.3.1 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.3.2 Unified Repository Guide
 
-> **v4.3.1** - The unified single-source repository that generates all 6 release
+> **v4.3.2** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -97,7 +97,7 @@ cx_prepare_python_environment "$PYTHON_BIN"
 
 ## v4.3.0 Integrated Profiles
 
-The current source and release metadata are `v4.3.1` dated `2026-07-31`.
+The current source and release metadata are `v4.3.2` dated `2026-08-01`.
 Graph Engineering work from the internal v4.2.1 closure is integrated into this
 release and is not published as a separate v4.2.1 archive. The stable v4.1.x
 line remains available as a downloadable compatibility baseline and receives
@@ -318,7 +318,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.1`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.2`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

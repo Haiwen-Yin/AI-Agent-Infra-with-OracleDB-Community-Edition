@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.3.1 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.3.2 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -48,6 +48,19 @@ explicit policy are denied. Approval, emergency, audit, retention, legal-hold,
 and evidence-export controls are enforced by the server and database rather
 than by Dashboard visibility.
 
+v4.3.2 adds versioned Memory lifecycle controls. Existing Memory is adopted
+without changing its external entity ID; ordinary delete becomes reasoned
+logical unavailability, while authorized history remains available. Agents may
+read current authorized Memory, request bounded chains, submit attributed
+feedback or governed candidates, and start only permitted dry-run or managed
+jobs. Approved semantic candidates require a separate reasoned activation that
+creates a successor Version; snapshot refresh and job completion are fenced.
+Memory content and model output are untrusted data and never authority.
+MCP exposes `memory_lifecycle_create`, `memory_lifecycle_chain`,
+`memory_lifecycle_feedback`, and `memory_lifecycle_candidate` only for the
+authenticated Agent's own Memory Versions; candidates still require governed
+review and separate activation.
+
 The Organization workspace is a governed query and change interface. Agents
 may discover only organization facts allowed by their authenticated Principal
 and `organizations.*` scope. Reading this Skill does not grant graphical edit,
@@ -62,7 +75,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.3.1.md   # this release's notes
+├── RELEASE_NOTES_v4.3.2.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -139,7 +152,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.1.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.2.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -164,7 +177,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.3.1 archive includes the verified glibc 2.28 wheel; do not
+The current v4.3.2 archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration
@@ -352,8 +365,8 @@ established Dashboard, Portal, and Agent paths are retained through the
 request-local compatibility bridge to `visualization/server.py`; the bridge
 does not open a second listener or grant direct database access. Legacy callers
 remain subject to session, CSRF, Agent identity, and permission checks. The
-`production` runtime profile exposes the integrated v4.3.1 stable core and is
-the current production recommendation; the v4.3.1 release and closure evidence
+`production` runtime profile exposes the integrated v4.3.2 stable core and is
+the current production recommendation; the v4.3.2 release and closure evidence
 are PASS. `graph-preview` and `development` remain explicitly controlled
 profiles for experimental capabilities.
 
@@ -491,7 +504,7 @@ replayed after an uncertain outcome.
 
 The Graph contract may evolve within the v4.3.x maturity cycle. Breaking
 changes require a new definition/schema version, migration or review state,
-and new release evidence. The v4.3.1 production profile is the current
+and new release evidence. The v4.3.2 production profile is the current
 production baseline; v4.1.x remains available as the prior baseline. The Graph
 implementation is graduated by configuration and evidence, not by a second
 long-lived implementation.

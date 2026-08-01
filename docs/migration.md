@@ -1,4 +1,38 @@
-# Migration Guide - AI Agent Infra with DB v4.3.1
+# Migration Guide - AI Agent Infra with DB v4.3.2
+
+## v4.3.2 Versioned Memory Step
+
+`23_v4_3_2_memory_lifecycle.sql` is additive and journaled. It adopts every
+existing `MEMORY` entity as version one of a stable Family without changing the
+existing entity ID, payload, tags, embeddings, ownership, workspace, or
+timestamps. It adds Families, Versions, Representations, Relations, Snapshots,
+Policies, Jobs, Usage Events, Candidates, Reviews, and projection Outbox
+facts. Use `migration_runner.py --version 4.3.2`; an interrupted step must be
+retried through the same command, not repaired by deleting migration rows.
+
+`24_v4_3_2_memory_digest_alignment.sql` is a separate idempotent journaled
+step. It changes only the digest of legacy-adopted version-one rows to SHA-256.
+It exists separately so installations that already recorded step 23 never face
+a prior-checksum mismatch; it does not change Family or Version IDs, payloads,
+ownership, scope, or lifecycle state.
+
+`25_v4_3_2_disable_legacy_memory_fusion.sql` is a separate idempotent
+journaled safety correction. It removes the pre-v4.3.2 scheduler task that
+directly fused legacy rows and decayed their importance. That task must not be
+recreated: governed lifecycle jobs create bounded candidates, preserve
+versions, and retain snapshot and audit evidence instead of mutating memory
+outside the shared service.
+
+`26_v4_3_2_snapshot_subject_fencing.sql` adds optional Principal permission
+version and Agent-instance fencing fields to snapshots. Existing snapshots and
+legacy callers remain compatible. New runtime callers should supply these
+identifiers so authorization, offboarding, domain removal, and instance
+replacement are rechecked before a pinned member is returned.
+
+The migration is a logical-forgetting upgrade. It does not physically erase
+old Memory content and does not assert model unlearning. Before an upgrade,
+record a recoverable backup/evidence manifest and verify current authorization,
+history, chain, candidate, and job behavior after the journal reports applied.
 
 ## v4.3.1 Organization Step
 

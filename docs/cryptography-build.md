@@ -1,4 +1,4 @@
-# cryptography Wheel Policy - AI Agent Infra with DB v4.3.1
+# cryptography Wheel Policy - AI Agent Infra with DB v4.3.2
 
 The platform uses `cryptography==49.0.0` for local AES-256-GCM configuration
 and credential encryption. The upstream Linux wheel currently carries the
@@ -19,7 +19,7 @@ performs the same glibc-floor check before installation. The requirement stays
 `cryptography==49.0.0`; the release does not downgrade the cryptographic
 library merely to accommodate an older operating system.
 
-The current v4.3.1 package contains both wheels and has been verified on the
+The current v4.3.2 package contains both wheels and has been verified on the
 RHEL 8/glibc 2.28 baseline. Do not deploy a package on RHEL 8 by renaming an
 incompatible wheel or by substituting an older cryptography release.
 The same offline gate currently requires the pinned `argon2-cffi==25.1.0`

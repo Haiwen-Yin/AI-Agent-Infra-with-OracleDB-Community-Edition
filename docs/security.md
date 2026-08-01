@@ -1,4 +1,18 @@
-# Security - AI Agent Infra with DB v4.3.1
+# Security - AI Agent Infra with DB v4.3.2
+
+## v4.3.2 Memory Boundary
+
+Memory bodies, summaries, graph labels, representations, candidates, model
+output, and feedback are untrusted data. They cannot grant a Principal access,
+invoke a Tool, widen a Security Domain, or override current authorization.
+Authorization is applied before retrieval, score, count, chain traversal,
+history, snapshot, export, Artifact, model, Skill, or Tool serialization.
+
+Operational forgetting is logical: `UNAVAILABLE`, archival, and index removal
+stop ordinary Agent retrieval while preserving minimal evidence. It is not
+physical deletion, model unlearning, or revocation of content already consumed
+or exported. Quarantine and permission revocation take effect immediately,
+including against a previously pinned Run snapshot.
 
 ## v4.3.1 Organization Scope
 

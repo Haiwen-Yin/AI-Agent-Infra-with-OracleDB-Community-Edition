@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.3.1
+# Architecture - AI Agent Infra with DB v4.3.2
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -580,7 +580,7 @@ the shared service contract.
 `production`, `graph-preview`, and `development` are build-time profiles
 generated from one source line. `production` contains the integrated v4.3.0
 surface; `graph-preview` and `development` expose explicitly enabled Graph
-controls for controlled validation. The v4.3.1 production profile is the
+controls for controlled validation. The v4.3.2 production profile is the
 current production recommendation; the stable v4.1.x line remains available as
 the prior compatibility baseline.
 Profiles do not weaken database, API, Skill, Tool, model, memory, Artifact, or

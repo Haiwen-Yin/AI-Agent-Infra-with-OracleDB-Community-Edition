@@ -1083,6 +1083,12 @@ tbody tr:hover {
 .operation-grid .primary-button {
   min-height: 39px;
 }
+.operation-explainer-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
 .evidence-actions {
   margin-top: 15px;
 }
@@ -1441,6 +1447,43 @@ tbody tr:hover {
 .wide-inline-form {
   grid-template-columns: repeat(2, minmax(150px, 1fr)) auto;
 }
+.workbench-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.workbench-field {
+  display: grid;
+  grid-template-rows: 16px 38px minmax(30px, auto);
+  min-width: 0;
+  gap: 4px;
+  align-items: start;
+  color: var(--muted);
+  font-size: 11px;
+}
+.workbench-field > span {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workbench-field > :is(input, select, button) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+}
+.workbench-field > small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.workbench-field.workbench-action .primary-button {
+  justify-content: center;
+  margin: 0;
+}
 .access-output {
   max-height: 220px;
   margin: 14px 0 0;
@@ -1563,7 +1606,8 @@ tbody tr:hover {
     grid-template-columns: repeat(2, 1fr);
   }
   .split-grid,
-  .operation-grid {
+  .operation-grid,
+  .operation-explainer-form {
     grid-template-columns: 1fr;
   }
   .graph-toolbar {
@@ -1585,6 +1629,9 @@ tbody tr:hover {
   }
   .inline-form,
   .wide-inline-form {
+    grid-template-columns: 1fr;
+  }
+  .workbench-form {
     grid-template-columns: 1fr;
   }
   .message-compose {

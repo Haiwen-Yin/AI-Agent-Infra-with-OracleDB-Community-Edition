@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.1
+# Deployment Guide - AI Agent Infra with DB v4.3.2
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -33,16 +33,16 @@ on newer operating systems use the upstream wheel. See
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
 The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.1 artifact includes the verified
+integrity before install. The current v4.3.2 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
-For upgrades, preserve the v4.1.x core and apply the v4.3.0 additive migration
-through the runner. The v4.3.0 `production` profile is the current production
-recommendation because unit and security tests, package validation, live
-database contracts, browser checks, recovery evidence, and capacity evidence
-are present. Multi-tenant deployment and public Internet exposure remain
-outside this private single-tenant contract.
+For upgrades, preserve the v4.1.x core and apply the complete additive chain
+through `migration_runner.py --version 4.3.2`. The v4.3.2 `production` profile
+is the current production recommendation because unit and security tests,
+package validation, live database contracts, browser checks, recovery evidence,
+and versioned-memory upgrade evidence are present. Multi-tenant deployment and
+public Internet exposure remain outside this private single-tenant contract.
 
 Existing v4.0.1 installations must then apply
 `8_portal_node_ownership.sql` before deploying or restarting the web service.
@@ -135,7 +135,6 @@ Creates the scheduler jobs declared by the current adapter.
 
 | Job | Schedule | Action |
 |-----|----------|--------|
-| MEMORY_FUSION_JOB | Daily 02:00 | Fuse similar memories + decay importance |
 | KNOWLEDGE_EXTRACTION_JOB | Weekly Sunday 06:00 | Extract knowledge from memory patterns |
 | KNOWLEDGE_REVIEW_JOB | Daily 06:00 | Schedule spaced reviews for knowledge entities |
 | SESSION_CLEANUP_JOB | Every 30 min | Clean expired sessions + purge inactive |
@@ -152,6 +151,11 @@ Creates the scheduler jobs declared by the current adapter.
 | SKILL_TOKEN_CLEANUP_JOB | Daily 07:00 | Clean expired skill tokens |
 | CONTEXT_AUDIT_JOB | Daily 00:00 | Audit context access patterns |
 | BRANCH_CLEANUP_JOB | Weekly Sat 02:00 | Archive abandoned branches |
+
+`MEMORY_FUSION_JOB` is a pre-v4.3.2 legacy task and is removed by migration
+`25_v4_3_2_disable_legacy_memory_fusion.sql`. It must not be recreated: direct
+fusion and importance decay bypass immutable Memory versions, review, snapshots,
+and lifecycle audit. Use governed `CX_MEMORY_JOBS` workflows instead.
 
 ### Phase 4: Grants (4_grants.sql)
 Grants required privileges to schema roles and users.

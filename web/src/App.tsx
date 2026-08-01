@@ -867,6 +867,8 @@ function PageView({
         onNotice={onNotice}
       />
     );
+  if (page === "memory")
+    return <MemoryLifecyclePage lang={lang} text={text} onNotice={onNotice} />;
   if (page === "graph")
     return <GraphPage lang={lang} text={text} onNotice={onNotice} />;
   if (page === "approvals")
@@ -901,6 +903,127 @@ function PageView({
       </>
     );
   return <DataPage page={page} lang={lang} text={text} onNotice={onNotice} />;
+}
+
+function MemoryLifecyclePage({
+  lang,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  type MemoryView = "overview" | "library" | "chain" | "workbench" | "jobs";
+  const [view, setView] = useState<MemoryView>("overview");
+  const [payload, setPayload] = useState<Row>({ nodes: [], edges: [] });
+  const [jobs, setJobs] = useState<Row[]>([]);
+  const [candidates, setCandidates] = useState<Row[]>([]);
+  const [policies, setPolicies] = useState<Row[]>([]);
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [chainData, setChainData] = useState<Row>({ nodes: [], relations: [] });
+  const [loading, setLoading] = useState(true);
+  const [libraryMode, setLibraryMode] = useState<"list" | "graph">("list");
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [memory, jobValue, candidateValue, policyValue] = await Promise.all([
+        api<Row>("/api/memory"), api<Row>("/api/memory/jobs"),
+        api<Row>("/api/memory/candidates"), api<Row>("/api/memory/policies"),
+      ]);
+      setPayload(memory);
+      setJobs(listPayload(jobValue, ["jobs"]));
+      setCandidates(listPayload(candidateValue, ["candidates"]));
+      setPolicies(listPayload(policyValue, ["policies"]));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("加载记忆生命周期失败", "Memory lifecycle loading failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const openChain = async (item: Row) => {
+    setSelected(item);
+    setView("chain");
+    if (!item.family_id) return;
+    setLoading(true);
+    try {
+      setChainData(await api<Row>(`/api/memory/${encodeURIComponent(String(item.family_id))}/chain`));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("读取记忆链失败", "Memory chain loading failed"));
+    } finally { setLoading(false); }
+  };
+  const startJob = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const reason = String(data.reason || "").trim();
+    if (!reason) { onNotice(text("整理作业必须填写原因", "A consolidation reason is required")); return; }
+    try {
+      await api("/api/memory/x/jobs", { method: "POST", body: JSON.stringify({ job_type: data.job_type, dry_run: data.dry_run === "true", reason, scope: { memory_scope: data.memory_scope || "" } }) });
+      onNotice(text("已创建受控整理作业", "Governed consolidation job created"));
+      await load();
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("作业创建失败", "Job creation failed")); }
+  };
+  const propose = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selected?.family_id || !selected?.version_id) { onNotice(text("请先从记忆库选择当前版本", "Select a current version from the Library first")); return; }
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const reason = String(data.reason || "").trim();
+    if (!reason) { onNotice(text("候选变更必须填写原因", "Candidate changes require a reason")); return; }
+    try {
+      await api(`/api/memory/${encodeURIComponent(String(selected.family_id))}/candidates`, { method: "POST", body: JSON.stringify({ candidate_type: data.candidate_type, source_version_id: selected.version_id, confidence: Number(data.confidence || 0), reason, proposed: { title: selected.title, note: data.note || "" } }) });
+      onNotice(text("候选已提交，语义变更不会直接替换当前记忆", "Candidate submitted; semantic changes do not replace the current memory directly"));
+      await load();
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("候选提交失败", "Candidate submission failed")); }
+  };
+  const nodes = payload.nodes || [];
+  const tabs: [MemoryView, string, string, typeof Layers3][] = [
+    ["overview", "概览", "Overview", Layers3], ["library", "记忆库", "Library", List],
+    ["chain", "记忆链", "Chain", Network], ["workbench", "整理工作台", "Consolidation workbench", GitCompareArrows],
+    ["jobs", "策略与作业", "Policies and jobs", Activity],
+  ];
+  return <section>
+    <SectionHeading title={text("记忆", "Memory")} subtitle={text("版本化记忆将内容、使用事件和动态效果分离；默认只向运行提供当前且获授权的版本。", "Versioned Memory separates content, usage events, and dynamic effectiveness; only current authorized versions are returned to runtime by default.")} text={text} />
+    <ViewToggle value={view} options={tabs.map(([key, zh, en, Icon]) => [key, text(zh, en), Icon])} onChange={(value) => setView(value as MemoryView)} />
+    <div className="page-toolbar cx-memory-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {loading && <PageLoading text={text} />}
+    {!loading && view === "overview" && <div className="cx-metric-grid">
+      <InfoPanel title={text("当前可用版本", "Current usable versions")} text={text}><strong className="metric-value">{nodes.length}</strong><p>{text("不包含已归档、隔离和逻辑不可用版本。", "Archived, quarantined, and logically unavailable versions are excluded.")}</p></InfoPanel>
+      <InfoPanel title={text("待复核候选", "Candidates awaiting review")} text={text}><strong className="metric-value">{candidates.filter((item) => item.status === "PENDING").length}</strong><p>{text("语义合并、替换、冲突与范围扩展需要受控复核。", "Semantic merge, replacement, conflict, and scope expansion remain governed.")}</p></InfoPanel>
+      <InfoPanel title={text("整理作业", "Consolidation jobs")} text={text}><strong className="metric-value">{jobs.length}</strong><p>{text("先预览影响，再执行受策略约束的整理。", "Preview impact before policy-governed organization work.")}</p></InfoPanel>
+    </div>}
+    {!loading && view === "library" && <>
+      <ViewToggle value={libraryMode} options={[["list", text("列表", "List"), List], ["graph", text("关系图", "Graph"), Network]]} onChange={(value) => setLibraryMode(value as "list" | "graph")} />
+      {libraryMode === "graph" ? <NetworkGraph nodes={nodes} edges={payload.edges || []} lang={lang} title={text("记忆关系图", "Memory relationship graph")} loading={false} text={text} onSelect={openChain} showFilters /> : <InfoPanel title={text("当前记忆库", "Current Memory library")} text={text}><p className="cx-form-hint">{text("点击条目查看可授权的版本链与关系；历史内容不会在此预加载。", "Click an item to inspect its authorized version chain and relationships; historical bodies are not preloaded here.")}</p><DataTable headers={[text("标题", "Title"), text("类型", "Type"), text("范围", "Scope"), text("状态", "State"), text("版本", "Version")]} rows={nodes.map((item: Row) => [<button className="text-button" onClick={() => void openChain(item)}>{displayRowValue(lang, item.label || item.title)}</button>, displayRowValue(lang, item.category || item.memory_type), displayRowValue(lang, item.memory_scope), displayRowValue(lang, item.lifecycle_state), item.version_number || "-"])} empty={text("当前权限范围内没有可用记忆", "No usable Memory is visible in the current authorization scope")} text={text} /></InfoPanel>}
+    </>}
+    {!loading && view === "chain" && <>
+      <InfoPanel title={text("记忆链", "Memory chain")} text={text}><p className="cx-form-hint">{text("链路使用有界关系遍历。推断关系是证据，不构成授权或事实权威。", "Chains use bounded traversal. Inferred relations are evidence, not authority or authorization.")}</p></InfoPanel>
+      <NetworkGraph nodes={chainData.nodes || []} edges={(chainData.relations || []).map((item: Row) => ({ from: item.source_version_id, to: item.target_version_id, label: item.relation_type, value: item.confidence || 1 }))} lang={lang} title={selected?.title || text("选择一条记忆", "Select a memory")} loading={false} text={text} onSelect={() => undefined} compact showFilters />
+    </>}
+    {!loading && view === "workbench" && <div className="cx-memory-workbench">
+      <InfoPanel title={text("受控候选", "Governed candidate")} text={text}>
+        <p className="cx-form-hint">{text("候选只进入复核队列，不会自动替换当前记忆。置信度仅用于排序，范围为 0 至 1。", "Candidates enter review only and never replace current Memory automatically. Confidence ranks review priority from 0 to 1.")}</p>
+        <form className="workbench-form" onSubmit={propose}>
+          <label className="workbench-field"><span>{text("候选类型", "Candidate type")}</span><select name="candidate_type" defaultValue="REPLACE"><option value="REPLACE">{text("替换", "Replace")}</option><option value="MERGE">{text("合并", "Merge")}</option><option value="CONFLICT">{text("冲突", "Conflict")}</option><option value="SCOPE_CHANGE">{text("范围调整", "Scope change")}</option></select><small>{text("指定需要复核的变更方式。", "Select the change that requires review.")}</small></label>
+          <label className="workbench-field"><span>{text("置信度", "Confidence")}</span><input name="confidence" type="number" min="0" max="1" step="0.01" defaultValue="0.8" title={text("候选与当前记忆的匹配程度，0 最低、1 最高；仅用于复核排序。", "Candidate match level: 0 is lowest and 1 is highest; it is used only for review priority.")} /><small>{text("数值越高，复核排序越靠前。", "Higher values are reviewed earlier.")}</small></label>
+          <label className="workbench-field"><span>{text("候选说明", "Candidate note")}</span><input name="note" placeholder={text("候选说明", "Candidate note")} /><small>{text("记录建议内容，不会覆盖原始记忆。", "Records the proposal without overwriting source Memory.")}</small></label>
+          <label className="workbench-field"><span>{text("提交原因", "Submission reason")}</span><input name="reason" required placeholder={text("提交原因", "Submission reason")} /><small>{text("写入审计记录，说明为何提出变更。", "Written to audit records to explain the request.")}</small></label>
+          <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button"><GitCompareArrows size={15} />{text("提交候选", "Submit candidate")}</button><small>{text("仅创建待复核候选。", "Creates a review-pending candidate only.")}</small></div>
+        </form>
+      </InfoPanel>
+      <InfoPanel title={text("受控整理作业", "Governed consolidation job")} text={text}>
+        <p className="cx-form-hint">{text("默认创建仅预览作业。创建执行作业只会入队；已注册 Worker 取得租约后，才按策略和审计边界处理，不会在提交时直接覆盖当前记忆。", "The default creates a preview-only job. An execution job is queued first; a registered Worker processes it only after acquiring a lease, under policy and audit boundaries, without overwriting current Memory on submission.")}</p>
+        <form className="workbench-form" onSubmit={startJob}>
+          <label className="workbench-field"><span>{text("作业类型", "Job type")}</span><select name="job_type" defaultValue="CONSOLIDATE"><option value="CONSOLIDATE">{text("整理", "Consolidate")}</option><option value="ARCHIVE_REVIEW">{text("归档复核", "Archive review")}</option><option value="REPRESENT">{text("生成表示层", "Build representations")}</option><option value="DISCOVER_RELATIONS">{text("发现关系", "Discover relations")}</option></select><small>{text("定义队列项的处理目的。", "Defines the purpose for queued items.")}</small></label>
+          <label className="workbench-field"><span>{text("记忆范围", "Memory scope")}</span><select name="memory_scope"><option value="">{text("全部范围", "All scopes")}</option><option value="AGENT_MEMORY">{text("智能体记忆", "Agent memory")}</option><option value="WORKSPACE_MEMORY">{text("工作区记忆", "Workspace memory")}</option></select><small>{text("限制入队对象；服务端仍会校验权限。", "Limits queued subjects; the server still checks authorization.")}</small></label>
+          <label className="workbench-field"><span>{text("运行模式", "Run mode")}</span><select name="dry_run" defaultValue="true"><option value="true">{text("仅预览作业", "Preview-only job")}</option><option value="false">{text("创建执行作业", "Queue execution job")}</option></select><small>{text("预览不修改记忆；执行由 Worker 后续处理。", "Preview does not modify Memory; a Worker handles execution later.")}</small></label>
+          <label className="workbench-field"><span>{text("作业原因", "Job reason")}</span><input name="reason" required placeholder={text("作业原因", "Job reason")} /><small>{text("写入审计记录，说明作业目的。", "Written to audit records to explain the job purpose.")}</small></label>
+          <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button"><PlayCircle size={15} />{text("创建作业", "Create job")}</button><small>{text("提交后进入队列，不会立即执行。", "Queues the job; it does not execute immediately.")}</small></div>
+        </form>
+      </InfoPanel>
+    </div>}
+    {!loading && view === "jobs" && <><InfoPanel title={text("有效策略", "Effective policies")} text={text}><p className="cx-form-hint">{text("策略版本约束作业的可执行范围；策略本身不直接修改记忆。", "Policy versions constrain job execution scope; a policy does not modify Memory by itself.")}</p><DataTable headers={[text("名称", "Name"), text("版本", "Version"), text("状态", "State")]} rows={policies.map((item) => [item.policy_name, item.policy_version, item.status])} empty={text("没有可见策略", "No policy is visible")} text={text} /></InfoPanel><InfoPanel title={text("作业队列", "Job queue")} text={text}><p className="cx-form-hint">{text("作业先入队，再由持有有效租约的 Worker 处理；状态变化保留在数据库审计链中。", "Jobs queue first, then a Worker with a valid lease processes them; state changes remain in the database audit chain.")}</p><DataTable headers={[text("类型", "Type"), text("状态", "State"), text("模式", "Mode"), text("创建时间", "Created")]} rows={jobs.map((item) => [item.job_type, item.status, ["Y", "TRUE", "1"].includes(String(item.dry_run).toUpperCase()) ? text("仅预览", "Preview-only") : text("执行", "Execution"), displayRowValue(lang, item.created_at)])} empty={text("没有记忆作业", "No Memory jobs")} text={text} /></InfoPanel></>}
+  </section>;
 }
 
 type DataPageConfig = {
@@ -1631,7 +1754,7 @@ function NetworkGraph({
         const graphNodes = filteredNodes.map((node) => ({
           ...node,
           id: String(node.id),
-          label: String(node.label || node.title || node.id),
+          label: `${String(node.label || node.title || node.id)}${node.history_node ? ` · ${text("历史谱系", "Historical lineage")}` : ""}`,
           shape: "dot",
           size: Number(node.size || 14),
           color: node.color || { background: "#0f6f82", border: "#0b4d5c" },
@@ -6457,49 +6580,16 @@ function LegacyOperations({
     const target = items.find((item) => String(item.branch_id) === selected);
     return (
       <InfoPanel title={text("分支操作", "Branch operations")} text={text}>
-        <form className="compact-form operation-form" onSubmit={fork}>
-          <div className="operation-grid">
-            <input
-              name="workspace_id"
-              required
-              placeholder={text("工作区 ID", "Workspace ID")}
-            />
-            <input
-              name="fork_context_id"
-              placeholder={text("上下文 ID（可选）", "Context ID (optional)")}
-            />
-            <input
-              name="branch_name"
-              required
-              placeholder={text("分支名称", "Branch name")}
-            />
-            <select name="branch_type" defaultValue="EXPERIMENT">
-              <option value="EXPERIMENT">{text("实验", "Experiment")}</option>
-              <option value="HANDOFF">{text("移交", "Handoff")}</option>
-              <option value="PARALLEL">{text("并行", "Parallel")}</option>
-            </select>
-            <input
-              name="agent_id"
-              required
-              placeholder={text("目标智能体 ID", "Target Agent ID")}
-            />
-            <input
-              name="source_agent_id"
-              placeholder={text("源智能体 ID", "Source Agent ID")}
-            />
-            <input
-              name="purpose"
-              required
-              placeholder={text("分支目的", "Branch purpose")}
-            />
-          </div>
-          <button
-            className="primary-button"
-            disabled={!canAction(capabilities, "branches.write")}
-          >
-            <GitBranch size={15} />
-            {text("创建分支", "Fork branch")}
-          </button>
+        <p className="cx-form-hint">{text("创建分支只建立独立上下文与归属记录，不会合并、执行或覆盖源上下文。后续暂停、恢复和废弃均保留审计轨迹。", "Creating a Branch establishes isolated context and ownership only; it does not merge, execute, or overwrite the source context. Later pause, resume, and abandonment actions remain auditable.")}</p>
+        <form className="operation-explainer-form" onSubmit={fork}>
+          <label className="workbench-field"><span>{text("工作区 ID", "Workspace ID")}</span><input name="workspace_id" required placeholder={text("工作区 ID", "Workspace ID")} /><small>{text("指定新分支所属的工作区。", "Sets the workspace that owns the new Branch.")}</small></label>
+          <label className="workbench-field"><span>{text("起始上下文 ID", "Fork context ID")}</span><input name="fork_context_id" placeholder={text("可选", "Optional")} /><small>{text("指定从哪一条上下文开始分叉。", "Identifies the context from which to fork.")}</small></label>
+          <label className="workbench-field"><span>{text("分支名称", "Branch name")}</span><input name="branch_name" required placeholder={text("分支名称", "Branch name")} /><small>{text("用于列表和审计中的可读标识。", "A readable identifier for lists and audit.")}</small></label>
+          <label className="workbench-field"><span>{text("分支类型", "Branch type")}</span><select name="branch_type" defaultValue="EXPERIMENT"><option value="EXPERIMENT">{text("实验", "Experiment")}</option><option value="HANDOFF">{text("移交", "Handoff")}</option><option value="PARALLEL">{text("并行", "Parallel")}</option></select><small>{text("说明分支的协作意图，不授予额外权限。", "Records collaboration intent; it grants no extra authority.")}</small></label>
+          <label className="workbench-field"><span>{text("目标智能体 ID", "Target Agent ID")}</span><input name="agent_id" required placeholder={text("目标智能体 ID", "Target Agent ID")} /><small>{text("指定承载该分支的智能体。", "Sets the Agent responsible for this Branch.")}</small></label>
+          <label className="workbench-field"><span>{text("源智能体 ID", "Source Agent ID")}</span><input name="source_agent_id" placeholder={text("可选", "Optional")} /><small>{text("记录来源智能体，便于交接追溯。", "Records the source Agent for handoff traceability.")}</small></label>
+          <label className="workbench-field"><span>{text("分支目的", "Branch purpose")}</span><input name="purpose" required placeholder={text("分支目的", "Branch purpose")} /><small>{text("写入审计记录，说明为何需要该分支。", "Written to audit records to explain the Branch.")}</small></label>
+          <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button" disabled={!canAction(capabilities, "branches.write")}><GitBranch size={15} />{text("创建分支", "Create Branch")}</button><small>{text("仅创建分支定义，不会启动执行。", "Creates the Branch definition only; it does not start execution.")}</small></div>
         </form>
         <div className="page-toolbar evidence-actions">
           <select
@@ -6607,26 +6697,14 @@ function LegacyOperations({
   };
   return (
     <InfoPanel title={text("循环操作", "Loop operations")} text={text}>
-      <form className="operation-grid" onSubmit={createLoop}>
-        <input
-          name="title"
-          required
-          placeholder={text("循环标题", "Loop title")}
-        />
-        <input name="goal" required placeholder={text("目标", "Goal")} />
-        <input name="summary" placeholder={text("摘要", "Summary")} />
-        <input name="max_iterations" type="number" min="1" defaultValue="10" />
-        <select name="visibility" defaultValue="PRIVATE">
-          <option value="PRIVATE">{text("私有", "Private")}</option>
-          <option value="SHARED">{text("共享", "Shared")}</option>
-        </select>
-        <button
-          className="primary-button"
-          disabled={!canAction(capabilities, "loops.write")}
-        >
-          <Plus size={15} />
-          {text("创建循环", "Create Loop")}
-        </button>
+      <p className="cx-form-hint">{text("创建循环只保存定义与停止条件，不会自动启动运行。请从下方选定循环后明确点击“启动运行”；暂停、恢复和停止均由运行状态机处理。", "Creating a Loop stores its definition and stop condition only; it never starts a run automatically. Select the Loop below and explicitly start it; pause, resume, and stop use the run state machine.")}</p>
+      <form className="operation-explainer-form" onSubmit={createLoop}>
+        <label className="workbench-field"><span>{text("循环标题", "Loop title")}</span><input name="title" required placeholder={text("循环标题", "Loop title")} /><small>{text("用于识别该循环定义。", "Identifies this Loop definition.")}</small></label>
+        <label className="workbench-field"><span>{text("目标", "Goal")}</span><input name="goal" required placeholder={text("目标", "Goal")} /><small>{text("定义每次迭代要达成的结果。", "Defines the result each iteration works toward.")}</small></label>
+        <label className="workbench-field"><span>{text("摘要", "Summary")}</span><input name="summary" placeholder={text("可选", "Optional")} /><small>{text("为操作人员提供简短背景说明。", "Provides brief context for operators.")}</small></label>
+        <label className="workbench-field"><span>{text("最大迭代次数", "Maximum iterations")}</span><input name="max_iterations" type="number" min="1" defaultValue="10" /><small>{text("达到上限后循环停止，防止无限运行。", "Stops the Loop at this limit to prevent unbounded runs.")}</small></label>
+        <label className="workbench-field"><span>{text("可见性", "Visibility")}</span><select name="visibility" defaultValue="PRIVATE"><option value="PRIVATE">{text("私有", "Private")}</option><option value="SHARED">{text("共享", "Shared")}</option></select><small>{text("控制定义的可见范围，不替代数据授权。", "Controls definition visibility; it does not replace data authorization.")}</small></label>
+        <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button" disabled={!canAction(capabilities, "loops.write")}><Plus size={15} />{text("创建循环", "Create Loop")}</button><small>{text("仅创建定义；运行需单独启动。", "Creates the definition only; start a run separately.")}</small></div>
       </form>
       <div className="page-toolbar evidence-actions">
         <select

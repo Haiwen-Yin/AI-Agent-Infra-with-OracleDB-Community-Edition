@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.3.1 · Community Edition · Oracle**
+> **v4.3.2 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -34,6 +34,16 @@ memory, knowledge, workspaces, task plans, Skills, execution state, and, in
 Enterprise, governed resources, authorization decisions, multi-party approval,
 emergency control, bounded audit, and evidence export.
 
+v4.3.2 adds governed, versioned Memory on top of the graphical
+organization-governance workspace. Each logical Memory has a stable family and
+an immutable current version; representations, relations, usage events,
+candidates, reviews, snapshots, jobs, and projection work remain attributable
+database facts. Normal optimization marks content unavailable or archived and
+removes it from ordinary retrieval without routine physical deletion. The
+optional model path can only create structured candidates; deterministic
+versioning, lineage, representations, and organization remain available with
+no LLM configured.
+
 v4.3.1 adds a graphical organization-governance workspace. Authorized users
 can search and progressively expand a deterministic organization hierarchy,
 switch among organization, people, Agent-responsibility, and anomaly views,
@@ -57,7 +67,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.3.1.md   # release notes for this version
+├── RELEASE_NOTES_v4.3.2.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -97,7 +107,9 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     │   ├── 16_v4_3_0_identity_channels.sql
     │   ├── 17_v4_3_0_governance_lifecycle.sql
     │   ├── 18_v4_3_0_security_lifecycle.sql
-    │   └── 19_v4_3_1_organization_governance.sql
+    │   ├── 19_v4_3_1_organization_governance.sql
+    │   ├── 23_v4_3_2_memory_lifecycle.sql
+    │   └── 24_v4_3_2_memory_digest_alignment.sql
     ├── tests/                # pytest suite
     ├── tools/                # runtime encryption and release build helpers
     │   ├── encrypt_config.py
@@ -137,7 +149,7 @@ The verifier also walks the mandatory `Requires-Dist` metadata of selected
 wheels. Any transitive wheel required by the base installation must therefore
 be present and compatible, even when it is not repeated as a direct pin in
 `requirements.txt`; optional extras are excluded.
-The current v4.3.1 package contains the verified glibc 2.28 compatibility
+The current v4.3.2 package contains the verified glibc 2.28 compatibility
 wheel, so it is offline-complete on this baseline; `verify_deps.py` still
 fails closed rather than using an incompatible newer-host wheel.
 

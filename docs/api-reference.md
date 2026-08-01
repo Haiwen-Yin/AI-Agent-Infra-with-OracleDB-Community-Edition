@@ -1,4 +1,35 @@
-# API Reference - AI Agent Infra with DB v4.3.1
+# API Reference - AI Agent Infra with DB v4.3.2
+
+## v4.3.2 Versioned Memory API
+
+`GET /api/memory` remains compatible and returns only current,
+ordinary-retrievable versions. It never returns archived, quarantined, or
+logically unavailable history by default. All IDs are opaque.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/memory` | GET/POST | List current Memory or create a Family/version one. |
+| `/api/memory/{family_id}` | GET | Read current Family; `?history=true` requests authorized history. |
+| `/api/memory/{family_id}/chain` | GET | Return a bounded authorized relation chain. |
+| `/api/memory/{family_id}/versions` | POST | Publish immutable successor with `expected_version_id`. |
+| `/api/memory/{family_id}/unavailable` | POST | Reasoned logical unavailability; never routine physical deletion. |
+| `/api/memory/{family_id}/quarantine` | POST | Administrator-only fail-closed security quarantine with a required reason. |
+| `/api/memory/{family_id}/candidates` | POST | Submit governed semantic candidate. |
+| `/api/memory/{family_id}/jobs` | POST | Create bounded dry-run or governed organization work. |
+| `/api/memory/snapshots/{snapshot_id}/refresh` | POST | Create a reasoned successor snapshot; the existing Run context remains immutable. |
+| `/api/memory/snapshots/{snapshot_id}/resolve` | GET | Resolve pinned members against immediate security state and governed expiry outcomes. |
+| `/api/memory/candidates/{candidate_id}/activate` | POST | Administrator-only, reasoned activation of an approved candidate as a successor Version. |
+| `/api/memory/jobs/run-once` | POST | Administrator-only execution of one database-leased deterministic job. |
+| `/api/memory/jobs/{job_id}/cancel` | POST | Administrator-only reasoned cancellation of queued or running Job Items. |
+| `/api/memory/jobs/{job_id}/retry` | POST | Administrator-only reasoned requeue of failed or cancelled Job Items. |
+| `/api/memory/jobs` | GET | List authorized Memory jobs. |
+| `/api/memory/candidates` | GET | List authorized review candidates. |
+| `/api/memory/policies` | GET | Read safe effective policy metadata. |
+| `/api/memory/projections/metrics` | GET | Read relational projection backlog and lag-safe health metrics. |
+| `/api/memory/projections/rebuild` | POST | Administrator-only bounded projection rebuild request with a reason. |
+
+Mutation derives actor identity from the authenticated session. Content,
+model output, and client-provided actor fields do not grant authority.
 
 ## v4.3.1 Organization Governance
 
