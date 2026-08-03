@@ -20,6 +20,7 @@ from . import graph_state
 from . import graph_event_contract
 from . import graph_executor
 from . import graph_scheduler
+from . import graph_assurance
 from .graph_contracts import completion_request_digest, worker_matches
 
 TERMINAL_RUNS = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "REVIEW_REQUIRED"})
@@ -743,6 +744,7 @@ def claim_ready(worker_id: str, runtime: str, capabilities: Optional[List[str]] 
                 lease_seconds: int = 120, agent_id: Optional[str] = None,
                 node_id: Optional[str] = None, node_key: Optional[str] = None,
                 scheduler_id: Optional[str] = None, scheduler_lease: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    graph_assurance.checkpoint("before_claim")
     if scheduler_lease:
         if not scheduler_id or not graph_scheduler.verify_scheduler_lease(
             str(scheduler_lease.get("lease_id") or ""), scheduler_id,
@@ -1030,6 +1032,7 @@ def claim_ready(worker_id: str, runtime: str, capabilities: Optional[List[str]] 
                     "worker_id": worker_id, "fencing_token": fencing,
                     "executor": ready.get("executor_admission")}, tx=tx,
         )
+        graph_assurance.checkpoint("after_claim")
         return {"attempt_id": attempt_id, "lease_token": lease["token"], "run_id": ready["run_id"],
                 "node_run_id": ready["node_run_id"], "node_key": ready["node_key"],
                 "fencing_token": fencing, "input_state": input_state,
@@ -1355,6 +1358,7 @@ def _evaluate_node_tx(tx, run_id: str, node_run_id: str, node_config: Dict[str, 
 
 def complete_attempt(lease_token: str, output_state: Optional[Dict[str, Any]], actor_id: str,
                      evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    graph_assurance.checkpoint("before_completion")
     if output_state is not None and not isinstance(output_state, dict):
         raise ValueError("output_state must be an object")
     if evidence is not None and not isinstance(evidence, dict):
@@ -1416,6 +1420,7 @@ def complete_attempt(lease_token: str, output_state: Optional[Dict[str, Any]], a
             tx, attempt["run_id"], safe_output, actor_id, attempt["attempt_id"],
             reducer_evidence=evidence or {}, reducers=(evidence or {}).get("reducers"),
         )
+        graph_assurance.checkpoint("after_checkpoint")
         if tx.execute(
             "UPDATE GRAPH_ATTEMPTS SET STATUS = 'SUCCEEDED', OUTPUT_STATE_JSON = :output_state_json, "
             "COMPLETION_DIGEST = :completion_digest, COMPLETED_AT = CURRENT_TIMESTAMP "
@@ -1466,6 +1471,7 @@ def complete_attempt(lease_token: str, output_state: Optional[Dict[str, Any]], a
             "AND FENCING_TOKEN = :fencing_token AND REVOKED_AT IS NULL",
             {"attempt_id": attempt["attempt_id"], "fencing_token": lease["fencing_token"]},
         )
+        graph_assurance.checkpoint("after_completion")
         return {"attempt_id": attempt["attempt_id"], "checkpoint": checkpoint,
                 "status": "SUCCEEDED" if budget_result["allowed"] else "REVIEW_REQUIRED",
                 "worker_id": attempt.get("worker_id")}
@@ -1581,6 +1587,7 @@ def fail_attempt(lease_token: str, error_code: str, error_message: str, actor_id
 
 def reap_expired_leases(limit: int = 100) -> int:
     """Fence expired attempts and put recoverable node work back in READY."""
+    graph_assurance.checkpoint("before_reap")
     limit = max(1, min(int(limit), 1000))
 
     def _reap(tx):
@@ -1643,7 +1650,9 @@ def reap_expired_leases(limit: int = 100) -> int:
             count += 1
         return count
 
-    return int(connection.execute_transaction_callback(_reap) or 0)
+    count = int(connection.execute_transaction_callback(_reap) or 0)
+    graph_assurance.checkpoint("after_reap")
+    return count
 
 
 def cancel_run(run_id: str, actor_id: str, reason: str) -> bool:

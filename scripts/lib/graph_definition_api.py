@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import connection, graph_adapter
+from . import connection, graph_adapter, graph_supply_chain
 from .graph_contracts import is_valid_status_transition
 
 GRAPH_SCHEMA_VERSION = "1.0"
@@ -590,12 +590,70 @@ def export_version(version_id: str, *, include_status: bool = False) -> Dict[str
             "definition_digest": version.get("definition_digest"),
         },
     }
-    document["export_digest"] = digest_json(document)
-    return document
+    return graph_supply_chain.attach_envelope(
+        document, publisher=str(version.get("actor_id") or ""),
+        parent_digest=str(version.get("definition_digest") or ""),
+        compiler_version=str((version.get("plan") or {}).get("compiler_version") or ""),
+    )
+
+
+def _record_supply_chain_import(version_id: str, document: Dict[str, Any], verification: Dict[str, Any],
+                                findings: List[Dict[str, str]]) -> None:
+    """Persist import provenance after the immutable Draft has been created."""
+    envelope = document.get("supply_chain") or {}
+    signature = envelope.get("signature") or {}
+    trust_state = "TRUSTED" if verification.get("trusted") else "UNTRUSTED_DRAFT"
+    risk = "CRITICAL" if any(item.get("severity") == "CRITICAL" for item in findings) else (
+        "HIGH" if findings else "LOW"
+    )
+    def _persist(tx: Any) -> None:
+        tx.execute(
+            "INSERT INTO GRAPH_DEFINITION_PROVENANCE "
+            "(PROVENANCE_ID, GRAPH_VERSION_ID, PARENT_DIGEST, PUBLISHER_ID, SOURCE_URI, FORMAT_VERSION, "
+            "COMPILER_VERSION, DOCUMENT_DIGEST, TRUST_STATE, CREATED_AT) VALUES "
+            "(:provenance_id, :version_id, :parent_digest, :publisher_id, :source_uri, :format_version, "
+            ":compiler_version, :document_digest, :trust_state, CURRENT_TIMESTAMP)",
+            {"provenance_id": _id("GPR"), "version_id": version_id,
+             "parent_digest": envelope.get("parent_digest") or None,
+             "publisher_id": envelope.get("publisher") or None, "source_uri": envelope.get("source_uri") or None,
+             "format_version": str(envelope.get("schema_version") or "legacy"),
+             "compiler_version": envelope.get("compiler_version") or None,
+             "document_digest": str(envelope.get("document_digest") or digest_json(document)),
+             "trust_state": trust_state},
+        )
+        for dependency in graph_supply_chain.normalize_dependencies(envelope.get("dependencies") or []):
+            tx.execute(
+                "INSERT INTO GRAPH_DEFINITION_DEPENDENCIES "
+                "(DEPENDENCY_ID, GRAPH_VERSION_ID, DEPENDENCY_KIND, DEPENDENCY_NAME, DEPENDENCY_VERSION, DEPENDENCY_DIGEST, CREATED_AT) "
+                "VALUES (:dependency_id, :version_id, :kind, :name, :version, :digest, CURRENT_TIMESTAMP)",
+                {"dependency_id": _id("GPD"), "version_id": version_id, **dependency},
+            )
+        if signature:
+            tx.execute(
+                "INSERT INTO GRAPH_DEFINITION_SIGNATURES "
+                "(SIGNATURE_ID, GRAPH_VERSION_ID, ALGORITHM, KEY_ID, SIGNATURE_VALUE, STATUS, VERIFIED_AT, CREATED_AT) "
+                "VALUES (:signature_id, :version_id, :algorithm, :key_id, :signature_value, :status, "
+                "CASE WHEN :trusted = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)",
+                {"signature_id": _id("GPS"), "version_id": version_id,
+                 "algorithm": str(signature.get("algorithm") or ""), "key_id": str(signature.get("key_id") or ""),
+                 "signature_value": str(signature.get("value") or ""),
+                 "status": "VERIFIED" if verification.get("trusted") else "UNVERIFIED",
+                 "trusted": 1 if verification.get("trusted") else 0},
+            )
+        tx.execute(
+            "INSERT INTO GRAPH_DEFINITION_SCANS "
+            "(SCAN_ID, GRAPH_VERSION_ID, SCAN_VERSION, FINDINGS_JSON, RISK_LEVEL, STATUS, CREATED_AT) "
+            "VALUES (:scan_id, :version_id, :scan_version, :findings_json, :risk_level, :status, CURRENT_TIMESTAMP)",
+            {"scan_id": _id("GSC"), "version_id": version_id, "scan_version": graph_supply_chain.SUPPLY_CHAIN_VERSION,
+             "findings_json": canonical_json(findings), "risk_level": risk,
+             "status": "BLOCKED" if findings else "PASSED"},
+        )
+    connection.execute_transaction_callback(_persist)
 
 
 def import_version(document: Dict[str, Any], actor_id: str, *, target_graph_id: Optional[str] = None,
-                   reason: str = "Imported Graph Definition") -> Dict[str, Any]:
+                   reason: str = "Imported Graph Definition", trusted_public_keys: Optional[Dict[str, str]] = None,
+                   edition: str = "Enterprise") -> Dict[str, Any]:
     """Import a canonical document as a new Draft.
 
     The source status and IDs are intentionally ignored.  This makes import
@@ -608,6 +666,8 @@ def import_version(document: Dict[str, Any], actor_id: str, *, target_graph_id: 
         raise ValueError("unsupported Graph import format")
     if str(document.get("format_version")) != GRAPH_EXPORT_VERSION:
         raise ValueError("unsupported Graph import format version")
+    verification = graph_supply_chain.verify_document(document, trusted_public_keys or {})
+    findings = graph_supply_chain.scan_document(document, edition=edition)
     definition = document.get("definition") or {}
     version_data = definition.get("version") or {}
     nodes = version_data.get("nodes") or []
@@ -634,6 +694,7 @@ def import_version(document: Dict[str, Any], actor_id: str, *, target_graph_id: 
         budget=version_data.get("budget") if isinstance(version_data.get("budget"), dict) else {},
     )
     imported = get_version(version_id, include_topology=True) or {}
+    _record_supply_chain_import(version_id, document, verification, findings)
     return {
         "graph_id": graph_id,
         "graph_version_id": version_id,
@@ -641,6 +702,8 @@ def import_version(document: Dict[str, Any], actor_id: str, *, target_graph_id: 
         "source_definition_digest": (definition.get("definition_digest") or
                                       (document.get("source") or {}).get("definition_digest")),
         "definition": imported,
+        "supply_chain": {"verification": verification, "findings": findings,
+                         "trust_state": "TRUSTED" if verification.get("trusted") else "UNTRUSTED_DRAFT"},
     }
 
 
@@ -667,6 +730,15 @@ def transition_version(version_id: str, new_status: str, actor_id: str, reason: 
         )
         if not compiled or str(compiled.get("definition_digest") or "") != definition_digest:
             raise ValueError("Graph Version must have a compiled plan matching its validation digest")
+        provenance = connection.execute_query_one(
+            "SELECT TRUST_STATE FROM GRAPH_DEFINITION_PROVENANCE WHERE GRAPH_VERSION_ID = :version_id",
+            {"version_id": version_id},
+        )
+        if provenance and str(provenance.get("trust_state") or "").upper() != "TRUSTED":
+            raise ValueError("untrusted imported Graph Definition requires governed review before publication")
+        from . import graph_dynamic
+        if not graph_dynamic.publishable(version_id):
+            raise ValueError("Dynamic Graph proposal requires completed governed approval before publication")
     def _transition(tx):
         changed = tx.execute(
             "UPDATE GRAPH_VERSIONS SET STATUS = :new_status, ACTOR_ID = :actor_id, REASON = :reason, "

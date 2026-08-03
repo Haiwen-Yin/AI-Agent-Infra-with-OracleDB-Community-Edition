@@ -1,5 +1,20 @@
 # Changelog
 
+## v4.3.3 - 2026-08-03
+
+- Hardened the database-authoritative Graph Runtime with additive assurance
+  evidence, bounded test-only failpoints, invariant scans, and local Agent
+  Runtime recovery records.
+- Added canonical Graph Definition supply-chain envelopes with dependency
+  locks, Ed25519 verification, import scanning, provenance, and untrusted
+  Draft publication gates.
+- Added disabled-by-default Dynamic Graph, A2A 1.0.1, and OpenTelemetry GenAI
+  preview boundaries. They project existing governed Graph facts and do not
+  introduce a second authorization or execution engine.
+- Local Agent Runtime recovery is not database HA. This release does not claim
+  database-cluster failover, database RPO/RTO, independent A2A conformance, or
+  real OTLP Collector delivery.
+
 ## v4.3.2 - 2026-08-01
 
 - Added database-authoritative versioned Memory Families, immutable Versions,

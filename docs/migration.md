@@ -1,4 +1,25 @@
-# Migration Guide - AI Agent Infra with DB v4.3.2
+# Migration Guide - AI Agent Infra with DB v4.3.3
+
+## v4.3.3 Graph Assurance Step
+
+`28_v4_3_3_graph_assurance.sql` is additive and journaled. It adds Graph
+assurance evidence, definition provenance, dependency locks, signature and scan
+records, Dynamic Graph proposal records, A2A task mappings, and telemetry
+delivery metadata. It does not alter existing Graph Versions, Runs, Attempts,
+Checkpoints, memory, organization, Channel, identity, governance, audit, or
+Artifact facts.
+
+Run `migration_runner.py --version 4.3.3` after creating a recoverable backup
+reference. The runner verifies the checksum ledger and retries an interrupted
+step through the same command. Do not edit an applied migration or delete a
+ledger row to simulate a rollback. Application rollback preserves the additive
+v4.3.3 evidence tables; restore a coordinated pre-upgrade database backup only
+when a full data rollback is required.
+
+After migration, run `live_db_validator.py` and the Graph assurance test set.
+Dynamic Graph, A2A, and OpenTelemetry are preview capabilities and remain off
+in the production profile. Enabling a preview does not create database HA or
+independent A2A/OTLP interoperability evidence.
 
 ## v4.3.2 Versioned Memory Step
 

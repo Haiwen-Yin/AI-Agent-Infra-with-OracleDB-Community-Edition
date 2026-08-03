@@ -1,4 +1,21 @@
-# Architecture - AI Agent Infra with DB v4.3.2
+# Architecture - AI Agent Infra with DB v4.3.3
+
+## v4.3.3 Trustworthy Runtime Extensions
+
+The v4.3.3 extension adds supporting relational records around the existing
+database-authoritative Graph execution plane: `GRAPH_ASSURANCE_EVIDENCE`, Graph
+Definition provenance/dependency/signature/scan records, immutable Dynamic
+Graph proposals, A2A Task-to-Run mappings, and redacted telemetry delivery
+metadata. None replaces Graph Runs, Attempts, State Events, Checkpoints,
+Transitions, Trace, Audit, or governance as the authority for execution.
+
+The assurance layer observes recovery through database lease and fencing facts
+and detects selected integrity anomalies. It supports replacing application
+processes while the database remains reachable. Database replication, standby
+promotion, and failover stay outside the application contract. Dynamic Graph,
+A2A, and OpenTelemetry are isolated, disabled-by-default preview adapters;
+they share identity and authorization checks but cannot create a second
+execution kernel or authorization channel.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -577,11 +594,11 @@ the shared service contract.
 
 ## Profile Boundary
 
-`production`, `graph-preview`, and `development` are build-time profiles
-generated from one source line. `production` contains the integrated v4.3.0
-surface; `graph-preview` and `development` expose explicitly enabled Graph
-controls for controlled validation. The v4.3.2 production profile is the
-current production recommendation; the stable v4.1.x line remains available as
-the prior compatibility baseline.
+`production`, `graph-preview`, `development`, and `experimental-4.2` are
+profiles generated from one source line. `production` contains the stable Graph
+Runtime; `graph-preview` enables only Dynamic Graph; `development` and
+`experimental-4.2` additionally expose A2A and OTLP preview controls for
+controlled validation. v4.3.3 keeps these protocol adapters disabled in
+production. The stable v4.1.x line remains the prior compatibility baseline.
 Profiles do not weaken database, API, Skill, Tool, model, memory, Artifact, or
 export authorization, and there is no long-lived source fork.

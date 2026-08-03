@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.3.2
+# Graph Engineering - AI Agent Infra with DB v4.3.3
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -92,17 +92,63 @@ pre-migration Checkpoint and a recorded mapping.
 
 ## Maturity And Graduation
 
-Each v4.3.x change must record a contract version, compatibility impact,
-migration/review behavior, and three-database evidence. The v4.3.0 production
-replacement gate has passed, so its validated stable core is the current
-production baseline through configuration and release gating. The runtime was
-graduated, not reimplemented, and v4.1.x remains available only as the prior
-baseline. The internal v4.2.1 closure is not a public release line.
+Each v4.3.x change records a contract version, compatibility impact,
+migration/review behavior, and database evidence. The v4.3.0 production
+replacement gate established the stable core. The v4.3.3 release reinforces
+that core without creating a second execution kernel.
 
-`production` is the integrated stable-core runtime profile and is the v4.3.0
-production recommendation. `graph-preview` and `development` explicitly enable
-additional experimental Graph controls. The v4.3.0 release evidence and
-closure manifests record PASS/releasable results for the current database,
-browser, recovery, capacity, package, and documentation gates. The profile
-boundary allows v4.1.x-compatible operations and capability-level previews to
-share one source line without making preview behavior a production claim.
+`production` is the stable runtime profile. `development` and
+`experimental-4.2` explicitly enable preview controls. A profile boundary lets
+stable and preview controls share one source line without making preview
+behavior a production claim.
+
+## v4.3.3 Trustworthy Runtime
+
+v4.3.3 adds a bounded assurance layer to the database-authoritative Runtime.
+It records recovery evidence, scans for runtime invariants, and provides
+test-only failpoints around claim, completion, checkpoint, and lease-reaping
+boundaries. The failpoints have no HTTP, Skill, MCP, Agent, A2A, or Web entry
+point and require the in-process `CX_GRAPH_TEST_MODE=1` test boundary.
+
+The verified recovery scope is replacement of an Agent, Worker, Scheduler,
+Web, or stream process while its existing local database remains the authority.
+Replacement processes revalidate their identity and lease authority; expired
+leases become eligible for recovery and stale fencing tokens cannot commit.
+This is Agent Runtime recovery, not database-cluster high availability. v4.3.3
+does not configure or measure database failover, standby promotion, RPO, or
+RTO.
+
+### Governed Dynamic Graph Preview
+
+Dynamic Graph is a disabled-by-default preview. A proposal applies canonical
+topology operations to a new immutable Draft child Version. It does not mutate
+the source Version or move an active Run. The resulting topology is compiled
+before it can be considered, and scope, side-effect, removal, and budget
+changes receive deterministic risk classification. High-risk proposals remain
+blocked until the existing Enterprise approval service records the required
+approval. Run migration, reverse migration, and compensation orchestration are
+not completed by this preview and remain explicit follow-up work.
+
+### Definition Supply Chain
+
+Graph exports carry a canonical supply-chain envelope: schema and compiler
+versions, publisher and source metadata, parent digest, dependency locks,
+compatibility level, document digest, and optionally an Ed25519 signature.
+Imports are always new Drafts. Unsigned, unverifiable, or scanned imports may
+be retained as `UNTRUSTED_DRAFT` for review but cannot be published. Private
+signing material is local publisher input and is never persisted or exported.
+
+### A2A And OpenTelemetry Previews
+
+The A2A 1.0.1 adapter maps a bounded Agent Card and Task identity to the
+existing Graph Run. The OpenTelemetry adapter creates a metadata-only,
+redacted projection with the pinned mapping version
+`otel-genai-preview-2026-08-03`. Both adapters are independent, default off,
+and are enabled only by `development` or `experimental-4.2`. They cannot grant
+authority or replace Graph, Trace, Audit, or governance evidence.
+
+v4.3.3 provides the internal mapping and contract tests. It has not yet
+completed independent A2A client conformance, durable A2A streaming, or a real
+OTLP Collector delivery/retry/dead-letter validation. Do not enable either
+preview in a production profile until those deployment-specific controls are
+validated.

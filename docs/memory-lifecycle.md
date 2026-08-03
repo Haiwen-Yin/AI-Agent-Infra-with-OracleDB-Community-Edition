@@ -1,4 +1,4 @@
-# Versioned Memory Lifecycle - AI Agent Infra with DB v4.3.2
+# Versioned Memory Lifecycle - AI Agent Infra with DB v4.3.3
 
 ## Purpose
 

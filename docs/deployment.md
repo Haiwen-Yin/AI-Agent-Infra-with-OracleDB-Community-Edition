@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.2
+# Deployment Guide - AI Agent Infra with DB v4.3.3
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -13,13 +13,11 @@
 | YashanDB | YashanDB 23.5.4+ | Dedicated database user |
 
 Use any accessible Python 3.14+ runtime. Set `PYTHON_BIN` when the chosen
-interpreter is not on `PATH`. For a clean
-v4.3.0 installation, deploy the base
-schema and phase scripts, then apply the nine common Graph/lifecycle migration
-scripts through the migration runner. Enterprise packages add the scheduler
-overlay, making ten migration-tail scripts. For an existing schema, run each
-versioned migration only through the runner so its checksum and ledger record
-are verified. Then run the application with the minimum documented privileges.
+interpreter is not on `PATH`. For a clean installation, deploy the base schema
+and phase scripts, then apply the required versioned Graph/lifecycle migrations
+through the migration runner. For an existing schema, run each versioned
+migration only through the runner so its checksum and ledger record are
+verified. Then run the application with the minimum documented privileges.
 Business Agent configuration must contain only its independent login and must
 never contain a fallback schema-owner credential.
 
@@ -33,16 +31,27 @@ on newer operating systems use the upstream wheel. See
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
 The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.2 artifact includes the verified
+integrity before install. The current v4.3.3 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the v4.1.x core and apply the complete additive chain
-through `migration_runner.py --version 4.3.2`. The v4.3.2 `production` profile
-is the current production recommendation because unit and security tests,
-package validation, live database contracts, browser checks, recovery evidence,
-and versioned-memory upgrade evidence are present. Multi-tenant deployment and
+through `migration_runner.py --version 4.3.3`. The v4.3.3 `production` profile
+retains the stable Graph Runtime and keeps Dynamic Graph, A2A, and OpenTelemetry
+previews disabled. The validated local recovery boundary covers replacement
+runtime processes using database leases, fencing, Runs, and Checkpoints; it
+does not claim database failover, RPO, or RTO. Multi-tenant deployment and
 public Internet exposure remain outside this private single-tenant contract.
+
+### v4.3.3 Preview Controls
+
+Do not enable a preview merely to expose an endpoint. `development` and
+`experimental-4.2` enable the isolated Dynamic Graph, A2A 1.0.1, and OTLP
+mapping surfaces for controlled validation. `production` denies these controls
+by design. A2A currently maps Tasks to existing Graph Runs but does not provide
+independent-client conformance or durable stream delivery. OTLP currently
+persists redacted projection metadata but does not deliver to a real Collector.
+Neither preview changes database authority, identity, policy, or audit rules.
 
 Existing v4.0.1 installations must then apply
 `8_portal_node_ownership.sql` before deploying or restarting the web service.
@@ -402,6 +411,8 @@ authority for ownership.
 ### Health Checks
 
 Verify `/api/health`, `/api/graph/capabilities`, registered Worker status,
-pending Event Inbox/Outbox rows, current Checkpoints, and the migration ledger
-after deployment. Keep database replication, backup, and failover configured
-according to the database vendor's production guidance.
+pending Event Inbox/Outbox rows, current Checkpoints, the assurance invariant
+view, and the migration ledger after deployment. Keep database replication,
+backup, and failover configured according to the database vendor's production
+guidance and validate that topology separately from application runtime
+recovery.

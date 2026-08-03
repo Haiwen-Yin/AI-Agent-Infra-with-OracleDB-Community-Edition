@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.2 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v4.3.3 - Community Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Supports encrypted database credentials, LDAP configuration, and enterprise features.
@@ -15,7 +15,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "4.3.2"
+VERSION = "4.3.3"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 

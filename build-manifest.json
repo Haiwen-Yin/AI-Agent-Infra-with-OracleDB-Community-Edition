@@ -11,12 +11,12 @@
     "display": "Oracle"
   },
   "edition": "Community",
-  "version": "4.3.2",
+  "version": "4.3.3",
   "python_requirement": ">=3.14",
   "profile": "production",
   "graph_engineering": true,
   "graph_preview": false,
-  "release_date": "2026-08-01",
+  "release_date": "2026-08-03",
   "license": "Apache-2.0",
   "features": [],
   "session_timeout_seconds": 300,
@@ -32,7 +32,7 @@
     "chuanxu-logo-en-on-dark.svg": "1881844286f7b58622de866e73b5995b6375f5cf89766944982657f36f9dd864",
     "chuanxu-logo-en-on-dark.png": "06e7325b4e483053700ede31be5b1cea6abf9c06146aa6dd565a00aa203a5eb7"
   },
-  "notes": "RELEASE_NOTES_v4.3.2.md",
+  "notes": "RELEASE_NOTES_v4.3.3.md",
   "generated_package_guard": "build.py",
   "graph_migrations": [
     "9_v4_2_0_graph_engineering.sql",

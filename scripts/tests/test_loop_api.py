@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.2 - Loop Engineering API Tests"""
+"""AI Agent Infra v4.3.3 - Loop Engineering API Tests"""
 
 import sys
 import os

@@ -831,13 +831,16 @@ barrier_retry_decision = barrier_recovery_decision
 PROFILES = frozenset({"PRODUCTION", "GRAPH-PREVIEW", "DEVELOPMENT", "EXPERIMENTAL-4.2"})
 PROFILE_CAPABILITIES = {
     "PRODUCTION": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance"}),
-    "GRAPH-PREVIEW": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration"}),
-    "DEVELOPMENT": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration", "experimental_connectors", "diagnostics"}),
-    "EXPERIMENTAL-4.2": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration", "experimental_connectors"}),
+    "GRAPH-PREVIEW": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration", "graph_dynamic"}),
+    "DEVELOPMENT": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration", "graph_dynamic", "a2a_gateway", "otel_export", "experimental_connectors", "diagnostics"}),
+    "EXPERIMENTAL-4.2": frozenset({"stable_core", "channels", "barriers", "gateway", "graph_runtime", "governance", "graph_preview", "graph_migration", "graph_dynamic", "a2a_gateway", "otel_export", "experimental_connectors"}),
 }
 DEFAULT_CAPABILITY_DEPENDENCIES = {
     "graph_preview": frozenset({"graph_runtime"}),
     "graph_migration": frozenset({"graph_runtime", "barriers", "governance"}),
+    "graph_dynamic": frozenset({"graph_runtime", "graph_migration", "governance"}),
+    "a2a_gateway": frozenset({"gateway", "graph_runtime", "governance"}),
+    "otel_export": frozenset({"graph_runtime", "governance"}),
     "experimental_connectors": frozenset({"gateway", "governance"}),
 }
 

@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.3.2
+# API Reference - AI Agent Infra with DB v4.3.3
 
 ## v4.3.2 Versioned Memory API
 
@@ -672,6 +672,37 @@ non-empty URL-encoded `reason` query parameter and accepts `limit=1..1000`
 (default `500`). The response is redacted, hashed, and linked to a Graph
 Governance Event; it is not a replacement for the Enterprise Audit retention
 or legal-hold workflow.
+
+## v4.3.3 Assurance And Preview API
+
+The assurance routes require the same authenticated session and administrator
+scope as the existing protected Graph views. They expose bounded metadata only.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/graph-assurance/invariants` | GET | Read selected runtime integrity findings. |
+| `/api/graph-assurance/evidence` | GET | Read bounded recovery/evidence metadata. |
+| `/api/graph-dynamic/proposals` | GET/POST | List proposals or create a preview Draft child Version. |
+| `/api/a2a/agent-card` | GET | Read the bounded A2A 1.0.1 Agent Card. |
+| `/api/a2a/tasks` | POST | Create a preview A2A Task mapped to one Graph Run. |
+| `/api/a2a/tasks/{task_id}` | GET | Read an authorized mapped Task. |
+| `/api/a2a/tasks/{task_id}/cancel` | POST | Cancel an authorized Task with a reason. |
+| `/api/telemetry/status` | GET | Read the pinned mapping version and enablement state. |
+
+`POST /api/graph-dynamic/proposals` requires `source_version_id`, a non-empty
+canonical `operations` array, and `reason`; optional `run_id`, `checkpoint_id`,
+and `expected_version` supply fences. It creates a new Draft only. High-risk
+proposals require the existing approval workflow again at publication time.
+
+Preview mutations return a capability-disabled response unless the active
+profile enables them: Dynamic Graph allows `graph-preview`, `development`, or
+`experimental-4.2`; A2A and telemetry delivery allow only `development` or
+`experimental-4.2`. Read-only status and bounded public-card discovery may
+remain available to describe that disabled state. The current A2A adapter does
+not expose durable streaming, pagination, callback push, or independent client
+conformance. The telemetry adapter does not send to a Collector in this release;
+it only persists the bounded metadata projection. These limitations are
+intentional and must not be treated as production protocol support.
 
 ## Skill Workflow
 

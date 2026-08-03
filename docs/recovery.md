@@ -1,4 +1,4 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.3.2
+# Recovery and High Availability - AI Agent Infra with DB v4.3.3
 
 ## Recovery Authority
 
@@ -23,6 +23,20 @@ Enterprise may run multiple Scheduler nodes. Atomic database claims and fencing
 provide local ownership; no remote node is reclaimed merely because a local
 web process restarted.
 
+## v4.3.3 Observed Runtime Recovery Boundary
+
+The v4.3.3 validation used the existing Oracle AI Database 26ai, PostgreSQL
+18 with Apache AGE, and YashanDB 23.5.4 baseline databases. It exercised
+lease expiry and fencing, concurrent claims, a test-only failure before and
+after Runtime transaction boundaries, recovery evidence, and invariant scans.
+The observed result is that eligible work can be resumed from the existing
+database facts without a duplicate committed completion.
+
+The tests do not establish exactly-once execution in arbitrary external
+systems. An uncertain `NON_IDEMPOTENT` side effect must be externally
+confirmed, compensated, or resolved by an authorized human; it must not be
+silently replayed.
+
 ## Database High Availability
 
 Database replication, backup, failover, and storage durability are deployment
@@ -32,11 +46,13 @@ responsibilities. Configure them using the supported database architecture:
 - PostgreSQL streaming replication, failover manager, and tested backups.
 - YashanDB's approved primary/standby or cluster HA design.
 
-After a database failover, restart or reconnect the application nodes, verify
-the database identity and migration ledger, and run the Graph capability and
-lease-recovery probes. The platform cannot recover state from an unavailable
-or unrecoverable database; database backup and restore are therefore a
-required production control.
+These are deployment recommendations, not v4.3.3 test evidence. No database
+cluster failover, standby promotion, RPO, or RTO test is configured or claimed
+by this release. After a customer-managed database failover, restart or
+reconnect application nodes, verify database identity and the migration ledger,
+and run the Graph capability and lease-recovery probes. The platform cannot
+recover state from an unavailable or unrecoverable database; tested backup and
+restore remain required production controls.
 
 ## Backup and Migration
 

@@ -11,9 +11,9 @@ from . import connection, governed_contracts, identity_api
 
 PROFILES = {"production", "graph-preview", "development", "experimental-4.2"}
 PROFILE_CAPABILITIES = {
-    "graph-preview": ("graph", "graph-preview", "channel-graph"),
-    "development": ("graph", "graph-preview", "channel-graph", "fault-injection"),
-    "experimental-4.2": ("graph", "graph-preview", "channel-graph", "experimental"),
+    "graph-preview": ("graph", "graph-preview", "channel-graph", "graph-dynamic"),
+    "development": ("graph", "graph-preview", "channel-graph", "graph-dynamic", "a2a-gateway", "otel-export", "fault-injection"),
+    "experimental-4.2": ("graph", "graph-preview", "channel-graph", "graph-dynamic", "a2a-gateway", "otel-export", "experimental"),
 }
 
 

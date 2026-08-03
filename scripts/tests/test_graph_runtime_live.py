@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import traceback
 import uuid
@@ -45,6 +46,7 @@ def run_live_checks(package_root: Path, config_file: Path, database: str) -> Dic
     from lib import graph_event_api as events
     from lib import graph_runtime as runtime
     from lib import graph_worker as worker
+    from lib import graph_assurance, graph_dynamic, graph_supply_chain, a2a_gateway, graph_telemetry
 
     actor = "v420-edge-" + uuid.uuid4().hex[:12]
     suffix = uuid.uuid4().hex[:8]
@@ -375,6 +377,112 @@ def run_live_checks(package_root: Path, config_file: Path, database: str) -> Dic
     assert events.mark_outbox(outbox_id, "SENT")
     assert events.mark_outbox(outbox_id, "SENT") is False
     checks["outbox_idempotency"] = True
+
+    # v4.3.3 failure injection is test-process-only. A failure after the
+    # Checkpoint write must roll back the entire completion transaction.
+    failure_start = "failure-start-" + suffix
+    failure_end = "failure-end-" + suffix
+    failure_version, failure_plan = make_graph(
+        [{"node_key": failure_start, "node_type": "START"},
+         {"node_key": failure_end, "node_type": "END"}],
+        [{"edge_id": "failure-edge-" + suffix, "source_node_key": failure_start, "target_node_key": failure_end}],
+    )
+    failure_run = new_run(failure_version, failure_plan, "atomic-failpoint")
+    failure_worker = "failure-" + suffix
+    advertise(failure_worker)
+    failure_attempt = claim(failure_worker, failure_run, failure_start)
+    assert failure_attempt
+    old_test_mode = os.environ.get("CX_GRAPH_TEST_MODE")
+    os.environ["CX_GRAPH_TEST_MODE"] = "1"
+    try:
+        with graph_assurance.failpoint_for_test("after_checkpoint"):
+            try:
+                worker.complete(failure_attempt["lease_token"], {"must": "rollback"}, actor)
+            except graph_assurance.FailpointTriggered:
+                pass
+            else:
+                raise AssertionError("completion failpoint did not trigger")
+    finally:
+        if old_test_mode is None:
+            os.environ.pop("CX_GRAPH_TEST_MODE", None)
+        else:
+            os.environ["CX_GRAPH_TEST_MODE"] = old_test_mode
+    assert runtime.get_run(failure_run)["current_checkpoint_id"] is None
+    assert runtime.list_attempts(failure_run)[0]["status"] == "RUNNING"
+    worker.complete(failure_attempt["lease_token"], {"committed": True}, actor)
+    checks["failure_injection_atomic_completion"] = True
+
+    recovery = graph_assurance.recover_runtime(actor, worker_id="replacement-" + suffix)
+    assert recovery["evidence_id"]
+    assert any(item["evidence_type"] == "AGENT_RUNTIME_RECOVERED" for item in graph_assurance.list_evidence(limit=20))
+    assert graph_assurance.invariant_scan()["healthy"] is True
+    checks["runtime_recovery_evidence_and_invariants"] = True
+
+    # A signed portable definition imports as a trusted Draft and can only be
+    # published after the normal compiler path. Private key material remains
+    # inside this test process.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+    )
+    exported = definitions.export_version(failure_version, include_status=True)
+    signed = graph_supply_chain.sign_document(
+        exported, private_key.private_bytes(
+            serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption(),
+        ), key_id="live-" + suffix,
+    )
+    import_graph = definitions.create_graph("v433-import-" + suffix, actor)
+    imported = definitions.import_version(
+        signed, actor, target_graph_id=import_graph,
+        trusted_public_keys={"live-" + suffix: graph_supply_chain._b64(public_key)},
+    )
+    assert imported["supply_chain"]["verification"]["trusted"] is True
+    assert compiler.compile_and_publish(imported["graph_version_id"], actor, "trusted import") ["published"] is True
+    checks["signed_definition_supply_chain"] = True
+
+    # Dynamic Graph creates a child Draft; a high-risk side-effect expansion
+    # stays non-publishable until the existing governed approval reaches quorum.
+    dynamic_graph = definitions.create_graph("v433-dynamic-" + suffix, actor)
+    dynamic_start, dynamic_agent, dynamic_end = "dynamic-start-" + suffix, "dynamic-agent-" + suffix, "dynamic-end-" + suffix
+    dynamic_source = definitions.create_version(
+        dynamic_graph,
+        [{"node_key": dynamic_start, "node_type": "START"}, {"node_key": dynamic_agent, "node_type": "AGENT"}, {"node_key": dynamic_end, "node_type": "END"}],
+        [{"edge_id": "dynamic-a-" + suffix, "source_node_key": dynamic_start, "target_node_key": dynamic_agent},
+         {"edge_id": "dynamic-b-" + suffix, "source_node_key": dynamic_agent, "target_node_key": dynamic_end}],
+        actor_id=actor, reason="dynamic source",
+    )
+    assert compiler.compile_and_publish(dynamic_source, actor, "publish dynamic source")["published"] is True
+    old_profile = os.environ.get("CX_RUNTIME_PROFILE")
+    os.environ["CX_RUNTIME_PROFILE"] = "development"
+    try:
+        proposal = graph_dynamic.create_draft(
+            dynamic_source,
+            [{"op": "REPLACE_NODE", "node_key": dynamic_agent,
+              "node": {"node_type": "AGENT", "side_effect_class": "NON_IDEMPOTENT", "resource_scope": {"classification": "RESTRICTED"}}}],
+            actor, "live high-risk dynamic proposal", expected_version=dynamic_source,
+        )
+        assert proposal["status"] == "PENDING_APPROVAL"
+        try:
+            compiler.compile_and_publish(proposal["target_version_id"], actor, "attempt bypass")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("high-risk Dynamic Graph bypassed approval")
+
+        source_plan_id = definitions.get_version(dynamic_source).get("plan_id")
+        task = a2a_gateway.create_task(dynamic_source, source_plan_id, actor, input_state={"a2a": True})
+        assert a2a_gateway.get_task(task["id"], actor)["run_id"] == task["run_id"]
+        telemetry_outbox = events.enqueue(task["run_id"], "OTLP_TEST", "otlp-" + suffix, {"metadata": "only"})
+        projection = graph_telemetry.project_trace(task["run_id"], {"event_type": "A2A_TASK", "output": "not-exported"})
+        assert graph_telemetry.queue_delivery(telemetry_outbox, "local-test", projection)
+    finally:
+        if old_profile is None:
+            os.environ.pop("CX_RUNTIME_PROFILE", None)
+        else:
+            os.environ["CX_RUNTIME_PROFILE"] = old_profile
+    checks["dynamic_graph_a2a_and_telemetry_preview"] = True
     return {"database": database, "passed": True, "checks": checks}
 
 

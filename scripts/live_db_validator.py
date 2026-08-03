@@ -103,6 +103,16 @@ V432_MIGRATION_SCRIPTS = V431_MIGRATION_SCRIPTS + (
     "27_v4_3_2_memory_governance_completion.sql",
 )
 
+V433_MIGRATION_SCRIPTS = V432_MIGRATION_SCRIPTS + (
+    "28_v4_3_3_graph_assurance.sql",
+)
+
+V433_GRAPH_ASSURANCE_TABLES = (
+    "GRAPH_ASSURANCE_EVIDENCE", "GRAPH_DEFINITION_PROVENANCE", "GRAPH_DEFINITION_DEPENDENCIES",
+    "GRAPH_DEFINITION_SIGNATURES", "GRAPH_DEFINITION_SCANS", "GRAPH_DYNAMIC_PROPOSALS",
+    "GRAPH_PROTOCOL_TASKS", "GRAPH_TELEMETRY_DELIVERIES",
+)
+
 V432_MEMORY_TABLES = (
     "CX_MEMORY_FAMILIES", "CX_MEMORY_VERSIONS", "CX_MEMORY_REPRESENTATIONS",
     "CX_MEMORY_RELATIONS", "CX_MEMORY_SNAPSHOTS", "CX_MEMORY_SNAPSHOT_MEMBERS",
@@ -826,6 +836,23 @@ def validate_v432_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(memory["passed"])}
 
 
+def validate_v433_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate the additive v4.3.3 runtime-assurance declarations."""
+    base = validate_v432_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("28_v4_3_3_graph_assurance.sql")
+    source = _normalized_marker_text(migration.read_text(encoding="utf-8")) if migration and migration.is_file() else ""
+    assurance = {
+        "scripts_required": list(V433_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V433_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V433_GRAPH_ASSURANCE_TABLES if name not in source],
+        "no_private_key_storage": "PRIVATE_KEY" not in source,
+    }
+    assurance["passed"] = not any((assurance["scripts_missing"], assurance["tables_missing"])) and assurance["no_private_key_storage"]
+    return {"database": database, "v432": base, "graph_assurance": assurance,
+            "passed": bool(base.get("passed")) and bool(assurance["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1250,12 +1277,13 @@ def main() -> int:
     # could be reported as ready.
     requires_graph = target_version.startswith(("4.2.", "4.3."))
     requires_v43 = target_version.startswith("4.3.")
-    requires_v431 = target_version.startswith(("4.3.1", "4.3.2"))
-    requires_v432 = target_version.startswith("4.3.2")
+    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3"))
+    requires_v432 = target_version.startswith(("4.3.2", "4.3.3"))
+    requires_v433 = target_version.startswith("4.3.3")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            migration_scripts = V432_MIGRATION_SCRIPTS if requires_v432 else (V431_MIGRATION_SCRIPTS if requires_v431 else V43_MIGRATION_SCRIPTS)
+            migration_scripts = V433_MIGRATION_SCRIPTS if requires_v433 else (V432_MIGRATION_SCRIPTS if requires_v432 else (V431_MIGRATION_SCRIPTS if requires_v431 else V43_MIGRATION_SCRIPTS))
             scripts = [
                 (REPO_ROOT / "scripts" / "deploy" / name)
                 if (REPO_ROOT / "scripts" / "deploy" / name).is_file()
@@ -1263,8 +1291,10 @@ def main() -> int:
                 for name in migration_scripts
             ]
             static_contracts[database] = (
-                validate_v432_static_contract(database, scripts) if requires_v432 else (
-                    validate_v431_static_contract(database, scripts) if requires_v431 else validate_v43_static_contract(database, scripts)
+                validate_v433_static_contract(database, scripts) if requires_v433 else (
+                    validate_v432_static_contract(database, scripts) if requires_v432 else (
+                        validate_v431_static_contract(database, scripts) if requires_v431 else validate_v43_static_contract(database, scripts)
+                    )
                 )
             )
     for database in available_databases:

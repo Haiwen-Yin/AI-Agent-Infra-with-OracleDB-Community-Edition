@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.3.2">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.3.3">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.3.2 - Graph</title>
+<title>Chuanxu Oracle Community v4.3.3 - Graph</title>
 <script src="/static/vis-network.min.js"></script>
 <link rel="stylesheet" href="/static/pages/graph.css">
 <script src="/static/chuanxu-prepaint.js"></script>
@@ -39,7 +39,7 @@
 </div>
 <div class="main-content">
   <div class="top-bar">
-    <div><h4><span data-zh>Graph Engineering</span><span data-en>Graph Engineering</span></h4><small class="cx-experimental-badge">Experimental v4.3.2</small></div>
+    <div><h4><span data-zh>Graph Engineering</span><span data-en>Graph Engineering</span></h4><small class="cx-experimental-badge">Experimental v4.3.3</small></div>
     <div class="stats-bar">
       <span id="vertexCount">-</span>
       <span id="edgeCount">-</span>
@@ -54,6 +54,7 @@
       <button class="cx-page-tab" type="button" data-graph-view="executors"><span data-zh>执行器</span><span data-en>Executors</span></button>
       <button class="cx-page-tab" type="button" data-graph-view="events"><span data-zh>事件与死信</span><span data-en>Events &amp; Dead Letters</span></button>
       <button class="cx-page-tab" type="button" data-graph-view="artifacts"><span data-zh>产物</span><span data-en>Artifacts</span></button>
+      <button class="cx-page-tab" type="button" data-graph-view="assurance"><span data-zh>运行保障</span><span data-en>Runtime Assurance</span></button>
     </nav>
     <section class="graph-view active" id="graph-view-explorer">
     <div class="search-row">
@@ -139,6 +140,14 @@
     <section class="graph-view" id="graph-view-artifacts">
       <section class="cx-panel artifacts-panel"><div class="panel-heading"><div><h5><span data-zh>运行产物与证据</span><span data-en>Run Artifacts &amp; Evidence</span></h5><span class="panel-subtitle"><span data-zh>内容通过引用、保留期限和法律保全管理</span><span data-en>Content is managed by reference, retention, and legal hold</span></span></div><button class="btn-sm btn-info" type="button" id="refreshArtifacts"><span data-zh>刷新</span><span data-en>Refresh</span></button></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Media</th><th>Classification</th><th>Size</th><th>Retention</th><th>Hold</th></tr></thead><tbody id="artifactList"></tbody></table></div></section>
     </section>
+    <section class="graph-view" id="graph-view-assurance">
+      <div class="graph-ops-layout">
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>运行时不变量</span><span data-en>Runtime Invariants</span></h5><span class="panel-subtitle"><span data-zh>检查数据库权威运行事实，不读取提示词、状态正文或产物内容</span><span data-en>Checks database-authoritative facts only; no prompts, state bodies, or artifact content.</span></span></div><button class="btn-sm btn-info" type="button" id="refreshAssurance"><span data-zh>刷新</span><span data-en>Refresh</span></button></div><pre id="assuranceInvariants" class="state-preview">-</pre></section>
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>恢复证据</span><span data-en>Recovery Evidence</span></h5><span class="panel-subtitle"><span data-zh>本地运行时接管记录；数据库高可用由部署拓扑另行保障</span><span data-en>Local Runtime takeover records; database HA depends on the deployed topology.</span></span></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Actor</th><th>Created</th></tr></thead><tbody id="assuranceEvidence"></tbody></table></div></section>
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>动态图提案</span><span data-en>Dynamic Graph Proposals</span></h5><span class="panel-subtitle"><span data-zh>高风险提案必须完成职责分离审批后才能发布</span><span data-en>High-risk proposals require separation-of-duties approval before publication.</span></span></div></div><div class="table-responsive"><table class="data-table"><thead><tr><th>ID</th><th>Status</th><th>Approval</th><th>Actor</th><th>Updated</th></tr></thead><tbody id="dynamicProposalList"></tbody></table></div></section>
+        <section class="cx-panel graph-ops-panel"><div class="panel-heading"><div><h5><span data-zh>互操作投影</span><span data-en>Interoperability Projection</span></h5><span class="panel-subtitle"><span data-zh>A2A 与 OTLP 默认关闭，仅投影已提交的图事实</span><span data-en>A2A and OTLP are disabled by default and project committed Graph facts only.</span></span></div></div><pre id="interoperabilityStatus" class="state-preview">-</pre></section>
+      </div>
+    </section>
     <div id="graphToast" class="graph-toast" role="status" aria-live="polite"></div>
   </div>
 </div>
@@ -155,7 +164,7 @@ var riskLevelLabels={LOW:['低','Low'],MEDIUM:['中','Medium'],HIGH:['高','High
 function graphRiskLevelLabel(level){var normalized=String(level||'').toUpperCase(),labels=riskLevelLabels[normalized];return labels?graphLabel(labels[0],labels[1]):String(level||'-')}
 function updateDefinitionRisk(level){selectedGraphRiskLevel=String(level||'').toUpperCase();var element=document.getElementById('definitionRisk');if(!element)return;element.textContent=selectedGraphRiskLevel?graphLabel('风险等级: ','Risk level: ')+graphRiskLevelLabel(selectedGraphRiskLevel):'-'}
 
-document.querySelectorAll('[data-graph-view]').forEach(function(button){button.addEventListener('click',function(){var view=button.getAttribute('data-graph-view');document.querySelectorAll('[data-graph-view]').forEach(function(item){item.classList.toggle('active',item===button)});document.querySelectorAll('.graph-view').forEach(function(item){item.classList.toggle('active',item.id==='graph-view-'+view)});if(view==='definitions')loadGraphDefinitions();if(view==='runs')loadGraphRuns();if(view==='executors')loadGraphExecutors();if(view==='events')loadGraphEvents();if(view==='artifacts')loadGraphArtifacts()})})
+document.querySelectorAll('[data-graph-view]').forEach(function(button){button.addEventListener('click',function(){var view=button.getAttribute('data-graph-view');document.querySelectorAll('[data-graph-view]').forEach(function(item){item.classList.toggle('active',item===button)});document.querySelectorAll('.graph-view').forEach(function(item){item.classList.toggle('active',item.id==='graph-view-'+view)});if(view==='definitions')loadGraphDefinitions();if(view==='runs')loadGraphRuns();if(view==='executors')loadGraphExecutors();if(view==='events')loadGraphEvents();if(view==='artifacts')loadGraphArtifacts();if(view==='assurance')loadGraphAssurance()})})
 
 var typeColors={MEMORY:'#1dd6f6',KNOWLEDGE:'#00a38e',TASK_OUTPUT:'#ffb74d',EXPERIENCE:'#c83c4a',HARNESS_TEMPLATE:'#ba68c8',SPEC:'#ff9800',SKILL:'#007f6f',LOOP_DEFINITION:'#78909c'};
 var network=null,nodes=null,edges=null,graphSourceNodes=[],graphSourceEdges=[];
@@ -354,6 +363,8 @@ function eventValue(item,key){return item&&item[key]!==undefined?item[key]:(item
 function loadGraphEvents(){return Promise.all([graphApi('/api/graph/events/inbox'),graphApi('/api/graph/events/dead-letter'),graphApi('/api/graph/events/outbox')]).then(function(result){var inbox=result[0].events||[],dead=result[1].events||[],outbox=result[2].events||[];document.getElementById('inboxList').innerHTML=graphTableRows(inbox,['inbox_id','event_type','status','attempts','available_at','error_message']);document.getElementById('outboxList').innerHTML=graphTableRows(outbox,['outbox_id','event_type','status','attempts','max_attempts','available_at']);document.getElementById('deadLetterList').innerHTML=dead.map(function(item){var id=eventValue(item,'inbox_id');return '<tr><td>'+graphEsc(id)+'</td><td>'+graphEsc(eventValue(item,'event_type'))+'</td><td>'+graphEsc(eventValue(item,'attempts'))+'</td><td>'+graphEsc(eventValue(item,'error_message'))+'</td><td><button class="btn-xs btn-warn" type="button" data-replay-inbox="'+graphEsc(id)+'">'+graphEsc(graphLabel('重放','Replay'))+'</button></td></tr>'}).join('')||'<tr><td colspan="5" class="muted">'+graphEsc(graphLabel('暂无死信','No dead letters'))+'</td></tr>';document.querySelectorAll('[data-replay-inbox]').forEach(function(button){button.onclick=function(){var reason=window.prompt(graphLabel('请输入重放原因','Enter a replay reason'));if(!reason)return;graphApi('/api/graph/events/inbox/'+encodeURIComponent(button.dataset.replayInbox)+'/replay',{method:'POST',body:JSON.stringify({reason:reason})}).then(function(){graphToast(graphLabel('事件已提交重放','Event replay submitted'));return loadGraphEvents()}).catch(function(error){graphToast(error.message,true)})}})}).catch(function(error){graphToast(error.message,true)})}
 document.getElementById('refreshEvents').onclick=loadGraphEvents;
 function loadGraphArtifacts(){return graphApi('/api/graph-artifacts').then(function(data){document.getElementById('artifactList').innerHTML=(data.artifacts||[]).map(function(item){return '<tr><td>'+graphEsc(item.artifact_id)+'</td><td>'+graphEsc(item.media_type)+'</td><td>'+graphEsc(item.classification)+'</td><td>'+graphEsc(item.size_bytes)+'</td><td>'+graphEsc(item.retention_until||'-')+'</td><td>'+graphEsc(item.legal_hold||'-')+'</td></tr>'}).join('')||'<tr><td colspan="6" class="muted">'+graphEsc(graphLabel('暂无产物','No artifacts'))+'</td></tr>'}).catch(function(error){graphToast(error.message,true)})}
+function loadGraphAssurance(){return Promise.all([graphApi('/api/graph-assurance/invariants'),graphApi('/api/graph-assurance/evidence?limit=50'),graphApi('/api/graph-dynamic/proposals?limit=50'),graphApi('/api/telemetry/status'),graphApi('/api/a2a/agent-card')]).then(function(result){var invariants=result[0]||{},evidence=result[1].evidence||[],proposals=result[2].proposals||[];document.getElementById('assuranceInvariants').textContent=JSON.stringify(invariants,null,2);document.getElementById('assuranceEvidence').innerHTML=graphTableRows(evidence,['evidence_id','evidence_type','status','actor_id','created_at']);document.getElementById('dynamicProposalList').innerHTML=graphTableRows(proposals,['proposal_id','status','approval_id','actor_id','updated_at']);document.getElementById('interoperabilityStatus').textContent=JSON.stringify({telemetry:result[3],a2a:result[4]},null,2)}).catch(function(error){graphToast(error.message,true)})}
+document.getElementById('refreshAssurance').onclick=loadGraphAssurance;
 document.getElementById('refreshArtifacts').onclick=loadGraphArtifacts;
 
 (function(){var sl=localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();

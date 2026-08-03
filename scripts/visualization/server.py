@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.2 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.3.3 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -36,8 +36,10 @@ from lib import identity_api
 from lib import governed_contracts, security_lifecycle
 if getattr(edition_features, 'GRAPH_ENGINEERING_ENABLED', False):
     from lib import graph_definition_api, graph_compiler, graph_runtime, graph_worker, graph_event_api, graph_adapter, graph_compat, graph_executor
+    from lib import graph_assurance, graph_dynamic, a2a_gateway, graph_telemetry
 else:
     graph_definition_api = graph_compiler = graph_runtime = graph_worker = graph_event_api = graph_adapter = graph_compat = graph_executor = None
+    graph_assurance = graph_dynamic = a2a_gateway = graph_telemetry = None
 
 if edition_features.has_feature('orchestrator'):
     from lib import orchestrator
@@ -49,7 +51,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.3.2"
+VERSION = "4.3.3"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -125,6 +127,7 @@ FEATURE_ROUTE_PREFIXES = {
         '/api/graph-worker', '/api/graph/workers', '/api/graph/events',
         '/api/graph/capabilities', '/api/graph-artifacts',
         '/api/graph-executors',
+        '/api/graph-dynamic', '/api/graph-assurance', '/api/a2a', '/api/telemetry',
     ),
 }
 
@@ -1001,6 +1004,12 @@ class VisHandler(BaseHTTPRequestHandler):
         if path.startswith('/api/graphs') or path.startswith('/api/graph-versions/'):
             self._handle_graph_post(path)
             return
+        if path.startswith('/api/graph-dynamic/'):
+            self._handle_graph_dynamic_post(path)
+            return
+        if path.startswith('/api/a2a/'):
+            self._handle_a2a_post(path)
+            return
         if path == '/api/graph-executors' or path.startswith('/api/graph-executors/'):
             self._handle_graph_executor_post(path)
             return
@@ -1496,6 +1505,55 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(422, str(exc))
         except Exception as exc:
             logger.exception('graph definition request failed')
+            self._send_error(500, str(exc))
+
+    def _handle_graph_dynamic_post(self, path):
+        """Preview-only Dynamic Graph commands remain behind normal session auth."""
+        try:
+            data = json.loads(self._read_body() or b'{}')
+            actor = self._graph_actor()
+            if path == '/api/graph-dynamic/proposals':
+                result = graph_dynamic.create_draft(
+                    str(data.get('source_version_id') or ''), data.get('operations') or [], actor,
+                    str(data.get('reason') or ''), run_id=str(data.get('run_id') or ''),
+                    checkpoint_id=str(data.get('checkpoint_id') or ''), expected_version=str(data.get('expected_version') or ''),
+                )
+                self._send_json(result, 201)
+                return
+            self._send_error(404, 'Unknown Dynamic Graph endpoint')
+        except PermissionError as exc:
+            self._send_error(403, str(exc))
+        except ValueError as exc:
+            self._send_error(422, str(exc))
+        except Exception as exc:
+            logger.exception('dynamic Graph request failed')
+            self._send_error(500, str(exc))
+
+    def _handle_a2a_post(self, path):
+        """A2A remains an authenticated preview adapter over existing Graph Runs."""
+        try:
+            data = json.loads(self._read_body() or b'{}')
+            principal = self._authenticated_principal()
+            actor = str(principal.get('actor_id') or '')
+            if path == '/api/a2a/tasks':
+                result = a2a_gateway.create_task(
+                    str(data.get('graph_version_id') or ''), str(data.get('plan_id') or ''), actor,
+                    input_state=data.get('input_state') or {}, budget=data.get('budget') or {},
+                    idempotency_key=data.get('idempotency_key'),
+                )
+                self._send_json(result, 201)
+                return
+            if path.startswith('/api/a2a/tasks/') and path.endswith('/cancel'):
+                task_id = path.split('/')[4]
+                self._send_json({'success': a2a_gateway.cancel_task(task_id, actor, str(data.get('reason') or ''))})
+                return
+            self._send_error(404, 'Unknown A2A endpoint')
+        except PermissionError as exc:
+            self._send_error(403, str(exc))
+        except ValueError as exc:
+            self._send_error(422, str(exc))
+        except Exception as exc:
+            logger.exception('A2A request failed')
             self._send_error(500, str(exc))
 
     def _graph_executor_payload(self, include_inactive=False):
@@ -2117,6 +2175,38 @@ class VisHandler(BaseHTTPRequestHandler):
                     status=qs.get('status', [None])[0], actor_id=qs.get('actor_id', [None])[0],
                     limit=int(qs.get('limit', ['100'])[0]),
                 )})
+            elif path == '/api/graph-assurance/invariants':
+                if self._require_admin() is None:
+                    return
+                self._send_json(graph_assurance.invariant_scan())
+            elif path == '/api/graph-assurance/evidence':
+                if self._require_admin() is None:
+                    return
+                self._send_json({'evidence': graph_assurance.list_evidence(
+                    qs.get('run_id', [None])[0], int(qs.get('limit', ['100'])[0]),
+                )})
+            elif path == '/api/graph-dynamic/proposals':
+                if self._require_admin() is None:
+                    return
+                self._send_json({'proposals': graph_dynamic.list_proposals(int(qs.get('limit', ['100'])[0]))})
+            elif path == '/api/a2a/agent-card':
+                principal = self._authenticated_principal()
+                self._send_json(a2a_gateway.agent_card(
+                    {'agent_name': 'Chuanxu Graph Gateway', 'skills': []}, authenticated=bool(principal),
+                ))
+            elif path.startswith('/api/a2a/tasks/'):
+                principal = self._authenticated_principal()
+                task_id = path.split('/')[4] if len(path.split('/')) > 4 else ''
+                task = a2a_gateway.get_task(task_id, str(principal.get('actor_id') or ''))
+                if not task:
+                    self._send_error(404, 'A2A task not found')
+                    return
+                self._send_json(task)
+            elif path == '/api/telemetry/status':
+                if self._require_admin() is None:
+                    return
+                self._send_json({'enabled': graph_telemetry.enabled(), 'mapping_version': graph_telemetry.MAPPING_VERSION,
+                                 'redaction': 'METADATA_ONLY'})
             elif path == '/api/graph-artifacts':
                 self._send_json({'artifacts': graph_runtime.list_artifacts(
                     owner_ref=qs.get('owner_ref', [None])[0],
@@ -2485,6 +2575,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_agents_discover(qs)
             else:
                 self._send_error(404, 'API endpoint not found')
+        except PermissionError as exc:
+            self._send_error(403, str(exc))
+        except ValueError as exc:
+            self._send_error(422, str(exc))
         except Exception as e:
             self._send_error(500, str(e))
 
@@ -4371,8 +4465,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.3.2', VERSION)
-            html = html.replace('2026-08-01', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.3.3', VERSION)
+            html = html.replace('2026-08-03', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

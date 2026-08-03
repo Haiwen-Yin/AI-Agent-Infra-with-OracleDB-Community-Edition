@@ -1,6 +1,6 @@
-# AI Agent Infra with OracleDB — 社区版 v4.3.2
+# AI Agent Infra with OracleDB — 社区版 v4.3.3
 
-**版本**: v4.3.2 | **日期**: 2026-08-01 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.3.3 | **日期**: 2026-08-03 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.top**
 
@@ -9,6 +9,8 @@
 > v4.3.1 身份与组织规则：除受保护的内置 `admin` 系统账号外，一个平台账号、一个 Human Principal 与一个组织人员表示同一主体。注册审批必须选择主组织，并在同一事务中激活账号和主组织归属；没有有效登录身份的 Principal 不能加入组织架构。
 
 > v4.3.2 记忆生命周期：记忆采用稳定族与不可变版本；日常整理、压缩、归档和遗忘使用受控候选、版本切换与逻辑不可用，不以物理删除替代审计证据。记忆正文、图关系与模型输出均是不受信任的数据，不能作为授权边界。
+
+> v4.3.3 图运行保障：以数据库中的租约、围栏、运行、检查点和事件作为恢复权威；Agent/Worker 等运行进程可由替代实例恢复。Dynamic Graph、A2A 与 OTLP 为默认关闭的预览能力；本版本不宣称数据库集群故障切换或 RPO/RTO 已验证。
 
 ## 品牌与技术名称
 
@@ -58,6 +60,7 @@
 
 | 版本 | 日期 | 里程碑 |
 |------|------|--------|
+| **v4.3.3** | 2026-08-03 | 强化数据库权威 Graph Runtime 的恢复与证据；新增已签名定义供应链，Dynamic Graph、A2A 1.0.1 与 OTLP 保持默认关闭的预览边界；运行时恢复不等同数据库高可用 |
 | **v4.3.2** | 2026-08-01 | 新增受治理的版本化记忆生命周期：稳定Family、不可变Version、当前版本指针、关系链、快照、候选复核、持久作业和带理由的逻辑不可用；第23、24步支持可重试升级 |
 | **v4.3.1** | 2026-07-31 | 新增数据库权威的图形化组织治理；支持组织、人员归属、Agent 责任与异常视图，闭包范围授权，语义草稿、校验、影响分析和审批提交 |
 | **v4.3.0** | 2026-07-29 | 集成内部 Graph Engineering 收口；统一 Human/Agent Principal、用户注册审批、一次性 Agent Enrollment、Security Domain、Channel、Barrier、Gateway、数据库会话与节点级回收；生产 profile 门禁通过，保留 v4.1.x 兼容基线，不单独发布 v4.2.1 |
@@ -1498,7 +1501,7 @@ Graph 条件必须使用受管的 typed AST。缺少 operand、非 AST 子项、
 校验节点/边身份、端点、父版本以及动态来源 Run/Checkpoint 的同图关系。
 
 v4.3.0 的生产 profile 已通过数据库、浏览器、容量、故障恢复、清洁部署和
-长时间运行证据门禁，生产部署使用 v4.3.2 production profile。Graph Preview、
+长时间运行证据门禁，生产部署使用 v4.3.3 production profile。Graph Preview、
 Channel、Barrier 和 Gateway 通过 profile 与数据库权限显式控制；Channel 不能扩大
 数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。待 Graph
 Engineering 行业规范和项目合约稳定后，最新验证通过的实现可直接毕业为正式

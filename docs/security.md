@@ -1,4 +1,27 @@
-# Security - AI Agent Infra with DB v4.3.2
+# Security - AI Agent Infra with DB v4.3.3
+
+## v4.3.3 Graph Trust Boundary
+
+Graph Runtime facts in the database remain the only execution and audit
+authority. Recovery evidence, A2A Task records, telemetry delivery metadata,
+and imported Graph Definition metadata are bounded supporting facts; none can
+grant a Principal, Agent, Skill, Tool, model, or database access.
+
+Imported definitions are canonicalized and scanned before use. A missing or
+unverifiable Ed25519 signature produces an `UNTRUSTED_DRAFT`; publication is
+blocked until governed review produces a trusted definition. Private signing
+keys are never written to platform tables, exports, audits, or logs. Import
+scanning rejects arbitrary-code markers and records findings without executing
+the import.
+
+Dynamic Graph is a preview-only Draft workflow. It requires an authenticated
+actor and reason, creates a child Version rather than mutating the source, and
+rechecks approval when publishing high-risk topology, scope, or side-effect
+changes. A2A and OpenTelemetry previews are disabled in `production`; A2A
+advertised capabilities do not expand authorization, while OpenTelemetry is a
+metadata-only redacted projection. Prompts, outputs, state, memory, artifacts,
+credentials, tokens, secrets, and protected policy data are excluded by
+default.
 
 ## v4.3.2 Memory Boundary
 
