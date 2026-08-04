@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.3
+# Deployment Guide - AI Agent Infra with DB v4.3.4
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -13,13 +13,24 @@
 | YashanDB | YashanDB 23.5.4+ | Dedicated database user |
 
 Use any accessible Python 3.14+ runtime. Set `PYTHON_BIN` when the chosen
-interpreter is not on `PATH`. For a clean installation, deploy the base schema
+interpreter is not on `PATH`. Run `bash scripts/install_offline.sh` from the
+package root before starting the service. It creates a package-local `.venv`
+from the selected interpreter and installs only the verified local `vendor/`
+wheelhouse; `start_web_server.sh` automatically prefers that `.venv`. This
+avoids global pip writes on PEP 668 managed installations. For a clean installation, deploy the base schema
 and phase scripts, then apply the required versioned Graph/lifecycle migrations
 through the migration runner. For an existing schema, run each versioned
 migration only through the runner so its checksum and ledger record are
 verified. Then run the application with the minimum documented privileges.
 Business Agent configuration must contain only its independent login and must
 never contain a fallback schema-owner credential.
+
+YashanDB packages additionally install the bundled CPython-native `yaspy`
+module into the same `.venv` and place the bundled client libraries under
+`.runtime/yashandb-client/lib` by default. The start script exports this path
+only for the service process; it does not change `~/.bashrc`. Set
+`CX_YASHAN_LIB_DIR` only when an approved shared client-library location is
+required.
 
 The offline dependency set may contain both the upstream
 `cryptography==49.0.0` `manylinux_2_34` wheel and a source-built
@@ -31,17 +42,36 @@ on newer operating systems use the upstream wheel. See
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
 The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.3 artifact includes the verified
+integrity before install. The current v4.3.4 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the v4.1.x core and apply the complete additive chain
-through `migration_runner.py --version 4.3.3`. The v4.3.3 `production` profile
+through `migration_runner.py --version 4.3.4`. The v4.3.4 `production` profile
 retains the stable Graph Runtime and keeps Dynamic Graph, A2A, and OpenTelemetry
 previews disabled. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
 does not claim database failover, RPO, or RTO. Multi-tenant deployment and
 public Internet exposure remain outside this private single-tenant contract.
+
+### v4.3.4 Compliance Activation
+
+Enterprise deployments add a database-authoritative compliance plane after the
+normal identity and Gateway migration chain. Apply it only with a recoverable
+backup manifest:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.4 --edition enterprise \
+  --database <oracle|pg|yashandb> --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+New production or restricted Agents remain `PENDING_ACTIVATION` until they
+prove a registered Gateway credential. Dashboard activation does not replace
+that proof. The Controller marks stale validated evidence as `DEGRADED`; it
+does not infer a violation from idleness, a missing Skill call, a model
+opinion, or an offline external process. Exceptions require a reason,
+compensating controls, expiry, and a distinct active Human approver.
 
 ### v4.3.3 Preview Controls
 

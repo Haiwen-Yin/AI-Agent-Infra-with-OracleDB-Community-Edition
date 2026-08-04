@@ -1,4 +1,4 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.3.3
+# Recovery and High Availability - AI Agent Infra with DB v4.3.4
 
 ## Recovery Authority
 
@@ -6,6 +6,23 @@ The database is the source of truth for Graph Definitions, published Compiler
 plans, Runs, Attempts, State Events, Checkpoints, Transitions, Leases, Events,
 Artifacts, and audit/governance evidence. Web processes, Schedulers, Workers,
 and Agents may restart without becoming the owner of the only copy of state.
+
+## v4.3.4 Compliance Controller Recovery
+
+The Enterprise Compliance Controller claims bounded evaluation jobs with a
+database lease and fencing token. A web or Controller restart leaves an
+unexpired lease with its current node; a replacement may only reclaim it after
+expiry and must match the new fence to complete it. Repeated evaluation updates
+the existing logical finding rather than creating a new finding or duplicate
+overdue notification. Approved exceptions expire deterministically and enqueue
+re-evaluation; expiry never restores authority. A stale heartbeat or evidence
+only degrades posture and never triggers automatic quarantine.
+
+The seeded Compliance Admin identity is an inactive credentialless system
+subject, not a recovery credential. It cannot be used to recover the Admin
+Agent, Schema Owner, or Human account. Recovering a quarantined Agent requires
+the existing governed remediation and authorized control path; evidence and
+the triggering finding remain retained.
 
 ## Worker and Scheduler Restart
 

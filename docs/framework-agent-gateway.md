@@ -1,4 +1,4 @@
-# Framework-Neutral Agent Gateway Adapter - AI Agent Infra with DB v4.3.3
+# Framework-Neutral Agent Gateway Adapter - AI Agent Infra with DB v4.3.4
 
 `shared/lib/agent_framework_adapters.py` is a pure conversion boundary for
 external runtimes such as OpenClaw and Hermes Agent. It does not implement a

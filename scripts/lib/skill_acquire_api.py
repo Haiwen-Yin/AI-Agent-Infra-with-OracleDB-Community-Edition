@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.3 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v4.3.4 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Enterprise Edition: direct access, no token required
@@ -188,7 +188,7 @@ def acquire_skill_full(skill_id: str, agent_id: Optional[str] = None, session_id
     return result
 
 
-def materialize_skill(skill_id: str, install_root: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def materialize_skill(skill_id: str, install_root: Optional[str] = None, *, agent_id: str = "") -> Optional[Dict[str, Any]]:
     """Verify and install a Skill package as a read-only tree for the Agent host."""
     metadata = acquire_skill_text(skill_id)
     archive_bytes = acquire_skill_resource(skill_id)
@@ -244,8 +244,26 @@ def materialize_skill(skill_id: str, install_root: Optional[str] = None) -> Opti
         for path in target.rglob("*"):
             path.chmod(0o555 if path.is_dir() else 0o444)
         target.chmod(0o555)
-        return {"status": status, "path": str(target),
-                "package_checksum": actual_hash, "file_hashes": file_hashes}
+        result = {"status": status, "path": str(target),
+                  "package_checksum": actual_hash, "file_hashes": file_hashes}
+        # Installation facts are useful compliance evidence, but a local file
+        # tree does not prove what an external process subsequently executed.
+        if agent_id:
+            try:
+                from . import compliance_api
+                compliance_api.submit_mcp_evidence(
+                    agent_id, "SKILL_INSTALLATION",
+                    {"skill_id": skill_id, "skill_version": metadata.get("skill_version"),
+                     "package_checksum": actual_hash, "file_hashes": file_hashes},
+                    nonce="skill-install:" + skill_id + ":" + actual_hash,
+                )
+            except Exception:
+                # A failed optional evidence record must not leave a partially
+                # materialized package or turn a Skill install into a bypass.
+                result["compliance_evidence"] = "NOT_RECORDED"
+            else:
+                result["compliance_evidence"] = "RECORDED"
+        return result
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise

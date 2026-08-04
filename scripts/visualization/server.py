@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.3 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.3.4 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -51,7 +51,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.3.3"
+VERSION = "4.3.4"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -342,12 +342,16 @@ def _get_or_assign_portal_agent(user_id):
 
 
 def _get_session(request_handler):
+    cached = getattr(request_handler, '_cx_session_cache', None)
+    if cached is not None:
+        return cached
     cookie = SimpleCookie(request_handler.headers.get('Cookie', ''))
     session_id = None
     _cookie_name = _get_cookie_name()
     if _cookie_name in cookie:
         session_id = cookie[_cookie_name].value
     if not session_id:
+        request_handler._cx_session_cache = None
         return None
     sess = sessions.get(session_id)
     if sess:
@@ -355,6 +359,7 @@ def _get_session(request_handler):
             persisted = _resolve_session_as_schema_owner(session_id)
             if persisted is None:
                 sessions.pop(session_id, None)
+                request_handler._cx_session_cache = None
                 return None
             sess['principal_id'] = persisted.get('principal_id') or sess.get('principal_id')
             sess['mfa_level'] = persisted.get('mfa_level') or 'NONE'
@@ -366,6 +371,7 @@ def _get_session(request_handler):
         except Exception:
             persisted = None
         if not persisted:
+            request_handler._cx_session_cache = None
             return None
         sess = {
             'username': persisted.get('user_id') or persisted.get('principal_id'),
@@ -387,9 +393,11 @@ def _get_session(request_handler):
     timeout = _session_timeout()
     if time.time() - sess.get('last_access', sess['created_at']) > timeout:
         sessions.pop(session_id, None)
+        request_handler._cx_session_cache = None
         return None
     sess['last_access'] = time.time()
-    return session_id, sess
+    request_handler._cx_session_cache = (session_id, sess)
+    return request_handler._cx_session_cache
 
 
 def _authenticate_local(username, password):
@@ -729,6 +737,8 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(401, 'Authentication required')
             return None
         entry = 'PORTAL' if self.path.startswith('/portal') else 'APP'
+        previous_agent_id = connection.get_current_agent_id()
+        connection.set_agent_context(None)
         try:
             if not identity_api.entry_allowed(str(result[1].get('principal_id') or ''), entry):
                 self._send_error(403, '{} access is disabled'.format(entry.title()))
@@ -736,6 +746,8 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception:
             self._send_error(503, 'Entry-access policy is unavailable')
             return None
+        finally:
+            connection.set_agent_context(previous_agent_id)
         return result
 
     def _require_admin(self):
@@ -914,6 +926,8 @@ class VisHandler(BaseHTTPRequestHandler):
 
         if path == '/portal/chat':
             session_data = _get_session(self)
+            previous_agent_id = connection.get_current_agent_id()
+            connection.set_agent_context(None)
             try:
                 portal_allowed = bool(
                     session_data and identity_api.entry_allowed(
@@ -922,6 +936,8 @@ class VisHandler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 portal_allowed = False
+            finally:
+                connection.set_agent_context(previous_agent_id)
             if not portal_allowed or str(session_data[1].get('mfa_level') or 'NONE').upper() == 'SETUP':
                 self._send_redirect('/portal/login')
                 return
@@ -4465,8 +4481,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.3.3', VERSION)
-            html = html.replace('2026-08-03', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.3.4', VERSION)
+            html = html.replace('2026-08-04', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.3.3 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.3.4 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -71,6 +71,15 @@ or a new credential path. Local runtime replacement is recoverable from the
 reachable database's leases, fencing, Runs, and Checkpoints. This is not an
 Oracle HA, Data Guard, RAC, RPO, or RTO claim.
 
+v4.3.4 adds the Enterprise Agent Compliance plane. A registered Agent must
+complete its own Gateway credential activation proof before receiving normal
+work tokens. Immutable Governed Profile versions, verified evidence, posture
+projections, findings, remediation, time-bounded exceptions, and deterministic
+restricted or quarantine controls are database-authoritative. Prompt text,
+Skill/API descriptions, and Agent self-reports are not authorization
+boundaries. The seeded Compliance Admin identity has no credential and is not
+an autonomous model runtime.
+
 The Organization workspace is a governed query and change interface. Agents
 may discover only organization facts allowed by their authenticated Principal
 and `organizations.*` scope. Reading this Skill does not grant graphical edit,
@@ -85,7 +94,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.3.3.md   # this release's notes
+├── RELEASE_NOTES_v4.3.4.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -162,7 +171,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.3.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.4.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -187,7 +196,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.3.3 archive includes the verified glibc 2.28 wheel; do not
+The current v4.3.4 archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration

@@ -1,4 +1,30 @@
-# API Reference - AI Agent Infra with DB v4.3.3
+# API Reference - AI Agent Infra with DB v4.3.4
+
+## v4.3.4 Agent Compliance API
+
+Enterprise-only compliance endpoints use the authenticated Human session and
+the same `agents.*` authorization/scope checks as Agent inventory. Scoped
+callers receive only their visible Agents; the summary does not disclose
+global counts or Controller queue details. Gateway evidence and remediation
+routes authenticate the calling Agent's current token and instance instead.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/gateway/activate` | POST | Complete pending-Agent credential proof and bind a server-derived baseline. |
+| `/api/gateway/evidence` | POST | Submit bounded, attributed Gateway evidence for the authenticated instance. |
+| `/api/gateway/remediations/{case_id}/respond` | POST | Submit structured remediation evidence; chat text is not an acknowledgement. |
+| `/api/agents/{agent_id}/posture` | GET | Read an authorized Agent's independent registration, runtime, posture, control, and evidence-strength states. |
+| `/api/compliance/summary` | GET | Read scope-filtered posture/finding counts and, for global administrators, Controller health. |
+| `/api/compliance/findings` | GET | List authorized deterministic findings. |
+| `/api/compliance/profiles` | GET/POST | Inspect Profiles or create a constrained draft. |
+| `/api/compliance/profiles/{profile_version_id}/publish` | POST | Publish an immutable validated Profile version with a reason. |
+| `/api/agents/{agent_id}/compliance-profile` | POST | Assign a published Profile and reset posture for reactivation. |
+| `/api/agents/{agent_id}/compliance-control` | POST | Apply an authorized, reasoned control state with optimistic version checking. |
+| `/api/compliance/exceptions` | GET/POST | Inspect or request a scoped, expiring exception with compensating controls. |
+| `/api/compliance/exceptions/{exception_id}/{decision}` | POST | A distinct active Human approves, rejects, or revokes an exception with a reason. |
+
+Community packages omit the Enterprise compliance workspace, routes, migration
+steps, Controller, Profile automation, exception, and remediation APIs.
 
 ## v4.3.2 Versioned Memory API
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## v4.3.4 - 2026-08-04
+
+- Added Enterprise Agent Compliance Posture, credential-proven Gateway
+  activation, governed Profile templates, bounded evidence, deterministic
+  findings, remediation, exceptions, controls, Controller diagnostics, and
+  Gateway/MCP integration.
+- Added the additive v4.3.4 compliance migration and live-schema validator
+  contract for Oracle AI Database 26ai, PostgreSQL 18, and YashanDB 23.5.4.
+- Corrected identity and Gateway expiry clock handling for databases using
+  local naive `TIMESTAMP` values, and aligned Gateway Client Secret lookup
+  with the registration credential digest contract.
+- Fixed Portal human-session authorization after Agent-context requests by
+  enforcing Schema Owner identity checks, guaranteed Oracle connection return,
+  and bounded connection-pool waiting during short request bursts.
+
 ## v4.3.3 - 2026-08-03
 
 - Hardened the database-authoritative Graph Runtime with additive assurance

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Chuanxu v4.3.3 - AI Agent Infra v4.3.3 - {{EDITION_LABEL}} unified FastAPI/Uvicorn server controller.
+# Chuanxu v4.3.4 - AI Agent Infra v4.3.4 - {{EDITION_LABEL}} unified FastAPI/Uvicorn server controller.
 
 set -euo pipefail
 
@@ -10,11 +10,18 @@ if [[ ! -f "$RUNTIME_HELPER" ]]; then
   exit 1
 fi
 source "$RUNTIME_HELPER"
-if ! PYTHON="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
+VENV_PYTHON="${CX_VENV_DIR:-$SCRIPT_DIR/.venv}/bin/python"
+if [[ -z "${PYTHON_BIN:-}" && -x "$VENV_PYTHON" ]]; then
+  PYTHON="$VENV_PYTHON"
+elif ! PYTHON="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
   echo "Python 3.14+ is required; set PYTHON_BIN to an accessible interpreter." >&2
   exit 1
 fi
 cx_prepare_python_environment "$PYTHON"
+YASHAN_CLIENT_LIB="${CX_YASHAN_LIB_DIR:-$SCRIPT_DIR/.runtime/yashandb-client/lib}"
+if [[ -d "$YASHAN_CLIENT_LIB" ]]; then
+  export LD_LIBRARY_PATH="$YASHAN_CLIENT_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 DB_DIALECT="oracle"
 PROFILE="${CX_RUNTIME_PROFILE:-production}"
@@ -27,7 +34,7 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR/scripts:$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export CX_DATABASE_DIALECT="$DB_DIALECT"
 export CX_RUNTIME_PROFILE="$PROFILE"
-export AI_AGENT_RELEASE_DATE="2026-08-03"
+export AI_AGENT_RELEASE_DATE="2026-08-04"
 
 read_config() {
   "$PYTHON" - "$1" "$2" <<'PY'
@@ -99,7 +106,7 @@ start_server() {
     echo "FastAPI and Uvicorn are not installed for the selected Python. Run scripts/install_offline.sh with the same Python 3.14+ interpreter, then retry." >&2
     exit 1
   fi
-  echo "Starting Chuanxu v4.3.3 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
+  echo "Starting Chuanxu v4.3.4 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
   setsid nohup "$PYTHON" -m uvicorn web_app:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-access-log >>"$LOG_FILE" 2>&1 &
   echo "$!" >"$PID_FILE"

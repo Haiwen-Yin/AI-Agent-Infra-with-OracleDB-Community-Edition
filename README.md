@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.3.3 · Community Edition · Oracle**
+> **v4.3.4 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -55,6 +55,15 @@ and do not add a second execution engine. The tested scope is local runtime
 replacement against the reachable database, not database-cluster failover,
 RPO, or RTO.
 
+v4.3.4 adds an Enterprise Agent Compliance plane. Registered Agents must
+complete their own credential-proven Gateway activation before receiving normal
+work tokens. Governed Profiles are immutable after publication, while verified
+evidence projects posture, findings, remediation, time-bounded exceptions, and
+deterministic restricted or quarantine controls. Prompt instructions, Skill or
+API descriptions, and Agent self-reports are never authorization boundaries.
+The seeded Compliance Admin identity is credentialless and pending activation;
+it is not an autonomous model runtime.
+
 v4.3.1 adds a graphical organization-governance workspace. Authorized users
 can search and progressively expand a deterministic organization hierarchy,
 switch among organization, people, Agent-responsibility, and anomaly views,
@@ -67,7 +76,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.3.3. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.3.4. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -78,7 +87,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.3.3.md   # release notes for this version
+├── RELEASE_NOTES_v4.3.4.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -120,7 +129,9 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     │   ├── 18_v4_3_0_security_lifecycle.sql
     │   ├── 19_v4_3_1_organization_governance.sql
     │   ├── 23_v4_3_2_memory_lifecycle.sql
-    │   └── 28_v4_3_3_graph_assurance.sql
+    │   ├── 28_v4_3_3_graph_assurance.sql
+    │   ├── 29_v4_3_4_agent_compliance.sql
+    │   └── 30_v4_3_4_compliance_hardening.sql
     ├── tests/                # pytest suite
     ├── tools/                # runtime encryption and release build helpers
     │   ├── encrypt_config.py

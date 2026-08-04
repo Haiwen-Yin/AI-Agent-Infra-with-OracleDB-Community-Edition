@@ -23,8 +23,24 @@ class GatewayError(ValueError):
     """Safe protocol error that does not reveal credential state."""
 
 
+def _compliance_allows(agent_id: str, operation: str) -> bool:
+    """Recheck the current authoritative control state for every Gateway use."""
+    try:
+        from . import compliance_api
+        return bool(compliance_api.control_allows(agent_id, operation))
+    except ImportError:
+        # Old independently packaged releases have no compliance module.  A
+        # v4.3.4 package always contains it and fails closed on database error.
+        return True
+    except Exception:
+        return False
+
+
 def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    # Gateway tokens are stored in adapter-neutral naive TIMESTAMP columns and
+    # compared to database CURRENT_TIMESTAMP. Keep their wall-clock basis
+    # aligned with identity/session expiry values.
+    return datetime.now().astimezone().replace(tzinfo=None)
 
 
 def local_node_id() -> str:
@@ -77,7 +93,11 @@ def verify_ed25519_proof(public_key: str, signature: str, message: str) -> bool:
 def authenticate_client_secret(agent_id: str, client_secret: str) -> Optional[Dict[str, Any]]:
     if not agent_id or not client_secret:
         return None
-    digest = _digest(client_secret, "agent-client-secret")
+    # Enrollment persists the registered Client Secret with the identity
+    # service's purpose-separated digest. Gateway must use that same contract;
+    # its private _digest() namespace is reserved for short-lived access and
+    # delivery tokens, not long-lived registration credentials.
+    digest = identity_api._secret_digest(client_secret, "agent-client-secret")
     row = identity_api._row(connection.execute_query_one(
         "SELECT c.AGENT_ID, c.CREDENTIAL_ID, c.CREDENTIAL_TYPE, c.PUBLIC_KEY, c.STATUS, c.EXPIRES_AT "
         "FROM CX_AGENT_CREDENTIALS c JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = c.AGENT_ID "
@@ -87,6 +107,26 @@ def authenticate_client_secret(agent_id: str, client_secret: str) -> Optional[Di
         {"agent_id": agent_id, "digest": digest},
     ))
     return row
+
+
+def authenticate_activation_client_secret(agent_id: str, client_secret: str) -> Optional[Dict[str, Any]]:
+    """Authenticate only the one transition allowed before an Agent is active.
+
+    This deliberately cannot issue a work token.  It exists so a freshly
+    enrolled Agent can prove possession of its registered credential without
+    an administrator manufacturing runtime evidence on its behalf.
+    """
+    if not agent_id or not client_secret:
+        return None
+    digest = identity_api._secret_digest(client_secret, "agent-client-secret")
+    return identity_api._row(connection.execute_query_one(
+        "SELECT c.AGENT_ID,c.CREDENTIAL_ID,c.CREDENTIAL_TYPE,c.PUBLIC_KEY,c.STATUS,p.STATUS AS AGENT_STATUS "
+        "FROM CX_AGENT_CREDENTIALS c JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=c.AGENT_ID "
+        "WHERE c.AGENT_ID=:agent_id AND c.SECRET_DIGEST=:digest AND c.STATUS='ACTIVE' "
+        "AND p.PRINCIPAL_TYPE='AGENT' AND p.STATUS='PENDING_ACTIVATION' "
+        "AND (c.EXPIRES_AT IS NULL OR c.EXPIRES_AT>CURRENT_TIMESTAMP)",
+        {"agent_id": agent_id, "digest": digest},
+    ))
 
 
 def issue_access_token(agent_id: str, instance_id: str, scopes: Iterable[str], *, ttl_seconds: int = 300, lease_digest: str = "") -> Dict[str, Any]:
@@ -102,10 +142,13 @@ def issue_access_token(agent_id: str, instance_id: str, scopes: Iterable[str], *
     if (not instance or str(instance.get("status") or "").upper() != "ACTIVE"
             or str(instance.get("agent_status") or "").upper() != "ACTIVE"):
         raise GatewayError("agent instance is unavailable")
+    scope_list = sorted({str(scope).strip() for scope in scopes if str(scope).strip()})
+    operation = "remediation" if scope_list and set(scope_list) <= {"compliance.evidence", "compliance.remediation"} else "token"
+    if not _compliance_allows(agent_id, operation):
+        raise GatewayError("agent control state blocks token issuance")
     ttl = max(30, min(int(ttl_seconds), 900))
     raw = secrets.token_urlsafe(32)
     expires = _now() + timedelta(seconds=ttl)
-    scope_list = sorted({str(scope).strip() for scope in scopes if str(scope).strip()})
     connection.execute(
         "INSERT INTO CX_AGENT_ACCESS_TOKENS(TOKEN_DIGEST, AGENT_ID, INSTANCE_ID, SCOPE_JSON, LEASE_DIGEST, FENCING_TOKEN, EXPIRES_AT) "
         "VALUES (:token_digest, :agent_id, :instance_id, :scope_json, :lease_digest, :fencing_token, :expires_at)",
@@ -128,6 +171,8 @@ def create_instance(agent_id: str, *, channel_id: str = "", security_domain_id: 
         raise GatewayError("agent is unavailable")
     if str(agent.get("status") or "").upper() != "ACTIVE":
         raise GatewayError("agent activation is required")
+    if not _compliance_allows(agent_id, "work"):
+        raise GatewayError("agent control state blocks new work")
     if channel_id:
         membership = identity_api._row(connection.execute_query_one(
             "SELECT c.SECURITY_DOMAIN_ID, c.CLASSIFICATION, d.CLASSIFICATION AS DOMAIN_CLASSIFICATION "
@@ -192,7 +237,9 @@ def create_instance(agent_id: str, *, channel_id: str = "", security_domain_id: 
 
 
 def heartbeat_instance(agent_id: str, instance_id: str) -> bool:
-    return connection.execute(
+    if not _compliance_allows(agent_id, "heartbeat"):
+        return False
+    changed = connection.execute(
         "UPDATE CX_AGENT_INSTANCES SET LAST_SEEN_AT = CURRENT_TIMESTAMP, "
         "LEASE_EXPIRES_AT = " + _five_minute_deadline_sql() + ", UPDATED_AT = CURRENT_TIMESTAMP "
         "WHERE INSTANCE_ID = :instance_id AND AGENT_ID = :agent_id AND STATUS = 'ACTIVE' "
@@ -200,6 +247,13 @@ def heartbeat_instance(agent_id: str, instance_id: str) -> bool:
         "WHERE p.PRINCIPAL_ID = :agent_id AND p.STATUS = 'ACTIVE')",
         {"instance_id": instance_id, "agent_id": agent_id},
     ) > 0
+    if changed:
+        try:
+            from . import compliance_api
+            compliance_api.observe_gateway_heartbeat(agent_id, instance_id)
+        except ImportError:
+            pass
+    return changed
 
 
 def revoke_instance(agent_id: str, instance_id: str, reason: str = "revoked") -> bool:
@@ -266,7 +320,7 @@ def reclaim_local_instances(node_id: str, reason: str = "web node restart") -> i
     return int(changed or 0)
 
 
-def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: str = "", required_scope: str = "") -> Optional[Dict[str, Any]]:
+def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: str = "", required_scope: str = "", *, operation: str = "work") -> Optional[Dict[str, Any]]:
     if not raw_token:
         return None
     row = identity_api._row(connection.execute_query_one(
@@ -282,6 +336,8 @@ def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: s
         "AND t.FENCING_TOKEN = i.FENCING_TOKEN", {"digest": _digest(raw_token, "agent-access-token")},
     ))
     if not row or (agent_id and str(row.get("agent_id")) != agent_id) or (instance_id and str(row.get("instance_id")) != instance_id):
+        return None
+    if not _compliance_allows(str(row.get("agent_id") or ""), operation):
         return None
     try:
         scopes = set(json.loads(row.get("scope_json") or "[]"))

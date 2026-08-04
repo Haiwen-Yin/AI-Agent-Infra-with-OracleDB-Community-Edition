@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.3 - MCP Server
+"""AI Agent Infra v4.3.4 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
@@ -32,7 +32,7 @@ from mcp.types import (
 from lib import (
     search_api, memory_api, knowledge_api,
     tool_registry, graph_api, loop_api, agent_api, skill_acquire_api,
-    memory_lifecycle,
+    memory_lifecycle, compliance_api,
 )
 from lib.config import get_config
 from lib.connection import execute_query
@@ -430,6 +430,15 @@ async def list_tools() -> List[Tool]:
             },
         ))
 
+    # Compliance tools deliberately use the same database-authoritative
+    # service as REST/Gateway.  They are visible to a registered Agent only
+    # for its own posture and bounded, untrusted boundary evidence.
+    tools.extend([
+        Tool(name="compliance_posture", description="Inspect the authenticated Agent's current compliance posture.", inputSchema={"type": "object", "properties": {}}),
+        Tool(name="compliance_profile", description="Inspect the authenticated Agent's assigned governed Profile identifier.", inputSchema={"type": "object", "properties": {}}),
+        Tool(name="compliance_evidence", description="Submit bounded advisory runtime evidence for the authenticated Agent.", inputSchema={"type": "object", "properties": {"evidence_type": {"type": "string"}, "payload": {"type": "object"}, "nonce": {"type": "string"}}, "required": ["evidence_type", "payload"]}),
+    ])
+
     tools.extend(_load_dynamic_tools())
 
     return tools
@@ -458,6 +467,17 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 category=arguments.get("category"),
             )
             return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
+        elif name == "compliance_posture":
+            result = compliance_api.runtime_posture(authenticated_agent)
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
+        elif name == "compliance_profile":
+            posture = compliance_api.runtime_posture(authenticated_agent)
+            result = {"agent_id": authenticated_agent, "profile_version_id": posture.get("profile_version_id"),
+                      "evidence_strength": posture.get("evidence_strength"), "activation_id": posture.get("activation_id")}
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
+        elif name == "compliance_evidence":
+            result = compliance_api.submit_mcp_evidence(authenticated_agent, arguments.get("evidence_type", ""), arguments.get("payload", {}), nonce=arguments.get("nonce", ""))
+            return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
         elif name == "skill_discover":
             result = skill_acquire_api.discover_skills(
                 skill_type=arguments.get("skill_type"), runtime=arguments.get("runtime"),
@@ -471,7 +491,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = skill_acquire_api.acquire_skill_full(arguments["skill_id"])
             if result:
                 result.pop("resource_zip", None)
-                result["installation"] = skill_acquire_api.materialize_skill(arguments["skill_id"])
+                result["installation"] = skill_acquire_api.materialize_skill(arguments["skill_id"], agent_id=authenticated_agent)
             return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
         elif name == "skill_status":
             skill = skill_acquire_api.acquire_skill_text(arguments["skill_id"])

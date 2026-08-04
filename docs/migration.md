@@ -1,4 +1,30 @@
-# Migration Guide - AI Agent Infra with DB v4.3.3
+# Migration Guide - AI Agent Infra with DB v4.3.4
+
+## v4.3.4 Agent Compliance Steps
+
+`29_v4_3_4_agent_compliance.sql` creates the additive Enterprise compliance
+authority: immutable governed Profile versions, assignments, activations,
+posture projections, append-only evidence, deterministic findings,
+remediation cases, scoped exceptions, and leased Controller jobs.
+`30_v4_3_4_compliance_hardening.sql` follows it and adds durable exception
+decision attribution, remediation evidence references, finding deadlines, and
+expiry/deadline indexes. Run the complete v4.3.4 chain with
+`migration_runner.py --version 4.3.4 --edition enterprise`; do not run step
+30 by hand or edit either applied step.
+
+Record a recoverable backup manifest before applying. Legacy Agents are
+backfilled only as `UNKNOWN` and `BOUNDARY_ONLY`; the migration never invents
+past Skill use, runtime activity, signatures, or compliance proof. The
+Controller creates the five unassigned restricted Profile templates and a
+credential-less, pending-activation Compliance Admin identity. That identity
+is independently attributable but cannot receive a Gateway token or perform
+advisory work until an operator completes a separate bound-credential
+activation.
+
+After applying, run `live_db_validator.py --version 4.3.4`, verify the
+Controller lease and the `CX_COMPLIANCE_*` catalog, then perform an authorized
+Gateway evidence and restricted-token test. Do not delete migration-ledger
+rows to retry an interrupted deployment; rerun the migration runner.
 
 ## v4.3.3 Graph Assurance Step
 

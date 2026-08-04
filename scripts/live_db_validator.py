@@ -113,6 +113,29 @@ V433_GRAPH_ASSURANCE_TABLES = (
     "GRAPH_PROTOCOL_TASKS", "GRAPH_TELEMETRY_DELIVERIES",
 )
 
+V434_MIGRATION_SCRIPTS = V433_MIGRATION_SCRIPTS + (
+    "29_v4_3_4_agent_compliance.sql",
+    "30_v4_3_4_compliance_hardening.sql",
+)
+V434_COMPLIANCE_TABLES = (
+    "CX_AGENT_PROFILES", "CX_AGENT_PROFILE_VERSIONS", "CX_AGENT_PROFILE_ASSIGNMENTS",
+    "CX_AGENT_ACTIVATIONS", "CX_AGENT_POSTURES", "CX_AGENT_POSTURE_EVIDENCE",
+    "CX_COMPLIANCE_FINDINGS", "CX_COMPLIANCE_REMEDIATION_CASES",
+    "CX_COMPLIANCE_EXCEPTIONS", "CX_COMPLIANCE_CONTROLLER_JOBS",
+)
+V434_COMPLIANCE_REQUIRED_COLUMNS = {
+    "CX_AGENT_PROFILES": frozenset({"PROFILE_ID", "PROFILE_KEY", "DISPLAY_NAME", "STATUS", "CREATED_BY"}),
+    "CX_AGENT_PROFILE_VERSIONS": frozenset({"PROFILE_VERSION_ID", "PROFILE_ID", "CONTENT_JSON", "CONTENT_DIGEST", "STATUS"}),
+    "CX_AGENT_PROFILE_ASSIGNMENTS": frozenset({"ASSIGNMENT_ID", "AGENT_ID", "PROFILE_VERSION_ID", "ENVIRONMENT", "STATUS"}),
+    "CX_AGENT_ACTIVATIONS": frozenset({"ACTIVATION_ID", "AGENT_ID", "EVIDENCE_STRENGTH", "BASELINE_DIGEST", "STATUS"}),
+    "CX_AGENT_POSTURES": frozenset({"POSTURE_ID", "AGENT_ID", "REGISTRATION_STATE", "RUNTIME_STATE", "POSTURE_STATE", "CONTROL_STATE", "VERSION"}),
+    "CX_AGENT_POSTURE_EVIDENCE": frozenset({"EVIDENCE_ID", "AGENT_ID", "EVIDENCE_TYPE", "PROVIDER", "PAYLOAD_DIGEST"}),
+    "CX_COMPLIANCE_FINDINGS": frozenset({"FINDING_ID", "AGENT_ID", "RULE_CODE", "SEVERITY", "STATUS", "DEADLINE_AT"}),
+    "CX_COMPLIANCE_REMEDIATION_CASES": frozenset({"CASE_ID", "FINDING_ID", "AGENT_ID", "STATUS", "RESPONSE_EVIDENCE_ID"}),
+    "CX_COMPLIANCE_EXCEPTIONS": frozenset({"EXCEPTION_ID", "POLICY_KEY", "REQUESTED_BY", "APPROVED_BY", "DECISION_REASON", "STATUS", "EXPIRES_AT"}),
+    "CX_COMPLIANCE_CONTROLLER_JOBS": frozenset({"JOB_ID", "JOB_TYPE", "STATUS", "FENCING_TOKEN", "IDEMPOTENCY_KEY"}),
+}
+
 V432_MEMORY_TABLES = (
     "CX_MEMORY_FAMILIES", "CX_MEMORY_VERSIONS", "CX_MEMORY_REPRESENTATIONS",
     "CX_MEMORY_RELATIONS", "CX_MEMORY_SNAPSHOTS", "CX_MEMORY_SNAPSHOT_MEMBERS",
@@ -853,6 +876,23 @@ def validate_v433_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(assurance["passed"])}
 
 
+def validate_v434_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate the additive v4.3.4 compliance migration source."""
+    base = validate_v433_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("29_v4_3_4_agent_compliance.sql")
+    source = _normalized_marker_text(migration.read_text(encoding="utf-8")) if migration and migration.is_file() else ""
+    compliance = {
+        "scripts_required": list(V434_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V434_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V434_COMPLIANCE_TABLES if name not in source],
+        "no_profile_secret_storage": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "ACCESS_TOKEN")),
+    }
+    compliance["passed"] = not any((compliance["scripts_missing"], compliance["tables_missing"])) and compliance["no_profile_secret_storage"]
+    return {"database": database, "v433": base, "compliance": compliance,
+            "passed": bool(base.get("passed")) and bool(compliance["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -903,7 +943,7 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
         cursor.execute("SELECT TABLE_NAME FROM USER_TABLES")
     tables = {str(row[0]).upper() for row in cursor.fetchall()}
     columns: dict[str, set[str]] = {}
-    for table in V43_REQUIRED_TABLES:
+    for table in tuple(dict.fromkeys(V43_REQUIRED_TABLES + V434_COMPLIANCE_TABLES)):
         if database == "pg":
             cursor.execute(
                 "SELECT upper(column_name) FROM information_schema.columns "
@@ -981,6 +1021,7 @@ class ProbeResult:
     v43_schema_contract: dict[str, Any] = field(default_factory=dict)
     v43_partial_schema: list[dict[str, Any]] = field(default_factory=list)
     v431_organization_contract: dict[str, Any] = field(default_factory=dict)
+    v434_compliance_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -992,6 +1033,17 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     )
     result.v43_partial_schema = v43_partial_schema_incomplete(snapshot)
     result.v431_organization_contract = _capture_v431_organization(cursor, database)
+    result.v434_compliance_contract = {
+        "tables_missing": sorted(set(V434_COMPLIANCE_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V434_COMPLIANCE_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v434_compliance_contract["passed"] = not any((
+        result.v434_compliance_contract["tables_missing"], result.v434_compliance_contract["columns_missing"],
+    ))
 
 
 def _capture_v431_organization(cursor: Any, database: str) -> dict[str, Any]:
@@ -1280,10 +1332,11 @@ def main() -> int:
     requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3"))
     requires_v432 = target_version.startswith(("4.3.2", "4.3.3"))
     requires_v433 = target_version.startswith("4.3.3")
+    requires_v434 = target_version.startswith("4.3.4")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            migration_scripts = V433_MIGRATION_SCRIPTS if requires_v433 else (V432_MIGRATION_SCRIPTS if requires_v432 else (V431_MIGRATION_SCRIPTS if requires_v431 else V43_MIGRATION_SCRIPTS))
+            migration_scripts = V434_MIGRATION_SCRIPTS if requires_v434 else (V433_MIGRATION_SCRIPTS if requires_v433 else (V432_MIGRATION_SCRIPTS if requires_v432 else (V431_MIGRATION_SCRIPTS if requires_v431 else V43_MIGRATION_SCRIPTS)))
             scripts = [
                 (REPO_ROOT / "scripts" / "deploy" / name)
                 if (REPO_ROOT / "scripts" / "deploy" / name).is_file()
@@ -1291,10 +1344,10 @@ def main() -> int:
                 for name in migration_scripts
             ]
             static_contracts[database] = (
-                validate_v433_static_contract(database, scripts) if requires_v433 else (
+                validate_v434_static_contract(database, scripts) if requires_v434 else (validate_v433_static_contract(database, scripts) if requires_v433 else (
                     validate_v432_static_contract(database, scripts) if requires_v432 else (
                         validate_v431_static_contract(database, scripts) if requires_v431 else validate_v43_static_contract(database, scripts)
-                    )
+                    ))
                 )
             )
     for database in available_databases:
@@ -1333,6 +1386,7 @@ def main() -> int:
             ))
             and (not requires_v43 or (
                 result.v43_schema_contract.get("passed") is True
+                and (not requires_v434 or result.v434_compliance_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

@@ -781,7 +781,21 @@ def test_dashboard_navigation_is_centered_against_equal_header_side_columns():
     assert "grid-template-columns:minmax(280px,1fr)autominmax(280px,1fr);" in css
     assert ".cx-nav-stack{min-width:0;justify-self:center" in css
     assert "@media(max-width:1100px)" in css
-    assert "grid-template-columns:repeat(6,max-content);justify-content:center" in css
+    assert "grid-template-columns:repeat(10,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
+
+
+def test_compliance_tabs_use_the_shared_segmented_control():
+    source, is_source = _react_ui_source()
+    if not is_source:
+        return
+    compliance = source.split("function CompliancePage(", 1)[1].split(
+        "function AgentsPage(", 1
+    )[0]
+    assert 'className="view-toggle compliance-tabs"' in compliance
+    assert 'role="tablist"' in compliance
+    assert 'role="tab"' in compliance
+    assert 'className="compliance-posture-card"' in compliance
+    assert 'text("控制状态", "Control")' in compliance
 
 
 def test_organization_workspace_marks_each_governed_region_as_protected():
@@ -851,3 +865,17 @@ def test_entry_access_is_enforced_by_dashboard_and_portal_backends():
     assert 'entry = "PORTAL" if path.startswith("/portal/api/") else "APP"' in web_app
     assert "identity_api.entry_allowed(principal_id, 'PORTAL')" in server
     assert "identity_api.entry_allowed(" in server and "'PORTAL'" in server
+
+
+def test_portal_identity_checks_leave_business_agent_context():
+    """Portal admission must query human identity as Schema Owner on Oracle."""
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    require_auth = server.split("    def _require_auth(self):", 1)[1].split("\n    def _require_admin", 1)[0]
+    assert "previous_agent_id = connection.get_current_agent_id()" in require_auth
+    assert "connection.set_agent_context(None)" in require_auth
+    assert "finally:" in require_auth
+    assert "connection.set_agent_context(previous_agent_id)" in require_auth
+    assert "def _schema_owner_context():" in web_app
+    assert "with _schema_owner_context():\n            allowed = identity_api.entry_allowed" in web_app
+    assert "_clear_legacy_thread_context" in web_app or "clear_context(None)" in web_app

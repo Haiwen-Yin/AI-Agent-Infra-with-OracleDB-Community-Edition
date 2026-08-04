@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.3.3
+# Architecture - AI Agent Infra with DB v4.3.4
 
 ## v4.3.3 Trustworthy Runtime Extensions
 

@@ -58,9 +58,17 @@ CHANNEL_MIGRATION_VERSIONS = frozenset({"4.3.0"})
 ORGANIZATION_MIGRATION_VERSIONS = frozenset({"4.3.1"})
 MEMORY_LIFECYCLE_MIGRATION_VERSIONS = frozenset({"4.3.2"})
 GRAPH_ASSURANCE_MIGRATION_VERSIONS = frozenset({"4.3.3"})
+COMPLIANCE_MIGRATION_VERSIONS = frozenset({"4.3.4"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS
 )
+
+V434_COMPLIANCE_TABLES = frozenset({
+    "CX_AGENT_PROFILES", "CX_AGENT_PROFILE_VERSIONS", "CX_AGENT_PROFILE_ASSIGNMENTS",
+    "CX_AGENT_ACTIVATIONS", "CX_AGENT_POSTURES", "CX_AGENT_POSTURE_EVIDENCE",
+    "CX_COMPLIANCE_FINDINGS", "CX_COMPLIANCE_REMEDIATION_CASES",
+    "CX_COMPLIANCE_EXCEPTIONS", "CX_COMPLIANCE_CONTROLLER_JOBS",
+})
 
 CHANNEL_REQUIRED_TABLES = frozenset({
     "CX_PRINCIPALS", "CX_HUMAN_IDENTITIES", "CX_REGISTRATION_REQUESTS", "CX_WEB_SESSIONS",
@@ -646,6 +654,8 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in COMPLIANCE_MIGRATION_VERSIONS:
+        return V434_COMPLIANCE_TABLES <= _schema_tables(cursor, database)
     if MIGRATION_VERSION in GRAPH_ASSURANCE_MIGRATION_VERSIONS:
         return (
             _channel_objects_complete(cursor, database)
@@ -1081,6 +1091,34 @@ def _v433_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v434_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    # A few historical test baselines had v4.3.2/4.3.3 Graph and Memory
+    # objects without the identity/Channel step.  Compliance depends on that
+    # authority and must not execute its legacy backfill against a partial
+    # schema.  Reuse the complete, idempotent v4.3.0 chain in that case.
+    try:
+        config = _load_database_config(config_path)
+        probe = _connect_for_preflight(database, config)
+        try:
+            with probe.cursor() as cursor:
+                channel_ready = _channel_objects_complete(cursor, database)
+        finally:
+            probe.close()
+    except Exception:
+        channel_ready = False
+    names = _v433_script_names(database, config_path, edition) if channel_ready else _v43_script_names(database, config_path, edition)
+    for name in _v432_script_names(database, config_path, edition):
+        if name not in names:
+            names.append(name)
+    if "28_v4_3_3_graph_assurance.sql" not in names:
+        names.append("28_v4_3_3_graph_assurance.sql")
+    if "29_v4_3_4_agent_compliance.sql" not in names:
+        names.append("29_v4_3_4_agent_compliance.sql")
+    if "30_v4_3_4_compliance_hardening.sql" not in names:
+        names.append("30_v4_3_4_compliance_hardening.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1458,7 +1496,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1506,6 +1544,8 @@ def main() -> int:
             script_names = _v432_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.3.3":
             script_names = _v433_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.3.4":
+            script_names = _v434_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

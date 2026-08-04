@@ -1,4 +1,46 @@
-# Security - AI Agent Infra with DB v4.3.3
+# Security - AI Agent Infra with DB v4.3.4
+
+## v4.3.4 Agent Compliance Boundary
+
+Agent registration, runtime, compliance posture, and control state are
+independent database-authoritative facts. A missing Skill invocation, idle or
+offline runtime, incomplete declaration, advisory model output, or ordinary
+chat message is not evidence of a policy breach. Those facts can result in
+`UNKNOWN`, a freshness warning, or operator review, but cannot automatically
+quarantine an Agent.
+
+New production and restricted Agents must first be confirmed by the existing
+admission flow and then prove possession of their registered Gateway
+credential while in `PENDING_ACTIVATION`. The activation service derives the
+Security Domain, runtime, environment, and assigned Profile from stored
+authority; it never accepts an Agent-supplied expansion. Normal work tokens
+are unavailable before activation. `CLIENT_SECRET` proves a boundary-only
+external integration; a validated Ed25519 adapter can be recorded as
+`SIGNED_ADAPTER`. Neither claim proves unobserved internal behavior.
+
+Profiles never grant a Principal, database, Tool, API, model, secret, or
+network permission. They constrain separately authorized operations. Published
+versions are immutable, parent locks cannot be relaxed by a child, and
+profiles reject secret-like content. The five supplied Enterprise Profile
+families are unassigned templates, not default grants.
+
+The deterministic Compliance Controller is leased and fenced in the database
+and makes no model calls. It may mark stale validated evidence as `DEGRADED`.
+Only explicit high-confidence rules such as credential reuse, identity-binding
+conflict, Profile digest mismatch, or fencing bypass are eligible for an
+automatic action. The Controller, not a dashboard user or LLM, is the only
+automatic-quarantine authority. `RESTRICTED` retains only bounded heartbeat,
+evidence, remediation, and recovery paths; `QUARANTINED`
+and `DISABLED` revoke Gateway tokens and fence platform instances. The
+platform cannot terminate arbitrary external OS processes.
+
+The Compliance Controller has a separate `SERVICE` identity and seeds a
+separate Compliance Admin `AGENT` identity with the General Restricted Profile.
+The seeded Agent has no Schema Owner, Human, Admin Agent, or Gateway
+credential and remains pending activation. It cannot approve exceptions,
+mutate Profiles, suppress evidence, grant access, or change authoritative
+posture. Controller evaluation remains deterministic and continues without
+any advisory Agent or model endpoint.
 
 ## v4.3.3 Graph Trust Boundary
 

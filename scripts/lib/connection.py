@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.3 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v4.3.4 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -38,6 +38,9 @@ _lock = threading.Lock()
 
 
 def _init_pool(cfg: DatabaseConfig) -> oracledb.ConnectionPool:
+    # Portal and Dashboard pages issue several guarded reads during one
+    # browser transition.  A short timed wait absorbs that legitimate burst;
+    # NOWAIT turned transient pool contention into a misleading login failure.
     return oracledb.create_pool(
         user=cfg.user,
         password=cfg.password,
@@ -45,7 +48,8 @@ def _init_pool(cfg: DatabaseConfig) -> oracledb.ConnectionPool:
         min=cfg.pool_min,
         max=cfg.pool_max,
         increment=cfg.pool_increment,
-        getmode=oracledb.SPOOL_ATTRVAL_NOWAIT,
+        getmode=oracledb.POOL_GETMODE_TIMEDWAIT,
+        wait_timeout=5000,
     )
 
 
@@ -72,8 +76,12 @@ def get_connection():
         apply_agent_context(conn)
         yield conn
     finally:
-        clear_agent_context(conn)
-        pool.release(conn)
+        # Context cleanup must never prevent the connection from returning to
+        # the pool, otherwise the next authenticated request can starve.
+        try:
+            clear_agent_context(conn)
+        finally:
+            pool.release(conn)
 
 
 _current_agent_id = threading.local()

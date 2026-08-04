@@ -41,10 +41,33 @@ if ! "$PYTHON_BIN" -m pip --version >/dev/null 2>&1; then
     echo "[ERROR] $PYTHON_BIN has no pip module. Install pip for the same interpreter before retrying." >&2
     exit 1
 fi
+VENV_DIR="${CX_VENV_DIR:-$PROJECT_DIR/.venv}"
+VENV_PYTHON="$VENV_DIR/bin/python"
+# Homebrew and other PEP 668 Python installations deliberately reject global
+# pip writes. A package-local virtual environment also keeps an offline
+# deployment isolated from the operator's Python installation.
+if [[ ! -x "$VENV_PYTHON" ]]; then
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
+fi
+if ! "$VENV_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 14) else 1)' >/dev/null 2>&1; then
+    echo "[ERROR] package virtual environment does not use Python 3.14+" >&2
+    exit 1
+fi
+# YashanDB ships a CPython-native driver rather than a wheel. Install it into
+# the same package-local virtual environment before checking or starting the
+# Web service; no user-site or global Python path is modified.
+if [[ -d "$VENDOR_DIR/yaspy" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/install_yaspy.sh" ]]; then
+        echo "[ERROR] YashanDB native-driver installer is missing." >&2
+        exit 1
+    fi
+    CX_YASHAN_LIB_DIR="${CX_YASHAN_LIB_DIR:-$PROJECT_DIR/.runtime/yashandb-client/lib}" \
+        PYTHON_BIN="$VENV_PYTHON" bash "$SCRIPT_DIR/install_yaspy.sh"
+fi
 # Validate the platform-specific wheel set before pip changes the environment.
 # Pip will select the compatible wheel when multiple platform builds of the
 # same package/version are present in vendor/.
-"$PYTHON_BIN" "$SCRIPT_DIR/verify_deps.py"
+"$VENV_PYTHON" "$SCRIPT_DIR/verify_deps.py"
 PIP_REQ_FILE="$REQ_FILE"
 TEMP_REQ_FILE=""
 if [[ -d "$VENDOR_DIR/yaspy" ]]; then
@@ -54,6 +77,6 @@ if [[ -d "$VENDOR_DIR/yaspy" ]]; then
     PIP_REQ_FILE="$TEMP_REQ_FILE"
     trap 'rm -f "$TEMP_REQ_FILE"' EXIT
 fi
-"$PYTHON_BIN" -m pip install --no-index --find-links "$VENDOR_DIR" -r "$PIP_REQ_FILE"
+"$VENV_PYTHON" -m pip install --no-index --find-links "$VENDOR_DIR" -r "$PIP_REQ_FILE"
 echo "[install] Done. Verifying installed dependency set..."
-"$PYTHON_BIN" "$SCRIPT_DIR/verify_deps.py"
+"$VENV_PYTHON" "$SCRIPT_DIR/verify_deps.py"

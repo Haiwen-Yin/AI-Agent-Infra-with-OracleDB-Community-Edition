@@ -9,6 +9,7 @@ Dashboard and external Skill clients.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import json
 import io
 import logging
@@ -29,18 +30,31 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle, organization_api
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, connection, governed_contracts, security_lifecycle, organization_api
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api
 
 
-VERSION = "4.3.3"
+VERSION = "4.3.4"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
     WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 DIST_ROOT = WEB_ROOT / "dist"
 DEFAULT_NODE_ID = agent_gateway_api.local_node_id()
+_COMPLIANCE_CONTROLLER_STOP = threading.Event()
+_ENTERPRISE_COMPLIANCE_PATHS = (
+    "/api/compliance",
+    "/api/agents/{agent_id}/posture",
+    "/api/agents/{agent_id}/activate",
+    "/api/agents/{agent_id}/compliance-profile",
+    "/api/agents/{agent_id}/compliance-control",
+    "/api/agents/{agent_id}/compliance-violation",
+    "/api/gateway/activate",
+    "/api/agent-gateway/activate",
+    "/api/gateway/evidence",
+    "/api/gateway/remediations/{case_id}/respond",
+)
 
 _VALID_PROFILES = {"production", "graph-preview", "development", "experimental-4.2"}
 _PUBLIC_LEGACY_API = {
@@ -108,6 +122,18 @@ def _local_node_id() -> str:
     return agent_gateway_api.local_node_id()
 
 
+@contextmanager
+def _schema_owner_context():
+    """Run human identity checks outside any Business Agent context."""
+    previous = connection.get_current_agent_id()
+    if previous:
+        connection.set_agent_context(None)
+    try:
+        yield
+    finally:
+        connection.set_agent_context(previous)
+
+
 def _reclaim_local_agents() -> int:
     """Reclaim only Portal and Gateway leases owned by this process node."""
     reclaimed = 0
@@ -126,15 +152,49 @@ def _reclaim_local_agents() -> int:
     return reclaimed
 
 
+def _start_compliance_controller() -> None:
+    """Run only the deterministic Controller; leases make multi-node safe."""
+    features = _edition_features()
+    if features is not None and not features.has_feature("compliance"):
+        return
+    def worker() -> None:
+        try:
+            from lib import compliance_controller
+        except ModuleNotFoundError:
+            from shared.lib import compliance_controller
+        while not _COMPLIANCE_CONTROLLER_STOP.is_set():
+            try:
+                compliance_controller.run_once(_local_node_id(), limit=50)
+            except Exception:
+                logger.debug("Compliance Controller cycle failed", exc_info=True)
+            _COMPLIANCE_CONTROLLER_STOP.wait(30)
+    threading.Thread(target=worker, name="cx-compliance-controller", daemon=True).start()
+
+
+def _remove_enterprise_compliance_routes() -> None:
+    """Keep Enterprise compliance HTTP surfaces out of Community runtimes."""
+    features = _edition_features()
+    if features is None or features.has_feature("compliance"):
+        return
+    app.router.routes[:] = [
+        route for route in app.router.routes
+        if getattr(route, "path", "") not in _ENTERPRISE_COMPLIANCE_PATHS
+    ]
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     # Recovery is deliberately node-scoped; another collaborating Dashboard
     # node keeps its leases and active Agent assignment.
+    _remove_enterprise_compliance_routes()
     _reclaim_local_agents()
+    _COMPLIANCE_CONTROLLER_STOP.clear()
+    _start_compliance_controller()
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
+    _COMPLIANCE_CONTROLLER_STOP.set()
     _reclaim_local_agents()
     try:
         identity_api.connection.close_pool()
@@ -321,6 +381,13 @@ def _legacy_dispatch(method: str, path: str, query: str, headers: Dict[str, str]
     except Exception as exc:  # the legacy handler normally serializes errors itself
         payload = json.dumps({"error": str(exc)}).encode("utf-8")
         return Response(payload, status_code=500, media_type="application/json")
+    finally:
+        # The legacy handler may set a Business Agent identity for Portal
+        # operations.  FastAPI reuses this event-loop thread between requests,
+        # so never carry that identity into the next human authorization check.
+        clear_context = getattr(connection, "set_agent_context", None)
+        if callable(clear_context):
+            clear_context(None)
 
     raw = handler.wfile.getvalue()
     marker = raw.find(b"\r\n\r\n")
@@ -415,7 +482,9 @@ def _legacy_gate(request: Request, path: str) -> Optional[Response]:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
     entry = "PORTAL" if path.startswith("/portal/api/") else "APP"
     try:
-        if not identity_api.entry_allowed(str(session["principal_id"]), entry):
+        with _schema_owner_context():
+            allowed = identity_api.entry_allowed(str(session["principal_id"]), entry)
+        if not allowed:
             return JSONResponse({"error": f"{entry.title()} access is disabled"}, status_code=403)
     except Exception:
         return JSONResponse({"error": "Entry-access policy is unavailable"}, status_code=503)
@@ -427,7 +496,8 @@ def _legacy_gate(request: Request, path: str) -> Optional[Response]:
     action = _legacy_required_action(path, request.method)
     if action:
         try:
-            access = identity_api.effective_access(str(session["principal_id"]), action)
+            with _schema_owner_context():
+                access = identity_api.effective_access(str(session["principal_id"]), action)
         except Exception:
             return JSONResponse({"error": "Authorization service unavailable"}, status_code=503)
         if access.get("decision") != "ALLOW":
@@ -548,6 +618,56 @@ class InstanceQuarantineBody(BaseModel):
     agent_id: str = Field(min_length=1, max_length=128)
     instance_id: str = Field(min_length=1, max_length=128)
     reason: str = Field(min_length=1, max_length=2000)
+
+
+class ComplianceActivationBody(BaseModel):
+    profile_version_id: str = Field(default="", max_length=128)
+    evidence_strength: str = Field(default="BOUNDARY_ONLY", max_length=32)
+    baseline: Dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ComplianceProfileBody(BaseModel):
+    profile_key: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=256)
+    content: Dict[str, Any] = Field(default_factory=dict)
+    parent_version_id: str = Field(default="", max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ComplianceAssignmentBody(BaseModel):
+    profile_version_id: str = Field(min_length=1, max_length=128)
+    environment: str = Field(default="production", min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ComplianceControlBody(BaseModel):
+    control_state: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=1, max_length=2000)
+    expected_version: Optional[int] = Field(default=None, ge=1)
+
+
+class ComplianceViolationBody(BaseModel):
+    rule_code: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=2000)
+    evidence_id: str = Field(default="", max_length=128)
+    automatic: bool = False
+
+
+class ComplianceRemediationBody(BaseModel):
+    required_action: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+    deadline_at: str = Field(default="", max_length=64)
+
+
+class ComplianceExceptionBody(BaseModel):
+    policy_key: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+    agent_id: str = Field(default="", max_length=128)
+    profile_version_id: str = Field(default="", max_length=128)
+    environment: str = Field(default="", max_length=64)
+    expires_at: str = Field(min_length=1, max_length=64)
+    compensating_controls: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DerivedObjectBody(BaseModel):
@@ -686,6 +806,21 @@ class GatewayTokenBody(BaseModel):
     scopes: list[str] = Field(default_factory=list, max_length=16)
 
 
+class GatewayActivationBody(GatewayTokenBody):
+    baseline: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GatewayEvidenceBody(BaseModel):
+    evidence_type: str = Field(min_length=1, max_length=64)
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    nonce: str = Field(default="", max_length=256)
+    expires_at: str = Field(default="", max_length=64)
+
+
+class GatewayRemediationBody(BaseModel):
+    response: Dict[str, Any] = Field(default_factory=dict)
+
+
 class GatewayAckBody(BaseModel):
     claim_token: str = Field(min_length=1, max_length=512)
     success: bool = True
@@ -788,7 +923,8 @@ def _session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     raw = request.cookies.get(_cookie_name())
     if not raw:
         return None
-    session = identity_api.resolve_session(raw, ttl_seconds=_session_timeout_seconds())
+    with _schema_owner_context():
+        session = identity_api.resolve_session(raw, ttl_seconds=_session_timeout_seconds())
     if session:
         request.state.cx_session = session
         request.state.cx_session_id = raw
@@ -800,7 +936,9 @@ def principal(request: Request) -> Dict[str, Any]:
     if not session:
         raise HTTPException(status_code=401, detail="Authentication required")
     try:
-        if not identity_api.entry_allowed(str(session["principal_id"]), "APP"):
+        with _schema_owner_context():
+            allowed = identity_api.entry_allowed(str(session["principal_id"]), "APP")
+        if not allowed:
             raise HTTPException(status_code=403, detail="Application access is disabled")
     except HTTPException:
         raise
@@ -823,7 +961,8 @@ def require_csrf(request: Request, session: Dict[str, Any] = Depends(principal))
 def require_action(action: str):
     def dependency(session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, Any]:
         try:
-            access = identity_api.effective_access(str(session["principal_id"]), action)
+            with _schema_owner_context():
+                access = identity_api.effective_access(str(session["principal_id"]), action)
         except Exception as exc:
             # Authorization failures must be distinguishable from a real deny;
             # otherwise a missing governance table or unavailable database is
@@ -1106,12 +1245,12 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "workspaces": "workspaces.read", "knowledge": "knowledge.read", "memory": "memory.read",
         "skills": "skills.read", "specs": "specs.read", "branches": "tasks.read",
         "collab": "channels.read", "loops": "tasks.read", "graph": "graphs.read",
-        "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read",
+        "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read", "compliance": "agents.read",
         "audit": "audit.read", "users": "users.read",
         "organization": "organizations.read",
     }
     feature_map = {
-        "approvals": "approvals", "audit": "audit",
+        "approvals": "approvals", "audit": "audit", "compliance": "compliance",
     }
     operation_actions = {
         "profile.update", "agents.enroll", "agents.operate", "agents.transfer", "agents.offboard",
@@ -1695,6 +1834,145 @@ def agents(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> 
     return {"items": items, "count": len(items)}
 
 
+@app.get("/api/agents/{agent_id}/posture")
+def agent_posture(agent_id: str, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.posture_detail(str(session["principal_id"]), agent_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent compliance posture is unavailable", identity_status=403) from exc
+
+
+@app.post("/api/agents/{agent_id}/activate")
+def agent_activate(agent_id: str, body: ComplianceActivationBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.activate_agent(str(session["principal_id"]), agent_id, body.profile_version_id,
+                                             body.evidence_strength, body.baseline, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent activation was denied") from exc
+
+
+@app.get("/api/compliance/summary")
+def compliance_summary(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.controller_summary(str(session["principal_id"]))
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance summary is unavailable", identity_status=403) from exc
+
+
+@app.get("/api/compliance/postures")
+def compliance_postures(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        items = compliance_api.list_postures(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance posture inventory is unavailable", identity_status=403) from exc
+
+
+@app.get("/api/compliance/findings")
+def compliance_findings(agent_id: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        items = compliance_api.list_findings(str(session["principal_id"]), agent_id, limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance findings are unavailable", identity_status=403) from exc
+
+
+@app.get("/api/compliance/remediations")
+def compliance_remediations(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        items = compliance_api.list_remediation_cases(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance remediation inventory is unavailable", identity_status=403) from exc
+
+
+@app.post("/api/compliance/findings/{finding_id}/remediations")
+def compliance_remediation_create(finding_id: str, body: ComplianceRemediationBody, session: Dict[str, Any] = Depends(require_action("agents.operate"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.create_remediation(str(session["principal_id"]), finding_id, body.required_action, body.reason, body.deadline_at)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance remediation creation was denied") from exc
+
+
+@app.get("/api/compliance/exceptions")
+def compliance_exceptions(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        items = compliance_api.list_exceptions(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance exception inventory is unavailable", identity_status=403) from exc
+
+
+@app.post("/api/compliance/exceptions")
+def compliance_exception_create(body: ComplianceExceptionBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.create_exception(
+            str(session["principal_id"]), body.policy_key, body.reason, agent_id=body.agent_id,
+            profile_version_id=body.profile_version_id, environment=body.environment,
+            expires_at=body.expires_at, compensating_controls=body.compensating_controls)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance exception request was denied") from exc
+
+
+@app.post("/api/compliance/exceptions/{exception_id}/{decision}")
+def compliance_exception_decide(exception_id: str, decision: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.decide_exception(str(session["principal_id"]), exception_id, decision, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance exception decision was denied") from exc
+
+
+@app.get("/api/compliance/profiles")
+def compliance_profiles(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        items = compliance_api.list_profiles(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance profiles are unavailable", identity_status=403) from exc
+
+
+@app.post("/api/compliance/profiles")
+def compliance_profile_create(body: ComplianceProfileBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.create_profile_draft(str(session["principal_id"]), body.profile_key, body.display_name,
+                                                   body.content, body.reason, body.parent_version_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile creation was denied") from exc
+
+
+@app.post("/api/compliance/profiles/{profile_version_id}/publish")
+def compliance_profile_publish(profile_version_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.publish_profile(str(session["principal_id"]), profile_version_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile publication was denied") from exc
+
+
+@app.post("/api/agents/{agent_id}/compliance-profile")
+def compliance_profile_assign(agent_id: str, body: ComplianceAssignmentBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.assign_profile(str(session["principal_id"]), agent_id, body.profile_version_id, body.environment, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile assignment was denied") from exc
+
+
+@app.post("/api/agents/{agent_id}/compliance-control")
+def compliance_control(agent_id: str, body: ComplianceControlBody, session: Dict[str, Any] = Depends(require_action("agents.operate"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.set_control(str(session["principal_id"]), agent_id, body.control_state, body.reason, body.expected_version)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance control was denied") from exc
+
+
+@app.post("/api/agents/{agent_id}/compliance-violation")
+def compliance_violation(agent_id: str, body: ComplianceViolationBody, session: Dict[str, Any] = Depends(require_action("agents.operate"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.report_deterministic_violation(str(session["principal_id"]), agent_id, body.rule_code,
+                                                              body.reason, body.evidence_id, body.automatic)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance violation was denied") from exc
+
+
 @app.get("/api/agents/{agent_id}/relationships")
 def agent_relationships(agent_id: str, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
@@ -2191,18 +2469,59 @@ def runtime_profile_activate(change_id: str, body: DecisionBody, session: Dict[s
         raise _identity_http_error(exc, "Runtime profile activation was denied") from exc
 
 
-def _gateway_context(request: Request, required_scope: str = "") -> Dict[str, Any]:
+def _gateway_context(request: Request, required_scope: str = "", *, operation: str = "work",
+                     attach_agent_database_context: bool = True) -> Dict[str, Any]:
     authorization = request.headers.get("Authorization", "")
     raw_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
     agent_id = request.headers.get("X-Agent-Id", "").strip()
     instance_id = request.headers.get("X-Agent-Instance", "").strip()
-    context = agent_gateway_api.authenticate_access_token(raw_token, agent_id, instance_id, required_scope)
+    context = agent_gateway_api.authenticate_access_token(raw_token, agent_id, instance_id, required_scope, operation=operation)
     if not context:
         raise HTTPException(status_code=401, detail="Agent access token is invalid")
     set_context = getattr(connection, "set_agent_context", None)
-    if callable(set_context):
+    if attach_agent_database_context and callable(set_context):
         set_context(str(context["agent_id"]))
     return context
+
+
+def _gateway_activation_credential(body: GatewayActivationBody) -> Optional[Dict[str, Any]]:
+    """Verify a pending Agent's registered credential for activation only."""
+    credential = agent_gateway_api.authenticate_activation_client_secret(body.agent_id, body.client_secret)
+    if credential:
+        return credential
+    if not (body.public_key and body.signature and body.challenge):
+        return None
+    try:
+        candidate = identity_api._row(connection.execute_query_one(
+            "SELECT c.AGENT_ID,c.CREDENTIAL_ID,c.CREDENTIAL_TYPE,c.PUBLIC_KEY,c.STATUS,p.STATUS AS AGENT_STATUS "
+            "FROM CX_AGENT_CREDENTIALS c JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=c.AGENT_ID "
+            "WHERE c.AGENT_ID=:agent_id AND c.CREDENTIAL_TYPE='ED25519' AND c.STATUS='ACTIVE' "
+            "AND p.PRINCIPAL_TYPE='AGENT' AND p.STATUS='PENDING_ACTIVATION' "
+            "AND (c.EXPIRES_AT IS NULL OR c.EXPIRES_AT>CURRENT_TIMESTAMP)", {"agent_id": body.agent_id}))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Agent credential service unavailable") from exc
+    if not candidate or str(candidate.get("public_key") or "") != body.public_key:
+        return None
+    return candidate if agent_gateway_api.verify_ed25519_proof(
+        body.public_key, body.signature, f"{body.agent_id}|activation|{body.challenge}") else None
+
+
+@app.post("/api/gateway/activate")
+@app.post("/api/agent-gateway/activate")
+def gateway_activate(body: GatewayActivationBody) -> Dict[str, Any]:
+    """Complete the one allowed pre-active Gateway action: credential proof."""
+    credential = _gateway_activation_credential(body)
+    if not credential:
+        raise HTTPException(status_code=401, detail="Agent activation credential is invalid")
+    try:
+        return compliance_api.activate_from_gateway(
+            body.agent_id, body.baseline, credential_type=str(credential.get("credential_type") or ""),
+            runtime="", environment="", security_domain_id=body.security_domain_id,
+        )
+    except compliance_api.ComplianceError as exc:
+        raise HTTPException(status_code=403, detail="Agent activation was denied") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Agent activation service unavailable") from exc
 
 
 @app.post("/api/gateway/token")
@@ -2244,7 +2563,7 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
         except (agent_gateway_api.GatewayError, PermissionError) as exc:
             raise HTTPException(status_code=403, detail="Agent instance could not be created") from exc
     requested = body.scopes or ["channels.read", "channels.write"]
-    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read"}
+    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation"}
     if not set(requested) <= allowed:
         raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
     try:
@@ -2326,6 +2645,32 @@ def gateway_heartbeat(request: Request) -> Dict[str, Any]:
         return {"success": agent_gateway_api.heartbeat_instance(str(context["agent_id"]), str(context["instance_id"]))}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Agent instance service unavailable") from exc
+
+
+@app.post("/api/gateway/evidence")
+def gateway_evidence(body: GatewayEvidenceBody, request: Request) -> Dict[str, Any]:
+    """Accept bounded runtime evidence through the existing Gateway token."""
+    context = _gateway_context(request, "compliance.evidence", operation="evidence", attach_agent_database_context=False)
+    try:
+        return compliance_api.submit_gateway_evidence(
+            str(context["agent_id"]), str(context["instance_id"]), body.evidence_type,
+            body.payload, nonce=body.nonce, expires_at=body.expires_at,
+        )
+    except compliance_api.ComplianceError as exc:
+        raise HTTPException(status_code=403, detail="Compliance evidence was denied") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Compliance evidence service unavailable") from exc
+
+
+@app.post("/api/gateway/remediations/{case_id}/respond")
+def gateway_remediation(case_id: str, body: GatewayRemediationBody, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(request, "compliance.remediation", operation="remediation", attach_agent_database_context=False)
+    try:
+        return compliance_api.respond_remediation(str(context["agent_id"]), case_id, body.response)
+    except compliance_api.ComplianceError as exc:
+        raise HTTPException(status_code=403, detail="Remediation response was denied") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Remediation response service unavailable") from exc
 
 
 @app.post("/api/gateway/channels/{channel_id}/messages")

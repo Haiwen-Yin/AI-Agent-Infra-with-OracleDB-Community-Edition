@@ -124,7 +124,8 @@ a {
 }
 .cx-nav {
   display: grid;
-  grid-template-columns: repeat(9, max-content);
+  grid-template-columns: repeat(10, max-content);
+  grid-template-rows: repeat(2, auto);
   justify-content: center;
   gap: 1px 7px;
   min-width: 0;
@@ -278,6 +279,37 @@ a {
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin: 25px 0 18px;
+}
+.compliance-posture-grid {
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+}
+.compliance-posture-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 94px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+.compliance-posture-card > div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.compliance-posture-card > div + div {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.compliance-posture-card small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.compliance-posture-card strong {
+  color: var(--brand-deep);
+  font-size: 16px;
+  overflow-wrap: anywhere;
 }
 .metric {
   min-height: 106px;
@@ -610,6 +642,10 @@ tbody tr:hover {
   color: var(--brand-deep);
   box-shadow: 0 1px 4px rgba(20, 42, 48, 0.12);
   font-weight: 700;
+}
+.compliance-tabs {
+  flex-wrap: wrap;
+  margin-bottom: 14px;
 }
 .entry-access-toggle {
   flex: 0 0 auto;
@@ -1567,7 +1603,8 @@ tbody tr:hover {
     padding-inline: 18px;
   }
   .cx-nav {
-    grid-template-columns: repeat(6, max-content);
+    grid-template-columns: repeat(10, max-content);
+    grid-template-rows: repeat(2, auto);
   }
   .organization-workspace {
     grid-template-columns: 200px minmax(410px, 1fr) 280px;
@@ -1583,13 +1620,15 @@ tbody tr:hover {
     grid-row: 2;
   }
   .cx-nav {
-    grid-template-columns: repeat(6, max-content);
+    grid-template-columns: repeat(10, max-content);
+    grid-template-rows: repeat(2, auto);
     justify-content: center;
   }
 }
 @media (max-width: 780px) {
   .cx-nav {
-    grid-template-columns: repeat(4, max-content);
+    grid-template-columns: repeat(10, max-content);
+    grid-template-rows: repeat(2, auto);
     justify-content: start;
     overflow-x: auto;
     padding-bottom: 2px;
@@ -1718,7 +1757,8 @@ tbody tr:hover {
     font-size: 8px;
   }
   .cx-nav {
-    grid-template-columns: repeat(3, max-content);
+    grid-template-columns: repeat(10, max-content);
+    grid-template-rows: repeat(2, auto);
   }
   .cx-main {
     padding-inline: 11px;

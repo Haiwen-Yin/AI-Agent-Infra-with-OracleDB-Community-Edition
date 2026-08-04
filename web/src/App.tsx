@@ -86,6 +86,7 @@ const nav = [
   ["channels", "频道", "Channels", MessageSquare],
   ["barriers", "协作关卡", "Collaboration gates", CircleHelp],
   ["approvals", "审批", "Approvals", ShieldCheck],
+  ["compliance", "合规", "Compliance", ShieldCheck],
   ["audit", "审计", "Audit", FileKey2],
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
@@ -880,6 +881,8 @@ function PageView({
         onNotice={onNotice}
       />
     );
+  if (page === "compliance")
+    return <CompliancePage lang={lang} capabilities={capabilities} text={text} onNotice={onNotice} />;
   if (page === "audit")
     return (
       <AuditPage
@@ -1243,6 +1246,23 @@ const statusLabels: Record<string, [string, string]> = {
   PAUSED: ["已暂停", "Paused"],
   COMPLETED: ["已完成", "Completed"],
   QUARANTINED: ["已隔离", "Quarantined"],
+  UNKNOWN: ["未知", "Unknown"],
+  COMPLIANT: ["合规", "Compliant"],
+  DEGRADED: ["降级", "Degraded"],
+  NON_COMPLIANT: ["不合规", "Non-compliant"],
+  NORMAL: ["正常", "Normal"],
+  PENDING_ACTIVATION: ["待激活", "Pending activation"],
+  NEVER_SEEN: ["未观察", "Never observed"],
+  ONLINE: ["在线", "Online"],
+  IDLE: ["空闲", "Idle"],
+  STALE: ["状态陈旧", "Stale"],
+  OFFLINE: ["离线", "Offline"],
+  BOUNDARY_ONLY: ["仅边界证据", "Boundary only"],
+  SIGNED_ADAPTER: ["已签名适配器", "Signed adapter"],
+  MANAGED_RUNTIME: ["受管运行时", "Managed runtime"],
+  SCOPE_LIMITED: ["范围受限", "Scope limited"],
+  REMEDIATING: ["整改中", "Remediating"],
+  ACKNOWLEDGED: ["已确认", "Acknowledged"],
   APPROVED: ["已批准", "Approved"],
   DENIED: ["已拒绝", "Denied"],
   EXPIRED: ["已过期", "Expired"],
@@ -3779,6 +3799,153 @@ function MonitorPage({
       )}
     </section>
   );
+}
+
+function CompliancePage({
+  lang,
+  capabilities,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  capabilities: Row | null;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [summary, setSummary] = useState<Row>({ postures: [], open_findings: [] });
+  const [findings, setFindings] = useState<Row[]>([]);
+  const [profiles, setProfiles] = useState<Row[]>([]);
+  const [remediations, setRemediations] = useState<Row[]>([]);
+  const [exceptions, setExceptions] = useState<Row[]>([]);
+  const [tab, setTab] = useState<"overview" | "findings" | "profiles" | "remediation" | "exceptions" | "controller">("overview");
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const [nextSummary, nextFindings, nextProfiles, nextRemediations, nextExceptions] = await Promise.all([
+        api<Row>("/api/compliance/summary"),
+        api<Row>("/api/compliance/findings"),
+        api<Row>("/api/compliance/profiles"),
+        api<Row>("/api/compliance/remediations"),
+        api<Row>("/api/compliance/exceptions"),
+      ]);
+      setSummary(nextSummary);
+      setFindings(nextFindings.items || []);
+      setProfiles(nextProfiles.items || []);
+      setRemediations(nextRemediations.items || []);
+      setExceptions(nextExceptions.items || []);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("合规数据加载失败", "Compliance data could not be loaded"));
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const decideException = async (decision: "approve" | "reject" | "revoke", reason: string) => {
+    if (!selected?.exception_id || !reason.trim()) return;
+    setBusy(true);
+    try {
+      await api(`/api/compliance/exceptions/${encodeURIComponent(String(selected.exception_id))}/${decision}`, {
+        method: "POST", body: JSON.stringify({ reason }),
+      });
+      setSelected(null);
+      await load();
+      onNotice(text("例外决定已记录。", "Exception decision recorded."));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("例外决定失败", "Exception decision failed"));
+    } finally { setBusy(false); }
+  };
+  const createProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    setBusy(true);
+    try {
+      await api("/api/compliance/profiles", { method: "POST", body: JSON.stringify({
+        profile_key: data.profile_key, display_name: data.display_name, reason: data.reason,
+        content: { locked_fields: ["database", "secrets"], controls: { database: "gateway_only", secrets: "broker_only" } },
+      }) });
+      event.currentTarget.reset(); await load();
+      onNotice(text("受管配置草稿已创建，发布前仍可复核。", "Governed Profile draft created; review it before publication."));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("创建受管配置失败", "Profile creation failed"));
+    } finally { setBusy(false); }
+  };
+  const createException = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    setBusy(true);
+    try {
+      await api("/api/compliance/exceptions", { method: "POST", body: JSON.stringify({
+        policy_key: data.policy_key, agent_id: data.agent_id, environment: data.environment,
+        expires_at: data.expires_at, reason: data.reason,
+        compensating_controls: { manual_review: "required" },
+      }) });
+      event.currentTarget.reset(); await load();
+      onNotice(text("例外请求已提交，申请人与审批人必须分离。", "Exception request submitted; requester and approver must be distinct."));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("例外请求失败", "Exception request failed"));
+    } finally { setBusy(false); }
+  };
+  const tabs: Array<[typeof tab, string, string]> = [
+    ["overview", "概览", "Overview"], ["findings", "发现", "Findings"], ["profiles", "受管配置", "Governed profiles"],
+    ["remediation", "整改", "Remediation"], ["exceptions", "例外", "Exceptions"], ["controller", "控制器", "Controller"],
+  ];
+  return <section className="page-stack">
+    <SectionHeading title={text("合规", "Compliance")} subtitle={text("基于已验证证据的智能体姿态、发现和受管配置。", "Evidence-based Agent posture, findings, and governed configurations.")} text={text} />
+    <div className="view-toggle compliance-tabs" role="tablist" aria-label={text("合规视图", "Compliance views")}>
+      {tabs.map(([key, zh, en]) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === key}
+          key={key}
+          className={tab === key ? "active" : ""}
+          onClick={() => setTab(key)}
+        >
+          {text(zh, en)}
+        </button>
+      ))}
+    </div>
+    {tab === "overview" && <>
+      <InfoPanel title={text("合规姿态", "Compliance posture")} text={text}>
+        <div className="metric-grid compliance-posture-grid">{(summary.postures || []).map((item: Row) => <div className="compliance-posture-card" key={`${item.posture_state}-${item.control_state}`}><div><small>{text("合规姿态", "Posture")}</small><strong>{displayRowValue(lang, item.posture_state || "UNKNOWN")}</strong></div><div><small>{text("数量", "Count")}</small><strong>{item.count || 0}</strong></div><div><small>{text("控制状态", "Control")}</small><strong>{displayRowValue(lang, item.control_state || "NORMAL")}</strong></div></div>)}</div>
+      </InfoPanel>
+      <div className="split-grid">
+        <InfoPanel title={text("待处理发现", "Open findings")} text={text}>
+          <div className="metric-grid">{(summary.open_findings || []).map((item: Row) => <div className="metric-card" key={String(item.severity)}><small>{displayRowValue(lang, item.severity || "UNKNOWN")}</small><strong>{item.count || 0}</strong></div>)}</div>
+          {!(summary.open_findings || []).length && <div className="empty-state">{text("当前范围内没有待处理发现。", "No open findings are visible in the current scope.")}</div>}
+        </InfoPanel>
+        <InfoPanel title={text("控制器", "Controller")} text={text}><div className="empty-state">{text("状态：", "Status: ")}{displayRowValue(lang, summary.controller || "UNKNOWN")}{summary.scope_limited ? text("。仅显示当前授权范围，不显示全局队列。", ". Only the authorized scope is shown; global queues are hidden.") : ""}</div></InfoPanel>
+      </div>
+    </>}
+    {tab === "findings" && <InfoPanel title={text("发现", "Findings")} text={text}>
+      <p className="cx-form-hint">{text("仅确定性规则和已验证证据可以标记为不合规；缺少活动或边界证据不会自动定性为违规。点击条目查看详情。", "Only deterministic rules with verified evidence may mark an Agent non-compliant. Missing activity or boundary evidence is not a violation by itself. Select a row for details.")}</p>
+      <DataTable headers={[text("严重性", "Severity"), text("智能体", "Agent"), text("规则", "Rule"), text("状态", "Status"), text("最近观察", "Last observed"), text("", "")]} rows={findings.map((item) => [displayRowValue(lang, item.severity), String(item.agent_id || "-"), String(item.rule_code || "-"), displayRowValue(lang, item.status), String(item.last_observed_at || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "finding" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规发现", "No compliance findings")} />
+    </InfoPanel>}
+    {tab === "profiles" && <>
+      <InfoPanel title={text("受管配置", "Governed profiles")} text={text}>
+        <p className="cx-form-hint">{text("配置限定已有权限，不会授予身份、数据、工具或数据库访问权。发布后的版本不可修改。", "Profiles constrain existing authority; they never grant identity, data, Tool, or database access. Published versions are immutable.")}</p>
+        <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16)])} text={text} empty={text("暂无受管配置", "No governed profiles")} />
+      </InfoPanel>
+      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("创建草稿", "Create draft")} text={text}><form className="inline-form" onSubmit={createProfile}><input name="profile_key" required placeholder={text("配置键", "Profile key")} /><input name="display_name" required placeholder={text("显示名称", "Display name")} /><input name="reason" required placeholder={text("创建原因", "Reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></form></InfoPanel>}
+    </>}
+    {tab === "remediation" && <InfoPanel title={text("整改", "Remediation")} text={text}>
+      <p className="cx-form-hint">{text("整改必须通过受认证网关提交结构化证据；普通频道聊天不会关闭整改。", "Remediation requires structured evidence through the authenticated Gateway; ordinary Channel chat never closes a case.")}</p>
+      <DataTable headers={[text("编号", "Case"), text("智能体", "Agent"), text("要求", "Required action"), text("状态", "Status"), text("期限", "Deadline"), text("", "")]} rows={remediations.map((item) => [String(item.case_id || "-"), String(item.agent_id || "-"), String(item.required_action || "-"), displayRowValue(lang, item.status), String(item.deadline_at || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "remediation" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无整改任务", "No remediation cases")} />
+    </InfoPanel>}
+    {tab === "exceptions" && <>
+      <InfoPanel title={text("例外", "Exceptions")} text={text}>
+        <p className="cx-form-hint">{text("例外必须包含补偿控制、原因和失效时间；申请人不能审批自己的请求，到期后控制器会重新评估。", "Exceptions require compensating controls, a reason, and an expiry. Requesters cannot approve their own request; the Controller reevaluates expiry.")}</p>
+        <DataTable headers={[text("策略", "Policy"), text("智能体", "Agent"), text("状态", "Status"), text("失效时间", "Expiry"), text("申请人", "Requester"), text("", "")]} rows={exceptions.map((item) => [String(item.policy_key || "-"), String(item.agent_id || "-") , displayRowValue(lang, item.status), String(item.expires_at || "-"), String(item.requested_by || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "exception" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规例外", "No compliance exceptions")} />
+      </InfoPanel>
+      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("请求例外", "Request exception")} text={text}><form className="inline-form" onSubmit={createException}><input name="policy_key" required placeholder={text("策略或字段", "Policy or field")} /><input name="agent_id" placeholder={text("智能体 ID（可选）", "Agent ID (optional)")} /><input name="environment" placeholder={text("环境", "Environment")} /><input name="expires_at" type="datetime-local" required /><input name="reason" required placeholder={text("业务原因", "Business reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("提交请求", "Submit request")}</button></form></InfoPanel>}
+    </>}
+    {tab === "controller" && <InfoPanel title={text("控制器诊断", "Controller diagnostics")} text={text}>
+      <DataTable headers={[text("状态", "Status"), text("数量", "Count")]} rows={(summary.jobs || []).map((item: Row) => [displayRowValue(lang, item.status), String(item.count || 0)])} text={text} empty={text("当前账户无权查看全局控制器队列，或暂无控制器任务。", "This account cannot view the global Controller queue, or no Controller jobs exist.")} />
+      <div className="empty-state">{text("最近租约节点：", "Last lease owner: ")}{summary.lease_owner || text("暂无", "None")}</div>
+    </InfoPanel>}
+    <DetailDrawer open={Boolean(selected)} title={text("合规详情", "Compliance details")} onClose={() => setSelected(null)} text={text} wide>
+      {selected && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = window.prompt(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = window.prompt(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
+    </DetailDrawer>
+  </section>;
 }
 
 function AgentsPage({

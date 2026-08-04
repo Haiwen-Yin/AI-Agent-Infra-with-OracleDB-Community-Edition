@@ -135,7 +135,15 @@ def _id(prefix: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    """Return the deployment-local wall clock for naive database TIMESTAMPs.
+
+    Identity tables intentionally use cross-adapter ``TIMESTAMP`` columns.
+    Binding a naive UTC value while Oracle/YashanDB compare against a local
+    ``CURRENT_TIMESTAMP`` makes a newly issued TTL appear expired by the
+    timezone offset.  All identity expiry values therefore use the same local
+    wall-clock basis as the database session.
+    """
+    return datetime.now().astimezone().replace(tzinfo=None)
 
 
 def _timestamp(value: Any) -> Optional[datetime]:
@@ -1633,7 +1641,9 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
             raise IdentityError("Enrollment environment binding failed")
         if int(row.get("max_uses") or 0) <= int(row.get("used_count") or 0):
             raise IdentityError("Enrollment quota is exhausted")
-        status = "PENDING_CONFIRMATION" if str(row.get("risk_tier") or "STANDARD").upper() != "LOW" else "ACTIVE"
+        # Enrollment fixes ownership but does not prove an approved runtime.
+        # All new Agents must complete v4.3.4 activation before formal work.
+        status = "PENDING_CONFIRMATION" if str(row.get("risk_tier") or "STANDARD").upper() != "LOW" else "PENDING_ACTIVATION"
         consumed = tx.execute("UPDATE CX_ENROLLMENT_TOKENS SET CONSUMED_AT = CURRENT_TIMESTAMP, CONSUMED_AGENT_ID = :agent_id WHERE TOKEN_ID = :token_id AND CONSUMED_AT IS NULL", {"agent_id": generated_agent_id, "token_id": row["token_id"]})
         if consumed != 1:
             raise IdentityError("Enrollment token was already redeemed")
@@ -1645,6 +1655,12 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
             {"agent_id": generated_agent_id, "grant_id": row["grant_id"]},
         )
         tx.execute("INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, STATUS) VALUES (:agent_id, 'AGENT', :status)", {"agent_id": generated_agent_id, "status": status})
+        tx.execute(
+            "INSERT INTO CX_AGENT_POSTURES(POSTURE_ID, AGENT_ID, REGISTRATION_STATE, RUNTIME_STATE, POSTURE_STATE, "
+            "CONTROL_STATE, EVIDENCE_STRENGTH, VERSION) VALUES (:posture_id, :agent_id, :registration_state, "
+            "'NEVER_SEEN', 'UNKNOWN', 'NORMAL', 'BOUNDARY_ONLY', 1)",
+            {"posture_id": _id("POST"), "agent_id": generated_agent_id, "registration_state": status},
+        )
         if row.get("security_domain_id"):
             tx.execute(
                 "INSERT INTO CX_DOMAIN_MEMBERS(MEMBERSHIP_ID, SECURITY_DOMAIN_ID, PRINCIPAL_ID, MEMBERSHIP_TIER, STATUS) "
@@ -1726,7 +1742,7 @@ def set_agent_status(actor_principal_id: str, agent_id: str, status: str, reason
     if not reason.strip():
         raise IdentityError("Agent status reason is required")
     target = str(status or "").upper()
-    if target not in {"ACTIVE", "DISABLED", "QUARANTINED", "OWNER_TRANSFER_REQUIRED"}:
+    if target not in {"ACTIVE", "PENDING_ACTIVATION", "DISABLED", "QUARANTINED", "OWNER_TRANSFER_REQUIRED"}:
         raise IdentityError("Agent status is invalid")
     access = effective_access(actor_principal_id, "agents.manage")
     related = _row(connection.execute_query_one(
@@ -1754,6 +1770,14 @@ def set_agent_status(actor_principal_id: str, agent_id: str, status: str, reason
         ))
         if not agent:
             return False
+        if target == "ACTIVE" and str(agent.get("status") or "").upper() != "ACTIVE":
+            activation = _row(tx.query_one(
+                "SELECT ACTIVATION_ID FROM CX_AGENT_ACTIVATIONS WHERE AGENT_ID = :agent_id "
+                "AND STATUS = 'ACTIVE' FOR UPDATE",
+                {"agent_id": agent_id},
+            ))
+            if not activation:
+                raise IdentityError("Agent activation evidence is required")
         related_tx = _row(tx.query_one(
             "SELECT RELATIONSHIP_ID FROM CX_AGENT_RELATIONSHIPS "
             "WHERE AGENT_ID = :agent_id AND PRINCIPAL_ID = :principal_id "
@@ -1769,7 +1793,10 @@ def set_agent_status(actor_principal_id: str, agent_id: str, status: str, reason
         ) > 0
         if not changed:
             return False
-        if target != "ACTIVE":
+        # Confirmation advances to activation pending.  The registered proof
+        # credential remains present for the activation handshake, while the
+        # non-ACTIVE Principal still prevents ordinary Gateway use.
+        if target not in {"ACTIVE", "PENDING_ACTIVATION"}:
             instance_status = "QUARANTINED" if target == "QUARANTINED" else "REVOKED"
             tx.execute(
                 "UPDATE CX_AGENT_INSTANCES SET STATUS = :instance_status, REVOKED_AT = CURRENT_TIMESTAMP, "
