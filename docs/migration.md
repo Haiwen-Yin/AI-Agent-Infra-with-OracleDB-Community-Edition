@@ -1,4 +1,20 @@
-# Migration Guide - AI Agent Infra with DB v4.3.4
+# Migration Guide - AI Agent Infra with DB v4.3.5
+
+## v4.3.5 Platform Capability Step
+
+`31_v4_3_5_platform_capabilities.sql` adds the database-authoritative
+installation capability registry, dependency catalog, and immutable change
+history for all three adapters. Capability rows seed enabled so an upgraded
+v4.3.4 installation preserves its behavior. Enterprise applies the complete
+v4.3.4 compliance chain before step 31; Community keeps its physical edition
+boundary and does not receive Enterprise compliance scripts.
+
+Run `migration_runner.py --version 4.3.5 --edition <community|enterprise>`
+after recording recoverable backup evidence. The runner is additive,
+idempotent, checksum-journaled, and retries an interrupted step. Validate with
+`live_db_validator.py --version 4.3.5`. Do not edit an applied migration or
+delete migration-ledger rows. Disabling an optional capability retains its
+data and running work but blocks new requests at the backend.
 
 ## v4.3.4 Agent Compliance Steps
 

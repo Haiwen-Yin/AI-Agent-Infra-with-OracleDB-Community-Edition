@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.4 - Community Edition - Distributed Tracing
+"""AI Agent Infra v4.3.5 - Community Edition - Distributed Tracing
 
 Trace ID propagation across sessions, plans, loop runs, and tool calls.
 Thread-local trace context for automatic propagation.

@@ -1,4 +1,21 @@
-# API Reference - AI Agent Infra with DB v4.3.4
+# API Reference - AI Agent Infra with DB v4.3.5
+
+## v4.3.5 Platform Capability API
+
+The protected Dashboard page uses these endpoints. Both require an
+authenticated Principal with `platform.manage`; mutations also require CSRF,
+a non-empty reason, and the current `expected_version`.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/platform/capabilities` | GET | Read the database-authoritative effective capability state and recent history. |
+| `/api/platform/capabilities/{capability_key}` | PUT | Enable or disable one optional capability with dependency and optimistic-lock checks. |
+
+The backend returns `409 CAPABILITY_DISABLED` for a disabled mapped entry
+point. Package edition availability is checked before database state, so a
+Community database row cannot activate Enterprise code absent from the
+package. Identity, authorization, security, audit writing, Agent identity,
+user management, and capability configuration are mandatory.
 
 ## v4.3.4 Agent Compliance API
 

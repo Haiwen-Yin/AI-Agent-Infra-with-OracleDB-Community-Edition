@@ -1,5 +1,5 @@
 -- ============================================================
--- AI Agent Infra v4.3.4 - Phase 2: PL/SQL API Packages
+-- AI Agent Infra v4.3.5 - Phase 2: PL/SQL API Packages
 -- ============================================================
 
 WHENEVER SQLERROR CONTINUE;
@@ -2055,8 +2055,11 @@ CREATE OR REPLACE PACKAGE BODY END_USER_MANAGER AS
         v_pwd VARCHAR2(100);
         v_existing VARCHAR2(100);
     BEGIN
-        BEGIN
-            SELECT CONFIG_VALUE INTO v_existing
+    BEGIN
+        IF NOT REGEXP_LIKE(p_eu_name, '^[A-Z][A-Z0-9_$#]{0,127}$') THEN
+            RETURN 'ERROR:unsafe end user identifier';
+        END IF;
+        SELECT CONFIG_VALUE INTO v_existing
             FROM SYSTEM_CONFIG
             WHERE CONFIG_KEY = 'end_user_pwd.' || p_agent_id;
             IF v_existing IS NOT NULL THEN
@@ -2362,7 +2365,7 @@ END MONITOR_MANAGER;
 /
 
 
-PROMPT AI Agent Infra v4.3.4 API Deployment Complete
+PROMPT AI Agent Infra v4.3.5 API Deployment Complete
 PROMPT ============================================================
 
 
@@ -3540,5 +3543,5 @@ END LOOP_MANAGER;
 
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v4.3.4 API Deployment Complete
+PROMPT AI Agent Infra v4.3.5 API Deployment Complete
 PROMPT ============================================================

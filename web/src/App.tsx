@@ -28,6 +28,7 @@ import {
   Redo2,
   RefreshCw,
   Search,
+  Settings2,
   ShieldCheck,
   StopCircle,
   Sun,
@@ -90,6 +91,7 @@ const nav = [
   ["audit", "审计", "Audit", FileKey2],
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
+  ["platform", "功能配置", "Capabilities", Settings2],
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -211,6 +213,16 @@ function App() {
     setPage(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const refreshCapabilities = async () => {
+    const value = await api<Row>("/api/capabilities");
+    setCapabilities(value);
+    const pages = new Set<string>(value.pages || []);
+    if (!pages.has(page)) {
+      const fallback = nav.find((item) => pages.has(item[0]))?.[0] || "agents";
+      window.history.replaceState({}, "", `/app/${fallback}`);
+      setPage(fallback);
+    }
+  };
 
   const text = (zh: string, en: string) => tx(lang, zh, en);
   if (loading)
@@ -285,12 +297,13 @@ function App() {
         )}
         <PageView
           key={page}
-          page={allowedPages.has(page) ? page : "monitor"}
+          page={allowedPages.has(page) ? page : (nav.find((item) => allowedPages.has(item[0]))?.[0] || "agents")}
           lang={lang}
           me={me}
           capabilities={capabilities}
           text={text}
           onNotice={setNotice}
+          onCapabilitiesChanged={refreshCapabilities}
         />
       </main>
     </div>
@@ -806,6 +819,7 @@ function PageView({
   capabilities,
   text,
   onNotice,
+  onCapabilitiesChanged,
 }: {
   page: string;
   lang: Lang;
@@ -813,7 +827,17 @@ function PageView({
   capabilities: Row | null;
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
+  onCapabilitiesChanged: () => Promise<void>;
 }) {
+  if (page === "platform")
+    return (
+      <PlatformCapabilitiesPage
+        lang={lang}
+        text={text}
+        onNotice={onNotice}
+        onCapabilitiesChanged={onCapabilitiesChanged}
+      />
+    );
   if (page === "channels")
     return (
       <Channels
@@ -906,6 +930,82 @@ function PageView({
       </>
     );
   return <DataPage page={page} lang={lang} text={text} onNotice={onNotice} />;
+}
+
+function PlatformCapabilitiesPage({
+  lang,
+  text,
+  onNotice,
+  onCapabilitiesChanged,
+}: {
+  lang: Lang;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+  onCapabilitiesChanged: () => Promise<void>;
+}) {
+  const [payload, setPayload] = useState<Row>({ items: [], history: [] });
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      setPayload(await api<Row>("/api/platform/capabilities?limit=50"));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const items = listPayload(payload, ["items"]);
+  const groups: [string, Row[]][] = [
+    [text("系统保护能力", "Protected system capabilities"), items.filter((item) => item.mandatory)],
+    [text("可配置能力", "Configurable capabilities"), items.filter((item) => !item.mandatory && item.edition_available)],
+    [text("当前版本不可用", "Unavailable in this edition"), items.filter((item) => !item.edition_available)],
+  ];
+  const submit = async () => {
+    if (!selected || reason.trim().length < 3) {
+      onNotice(text("请输入至少 3 个字符的变更原因", "Enter a change reason of at least 3 characters"));
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/platform/capabilities/${encodeURIComponent(String(selected.capability_key))}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: !selected.effective_enabled,
+          expected_version: Number(selected.version),
+          reason: reason.trim(),
+        }),
+      });
+      setSelected(null);
+      setReason("");
+      await Promise.all([load(), onCapabilitiesChanged()]);
+      onNotice(text("功能状态已写入数据库并记录审计", "Capability state was committed and audited"));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />
+    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {loading ? <PageLoading text={text} /> : groups.map(([title, rows]) => rows.length > 0 && <InfoPanel key={title} title={title} text={text}><div className="capability-list">{rows.map((item) => {
+      const blocked = Boolean(item.mandatory) || !item.edition_available;
+      return <div className="capability-row" key={String(item.capability_key)}>
+        <div><strong>{lang === "zh" ? item.display_name_zh : item.display_name_en}</strong><small>{String(item.capability_key)} · v{String(item.version)}</small></div>
+        <div className="capability-dependencies">{item.dependencies?.length ? `${text("依赖", "Depends on")}: ${item.dependencies.join(", ")}` : text("无功能依赖", "No capability dependencies")}</div>
+        <button type="button" role="switch" aria-checked={Boolean(item.effective_enabled)} className={`capability-switch ${item.effective_enabled ? "active" : ""}`} disabled={blocked} onClick={() => { setSelected(item); setReason(""); }} title={blocked ? text("系统保护或当前版本不可用", "Protected by the system or unavailable in this edition") : text("变更功能状态", "Change capability state")}><span /><b>{item.effective_enabled ? text("开启", "On") : text("关闭", "Off")}</b></button>
+      </div>;
+    })}</div></InfoPanel>)}
+    <InfoPanel title={text("最近变更", "Recent changes")} text={text}><DataTable headers={[text("功能", "Capability"), text("变更", "Change"), text("操作人", "Actor"), text("原因", "Reason"), text("时间", "Time")]} rows={listPayload(payload, ["history"]).map((item) => [item.capability_key, `${item.from_enabled} -> ${item.to_enabled}`, item.changed_by, item.reason, displayRowValue(lang, item.created_at)])} empty={text("暂无功能状态变更", "No capability changes yet")} text={text} /></InfoPanel>
+    <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
+      {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
+    </DetailDrawer>
+  </>;
 }
 
 function MemoryLifecyclePage({

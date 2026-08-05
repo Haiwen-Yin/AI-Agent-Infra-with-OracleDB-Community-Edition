@@ -1,4 +1,21 @@
-# Security - AI Agent Infra with DB v4.3.4
+# Security - AI Agent Infra with DB v4.3.5
+
+## v4.3.5 Capability Boundary
+
+Feature visibility in the Dashboard is not an authorization boundary. The
+effective state of a product capability is the conjunction of package
+availability, database registry state, and the current Principal's action
+permission. Mapped API routes enforce the registry before their handlers run;
+disabled pages cannot be reached by calling the API directly.
+
+Capability changes require `platform.manage`, CSRF, an explicit reason, and an
+optimistic database version. The state update, immutable history row, and
+`CX_SECURITY_EVENTS` record use one transaction so a failed audit write cannot
+produce an apparently successful state change. Dependencies are validated in
+both directions. Mandatory control-plane capabilities cannot be disabled. No
+password, token, private key, or arbitrary configuration secret is stored in
+the registry. Cross-Admin Skill tokens use `X-Admin-Token`, not URL query
+strings, and Oracle End User names are validated before dynamic DDL.
 
 ## v4.3.4 Agent Compliance Boundary
 

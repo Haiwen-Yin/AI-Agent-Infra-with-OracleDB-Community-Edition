@@ -30,12 +30,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities
 
 
-VERSION = "4.3.4"
+VERSION = "4.3.5"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -97,6 +97,75 @@ def _runtime_profile() -> str:
     return requested
 
 app = FastAPI(title="Chuanxu AI Agent Management Platform", version=VERSION)
+
+
+def _path_capability(path: str) -> Optional[str]:
+    """Map every product entry point to one installation capability."""
+    normalized = "/" + str(path or "").lstrip("/")
+    if normalized.startswith("/portal"):
+        return "portal"
+    if normalized.startswith("/app/"):
+        page = normalized.split("/", 3)[2]
+        return {
+            "monitor": "monitor", "agents": "agents", "tasks": "tasks",
+            "workspaces": "workspaces", "knowledge": "knowledge", "memory": "memory",
+            "skills": "skills", "specs": "specs", "branches": "branches",
+            "collab": "collaboration", "loops": "loops", "graph": "graph",
+            "channels": "channels", "barriers": "barriers", "approvals": "approvals",
+            "compliance": "compliance", "audit": "audit_view", "users": "users",
+            "organization": "organization", "platform": "platform_config",
+        }.get(page)
+    if normalized.startswith("/api/agents/") and any(part in normalized for part in ("/posture", "/activate", "/compliance-")):
+        return "compliance"
+    rules = (
+        (("/api/platform",), "platform_config"),
+        (("/api/monitor",), "monitor"),
+        (("/api/agents/",), "agents"),
+        (("/api/tasks", "/api/execution", "/ap/v1/agent/tasks"), "tasks"),
+        (("/api/workspaces",), "workspaces"),
+        (("/api/knowledge",), "knowledge"),
+        (("/api/memory",), "memory"),
+        (("/api/skills", "/api/skill", "/api/agent/skills"), "skills"),
+        (("/api/specs",), "specs"),
+        (("/api/branches", "/api/branch"), "branches"),
+        (("/api/collab",), "collaboration"),
+        (("/api/loops",), "loops"),
+        (("/api/graphs", "/api/graph-", "/api/graph/"), "graph"),
+        (("/api/channels", "/api/gateway/channels", "/api/agent-gateway/channels", "/api/gateway/events"), "channels"),
+        (("/api/barriers", "/api/gateway/barriers", "/api/agent-gateway/barriers"), "barriers"),
+        (("/api/approvals",), "approvals"),
+        (("/api/compliance", "/api/gateway/evidence", "/api/gateway/remediations"), "compliance"),
+        (("/api/audit", "/api/traces", "/api/evidence", "/api/legal-holds"), "audit_view"),
+        (("/api/users", "/api/registration"), "users"),
+        (("/api/organization",), "organization"),
+    )
+    for prefixes, capability in rules:
+        if any(
+            normalized == prefix.rstrip("/")
+            or normalized.startswith(prefix.rstrip("/") + "/")
+            for prefix in prefixes
+        ):
+            return capability
+    return None
+
+
+@app.middleware("http")
+async def enforce_platform_capability(request: Request, call_next):
+    capability = _path_capability(request.url.path)
+    if capability:
+        try:
+            enabled = platform_capabilities.is_enabled(capability)
+        except platform_capabilities.CapabilityServiceUnavailable:
+            return JSONResponse(
+                {"detail": {"code": "CAPABILITY_SERVICE_UNAVAILABLE", "capability": capability}},
+                status_code=503,
+            )
+        if not enabled:
+            return JSONResponse(
+                {"detail": {"code": "CAPABILITY_DISABLED", "capability": capability}},
+                status_code=409,
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -164,7 +233,8 @@ def _start_compliance_controller() -> None:
             from shared.lib import compliance_controller
         while not _COMPLIANCE_CONTROLLER_STOP.is_set():
             try:
-                compliance_controller.run_once(_local_node_id(), limit=50)
+                if platform_capabilities.is_enabled("compliance"):
+                    compliance_controller.run_once(_local_node_id(), limit=50)
             except Exception:
                 logger.debug("Compliance Controller cycle failed", exc_info=True)
             _COMPLIANCE_CONTROLLER_STOP.wait(30)
@@ -906,6 +976,12 @@ class ProfileBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class PlatformCapabilityBody(BaseModel):
+    enabled: bool
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 def _cookie_name() -> str:
     return f"session_id_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
 
@@ -1248,6 +1324,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read", "compliance": "agents.read",
         "audit": "audit.read", "users": "users.read",
         "organization": "organizations.read",
+        "platform": "platform.manage",
     }
     feature_map = {
         "approvals": "approvals", "audit": "audit", "compliance": "compliance",
@@ -1268,6 +1345,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "organizations.history.read", "organizations.members.manage",
         "organizations.reporting.manage", "organizations.sync.manage",
         "organizations.emergency", "organizations.export",
+        "platform.manage",
     }
     features = _edition_features()
     try:
@@ -1277,10 +1355,15 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         }
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Authorization service unavailable") from exc
+    try:
+        platform_page_states = platform_capabilities.page_states()
+    except platform_capabilities.CapabilityServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
     allowed = [
         page for page, action in pages.items()
         if access_by_action[action]["decision"] == "ALLOW"
         and (page not in feature_map or features is None or features.has_feature(feature_map[page]))
+        and platform_page_states.get(page, True)
     ]
     profile = _runtime_profile()
     return {
@@ -1289,8 +1372,39 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "pages": allowed, "actions": access_by_action,
         "maturity": {"core": "stable", "graph": "experimental", "channel": "active"},
         "features": sorted(getattr(features, "FEATURES", set()) if features else set()),
+        "platform_capabilities": platform_page_states,
         "session_timeout_seconds": _session_timeout_seconds(),
     }
+
+
+@app.get("/api/platform/capabilities")
+def platform_capability_list(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return platform_capabilities.list_capabilities(limit=limit)
+    except platform_capabilities.CapabilityServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
+
+
+@app.put("/api/platform/capabilities/{capability_key}")
+def platform_capability_update(
+    capability_key: str,
+    body: PlatformCapabilityBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return platform_capabilities.set_enabled(
+            str(session["principal_id"]), capability_key, body.enabled,
+            body.reason, body.expected_version,
+        )
+    except platform_capabilities.CapabilityConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except platform_capabilities.CapabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except platform_capabilities.CapabilityServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
 
 
 def _organization_http_error(exc: Exception) -> HTTPException:

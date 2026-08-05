@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.4 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.3.5 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -51,7 +51,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.3.4"
+VERSION = "4.3.5"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -3702,7 +3702,7 @@ class VisHandler(BaseHTTPRequestHandler):
     def _handle_admin_skill_list(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        admin_token = qs.get('admin_token', [None])[0]
+        admin_token = self.headers.get('X-Admin-Token') or qs.get('admin_token', [None])[0]
         if not admin_token or not agent_api.verify_admin_token(admin_token):
             self._send_json({'error': 'Invalid admin token'}, 403)
             return
@@ -3733,7 +3733,7 @@ class VisHandler(BaseHTTPRequestHandler):
     def _handle_admin_skill_acquire(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        admin_token = qs.get('admin_token', [None])[0]
+        admin_token = self.headers.get('X-Admin-Token') or qs.get('admin_token', [None])[0]
         if not admin_token or not agent_api.verify_admin_token(admin_token):
             self._send_json({'error': 'Invalid admin token'}, 403)
             return
@@ -4481,8 +4481,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.3.4', VERSION)
-            html = html.replace('2026-08-04', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.3.5', VERSION)
+            html = html.replace('2026-08-05', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

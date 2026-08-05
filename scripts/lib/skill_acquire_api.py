@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.4 - Community Edition - Skill Acquisition API
+"""AI Agent Infra v4.3.5 - Community Edition - Skill Acquisition API
 
 Agent-facing interface for discovering and acquiring skills.
 - Enterprise Edition: direct access, no token required
@@ -10,6 +10,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import urllib.parse
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
@@ -274,8 +275,9 @@ from urllib.request import Request as _Request, urlopen as _urlopen
 from urllib.error import HTTPError as _HTTPError, URLError as _URLError
 
 
-def _admin_api_get(url: str, timeout: int = 30) -> dict:
-    req = _Request(url, headers={"Accept": "application/json"}, method="GET")
+def _admin_api_get(url: str, admin_token: str, timeout: int = 30) -> dict:
+    # Keep the token out of the URL so reverse proxies and access logs do not capture it.
+    req = _Request(url, headers={"Accept": "application/json", "X-Admin-Token": admin_token}, method="GET")
     try:
         with _urlopen(req, timeout=timeout) as resp:
             return _json.loads(resp.read().decode("utf-8"))
@@ -295,14 +297,14 @@ def discover_skills_via_admin(
     runtime: Optional[str] = None,
     keyword: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    url = f"{admin_url.rstrip('/')}/api/admin/skill/list?admin_token={admin_token}"
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/list"
     if skill_type:
         url += f"&type={skill_type}"
     if runtime:
         url += f"&runtime={runtime}"
     if keyword:
         url += f"&keyword={keyword}"
-    result = _admin_api_get(url)
+    result = _admin_api_get(url, admin_token)
     return result.get("skills", [])
 
 
@@ -312,10 +314,11 @@ def acquire_skill_via_admin(
     skill_id: str,
     include_resource: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    url = f"{admin_url.rstrip('/')}/api/admin/skill/{skill_id}/acquire?admin_token={admin_token}"
+    url = f"{admin_url.rstrip('/')}/api/admin/skill/{urllib.parse.quote(str(skill_id), safe='')}"
+    url += "/acquire"
     if include_resource:
         url += "&resource=1"
-    result = _admin_api_get(url)
+    result = _admin_api_get(url, admin_token)
     if "error" in result:
         return None
     if include_resource and result.get("resource_encoding") == "base64" and result.get("resource_zip"):

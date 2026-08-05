@@ -18,16 +18,22 @@ from live_db_validator import (
     V431_MIGRATION_SCRIPTS,
     V432_MIGRATION_SCRIPTS,
     V433_MIGRATION_SCRIPTS,
+    V434_MIGRATION_SCRIPTS,
+    V435_MIGRATION_SCRIPTS,
     V431_ORGANIZATION_REQUIRED_COLUMNS,
     V431_ORGANIZATION_TABLES,
     V432_MEMORY_TABLES,
     V432_MEMORY_REQUIRED_COLUMNS,
     V433_GRAPH_ASSURANCE_TABLES,
+    V435_PLATFORM_TABLES,
+    V435_PLATFORM_REQUIRED_COLUMNS,
     _load_database_config,
     validate_v43_static_contract,
     validate_v431_static_contract,
     validate_v432_static_contract,
     validate_v433_static_contract,
+    validate_v434_static_contract,
+    validate_v435_static_contract,
 )
 
 
@@ -59,8 +65,9 @@ ORGANIZATION_MIGRATION_VERSIONS = frozenset({"4.3.1"})
 MEMORY_LIFECYCLE_MIGRATION_VERSIONS = frozenset({"4.3.2"})
 GRAPH_ASSURANCE_MIGRATION_VERSIONS = frozenset({"4.3.3"})
 COMPLIANCE_MIGRATION_VERSIONS = frozenset({"4.3.4"})
+PLATFORM_CAPABILITY_MIGRATION_VERSIONS = frozenset({"4.3.5"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS
 )
 
 V434_COMPLIANCE_TABLES = frozenset({
@@ -518,6 +525,14 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V433_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V433_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v433_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.3.4":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V434_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V434_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v434_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.3.5":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V435_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V435_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v435_static_contract(database, full_scripts)
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
@@ -654,6 +669,11 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in PLATFORM_CAPABILITY_MIGRATION_VERSIONS:
+        present = _schema_tables(cursor, database)
+        return set(V435_PLATFORM_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V435_PLATFORM_REQUIRED_COLUMNS, present,
+        )
     if MIGRATION_VERSION in COMPLIANCE_MIGRATION_VERSIONS:
         return V434_COMPLIANCE_TABLES <= _schema_tables(cursor, database)
     if MIGRATION_VERSION in GRAPH_ASSURANCE_MIGRATION_VERSIONS:
@@ -1112,10 +1132,19 @@ def _v434_script_names(database: str, config_path: Path, edition: str) -> list[s
             names.append(name)
     if "28_v4_3_3_graph_assurance.sql" not in names:
         names.append("28_v4_3_3_graph_assurance.sql")
-    if "29_v4_3_4_agent_compliance.sql" not in names:
-        names.append("29_v4_3_4_agent_compliance.sql")
-    if "30_v4_3_4_compliance_hardening.sql" not in names:
-        names.append("30_v4_3_4_compliance_hardening.sql")
+    if edition.lower() == "enterprise":
+        if "29_v4_3_4_agent_compliance.sql" not in names:
+            names.append("29_v4_3_4_agent_compliance.sql")
+        if "30_v4_3_4_compliance_hardening.sql" not in names:
+            names.append("30_v4_3_4_compliance_hardening.sql")
+    return names
+
+
+def _v435_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    """Apply all prerequisites before the database-authoritative registry."""
+    names = _v434_script_names(database, config_path, edition)
+    if "31_v4_3_5_platform_capabilities.sql" not in names:
+        names.append("31_v4_3_5_platform_capabilities.sql")
     return names
 
 
@@ -1496,7 +1525,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1546,6 +1575,8 @@ def main() -> int:
             script_names = _v433_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.3.4":
             script_names = _v434_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.3.5":
+            script_names = _v435_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

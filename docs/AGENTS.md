@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.3.4 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.3.5 Unified Repository Guide
 
-> **v4.3.4** - The unified single-source repository that generates all 6 release
+> **v4.3.5** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -87,19 +87,19 @@ orchestrator).
 To cut a new release:
 
 ```bash
-echo "4.3.4" > VERSION
+echo "4.3.5" > VERSION
 source shared/scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" build.py --profile production  # builds and gates all six editions
-"$PYTHON_BIN" spec_validator.py --build-output build_output/v4.3.4 --release
+"$PYTHON_BIN" spec_validator.py --build-output build_output/v4.3.5 --release
 ```
 
 ## v4.3.0 Integrated Profiles
 
-The working source targets `v4.3.4`; the final package date is assigned only
-when the final archives are built. The prior published baseline is `v4.3.3`
-dated `2026-08-03`.
+The working source targets `v4.3.5`; the final package date is assigned only
+when the final archives are built. The prior published baseline is `v4.3.4`
+dated `2026-08-04`.
 Graph Engineering work from the internal v4.2.1 closure is integrated into this
 release and is not published as a separate v4.2.1 archive. The stable v4.1.x
 line remains available as a downloadable compatibility baseline and receives
@@ -320,7 +320,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.4`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.5`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

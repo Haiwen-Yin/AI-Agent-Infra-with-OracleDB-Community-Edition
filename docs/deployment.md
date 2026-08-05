@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.4
+# Deployment Guide - AI Agent Infra with DB v4.3.5
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -42,12 +42,12 @@ on newer operating systems use the upstream wheel. See
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
 The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.4 artifact includes the verified
+integrity before install. The current v4.3.5 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the v4.1.x core and apply the complete additive chain
-through `migration_runner.py --version 4.3.4`. The v4.3.4 `production` profile
+through `migration_runner.py --version 4.3.5`. The v4.3.5 `production` profile
 retains the stable Graph Runtime and keeps Dynamic Graph, A2A, and OpenTelemetry
 previews disabled. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it

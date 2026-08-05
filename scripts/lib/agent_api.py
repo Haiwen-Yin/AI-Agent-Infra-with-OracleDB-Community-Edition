@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.4 - Community Edition - Agent API
+"""AI Agent Infra v4.3.5 - Community Edition - Agent API
 
 Agent registration, session management, access audit logging,
 collaboration tracking, and Admin/Agent separation support.
@@ -20,6 +20,16 @@ _ALLOWED_UPDATE_FIELDS = {
     "agent_name", "agent_type", "description",
     "capabilities", "config", "status", "wm_entity_id",
 }
+
+
+def _database_user_name(agent_id: str) -> str:
+    """Keep the legacy Oracle mapping while rejecting unsafe identifiers."""
+    name = str(agent_id or "").replace("-", "_").upper()
+    if not name or len(name) > 128 or not name[0].isalpha() or any(
+        char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$#_" for char in name
+    ):
+        raise ValueError("Agent ID cannot be mapped to a safe Oracle End User name")
+    return name
 
 
 def _row_to_dict(row: Any) -> Dict[str, Any]:
@@ -654,7 +664,7 @@ def register_agent_via_admin(
     register_agent(agent_id, agent_name, agent_type=agent_type,
                    description=description, capabilities=capabilities, config=config)
 
-    eu_name = agent_id.replace('-', '_').upper()
+    eu_name = _database_user_name(agent_id)
     pwd = _get_end_user_password_direct(agent_id)
     if not pwd:
         logger.error("Failed to get End User password for %s after registration", agent_id)
@@ -806,7 +816,7 @@ def recover_agent_via_admin(
         logger.warning("Recovery rejected: agent %s may still be active (LAST_SEEN_AT within 5 min)", agent_id)
         return None
 
-    eu_name = agent_id.replace('-', '_').upper()
+    eu_name = _database_user_name(agent_id)
     new_pwd = secrets.token_hex(8)
 
     try:

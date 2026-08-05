@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.3.5 - 2026-08-05
+
+- Added a database-authoritative Platform Capability Configuration page with
+  protected mandatory capabilities, dependency checks, required reasons,
+  optimistic concurrency, immutable history, and audited transactions.
+- Added request-level backend enforcement so hiding a Dashboard page cannot
+  bypass a disabled capability. Community packages cannot enable Enterprise
+  capabilities through the runtime registry.
+- Optimized capability page-state loading to one authoritative database read.
+- Removed admin Skill tokens from cross-Admin acquisition URLs and hardened
+  Oracle End User identifier validation before dynamic DDL.
+
 ## v4.3.4 - 2026-08-04
 
 - Added Enterprise Agent Compliance Posture, credential-proven Gateway

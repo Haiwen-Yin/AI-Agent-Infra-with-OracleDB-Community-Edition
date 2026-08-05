@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.3.4 · Community Edition · Oracle**
+> **v4.3.5 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -64,6 +64,13 @@ API descriptions, and Agent self-reports are never authorization boundaries.
 The seeded Compliance Admin identity is credentialless and pending activation;
 it is not an autonomous model runtime.
 
+v4.3.5 adds database-authoritative Platform Capability Configuration. An
+administrator can reduce the enabled product surface per installation while
+mandatory identity, authorization, security, audit-writing, Agent, user, and
+configuration controls remain protected. Changes require a reason, dependency
+checks, optimistic concurrency, and immutable audit history. This runtime
+layer cannot expand the Community/Enterprise package boundary.
+
 v4.3.1 adds a graphical organization-governance workspace. Authorized users
 can search and progressively expand a deterministic organization hierarchy,
 switch among organization, people, Agent-responsibility, and anomaly views,
@@ -76,7 +83,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.3.4. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.3.5. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -87,7 +94,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.3.4.md   # release notes for this version
+├── RELEASE_NOTES_v4.3.5.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -171,7 +178,7 @@ The verifier also walks the mandatory `Requires-Dist` metadata of selected
 wheels. Any transitive wheel required by the base installation must therefore
 be present and compatible, even when it is not repeated as a direct pin in
 `requirements.txt`; optional extras are excluded.
-The current v4.3.3 package contains the verified glibc 2.28 compatibility
+The current v4.3.5 package contains the verified glibc 2.28 compatibility
 wheel, so it is offline-complete on this baseline; `verify_deps.py` still
 fails closed rather than using an incompatible newer-host wheel.
 
