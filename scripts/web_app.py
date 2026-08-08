@@ -30,12 +30,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters
 
 
-VERSION = "4.3.5"
+VERSION = "4.3.6"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -43,6 +43,7 @@ if not WEB_ROOT.is_dir():
 DIST_ROOT = WEB_ROOT / "dist"
 DEFAULT_NODE_ID = agent_gateway_api.local_node_id()
 _COMPLIANCE_CONTROLLER_STOP = threading.Event()
+_NATIVE_RUNTIME_STOP = threading.Event()
 _ENTERPRISE_COMPLIANCE_PATHS = (
     "/api/compliance",
     "/api/agents/{agent_id}/posture",
@@ -114,6 +115,7 @@ def _path_capability(path: str) -> Optional[str]:
             "channels": "channels", "barriers": "barriers", "approvals": "approvals",
             "compliance": "compliance", "audit": "audit_view", "users": "users",
             "organization": "organization", "platform": "platform_config",
+            "native-agents": "agent_provisioning",
         }.get(page)
     if normalized.startswith("/api/agents/") and any(part in normalized for part in ("/posture", "/activate", "/compliance-")):
         return "compliance"
@@ -241,6 +243,31 @@ def _start_compliance_controller() -> None:
     threading.Thread(target=worker, name="cx-compliance-controller", daemon=True).start()
 
 
+def _start_native_runtime() -> None:
+    """Run the reference local Worker; database leases coordinate nodes."""
+    def worker() -> None:
+        while not _NATIVE_RUNTIME_STOP.is_set():
+            try:
+                native_runtime.execute_one(node_id=_local_node_id())
+            except Exception:
+                logger.debug("Native Runtime cycle failed", exc_info=True)
+            _NATIVE_RUNTIME_STOP.wait(2)
+    threading.Thread(target=worker, name="cx-native-runtime", daemon=True).start()
+
+
+def _bootstrap_native_agents() -> None:
+    """Initialize platform-owned Agent identities after database migration.
+
+    A v4.3.5 database does not have the additive v4.3.6 tables yet.  Startup
+    remains compatible in that state; the migration runner is authoritative
+    and the next restart will complete bootstrap.
+    """
+    try:
+        native_agent_api.bootstrap_native_agents()
+    except Exception:
+        logger.info("Native Agent bootstrap is pending migration", exc_info=True)
+
+
 def _remove_enterprise_compliance_routes() -> None:
     """Keep Enterprise compliance HTTP surfaces out of Community runtimes."""
     features = _edition_features()
@@ -259,12 +286,16 @@ def on_startup() -> None:
     _remove_enterprise_compliance_routes()
     _reclaim_local_agents()
     _COMPLIANCE_CONTROLLER_STOP.clear()
+    _NATIVE_RUNTIME_STOP.clear()
+    _bootstrap_native_agents()
     _start_compliance_controller()
+    _start_native_runtime()
 
 
 @app.on_event("shutdown")
 def on_shutdown() -> None:
     _COMPLIANCE_CONTROLLER_STOP.set()
+    _NATIVE_RUNTIME_STOP.set()
     _reclaim_local_agents()
     try:
         identity_api.connection.close_pool()
@@ -526,6 +557,14 @@ def _legacy_required_action(path: str, method: str) -> Optional[str]:
 def _legacy_gate(request: Request, path: str) -> Optional[Response]:
     """Apply session, Agent-token, CSRF and coarse permission checks to legacy APIs."""
     if not path.startswith(("/api/", "/portal/api/", "/ap/")):
+        return None
+    if path in _TOKEN_LEGACY_API and path not in {"/api/agents/heartbeat"}:
+        try:
+            native_agent_api.enforce_external_registration_allowed()
+        except PermissionError as exc:
+            return JSONResponse({"error": "External Agent registration is disabled"}, status_code=409)
+        except Exception:
+            return JSONResponse({"error": "External Agent registration policy unavailable"}, status_code=503)
         return None
     if path in _PUBLIC_LEGACY_API or path in _TOKEN_LEGACY_API:
         return None
@@ -982,6 +1021,48 @@ class PlatformCapabilityBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class LLMProviderProfileBody(BaseModel):
+    profile_key: str = Field(min_length=1, max_length=128)
+    provider_url: str = Field(min_length=1, max_length=512)
+    model_id: str = Field(min_length=1, max_length=256)
+    api_key: str = Field(default="", max_length=4096)
+    approved_for: list[str] = Field(default_factory=list, max_length=100)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class NativeAgentRequestBody(BaseModel):
+    agent_name: str = Field(min_length=1, max_length=256)
+    owner_principal_id: str = Field(min_length=1, max_length=128)
+    template_key: str = Field(min_length=1, max_length=128)
+    provider_profile_id: str = Field(default="", max_length=128)
+    deployment_target_id: str = Field(default="DT_LOCAL_MANAGED", max_length=128)
+    isolation_level: str = Field(default="DOMAIN_ISOLATED", max_length=32)
+    classification: str = Field(default="INTERNAL", max_length=32)
+    purpose: str = Field(min_length=1, max_length=2000)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class NativeAgentDecisionBody(BaseModel):
+    decision: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class NativeAgentActivationBody(BaseModel):
+    llm_profile_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class NativeAgentExecuteBody(BaseModel):
+    messages: list[Dict[str, Any]] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class ExternalRegistrationPolicyBody(BaseModel):
+    state: str = Field(min_length=1, max_length=32)
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 def _cookie_name() -> str:
     return f"session_id_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
 
@@ -1331,7 +1412,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
     }
     operation_actions = {
         "profile.update", "agents.enroll", "agents.operate", "agents.transfer", "agents.offboard",
-        "agents.read.all", "agents.manage", "agents.claim",
+        "agents.read.all", "agents.manage", "agents.manage.all", "agents.enroll.others", "agents.claim",
         "skills.write", "branches.write", "loops.write", "tasks.write", "workspaces.write", "specs.write",
         "channels.create", "channels.read.all", "channels.write", "channels.manage_members", "channels.lifecycle",
         "channels.quarantine", "channels.bridge", "channels.actions.decide", "memory.review",
@@ -1405,6 +1486,224 @@ def platform_capability_update(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except platform_capabilities.CapabilityServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
+
+
+@app.get("/api/platform/native-bootstrap")
+def native_bootstrap_status(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        marker = connection.execute_query_one(
+            "SELECT BOOTSTRAP_KEY,BOOTSTRAP_VERSION,STATUS,STARTED_AT,COMPLETED_AT,UPDATED_AT "
+            "FROM CX_NATIVE_BOOTSTRAP WHERE BOOTSTRAP_KEY='v4.3.6'",
+        )
+        return {"status": "MIGRATION_PENDING" if not marker else "READY", "bootstrap": marker or {}}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Native Agent bootstrap status unavailable") from exc
+
+
+@app.post("/api/platform/native-bootstrap")
+def native_bootstrap_run(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.bootstrap_native_agents()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Native Agent bootstrap failed") from exc
+
+
+@app.get("/api/agent-templates")
+def native_agent_templates(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        items = native_agent_api.list_templates(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent templates are unavailable") from exc
+
+
+@app.get("/api/deployment-targets")
+def deployment_targets(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        suffix, params = native_agent_api._limit(limit)
+        targets = connection.execute_query(
+            "SELECT TARGET_ID,TARGET_KEY,TARGET_TYPE,STATUS,MANAGED,CREATED_AT,UPDATED_AT "
+            "FROM CX_DEPLOYMENT_TARGETS ORDER BY TARGET_KEY" + suffix, params,
+        )
+        return {"items": [{str(k).lower(): v for k, v in dict(row).items()} for row in targets],
+                "reference_adapters": deployment_adapters.describe_reference_adapters()}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Deployment targets are unavailable") from exc
+
+
+@app.get("/api/native-manifests")
+def native_manifests(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        items = native_agent_api.list_manifests(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Native Skill and Tool manifests are unavailable") from exc
+
+
+@app.get("/api/native-agents")
+def native_agents(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        items = native_agent_api.list_native_agents(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Native Agent inventory is unavailable") from exc
+
+
+@app.post("/api/native-agents/{agent_id}/activate")
+def native_agent_activate(
+    agent_id: str,
+    body: NativeAgentActivationBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.activate_agent(
+            str(session["principal_id"]), agent_id, body.llm_profile_id, body.reason,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "Native Agent activation was denied") from exc
+
+
+@app.post("/api/native-agents/{agent_id}/execute")
+def native_agent_execute(
+    agent_id: str,
+    body: NativeAgentExecuteBody,
+    session: Dict[str, Any] = Depends(require_action("agents.operate")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.create_execution(
+            str(session["principal_id"]), agent_id, body.messages, body.reason,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Native Agent execution could not be queued") from exc
+
+
+@app.get("/api/native-executions/{execution_id}")
+def native_execution(
+    execution_id: str,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        return native_runtime.get_execution(str(session["principal_id"]), execution_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Native Agent execution is unavailable") from exc
+
+
+@app.get("/api/llm-provider-profiles")
+def llm_provider_profiles(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = native_agent_api.list_llm_profiles(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "LLM Provider Profiles are unavailable") from exc
+
+
+@app.post("/api/llm-provider-profiles")
+def llm_provider_profile(
+    body: LLMProviderProfileBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.upsert_llm_profile(
+            str(session["principal_id"]), body.profile_key, body.provider_url,
+            body.model_id, body.api_key, body.reason, body.approved_for,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "LLM Provider Profile could not be saved") from exc
+
+
+@app.get("/api/platform/external-agent-registration")
+def external_agent_registration_policy(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.external_registration_policy()
+    except Exception as exc:
+        raise _identity_http_error(exc, "External Agent registration policy is unavailable") from exc
+
+
+@app.put("/api/platform/external-agent-registration")
+def external_agent_registration_policy_update(
+    body: ExternalRegistrationPolicyBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.set_external_registration_policy(
+            str(session["principal_id"]), body.state, body.reason, body.expected_version,
+        )
+    except native_agent_api.NativeAgentConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "External Agent registration policy update was denied") from exc
+
+
+@app.get("/api/agent-provision-requests")
+def agent_provision_requests(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        items = native_agent_api.list_requests(str(session["principal_id"]), limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent provisioning requests are unavailable") from exc
+
+
+@app.post("/api/agent-provision-requests")
+def agent_provision_request(
+    body: NativeAgentRequestBody,
+    session: Dict[str, Any] = Depends(require_action("agents.enroll")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.create_request(
+            str(session["principal_id"]), agent_name=body.agent_name,
+            owner_principal_id=body.owner_principal_id, template_key=body.template_key,
+            provider_profile_id=body.provider_profile_id,
+            target_id=body.deployment_target_id, isolation_level=body.isolation_level,
+            classification=body.classification, purpose=body.purpose, reason=body.reason,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent provisioning request was denied") from exc
+
+
+@app.post("/api/agent-provision-requests/{request_id}/decision")
+def agent_provision_decision(
+    request_id: str,
+    body: NativeAgentDecisionBody,
+    session: Dict[str, Any] = Depends(require_action("agents.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.decide_request(
+            str(session["principal_id"]), request_id, body.decision, body.reason,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except native_agent_api.NativeAgentConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Agent provisioning decision was denied") from exc
 
 
 def _organization_http_error(exc: Exception) -> HTTPException:
@@ -2235,6 +2534,7 @@ def grant(body: GrantBody, session: Dict[str, Any] = Depends(require_action("age
 @app.post("/api/enrollment/redeem")
 def redeem(body: EnrollmentBody) -> Dict[str, Any]:
     try:
+        native_agent_api.enforce_external_registration_allowed()
         return identity_api.redeem_enrollment(body.enrollment_token, body.agent_id, runtime=body.runtime, environment=body.environment, node_id=body.node_id, public_key=body.public_key, client_secret=body.client_secret)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Enrollment failed") from exc

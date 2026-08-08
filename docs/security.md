@@ -1,4 +1,26 @@
-# Security - AI Agent Infra with DB v4.3.5
+# Security - AI Agent Infra with DB v4.3.6
+
+## v4.3.6 Native Agent Boundary
+
+Platform Admin and Enterprise Compliance Admin Agents are independent
+Principals created by idempotent bootstrap. The human `admin` account manages
+them but is not merged with them. Business Agent creation requires a human
+request, a different approver, an owner in the authorized scope, a locked
+template isolation level, a deployment target, a classification, and a
+reason. Activation requires an active LLM Provider Profile and does not grant
+any database privilege.
+
+LLM prompts, responses, Skills, Tools, API descriptions, and remote adapter
+callbacks are untrusted inputs. Database authorization, Gateway admission,
+short-lived credentials, execution isolation, approval, and audit remain the
+enforcement boundary. A shared Worker Pool cannot reuse context, workspace,
+database session, token, secret reference, or model conversation state across
+Agents. Database fencing prevents a stale Worker from completing a reclaimed
+execution.
+
+The external registration policy has `ENABLED`, `APPROVAL_ONLY`, and
+`DISABLED` states. `DISABLED` rejects new Skill-first enrollment only; existing
+external Agents retain their stored lifecycle and can be separately revoked.
 
 ## v4.3.5 Capability Boundary
 

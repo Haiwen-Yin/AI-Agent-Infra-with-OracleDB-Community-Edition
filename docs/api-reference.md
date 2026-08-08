@@ -1,4 +1,25 @@
-# API Reference - AI Agent Infra with DB v4.3.5
+# API Reference - AI Agent Infra with DB v4.3.6
+
+## v4.3.6 Native Agent API
+
+The native Agent page requires the database `agent_provisioning` capability
+and the corresponding action permission. Mutations require CSRF, an explicit
+reason, and server-side scope checks.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/platform/native-bootstrap` | GET/POST | Inspect or idempotently run platform-native bootstrap. |
+| `/api/native-agents` | GET | Read scoped native Agent inventory. |
+| `/api/agent-templates` | GET | Read published locked templates. |
+| `/api/native-manifests` | GET | Read versioned, digest-checked built-in Skill/Tool manifests. |
+| `/api/llm-provider-profiles` | GET/POST | Read redacted or create encrypted LLM profiles. |
+| `/api/deployment-targets` | GET | Read deployment targets and reference adapter contracts. |
+| `/api/agent-provision-requests` | GET/POST | Read scoped requests or submit a human request. |
+| `/api/agent-provision-requests/{id}/decision` | POST | Approve or reject with separated approval and reason. |
+| `/api/native-agents/{id}/activate` | POST | Bind an approved LLM profile and activate an Agent. |
+| `/api/native-agents/{id}/execute` | POST | Queue a bounded execution unit. |
+| `/api/native-executions/{id}` | GET | Read the caller's authorized execution state/result. |
+| `/api/platform/external-agent-registration` | GET/PUT | Inspect or change the new external Skill-first registration policy. |
 
 ## v4.3.5 Platform Capability API
 

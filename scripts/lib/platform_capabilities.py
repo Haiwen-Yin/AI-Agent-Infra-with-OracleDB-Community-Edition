@@ -28,6 +28,7 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
     "agents": {"zh": "智能体", "en": "Agents", "mandatory": True, "page": "agents"},
     "users": {"zh": "用户管理", "en": "User management", "mandatory": True, "page": "users"},
     "platform_config": {"zh": "功能配置", "en": "Capability configuration", "mandatory": True, "page": "platform"},
+    "agent_provisioning": {"zh": "业务智能体配置", "en": "Business Agent provisioning", "mandatory": False, "page": "native-agents"},
     "portal": {"zh": "门户", "en": "Portal", "mandatory": False, "page": ""},
     "monitor": {"zh": "监控", "en": "Monitor", "mandatory": False, "page": "monitor"},
     "tasks": {"zh": "任务", "en": "Tasks", "mandatory": False, "page": "tasks"},
@@ -49,6 +50,7 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 DEPENDENCIES = {
+    "agent_provisioning": ("agents", "audit_write"),
     "branches": ("tasks", "workspaces"),
     "collaboration": ("agents",),
     "loops": ("tasks",),
@@ -161,7 +163,7 @@ def list_capabilities(limit: int = 100) -> Dict[str, Any]:
             "effective_enabled": configured and available,
             "dependencies": dep_map.get(key, []),
         })
-    return {"items": items, "history": history, "schema_version": "4.3.5"}
+    return {"items": items, "history": history, "schema_version": "4.3.6"}
 
 
 def set_enabled(actor: str, key: str, enabled: bool, reason: str, expected_version: int) -> Dict[str, Any]:

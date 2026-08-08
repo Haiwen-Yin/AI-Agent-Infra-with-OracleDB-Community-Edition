@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.3.5 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.3.6 Unified Repository Guide
 
-> **v4.3.5** - The unified single-source repository that generates all 6 release
+> **v4.3.6** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -8,6 +8,23 @@
 > name; database-specific package names identify the adapter and edition.
 
 ## 1. Repository Layout
+
+## v4.3.6 Native Agent Lifecycle
+
+Initialization creates `SYSTEM_PLATFORM_ADMIN_AGENT` in every edition and
+`SYSTEM_COMPLIANCE_ADMIN_AGENT` only in Enterprise. These are separate Agent
+Principals and never reuse the human `admin` session or a Schema Owner
+credential. Bootstrap is idempotent and does not call an external Agent or
+LLM. Business Agents are requested by an authorized human, approved by a
+different Principal, deployed through a selected target, and remain pending
+until an approved LLM profile and runtime health are available.
+
+External Agents remain Skill-first: `SKILL.md` enrollment, Gateway
+authentication, authorization, revocation, and audit are unchanged. The
+database policy `external_agent_registration` controls only new external
+registrations. A shared Worker Pool may share scheduling capacity only; every
+execution receives separate context, workspace, database session, token,
+secret references, and model conversation state.
 
 ```
 /root/ai-agent-infra/
@@ -320,7 +337,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.5`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.6`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

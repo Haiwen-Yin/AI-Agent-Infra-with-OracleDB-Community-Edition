@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.3.6 - 2026-08-07
+
+- Added platform-native Agent bootstrap and separated Platform Admin and
+  Enterprise Compliance Admin identities from the human `admin` account.
+- Added encrypted LLM Provider Profiles, governed business Agent requests and
+  approvals, built-in sensitive-domain templates, runtime isolation levels,
+  lease-fenced local execution, and customer deployment adapter contracts.
+- Added the database-authoritative external Agent registration policy with
+  `DISABLED`, `APPROVAL_ONLY`, and `ENABLED` states while preserving existing
+  Skill-first registrations.
+
 ## v4.3.5 - 2026-08-05
 
 - Added a database-authoritative Platform Capability Configuration page with

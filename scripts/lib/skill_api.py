@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.5 - Skill Storage & Distribution API
+"""AI Agent Infra v4.3.6 - Skill Storage & Distribution API
 
 Supports direct database access and Admin API mode for Business Agents.
 """

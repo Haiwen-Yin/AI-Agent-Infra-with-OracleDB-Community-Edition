@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.5
+# Deployment Guide - AI Agent Infra with DB v4.3.6
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -24,6 +24,31 @@ migration only through the runner so its checksum and ledger record are
 verified. Then run the application with the minimum documented privileges.
 Business Agent configuration must contain only its independent login and must
 never contain a fallback schema-owner credential.
+
+## v4.3.6 Native Agent Deployment
+
+After the v4.3.5 chain, apply the additive v4.3.6 migration and repeat it
+through the runner for idempotency:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.3.6 \
+  --database <oracle|pg|yashandb> --edition <community|enterprise> \
+  --<adapter>-config config.json --backup-evidence release_evidence/backup.json
+```
+
+The migration creates the native bootstrap, templates, Agent inventory, LLM
+profiles, provisioning requests, deployment targets, runtime leases and
+external-registration policy. The application startup then performs the
+database-authoritative bootstrap. Without an LLM profile the built-in Agents
+remain `ACTIVATION_PENDING`; no external Agent is required for initialization.
+Configure an OpenAI-compatible URL and model in the protected Dashboard. API
+keys are encrypted at rest and are never returned by ordinary reads.
+
+`LOCAL_MANAGED`, `REMOTE_WORKER`, `CONTAINER_MANAGED`, and `WEBHOOK_MANAGED`
+are reference lifecycle contracts. They do not provide customer-specific
+virtualization, SaaS, MaaS, or Agent-platform connectors. Such connectors must
+implement prepare, activate, health, cancel, revoke, and evidence without
+granting authority from a remote callback.
 
 YashanDB packages additionally install the bundled CPython-native `yaspy`
 module into the same `.venv` and place the bundled client libraries under

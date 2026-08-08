@@ -1,6 +1,16 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.3.5
+# Recovery and High Availability - AI Agent Infra with DB v4.3.6
 
 ## Recovery Authority
+
+## v4.3.6 Native Runtime Recovery
+
+Native executions are durable database rows. A Worker claims a pending row
+with a node-scoped lease and increments its fencing token. Completion requires
+the same Worker, node, lease fence, and `CLAIMED` state, so a process that
+resumes after lease expiry cannot overwrite the replacement Worker's result.
+On Web restart, only local Portal, Gateway, and runtime leases are reclaimed;
+leases belonging to other Admin nodes are not touched. A database outage
+blocks new side effects rather than using an in-memory fallback.
 
 The database is the source of truth for Graph Definitions, published Compiler
 plans, Runs, Attempts, State Events, Checkpoints, Transitions, Leases, Events,

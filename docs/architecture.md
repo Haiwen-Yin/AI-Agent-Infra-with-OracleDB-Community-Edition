@@ -1,4 +1,15 @@
-# Architecture - AI Agent Infra with DB v4.3.5
+# Architecture - AI Agent Infra with DB v4.3.6
+
+## v4.3.6 Native Provisioning Plane
+
+The v4.3.6 plane is: Human request -> approval -> Agent Principal ->
+DeploymentTarget -> isolated execution -> database evidence. Platform Admin
+and Enterprise Compliance Admin are seeded by software bootstrap; external
+Skill-first Agents remain a separate admission source. LLM Provider Profiles
+are versioned database records with encrypted optional keys and redacted reads.
+Reference adapters define customer integration without importing vendor
+authority into the platform. The database remains the source of truth for
+identity, ownership, status, lease, fencing, audit, and recovery.
 
 ## v4.3.3 Trustworthy Runtime Extensions
 

@@ -92,6 +92,7 @@ const nav = [
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
   ["platform", "功能配置", "Capabilities", Settings2],
+  ["native-agents", "原生智能体", "Native Agents", Bot],
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -838,6 +839,16 @@ function PageView({
         onCapabilitiesChanged={onCapabilitiesChanged}
       />
     );
+  if (page === "native-agents")
+    return (
+      <NativeAgentsPage
+        lang={lang}
+        me={me}
+        capabilities={capabilities}
+        text={text}
+        onNotice={onNotice}
+      />
+    );
   if (page === "channels")
     return (
       <Channels
@@ -1005,6 +1016,125 @@ function PlatformCapabilitiesPage({
     <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
       {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
     </DetailDrawer>
+  </>;
+}
+
+function NativeAgentsPage({
+  lang,
+  me,
+  capabilities,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  me: Row;
+  capabilities: Row | null;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [data, setData] = useState<Row>({ agents: [], templates: [], manifests: [], profiles: [], requests: [], targets: [], policy: null, bootstrap: null });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  const [selected, setSelected] = useState<Row | null>(null);
+  const canManage = canAction(capabilities, "platform.manage") || canAction(capabilities, "agents.manage");
+  const canEnroll = canAction(capabilities, "agents.enroll");
+  const canDecide = canAction(capabilities, "agents.manage");
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [bootstrap, agents, templates, manifests, profiles, requests, targets, policy] = await Promise.all([
+        api<Row>("/api/platform/native-bootstrap"),
+        api<Row>("/api/native-agents?limit=100"),
+        api<Row>("/api/agent-templates?limit=100"),
+        api<Row>("/api/native-manifests?limit=100"),
+        api<Row>("/api/llm-provider-profiles?limit=100"),
+        api<Row>("/api/agent-provision-requests?limit=100"),
+        api<Row>("/api/deployment-targets?limit=100"),
+        api<Row>("/api/platform/external-agent-registration"),
+      ]);
+      setData({ bootstrap, agents, templates, manifests, profiles, requests, targets, policy });
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const agents = listPayload(data.agents, ["items"]);
+  const templates = listPayload(data.templates, ["items"]);
+  const manifests = listPayload(data.manifests, ["items"]);
+  const profiles = listPayload(data.profiles, ["items"]);
+  const requests = listPayload(data.requests, ["items"]);
+  const targets = listPayload(data.targets, ["items"]);
+  const referenceAdapters = listPayload(data.targets, ["reference_adapters"]);
+  const submitProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      await api("/api/llm-provider-profiles", { method: "POST", body: JSON.stringify({
+        profile_key: String(form.get("profile_key") || ""), provider_url: String(form.get("provider_url") || ""),
+        model_id: String(form.get("model_id") || ""), api_key: String(form.get("api_key") || ""),
+        approved_for: [], reason: String(form.get("reason") || ""),
+      }) });
+      event.currentTarget.reset(); await load(); onNotice(text("LLM 配置已加密保存", "LLM profile was encrypted and saved"));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      await api("/api/agent-provision-requests", { method: "POST", body: JSON.stringify({
+        agent_name: String(form.get("agent_name") || ""), owner_principal_id: String(form.get("owner_principal_id") || me.principal_id || ""),
+        template_key: String(form.get("template_key") || ""), provider_profile_id: String(form.get("provider_profile_id") || ""),
+        deployment_target_id: String(form.get("deployment_target_id") || "DT_LOCAL_MANAGED"), isolation_level: String(form.get("isolation_level") || "DOMAIN_ISOLATED"),
+        classification: String(form.get("classification") || "INTERNAL"), purpose: String(form.get("purpose") || ""), reason: String(form.get("reason") || ""),
+      }) });
+      event.currentTarget.reset(); await load(); onNotice(text("业务智能体申请已提交，等待职责分离审批", "Business Agent request submitted for separated approval"));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const decide = async (request: Row, decision: string) => {
+    const why = window.prompt(text("请输入审批原因", "Enter the decision reason")) || "";
+    if (why.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await api(`/api/agent-provision-requests/${encodeURIComponent(String(request.request_id))}/decision`, { method: "POST", body: JSON.stringify({ decision, reason: why.trim() }) });
+      await load(); onNotice(text("申请状态已更新并记录审计", "Request state was updated and audited"));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const activate = async (agent: Row) => {
+    const profile = profiles[0];
+    if (!profile) { onNotice(text("请先配置一个 LLM Provider Profile", "Configure an LLM Provider Profile first")); return; }
+    const why = window.prompt(text("请输入激活原因", "Enter the activation reason")) || "";
+    if (why.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await api(`/api/native-agents/${encodeURIComponent(String(agent.agent_id))}/activate`, { method: "POST", body: JSON.stringify({ llm_profile_id: profile.profile_id, reason: why.trim() }) });
+      await load(); onNotice(text("智能体已激活", "Agent activated"));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const policy = data.policy || {};
+  const statusLabel = (value: unknown) => displayRowValue(lang, value || "-");
+  return <>
+    <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} />
+    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {loading ? <PageLoading text={text} /> : <>
+      <div className="metric-grid">
+        <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{statusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("启动初始化不调用模型；无 LLM 时仅保持待激活。", "Bootstrap makes no model call; without an LLM the Agent remains pending activation.")}</p>{canManage && <button className="primary-button" disabled={busy} onClick={async () => { setBusy(true); try { await api("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><Bot size={15} />{text("执行幂等初始化", "Run idempotent bootstrap")}</button>}</InfoPanel>
+        <InfoPanel title={text("外部 Skill-first 注册", "External Skill-first registration")} text={text}><strong className={`metric-value ${String(policy.state || "").toLowerCase()}`}>{statusLabel(policy.state)}</strong><p className="cx-form-hint">{text("关闭只影响新注册，既有外部智能体不被删除。", "Disabling affects new registrations only; existing external Agents remain.")}</p>{canManage && <form className="inline-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await api("/api/platform/external-agent-registration", { method: "PUT", body: JSON.stringify({ state: String(form.get("state") || "DISABLED"), expected_version: Number(policy.version || 1), reason: String(form.get("reason") || "") }) }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><select name="state" defaultValue={String(policy.state || "ENABLED")}><option value="ENABLED">{text("允许", "Enabled")}</option><option value="APPROVAL_ONLY">{text("仅审批", "Approval only")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option></select><input name="reason" required placeholder={text("变更原因", "Change reason")} /><button className="primary-button" disabled={busy}><Check size={15} />{text("保存策略", "Save policy")}</button></form>}</InfoPanel>
+      </div>
+      <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage && String(item.status).toUpperCase() !== "ACTIVE" ? <button className="small-button" disabled={busy} onClick={() => void activate(item)}>{text("激活", "Activate")}</button> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
+      <InfoPanel title={text("受管 Skill / Tool 清单", "Managed Skill / Tool manifests")} text={text}><p className="cx-form-hint">{text("内置清单按版本和摘要固定，普通读取不暴露私钥；业务 Agent 只能继承已审批清单。", "Built-in manifests are pinned by version and digest; ordinary reads never expose private keys, and business Agents may inherit only approved manifests.")}</p><DataTable headers={[text("清单", "Manifest"), text("类型", "Kind"), text("版本", "Version"), text("校验", "Verification"), text("状态", "Status")]} rows={manifests.map((item) => [item.manifest_key, item.manifest_kind, item.version, statusLabel(item.signature_status), statusLabel(item.status)])} empty={text("暂无受管清单", "No managed manifests")} text={text} /></InfoPanel>
+      <div className="two-column-panels">
+        <InfoPanel title={text("LLM Provider Profile", "LLM Provider Profiles")} text={text}><form className="workbench-form" onSubmit={submitProfile}><input name="profile_key" required placeholder={text("配置键", "Profile key")} /><input name="provider_url" type="url" required placeholder="https://llm.example/v1" /><input name="model_id" required placeholder={text("模型 ID", "Model ID")} /><input name="api_key" type="password" placeholder={text("API Key（可选）", "API key (optional)")} /><input name="reason" required placeholder={text("保存原因", "Save reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("保存配置", "Save profile")}</button></form><DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health")]} rows={profiles.map((item) => [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), statusLabel(item.health_state)])} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} /></InfoPanel>
+        <InfoPanel title={text("业务智能体申请", "Business Agent request")} text={text}><form className="workbench-form" onSubmit={submitRequest}><input name="agent_name" required placeholder={text("智能体名称", "Agent name")} /><select name="template_key" required defaultValue="general-restricted">{templates.filter((item) => String(item.template_kind).toUpperCase() === "BUSINESS").map((item) => <option key={item.template_key} value={item.template_key}>{item.display_name}</option>)}</select><input name="owner_principal_id" defaultValue={String(me.principal_id || "")} required placeholder={text("负责人 Principal", "Owner Principal")} /><select name="provider_profile_id" defaultValue=""><option value="">{text("模型稍后配置", "Configure model later")}</option>{profiles.map((item) => <option key={item.profile_id} value={item.profile_id}>{item.profile_key}</option>)}</select><select name="deployment_target_id" defaultValue="DT_LOCAL_MANAGED">{targets.map((item) => <option key={item.target_id} value={item.target_id}>{item.target_key} · {item.target_type}</option>)}</select><select name="isolation_level" defaultValue="DOMAIN_ISOLATED"><option value="DOMAIN_ISOLATED">DOMAIN_ISOLATED</option><option value="DEDICATED_CONTAINER">DEDICATED_CONTAINER</option><option value="DEDICATED_RUNTIME">DEDICATED_RUNTIME</option></select><input name="classification" defaultValue="INTERNAL" placeholder={text("数据分类", "Classification")} /><textarea name="purpose" required placeholder={text("业务目的", "Business purpose")} /><input name="reason" required placeholder={text("申请原因", "Request reason")} /><button className="primary-button" disabled={busy || !canEnroll}><Plus size={15} />{text("提交申请", "Submit request")}</button></form></InfoPanel>
+      </div>
+      <InfoPanel title={text("申请与审批", "Requests and approvals")} text={text}><DataTable headers={[text("名称", "Name"), text("模板", "Template"), text("隔离", "Isolation"), text("状态", "Status"), text("操作", "Action")]} rows={requests.map((item) => [String(item.agent_name), String(item.template_key), String(item.isolation_level), statusLabel(item.status), String(item.status).toUpperCase() === "APPROVAL_PENDING" && canDecide ? <span className="actions-row"><button className="small-button" disabled={busy} onClick={() => void decide(item, "APPROVE")}>{text("批准", "Approve")}</button><button className="small-button" disabled={busy} onClick={() => void decide(item, "REJECT")}>{text("拒绝", "Reject")}</button></span> : statusLabel(item.decided_by || item.applicant_principal_id)])} empty={text("暂无可见申请", "No visible requests")} text={text} /></InfoPanel>
+      <InfoPanel title={text("部署适配器契约", "Deployment adapter contract")} text={text}><p className="cx-form-hint">{text("以下是平台提供的参考生命周期，不代表已经内置客户专属虚拟化、SaaS、MaaS 或 Agent 平台连接器。连接器必须保留数据库授权、隔离、回调校验和审计边界。", "These are reference lifecycle contracts, not built-in customer-specific virtualization, SaaS, MaaS, or Agent connectors. Every connector must preserve database authorization, isolation, callback validation, and audit boundaries.")}</p><DataTable headers={[text("类型", "Type"), text("生命周期", "Lifecycle"), text("网络调用", "Network calls"), text("说明", "Note")]} rows={referenceAdapters.map((item) => [item.target_type, (item.lifecycle || []).join(" · "), item.network_calls ? text("允许", "Allowed") : text("不执行", "None"), item.security_note])} empty={text("暂无适配器契约", "No adapter contracts")} text={text} /></InfoPanel>
+    </>}
+    <DetailDrawer open={Boolean(selected)} title={text("原生智能体详情", "Native Agent details")} onClose={() => setSelected(null)} text={text}><pre className="decision-box">{selected ? JSON.stringify(selected, null, 2) : ""}</pre></DetailDrawer>
   </>;
 }
 

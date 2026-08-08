@@ -280,6 +280,36 @@ a {
   gap: 12px;
   margin: 25px 0 18px;
 }
+.metric-value {
+  display: block;
+  margin: 4px 0 8px;
+  color: var(--brand-deep);
+  font-size: 24px;
+  line-height: 1.15;
+}
+.two-column-panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+.table-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-deep);
+  font-weight: 700;
+  text-align: left;
+}
+.table-link:hover {
+  text-decoration: underline;
+}
+.actions-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
 .compliance-posture-grid {
   grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
 }
@@ -1712,7 +1742,8 @@ tbody tr:hover {
   }
   .split-grid,
   .operation-grid,
-  .operation-explainer-form {
+  .operation-explainer-form,
+  .two-column-panels {
     grid-template-columns: 1fr;
   }
   .graph-toolbar {

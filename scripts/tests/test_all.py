@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.5 - Community Edition - Master Test Runner"""
+"""AI Agent Infra v4.3.6 - Community Edition - Master Test Runner"""
 
 import sys
 import os
@@ -23,7 +23,7 @@ from tests.test_skill import run_all as run_skill
 
 def main():
     print("=" * 60)
-    print("AI Agent Infra v4.3.5 - Community Edition - Full Test Suite")
+    print("AI Agent Infra v4.3.6 - Community Edition - Full Test Suite")
     print("=" * 60)
 
     suites = [

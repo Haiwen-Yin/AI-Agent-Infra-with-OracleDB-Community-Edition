@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.5 - Security Module Tests"""
+"""AI Agent Infra v4.3.6 - Security Module Tests"""
 
 import sys
 import os

@@ -155,6 +155,30 @@ V435_PLATFORM_REQUIRED_COLUMNS = {
     }),
 }
 
+V436_MIGRATION_SCRIPTS = V435_MIGRATION_SCRIPTS + (
+    "32_v4_3_6_native_agents.sql",
+)
+V436_NATIVE_AGENT_TABLES = (
+    "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
+    "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
+    "CX_NATIVE_PROVISION_REQUESTS", "CX_RUNTIME_WORKERS",
+    "CX_RUNTIME_EXECUTIONS", "CX_EXTERNAL_AGENT_POLICY",
+    "CX_EXTERNAL_AGENT_POLICY_HISTORY",
+)
+V436_NATIVE_AGENT_REQUIRED_COLUMNS = {
+    "CX_NATIVE_BOOTSTRAP": frozenset({"BOOTSTRAP_KEY", "BOOTSTRAP_VERSION", "STATUS"}),
+    "CX_AGENT_TEMPLATES": frozenset({"TEMPLATE_ID", "TEMPLATE_KEY", "CONTENT_JSON", "CONTENT_DIGEST", "STATUS"}),
+    "CX_NATIVE_MANIFESTS": frozenset({"MANIFEST_ID", "MANIFEST_KEY", "VERSION", "CONTENT_DIGEST", "SIGNATURE", "SIGNATURE_STATUS", "STATUS"}),
+    "CX_NATIVE_AGENTS": frozenset({"AGENT_ID", "SOURCE", "AGENT_KIND", "STATUS", "ACTIVATION_STATE", "DEPLOYMENT_TARGET_ID"}),
+    "CX_LLM_PROVIDER_PROFILES": frozenset({"PROFILE_ID", "PROFILE_KEY", "PROVIDER_URL", "MODEL_ID", "API_KEY_CIPHER", "STATUS"}),
+    "CX_DEPLOYMENT_TARGETS": frozenset({"TARGET_ID", "TARGET_KEY", "TARGET_TYPE", "CONFIG_JSON", "STATUS"}),
+    "CX_NATIVE_PROVISION_REQUESTS": frozenset({"REQUEST_ID", "APPLICANT_PRINCIPAL_ID", "OWNER_PRINCIPAL_ID", "STATUS", "REASON"}),
+    "CX_RUNTIME_WORKERS": frozenset({"WORKER_ID", "NODE_ID", "STATUS", "FENCING_TOKEN"}),
+    "CX_RUNTIME_EXECUTIONS": frozenset({"EXECUTION_ID", "AGENT_ID", "STATUS", "INPUT_JSON", "FENCING_TOKEN"}),
+    "CX_EXTERNAL_AGENT_POLICY": frozenset({"POLICY_KEY", "STATE", "VERSION", "REASON"}),
+    "CX_EXTERNAL_AGENT_POLICY_HISTORY": frozenset({"HISTORY_ID", "POLICY_KEY", "FROM_STATE", "TO_STATE", "RESULT_VERSION"}),
+}
+
 V432_MEMORY_TABLES = (
     "CX_MEMORY_FAMILIES", "CX_MEMORY_VERSIONS", "CX_MEMORY_REPRESENTATIONS",
     "CX_MEMORY_RELATIONS", "CX_MEMORY_SNAPSHOTS", "CX_MEMORY_SNAPSHOT_MEMBERS",
@@ -940,6 +964,24 @@ def validate_v435_static_contract(database: str, scripts: Sequence[Path]) -> dic
     capability["passed"] = not any((capability["scripts_missing"], capability["tables_missing"])) and capability["no_secret_storage"]
     return {"database": database, "v434": base, "platform_capabilities": capability,
             "passed": bool(base.get("passed")) and bool(capability["passed"])}
+
+
+def validate_v436_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate the additive v4.3.6 native Agent declarations."""
+    base = validate_v435_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("32_v4_3_6_native_agents.sql")
+    source = _normalized_marker_text(migration.read_text(encoding="utf-8")) if migration and migration.is_file() else ""
+    native = {
+        "scripts_required": list(V436_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V436_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V436_NATIVE_AGENT_TABLES if name not in source],
+        "encrypted_secret_column": "API_KEY_CIPHER" in source,
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    native["passed"] = not any((native["scripts_missing"], native["tables_missing"])) and native["encrypted_secret_column"] and native["no_plaintext_secret_markers"]
+    return {"database": database, "v435": base, "native_agents": native,
+            "passed": bool(base.get("passed")) and bool(native["passed"])}
 
 
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
