@@ -289,6 +289,39 @@ def bootstrap_native_agents() -> Dict[str, Any]:
         raise NativeAgentError("native Agent bootstrap is unavailable") from exc
 
 
+def activate_bootstrap_agents(actor: str, llm_profile_id: str) -> Dict[str, Any]:
+    """Activate only platform-owned management Agents after trusted bootstrap.
+
+    This is intentionally not exposed as a general API.  Normal business
+    Agents still require a human approval and activation action.
+    """
+    if not str(actor).startswith("BOOTSTRAP_DEPLOYMENT_AGENT:") or not _text(llm_profile_id, 128):
+        raise NativeAgentError("bootstrap Agent activation is restricted")
+    def work(tx: Any) -> Dict[str, Any]:
+        profile = _row(tx.query_one(
+            "SELECT PROFILE_ID,STATUS FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id FOR UPDATE",
+            {"id": llm_profile_id},
+        ))
+        if not profile or str(profile.get("status") or "").upper() != "ACTIVE":
+            raise NativeAgentError("LLM Provider Profile is unavailable")
+        agent_ids = [PLATFORM_ADMIN_AGENT_ID]
+        if _enterprise():
+            agent_ids.append(COMPLIANCE_ADMIN_AGENT_ID)
+        activated = []
+        for agent_id in agent_ids:
+            changed = tx.execute(
+                "UPDATE CX_NATIVE_AGENTS SET STATUS='ACTIVE',ACTIVATION_STATE='ACTIVE',LLM_PROFILE_ID=:profile,"
+                "UPDATED_AT=CURRENT_TIMESTAMP WHERE AGENT_ID=:agent AND SOURCE='PLATFORM_BUILTIN' AND STATUS IN ('INITIALIZED','ACTIVATION_PENDING','DEGRADED')",
+                {"profile": llm_profile_id, "agent": agent_id},
+            )
+            if changed:
+                activated.append(agent_id)
+                _audit(tx, actor, "BOOTSTRAP_AGENT_ACTIVATE", "AGENT", agent_id, "ALLOW",
+                       "Bootstrap Deployment Agent attached the approved platform LLM Profile")
+        return {"activated": activated, "llm_profile_id": llm_profile_id}
+    return connection.execute_transaction_callback(work)
+
+
 def list_native_agents(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
     suffix, params = _limit(limit)
     all_access = False
@@ -582,6 +615,14 @@ def activate_agent(actor: str, agent_id: str, llm_profile_id: str, reason: str) 
         ))
         if not profile or str(profile.get("status") or "").upper() != "ACTIVE":
             raise NativeAgentError("LLM Provider Profile is unavailable")
+        if str(agent.get("is_protected") or "N").upper() != "Y":
+            # A configured default Contract is optional for platforms that do
+            # not use vectors.  Once it exists, a business Agent cannot become
+            # active while that Contract remains unverified or write-blocked.
+            from . import embedding_governance
+            effective = embedding_governance.effective_binding(agent_id)
+            if effective.get("binding") and not effective.get("ready"):
+                raise NativeAgentError("Embedding Contract is not ready for this business Agent")
         tx.execute(
             "UPDATE CX_NATIVE_AGENTS SET STATUS='ACTIVE',ACTIVATION_STATE='ACTIVE',LLM_PROFILE_ID=:profile,"
             "UPDATED_AT=CURRENT_TIMESTAMP WHERE AGENT_ID=:agent",

@@ -30,12 +30,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance
 
 
-VERSION = "4.3.6"
+VERSION = "4.3.7"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -115,7 +115,7 @@ def _path_capability(path: str) -> Optional[str]:
             "channels": "channels", "barriers": "barriers", "approvals": "approvals",
             "compliance": "compliance", "audit": "audit_view", "users": "users",
             "organization": "organization", "platform": "platform_config",
-            "native-agents": "agent_provisioning",
+            "native-agents": "agent_provisioning", "deployment": "deployment_governance",
         }.get(page)
     if normalized.startswith("/api/agents/") and any(part in normalized for part in ("/posture", "/activate", "/compliance-")):
         return "compliance"
@@ -140,6 +140,8 @@ def _path_capability(path: str) -> Optional[str]:
         (("/api/audit", "/api/traces", "/api/evidence", "/api/legal-holds"), "audit_view"),
         (("/api/users", "/api/registration"), "users"),
         (("/api/organization",), "organization"),
+        (("/api/embedding",), "embedding_governance"),
+        (("/api/deployment-runs",), "deployment_governance"),
     )
     for prefixes, capability in rules:
         if any(
@@ -1030,6 +1032,68 @@ class LLMProviderProfileBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class EmbeddingProfileBody(BaseModel):
+    profile_key: str = Field(min_length=1, max_length=128)
+    provider_url: str = Field(default="", max_length=512)
+    model_id: str = Field(default="", max_length=256)
+    execution_mode: str = Field(min_length=1, max_length=32)
+    dimension: int = Field(ge=0, le=65536)
+    distance_metric: str = Field(default="COSINE", max_length=32)
+    normalize_vectors: bool = True
+    preprocessing: Dict[str, Any] = Field(default_factory=dict)
+    modalities: list[str] = Field(default_factory=lambda: ["TEXT"], max_length=16)
+    api_key: str = Field(default="", max_length=4096)
+    secret_reference: str = Field(default="", max_length=512)
+    model_fingerprint: str = Field(default="", max_length=256)
+    expected_version: Optional[int] = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EmbeddingContractBody(BaseModel):
+    profile_id: str = Field(min_length=1, max_length=128)
+    model_fingerprint: str = Field(default="", max_length=256)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EmbeddingSpaceBody(BaseModel):
+    space_key: str = Field(min_length=1, max_length=128)
+    contract_id: str = Field(min_length=1, max_length=128)
+    default: bool = False
+    writable: bool = False
+    physical_ref: str = Field(default="", max_length=256)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EmbeddingBindingBody(BaseModel):
+    binding_scope: str = Field(min_length=1, max_length=32)
+    binding_subject_id: str = Field(min_length=1, max_length=128)
+    profile_id: str = Field(min_length=1, max_length=128)
+    space_id: str = Field(min_length=1, max_length=128)
+    expected_version: Optional[int] = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EmbeddingProbeBody(BaseModel):
+    scope: str = Field(default="PLATFORM", max_length=32)
+    timeout: int = Field(default=30, ge=1, le=120)
+
+
+class AgentEmbeddingProbeBody(BaseModel):
+    observed_dimension: int = Field(ge=1, le=65536)
+    observed_model: str = Field(default="", max_length=256)
+    response_digest: str = Field(min_length=64, max_length=64)
+    model_fingerprint: str = Field(default="", max_length=256)
+
+
+class EmbeddingJobBody(BaseModel):
+    job_kind: str = Field(min_length=1, max_length=32)
+    target_space_id: str = Field(min_length=1, max_length=128)
+    source_space_id: str = Field(default="", max_length=128)
+    input_data: Dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str = Field(default="", max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class NativeAgentRequestBody(BaseModel):
     agent_name: str = Field(min_length=1, max_length=256)
     owner_principal_id: str = Field(min_length=1, max_length=128)
@@ -1632,6 +1696,223 @@ def llm_provider_profile(
         )
     except Exception as exc:
         raise _identity_http_error(exc, "LLM Provider Profile could not be saved") from exc
+
+
+@app.get("/api/deployment-runs")
+def deployment_runs(
+    limit: int = 50,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        amount = max(1, min(int(limit), 500))
+        suffix = " LIMIT :limit" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"} else " FETCH FIRST :limit ROWS ONLY"
+        rows = connection.execute_query(
+            "SELECT RUN_ID,RUN_MODE,DATABASE_DIALECT,EDITION,PACKAGE_VERSION,STATUS,READINESS_JSON,"
+            "DEPLOYMENT_AGENT_ID,CURRENT_STEP,FAILURE_CODE,FAILURE_DETAIL,CREATED_AT,UPDATED_AT,COMPLETED_AT "
+            "FROM CX_DEPLOYMENT_RUNS ORDER BY CREATED_AT DESC" + suffix, {"limit": amount},
+        )
+        items = []
+        for row in rows:
+            item = {str(key).lower(): value for key, value in dict(row).items()}
+            try:
+                item["readiness"] = json.loads(str(item.pop("readiness_json", "{}") or "{}"))
+            except ValueError:
+                item["readiness"] = {}
+            items.append(item)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Deployment evidence is unavailable") from exc
+
+
+@app.get("/api/embedding/readiness")
+def embedding_readiness(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return {"readiness": embedding_governance.readiness(), "queue": embedding_governance.queue_metrics()}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Contract readiness is unavailable") from exc
+
+
+@app.get("/api/embedding/profiles")
+def embedding_profiles(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_profiles(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Profiles are unavailable") from exc
+
+
+@app.post("/api/embedding/profiles")
+def embedding_profile(
+    body: EmbeddingProfileBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.upsert_profile(
+            str(session["principal_id"]), profile_key=body.profile_key, provider_url=body.provider_url,
+            model_id=body.model_id, execution_mode=body.execution_mode, dimension=body.dimension,
+            distance_metric=body.distance_metric, normalize_vectors=body.normalize_vectors,
+            preprocessing=body.preprocessing, modalities=body.modalities, api_key=body.api_key,
+            secret_reference=body.secret_reference, model_fingerprint=body.model_fingerprint,
+            expected_version=body.expected_version, reason=body.reason,
+        )
+    except embedding_governance.EmbeddingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Profile could not be saved") from exc
+
+
+@app.get("/api/embedding/contracts")
+def embedding_contracts(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_contracts(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Contracts are unavailable") from exc
+
+
+@app.post("/api/embedding/contracts")
+def embedding_contract(
+    body: EmbeddingContractBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.create_contract(
+            str(session["principal_id"]), body.profile_id, body.reason,
+            model_fingerprint=body.model_fingerprint,
+        )
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Contract could not be created") from exc
+
+
+@app.get("/api/embedding/spaces")
+def embedding_spaces(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_spaces(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Spaces are unavailable") from exc
+
+
+@app.post("/api/embedding/spaces")
+def embedding_space(
+    body: EmbeddingSpaceBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.create_space(
+            str(session["principal_id"]), body.space_key, body.contract_id, body.reason,
+            default=body.default, writable=body.writable, physical_ref=body.physical_ref,
+        )
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Space could not be created") from exc
+
+
+@app.get("/api/embedding/bindings")
+def embedding_bindings(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_bindings(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding bindings are unavailable") from exc
+
+
+@app.post("/api/embedding/bindings")
+def embedding_binding(
+    body: EmbeddingBindingBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.bind(
+            str(session["principal_id"]), body.binding_scope, body.binding_subject_id,
+            body.profile_id, body.space_id, body.reason, body.expected_version,
+        )
+    except embedding_governance.EmbeddingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding binding could not be saved") from exc
+
+
+@app.post("/api/embedding/profiles/{profile_id}/probe")
+def embedding_probe(
+    profile_id: str,
+    body: EmbeddingProbeBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.probe_profile(str(session["principal_id"]), profile_id, scope=body.scope, timeout=body.timeout)
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding probe failed") from exc
+
+
+@app.post("/api/gateway/embedding/profiles/{profile_id}/probe")
+@app.post("/api/agent-gateway/embedding/profiles/{profile_id}/probe")
+def gateway_embedding_probe(profile_id: str, body: AgentEmbeddingProbeBody, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(request, "embedding.probe", operation="embedding.probe")
+    try:
+        return embedding_governance.record_agent_probe(
+            str(context["agent_id"]), profile_id, observed_dimension=body.observed_dimension,
+            observed_model=body.observed_model, response_digest=body.response_digest,
+            model_fingerprint=body.model_fingerprint,
+        )
+    except embedding_governance.EmbeddingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Agent-side Embedding probe failed") from exc
+
+
+@app.get("/api/embedding/jobs")
+def embedding_jobs(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_jobs(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding jobs are unavailable") from exc
+
+
+@app.post("/api/embedding/jobs")
+def embedding_job(
+    body: EmbeddingJobBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.enqueue_job(
+            str(session["principal_id"]), job_kind=body.job_kind, target_space_id=body.target_space_id,
+            source_space_id=body.source_space_id, input_data=body.input_data,
+            idempotency_key=body.idempotency_key, reason=body.reason,
+        )
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding Job could not be queued") from exc
 
 
 @app.get("/api/platform/external-agent-registration")
@@ -2977,7 +3258,7 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
         except (agent_gateway_api.GatewayError, PermissionError) as exc:
             raise HTTPException(status_code=403, detail="Agent instance could not be created") from exc
     requested = body.scopes or ["channels.read", "channels.write"]
-    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation"}
+    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe"}
     if not set(requested) <= allowed:
         raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
     try:

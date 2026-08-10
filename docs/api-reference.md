@@ -1,4 +1,29 @@
-# API Reference - AI Agent Infra with DB v4.3.6
+# API Reference - AI Agent Infra with DB v4.3.7
+
+## v4.3.7 Deployment And Embedding API
+
+Deployment status and evidence are read-only operational views. They do not
+expose arbitrary DDL execution. All mutations require the current protected
+Human session, CSRF, an explicit reason where applicable, scope checks, and
+atomic audit writes.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/platform/deployment/status` | GET | Read sanitized Bootstrap deployment, readiness, and handoff state. |
+| `/api/platform/deployment/verify` | POST | Run postflight verification only; it cannot execute arbitrary SQL. |
+| `/api/embedding/profiles` | GET/POST | Read redacted Profiles or create a governed Profile. |
+| `/api/embedding/contracts` | GET/POST | Read immutable Contract versions or publish a validated successor. |
+| `/api/embedding/spaces` | GET/POST | Inspect or create a logical vector Space. |
+| `/api/embedding/bindings` | GET/POST | Inspect or create an auditable effective binding. |
+| `/api/embedding/profiles/{profile_id}/probe` | POST | Run a bounded platform-side compatibility probe. |
+| `/api/gateway/embedding/profiles/{profile_id}/probe` | POST | Accept an authenticated Agent-side direct-mode probe. |
+| `/api/embedding/jobs` | GET/POST | Inspect or enqueue bounded ingestion or re-embedding work. |
+| `/api/embedding/jobs/{job_id}` | GET | Read authorized queued, claimed, retry, or terminal job state. |
+
+The local `scripts/embedding_worker.py` claims jobs by database lease and
+fencing token. It accepts only verified writable `PLATFORM_MANAGED` and
+`ENTERPRISE_PROXY` targets; direct and imported vectors are validated at their
+respective write boundary.
 
 ## v4.3.6 Native Agent API
 

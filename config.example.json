@@ -12,7 +12,13 @@
     "embedding": {
         "api_url": "<EMBEDDING_API_URL>",
         "model": "text-embedding-bge-m3",
-        "dimension": 1024
+        "dimension": 1024,
+        "api_key": "<EMBEDDING_API_KEY_OR_EMPTY>",
+        "execution_mode": "PLATFORM_MANAGED",
+        "profile_key": "platform-default",
+        "distance_metric": "COSINE",
+        "normalize_vectors": true,
+        "secret_reference": ""
     },
     "llm": {
         "api_url": "<LLM_API_URL>",
@@ -22,7 +28,7 @@
     "security": {
         "admin_username": "admin",
         "session_timeout": 300,
-        "secret_key": "oracle-community-v4.3.3"
+        "secret_key": "oracle-community-v4.3.7"
     },
     "agent": {
         "mode": "standalone"

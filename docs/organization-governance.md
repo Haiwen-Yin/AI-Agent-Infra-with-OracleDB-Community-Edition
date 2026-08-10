@@ -1,4 +1,4 @@
-# Organization Governance - AI Agent Infra with DB v4.3.6
+# Organization Governance - AI Agent Infra with DB v4.3.7
 
 v4.3.1 introduces a database-authoritative organization model and a graphical
 workspace for controlled search, inspection, and change preparation. It is a

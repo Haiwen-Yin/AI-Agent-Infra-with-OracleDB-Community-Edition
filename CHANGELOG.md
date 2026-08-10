@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.3.7 - 2026-08-10
+
+- Added the local Bootstrap Deployment Agent, prepared-target preflight,
+  encrypted owner-only journal, durable deployment evidence, and retirement
+  handoff to platform-native management Agents.
+- Added governed Embedding Profiles, immutable Contracts, Spaces, bindings,
+  platform/Agent probes, `LEGACY_DEFAULT` isolation, and all five supported
+  execution modes.
+- Added the protected Deployment & Models dashboard and a bounded,
+  lease-protected local Embedding Worker for asynchronous ingestion and
+  re-embedding outside HTTP request handling.
+
 ## v4.3.6 - 2026-08-07
 
 - Added platform-native Agent bootstrap and separated Platform Admin and

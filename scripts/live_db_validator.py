@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.14
-"""Read-only live database capability probe for v4.1.0 release evidence."""
+"""Read-only live database capability probe for current release evidence."""
 
 from __future__ import annotations
 
@@ -158,6 +158,9 @@ V435_PLATFORM_REQUIRED_COLUMNS = {
 V436_MIGRATION_SCRIPTS = V435_MIGRATION_SCRIPTS + (
     "32_v4_3_6_native_agents.sql",
 )
+V437_MIGRATION_SCRIPTS = V436_MIGRATION_SCRIPTS + (
+    "33_v4_3_7_bootstrap_embedding.sql",
+)
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
     "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
@@ -177,6 +180,26 @@ V436_NATIVE_AGENT_REQUIRED_COLUMNS = {
     "CX_RUNTIME_EXECUTIONS": frozenset({"EXECUTION_ID", "AGENT_ID", "STATUS", "INPUT_JSON", "FENCING_TOKEN"}),
     "CX_EXTERNAL_AGENT_POLICY": frozenset({"POLICY_KEY", "STATE", "VERSION", "REASON"}),
     "CX_EXTERNAL_AGENT_POLICY_HISTORY": frozenset({"HISTORY_ID", "POLICY_KEY", "FROM_STATE", "TO_STATE", "RESULT_VERSION"}),
+}
+V437_BOOTSTRAP_TABLES = (
+    "CX_DEPLOYMENT_RUNS", "CX_DEPLOYMENT_STEPS", "CX_DEPLOYMENT_EVIDENCE",
+    "CX_DEPLOYMENT_LEASES", "CX_EMBEDDING_PROFILES", "CX_EMBEDDING_CONTRACTS",
+    "CX_EMBEDDING_SPACES", "CX_EMBEDDING_BINDINGS", "CX_EMBEDDING_PROBES",
+    "CX_EMBEDDING_JOBS", "CX_EMBEDDING_HISTORY",
+)
+V437_BOOTSTRAP_REQUIRED_COLUMNS = {
+    "CX_DEPLOYMENT_RUNS": frozenset({"RUN_ID", "RUN_MODE", "STATUS", "READINESS_JSON", "PLAN_DIGEST"}),
+    "CX_DEPLOYMENT_STEPS": frozenset({"STEP_ID", "RUN_ID", "STEP_KEY", "STATUS", "ACTION_DIGEST"}),
+    "CX_DEPLOYMENT_EVIDENCE": frozenset({"EVIDENCE_ID", "RUN_ID", "EVIDENCE_TYPE", "PAYLOAD_DIGEST"}),
+    "CX_DEPLOYMENT_LEASES": frozenset({"LEASE_KEY", "RUN_ID", "FENCING_TOKEN", "LEASE_EXPIRES_AT"}),
+    "CX_EMBEDDING_PROFILES": frozenset({"PROFILE_ID", "PROFILE_KEY", "MODEL_ID", "MODEL_FINGERPRINT", "EXECUTION_MODE", "VERSION"}),
+    "CX_EMBEDDING_CONTRACTS": frozenset({"CONTRACT_ID", "PROFILE_ID", "CONTRACT_VERSION", "DIMENSION", "CONTRACT_DIGEST"}),
+    "CX_EMBEDDING_SPACES": frozenset({"SPACE_ID", "SPACE_KEY", "STATUS", "VALIDATION_STATE", "WRITE_ENABLED"}),
+    "CX_EMBEDDING_BINDINGS": frozenset({"BINDING_ID", "BINDING_SCOPE", "BINDING_SUBJECT_ID", "VERSION"}),
+    "CX_EMBEDDING_PROBES": frozenset({"PROBE_ID", "PROFILE_ID", "PROBE_SCOPE", "STATUS"}),
+    "CX_EMBEDDING_JOBS": frozenset({"JOB_ID", "JOB_KIND", "STATUS", "IDEMPOTENCY_KEY", "FENCING_TOKEN"}),
+    "CX_EMBEDDING_HISTORY": frozenset({"HISTORY_ID", "OBJECT_TYPE", "OBJECT_ID", "ACTION", "ACTOR"}),
+    "ENTITY_EMBEDDINGS": frozenset({"EMBEDDING_SPACE_ID", "EMBEDDING_PROFILE_ID", "EMBEDDING_CONTRACT_ID", "CONTENT_DIGEST", "SOURCE_MODE", "VALIDATION_STATUS"}),
 }
 
 V432_MEMORY_TABLES = (
@@ -984,6 +1007,24 @@ def validate_v436_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(native["passed"])}
 
 
+def validate_v437_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate deterministic deployment and Embedding governance declarations."""
+    base = validate_v436_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("33_v4_3_7_bootstrap_embedding.sql")
+    source = _normalized_marker_text(migration.read_text(encoding="utf-8")) if migration and migration.is_file() else ""
+    bootstrap = {
+        "scripts_required": list(V437_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V437_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V437_BOOTSTRAP_TABLES if name not in source],
+        "contract_markers": all(marker in source for marker in ("EMBEDDING_SPACE_ID", "EMBEDDING_CONTRACT_ID", "MODEL_FINGERPRINT", "LEGACY_DEFAULT")),
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    bootstrap["passed"] = not any((bootstrap["scripts_missing"], bootstrap["tables_missing"])) and bootstrap["contract_markers"] and bootstrap["no_plaintext_secret_markers"]
+    return {"database": database, "v436": base, "bootstrap_embedding": bootstrap,
+            "passed": bool(base.get("passed")) and bool(bootstrap["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1036,6 +1077,7 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
     columns: dict[str, set[str]] = {}
     for table in tuple(dict.fromkeys(
         V43_REQUIRED_TABLES + V434_COMPLIANCE_TABLES + V435_PLATFORM_TABLES
+        + V436_NATIVE_AGENT_TABLES + V437_BOOTSTRAP_TABLES + tuple(V437_BOOTSTRAP_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1116,6 +1158,8 @@ class ProbeResult:
     v431_organization_contract: dict[str, Any] = field(default_factory=dict)
     v434_compliance_contract: dict[str, Any] = field(default_factory=dict)
     v435_platform_contract: dict[str, Any] = field(default_factory=dict)
+    v436_native_agent_contract: dict[str, Any] = field(default_factory=dict)
+    v437_bootstrap_embedding_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1148,6 +1192,28 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     }
     result.v435_platform_contract["passed"] = not any((
         result.v435_platform_contract["tables_missing"], result.v435_platform_contract["columns_missing"],
+    ))
+    result.v436_native_agent_contract = {
+        "tables_missing": sorted(set(V436_NATIVE_AGENT_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V436_NATIVE_AGENT_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v436_native_agent_contract["passed"] = not any((
+        result.v436_native_agent_contract["tables_missing"], result.v436_native_agent_contract["columns_missing"],
+    ))
+    result.v437_bootstrap_embedding_contract = {
+        "tables_missing": sorted(set(V437_BOOTSTRAP_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V437_BOOTSTRAP_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v437_bootstrap_embedding_contract["passed"] = not any((
+        result.v437_bootstrap_embedding_contract["tables_missing"], result.v437_bootstrap_embedding_contract["columns_missing"],
     ))
 
 
@@ -1434,28 +1500,39 @@ def main() -> int:
     # could be reported as ready.
     requires_graph = target_version.startswith(("4.2.", "4.3."))
     requires_v43 = target_version.startswith("4.3.")
-    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5"))
-    requires_v432 = target_version.startswith(("4.3.2", "4.3.3", "4.3.4", "4.3.5"))
-    requires_v433 = target_version.startswith(("4.3.3", "4.3.4", "4.3.5"))
-    requires_v434 = target_version.startswith(("4.3.4", "4.3.5"))
-    requires_v435 = target_version.startswith("4.3.5")
+    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
+    requires_v432 = target_version.startswith(("4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
+    requires_v433 = target_version.startswith(("4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
+    requires_v434 = target_version.startswith(("4.3.4", "4.3.5", "4.3.6", "4.3.7"))
+    requires_v435 = target_version.startswith(("4.3.5", "4.3.6", "4.3.7"))
+    requires_v436 = target_version.startswith(("4.3.6", "4.3.7"))
+    requires_v437 = target_version.startswith("4.3.7")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            migration_scripts = V435_MIGRATION_SCRIPTS if requires_v435 else (V434_MIGRATION_SCRIPTS if requires_v434 else (V433_MIGRATION_SCRIPTS if requires_v433 else (V432_MIGRATION_SCRIPTS if requires_v432 else (V431_MIGRATION_SCRIPTS if requires_v431 else V43_MIGRATION_SCRIPTS))))
+            if requires_v437:
+                migration_scripts, validator = V437_MIGRATION_SCRIPTS, validate_v437_static_contract
+            elif requires_v436:
+                migration_scripts, validator = V436_MIGRATION_SCRIPTS, validate_v436_static_contract
+            elif requires_v435:
+                migration_scripts, validator = V435_MIGRATION_SCRIPTS, validate_v435_static_contract
+            elif requires_v434:
+                migration_scripts, validator = V434_MIGRATION_SCRIPTS, validate_v434_static_contract
+            elif requires_v433:
+                migration_scripts, validator = V433_MIGRATION_SCRIPTS, validate_v433_static_contract
+            elif requires_v432:
+                migration_scripts, validator = V432_MIGRATION_SCRIPTS, validate_v432_static_contract
+            elif requires_v431:
+                migration_scripts, validator = V431_MIGRATION_SCRIPTS, validate_v431_static_contract
+            else:
+                migration_scripts, validator = V43_MIGRATION_SCRIPTS, validate_v43_static_contract
             scripts = [
                 (REPO_ROOT / "scripts" / "deploy" / name)
                 if (REPO_ROOT / "scripts" / "deploy" / name).is_file()
                 else (REPO_ROOT / "adapters" / database / "deploy" / name)
                 for name in migration_scripts
             ]
-            static_contracts[database] = (
-                validate_v435_static_contract(database, scripts) if requires_v435 else (validate_v434_static_contract(database, scripts) if requires_v434 else (validate_v433_static_contract(database, scripts) if requires_v433 else (
-                    validate_v432_static_contract(database, scripts) if requires_v432 else (
-                        validate_v431_static_contract(database, scripts) if requires_v431 else validate_v43_static_contract(database, scripts)
-                    ))
-                ))
-            )
+            static_contracts[database] = validator(database, scripts)
     for database in available_databases:
         path = paths[database]
         if path is None:
@@ -1494,6 +1571,8 @@ def main() -> int:
                 result.v43_schema_contract.get("passed") is True
                 and (not requires_v434 or not enterprise or result.v434_compliance_contract.get("passed") is True)
                 and (not requires_v435 or result.v435_platform_contract.get("passed") is True)
+                and (not requires_v436 or result.v436_native_agent_contract.get("passed") is True)
+                and (not requires_v437 or result.v437_bootstrap_embedding_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

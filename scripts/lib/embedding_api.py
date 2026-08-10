@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.6 - Community Edition - Embedding API
+"""AI Agent Infra v4.3.7 - Community Edition - Embedding API
 
 Generate, store, and search vector embeddings for entities.
 Uses external Embedding API (OpenAI-compatible) + Oracle TO_VECTOR() for storage.
@@ -8,10 +8,12 @@ Single-SQL CTE fusion search available via search_unified_sql().
 """
 
 import json
+import hashlib
 import logging
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from . import connection
 from .connection import execute, execute_query, execute_query_one
 from .config import get_config
 
@@ -39,6 +41,59 @@ def _get_api_config() -> Dict[str, Any]:
     }
 
 
+def _governed_context(agent_id: str = "", *, require_platform_generation: bool = False) -> Dict[str, Any]:
+    """Resolve the only vector space this call may read or write.
+
+    The legacy helper remains callable by existing Skills, but after v4.3.7 it
+    cannot silently fall back to an unbound/default model.  A caller may use
+    the process Agent context, an explicit Agent id, or the platform binding.
+    """
+    from . import embedding_governance
+
+    current = agent_id or connection.get_current_agent_id() or ""
+    effective = embedding_governance.effective_binding(current)
+    if not effective.get("binding"):
+        raise ValueError("Embedding Contract is not configured for this Agent")
+    if not effective.get("ready"):
+        raise ValueError("Embedding Contract is not verified or writable")
+    profile = effective["profile"]
+    mode = str(profile.get("execution_mode") or "").upper()
+    if require_platform_generation and mode != "PLATFORM_MANAGED":
+        raise ValueError("Embedding generation is delegated by the configured execution mode")
+    return {
+        "agent_id": current,
+        "profile": profile,
+        "space": effective["space"],
+        "contract": effective["contract"],
+        "mode": mode,
+    }
+
+
+def _content_digest(value: str) -> str:
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+
+
+def _query_embedding(text: str, *, agent_id: str = "") -> tuple[Dict[str, Any], str]:
+    """Generate one query vector under the active verified Contract."""
+    context = _governed_context(agent_id, require_platform_generation=True)
+    profile = context["profile"]
+    from .embedding_governance import _profile_api_key
+    vector = generate_embedding(
+        text, api_url=str(profile.get("provider_url") or ""), model=str(profile.get("model_id") or ""),
+        api_key=_profile_api_key(profile),
+    )
+    if len(vector) != int(context["contract"].get("dimension") or 0):
+        raise ValueError("Embedding provider response differs from the active Contract")
+    return context, json.dumps(vector)
+
+
+def _scope_params(context: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "emb_space": str(context["space"]["space_id"]),
+        "emb_contract": str(context["contract"]["contract_id"]),
+    }
+
+
 def _detect_dimension(model: str, api_url: str) -> int:
     if model in MODEL_DIMENSIONS:
         return MODEL_DIMENSIONS[model]
@@ -60,6 +115,7 @@ def generate_embedding(
     text: str,
     api_url: Optional[str] = None,
     model: Optional[str] = None,
+    api_key: Optional[str] = None,
     timeout: int = 30,
 ) -> List[float]:
     if not text or not text.strip():
@@ -71,10 +127,13 @@ def generate_embedding(
 
     payload = json.dumps({"model": model, "input": text}).encode("utf-8")
 
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
     req = urllib.request.Request(
         api_url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
 
@@ -101,21 +160,38 @@ def store_embedding(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
     embedding_version: Optional[int] = None,
+    agent_id: str = "",
 ) -> bool:
-    embedding = generate_embedding(text, api_url=api_url, model=model)
-
-    cfg = _get_api_config()
-    model = model or cfg["model"]
+    context = _governed_context(agent_id, require_platform_generation=True)
+    profile = context["profile"]
+    from .embedding_governance import _profile_api_key
+    if api_url and str(api_url).rstrip("/") != str(profile.get("provider_url") or "").rstrip("/"):
+        raise ValueError("submitted Embedding provider differs from the effective Contract")
+    if model and str(model) != str(profile.get("model_id") or ""):
+        raise ValueError("submitted Embedding model differs from the effective Contract")
+    embedding = generate_embedding(
+        text, api_url=str(profile.get("provider_url") or ""), model=str(profile.get("model_id") or ""),
+        api_key=_profile_api_key(profile),
+    )
+    from . import embedding_governance
+    checked = embedding_governance.validate_vector_write(
+        context["agent_id"], embedding, space_id=str(context["space"]["space_id"]),
+        profile_id=str(profile["profile_id"]), contract_id=str(context["contract"]["contract_id"]),
+        source_mode=context["mode"],
+    )
+    model = str(profile.get("model_id") or "")
     dimension = len(embedding)
 
     vec_str = json.dumps(embedding)
 
     sql_check = """
         SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS
-        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID = :space
     """
     try:
-        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
+        scope = {"space": checked["space"]["space_id"], "profile": checked["profile"]["profile_id"],
+                 "contract": checked["contract"]["contract_id"], "mode": context["mode"], "digest": _content_digest(text)}
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type, **scope})
         count = int(list(row.values())[0]) if row else 0
 
         version_col = ""
@@ -136,23 +212,26 @@ def store_embedding(
                 UPDATE ENTITY_EMBEDDINGS
                 SET EMBEDDING = TO_VECTOR(:vec),
                     EMBEDDING_MODEL = :model,
-                    EMBEDDING_DIM = :dim{version_clause}
-                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+                    EMBEDDING_DIM = :dim, EMBEDDING_PROFILE_ID=:profile,
+                    EMBEDDING_CONTRACT_ID=:contract, CONTENT_DIGEST=:digest,
+                    SOURCE_MODE=:mode, VALIDATION_STATUS='VERIFIED'{version_clause}
+                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:space
             """
             execute(sql, {"vec": vec_str, "model": model, "dim": dimension,
-                          "eid": entity_id, "etype": entity_type, **version_update})
+                          "eid": entity_id, "etype": entity_type, **scope, **version_update})
         else:
             from .connection import get_connection
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO ENTITY_EMBEDDINGS
-                               (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL,
+                               (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID, EMBEDDING_CONTRACT_ID,
+                                CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL,
                                 EMBEDDING_DIM, CREATED_AT{version_col})
-                            VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim,
+                            VALUES (:eid, :etype, :space, :profile, :contract, :digest, :mode, 'VERIFIED', TO_VECTOR(:vec), :model, :dim,
                                     CURRENT_TIMESTAMP{version_val})""",
                         {"eid": entity_id, "etype": entity_type, "vec": vec_str,
-                         "model": model, "dim": dimension, **version_param},
+                         "model": model, "dim": dimension, **scope, **version_param},
                     )
                     conn.commit()
         logger.info(f"Stored embedding for {entity_type}:{entity_id} ({dimension}d, {model})")
@@ -167,18 +246,31 @@ def store_embedding_vector(
     entity_type: str,
     embedding: List[float],
     model: Optional[str] = None,
+    agent_id: str = "",
+    source_mode: str = "PRECOMPUTED_IMPORT",
 ) -> bool:
-    cfg = _get_api_config()
-    model = model or cfg["model"]
+    context = _governed_context(agent_id)
+    from . import embedding_governance
+    checked = embedding_governance.validate_vector_write(
+        context["agent_id"], embedding, space_id=str(context["space"]["space_id"]),
+        profile_id=str(context["profile"]["profile_id"]), contract_id=str(context["contract"]["contract_id"]),
+        source_mode=source_mode,
+    )
+    model = model or str(context["profile"].get("model_id") or "")
+    if model != str(context["profile"].get("model_id") or ""):
+        raise ValueError("submitted Embedding model differs from the effective Contract")
     dimension = len(embedding)
     vec_str = json.dumps(embedding)
 
     sql_check = """
         SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS
-        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID = :space
     """
     try:
-        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
+        scope = {"space": checked["space"]["space_id"], "profile": checked["profile"]["profile_id"],
+                 "contract": checked["contract"]["contract_id"], "mode": source_mode.upper(),
+                 "digest": _content_digest(vec_str)}
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type, **scope})
         count = int(list(row.values())[0]) if row else 0
 
         if count > 0:
@@ -186,18 +278,21 @@ def store_embedding_vector(
                 UPDATE ENTITY_EMBEDDINGS
                 SET EMBEDDING = TO_VECTOR(:vec),
                     EMBEDDING_MODEL = :model,
-                    EMBEDDING_DIM = :dim
-                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+                    EMBEDDING_DIM = :dim, EMBEDDING_PROFILE_ID=:profile,
+                    EMBEDDING_CONTRACT_ID=:contract, CONTENT_DIGEST=:digest,
+                    SOURCE_MODE=:mode, VALIDATION_STATUS='VERIFIED'
+                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:space
             """
-            execute(sql, {"vec": vec_str, "model": model, "dim": dimension, "eid": entity_id, "etype": entity_type})
+            execute(sql, {"vec": vec_str, "model": model, "dim": dimension, "eid": entity_id, "etype": entity_type, **scope})
         else:
             from .connection import get_connection
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
-                        VALUES (:eid, :etype, TO_VECTOR(:vec), :model, :dim, CURRENT_TIMESTAMP)
-                    """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension})
+                        INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID,
+                            EMBEDDING_CONTRACT_ID, CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
+                        VALUES (:eid, :etype, :space, :profile, :contract, :digest, :mode, 'VERIFIED', TO_VECTOR(:vec), :model, :dim, CURRENT_TIMESTAMP)
+                    """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension, **scope})
                     conn.commit()
         logger.info(f"Stored embedding vector for {entity_type}:{entity_id} ({dimension}d)")
         return True
@@ -207,13 +302,14 @@ def store_embedding_vector(
 
 
 def get_embedding(entity_id: str, entity_type: str = "MEMORY") -> Optional[Dict]:
+    context = _governed_context()
     sql = """
-        SELECT ENTITY_ID, ENTITY_TYPE, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT
+        SELECT ENTITY_ID, ENTITY_TYPE, EMBEDDING_MODEL, EMBEDDING_DIM, EMBEDDING_SPACE_ID, EMBEDDING_CONTRACT_ID, CREATED_AT
         FROM ENTITY_EMBEDDINGS
-        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype
+        WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:emb_space AND EMBEDDING_CONTRACT_ID=:emb_contract
     """
     try:
-        row = execute_query_one(sql, {"eid": entity_id, "etype": entity_type})
+        row = execute_query_one(sql, {"eid": entity_id, "etype": entity_type, **_scope_params(context)})
         if row and row.get("entity_id"):
             return {
                 "entity_id": row["entity_id"],
@@ -229,9 +325,10 @@ def get_embedding(entity_id: str, entity_type: str = "MEMORY") -> Optional[Dict]
 
 
 def delete_embedding(entity_id: str, entity_type: str = "MEMORY") -> bool:
-    sql = "DELETE FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype"
+    context = _governed_context()
+    sql = "DELETE FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:emb_space AND EMBEDDING_CONTRACT_ID=:emb_contract"
     try:
-        execute(sql, {"eid": entity_id, "etype": entity_type})
+        execute(sql, {"eid": entity_id, "etype": entity_type, **_scope_params(context)})
         return True
     except Exception as e:
         logger.error(f"Failed to delete embedding: {e}")
@@ -246,11 +343,14 @@ def search_similar(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> List[Dict]:
-    embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = json.dumps(embedding)
+    context, vec_str = _query_embedding(text)
+    profile = context["profile"]
+    if api_url or model:
+        if (api_url and str(api_url).rstrip("/") != str(profile.get("provider_url") or "").rstrip("/")) or (model and str(model) != str(profile.get("model_id") or "")):
+            raise ValueError("submitted Embedding configuration differs from the active Contract")
 
     conditions = []
-    params = {"vec": vec_str, "k": top_k}
+    params = {"vec": vec_str, "k": top_k, **_scope_params(context)}
     if entity_type:
         conditions.append("AND e.ENTITY_TYPE = :etype")
         params["etype"] = entity_type
@@ -264,7 +364,7 @@ def search_similar(
                VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
         FROM ENTITY_EMBEDDINGS em
         JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
-        WHERE 1=1 {where}
+        WHERE em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract {where}
         ORDER BY distance ASC
         FETCH FIRST :k ROWS ONLY
     """
@@ -294,6 +394,7 @@ def generate_embeddings_batch(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> Dict:
+    context = _governed_context(require_platform_generation=True)
     sql = """
         SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT
         FROM ENTITIES e
@@ -301,6 +402,7 @@ def generate_embeddings_batch(
           AND NOT EXISTS (
             SELECT 1 FROM ENTITY_EMBEDDINGS em
             WHERE em.ENTITY_ID = e.ENTITY_ID AND em.ENTITY_TYPE = e.ENTITY_TYPE
+              AND em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract
           )
           AND e.TITLE IS NOT NULL
         ORDER BY e.CREATED_AT DESC
@@ -308,7 +410,7 @@ def generate_embeddings_batch(
     """
 
     try:
-        rows = execute_query(sql, {"etype": entity_type, "lim": limit})
+        rows = execute_query(sql, {"etype": entity_type, "lim": limit, **_scope_params(context)})
         generated = 0
         failed = 0
 
@@ -338,13 +440,15 @@ def generate_embeddings_batch(
 
 
 def get_embedding_stats() -> Dict:
+    context = _governed_context()
     try:
         row = execute_query_one("""
             SELECT COUNT(*) AS total,
                    COUNT(CASE WHEN EMBEDDING IS NOT NULL THEN 1 END) AS with_vector,
                    COUNT(DISTINCT EMBEDDING_MODEL) AS model_count
             FROM ENTITY_EMBEDDINGS
-        """)
+            WHERE EMBEDDING_SPACE_ID=:emb_space AND EMBEDDING_CONTRACT_ID=:emb_contract
+        """, _scope_params(context))
         if row:
             return {
                 "total": int(list(row.values())[0]) if row else 0,
@@ -373,9 +477,11 @@ def search_by_entity_id(
     top_k: int = 10,
     workspace_id: Optional[str] = None,
 ) -> List[Dict]:
-    sql_check = "SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype"
+    context = _governed_context()
+    scope = _scope_params(context)
+    sql_check = "SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:emb_space AND EMBEDDING_CONTRACT_ID=:emb_contract"
     try:
-        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type})
+        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type, **scope})
         count = int(list(row.values())[0]) if row else 0
         if count == 0:
             return []
@@ -384,15 +490,15 @@ def search_by_entity_id(
         sql = f"""
             SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CATEGORY,
                    VECTOR_DISTANCE(em.EMBEDDING,
-                       (SELECT EMBEDDING FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype),
+                       (SELECT EMBEDDING FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = :etype AND EMBEDDING_SPACE_ID=:emb_space AND EMBEDDING_CONTRACT_ID=:emb_contract),
                        COSINE) AS distance
             FROM ENTITY_EMBEDDINGS em
             JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
-            WHERE em.ENTITY_ID != :eid {ws_filter}
+            WHERE em.ENTITY_ID != :eid AND em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract {ws_filter}
             ORDER BY distance ASC
             FETCH FIRST :k ROWS ONLY
         """
-        params = {"eid": entity_id, "etype": entity_type, "k": top_k}
+        params = {"eid": entity_id, "etype": entity_type, "k": top_k, **scope}
         if workspace_id:
             params["wsid"] = workspace_id
 
@@ -424,11 +530,14 @@ def search_hybrid(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> List[Dict]:
-    embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = json.dumps(embedding)
+    context, vec_str = _query_embedding(text)
+    profile = context["profile"]
+    if api_url or model:
+        if (api_url and str(api_url).rstrip("/") != str(profile.get("provider_url") or "").rstrip("/")) or (model and str(model) != str(profile.get("model_id") or "")):
+            raise ValueError("submitted Embedding configuration differs from the active Contract")
 
     conditions = []
-    params = {"vec": vec_str, "k": top_k}
+    params = {"vec": vec_str, "k": top_k, **_scope_params(context)}
     if entity_type:
         conditions.append("AND e.ENTITY_TYPE = :etype")
         params["etype"] = entity_type
@@ -445,7 +554,7 @@ def search_hybrid(
                VECTOR_DISTANCE(em.EMBEDDING, TO_VECTOR(:vec), COSINE) AS distance
         FROM ENTITY_EMBEDDINGS em
         JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
-        WHERE 1=1 {where}
+        WHERE em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract {where}
         ORDER BY distance ASC
         FETCH FIRST :k ROWS ONLY
     """
@@ -567,10 +676,13 @@ def search_unified(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> List[Dict]:
-    embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = json.dumps(embedding)
+    context, vec_str = _query_embedding(text)
+    profile = context["profile"]
+    if api_url or model:
+        if (api_url and str(api_url).rstrip("/") != str(profile.get("provider_url") or "").rstrip("/")) or (model and str(model) != str(profile.get("model_id") or "")):
+            raise ValueError("submitted Embedding configuration differs from the active Contract")
 
-    params: Dict[str, Any] = {"vec": vec_str, "ftq": text, "k": top_k * 3}
+    params: Dict[str, Any] = {"vec": vec_str, "ftq": text, "k": top_k * 3, **_scope_params(context)}
     conditions = []
 
     if entity_type:
@@ -593,7 +705,7 @@ def search_unified(
         JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
         LEFT JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID AND km.ENTITY_TYPE = e.ENTITY_TYPE
         LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
-        WHERE 1=1 {where}
+        WHERE em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract {where}
         ORDER BY vec_distance ASC
         FETCH FIRST :k ROWS ONLY
     """
@@ -702,8 +814,11 @@ def search_unified_sql(
     api_url: Optional[str] = None,
     model: Optional[str] = None,
 ) -> List[Dict]:
-    embedding = generate_embedding(text, api_url=api_url, model=model)
-    vec_str = json.dumps(embedding)
+    context, vec_str = _query_embedding(text)
+    profile = context["profile"]
+    if api_url or model:
+        if (api_url and str(api_url).rstrip("/") != str(profile.get("provider_url") or "").rstrip("/")) or (model and str(model) != str(profile.get("model_id") or "")):
+            raise ValueError("submitted Embedding configuration differs from the active Contract")
 
     params: Dict[str, Any] = {
         "vec": vec_str,
@@ -714,6 +829,7 @@ def search_unified_sql(
         "fw": fulltext_weight,
         "rw": relational_weight,
         "gw": graph_weight,
+        **_scope_params(context),
     }
 
     filter_conds = []
@@ -810,7 +926,7 @@ WITH candidates AS (
     JOIN ENTITIES e ON e.ENTITY_ID = em.ENTITY_ID AND e.ENTITY_TYPE = em.ENTITY_TYPE
     LEFT JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID AND km.ENTITY_TYPE = e.ENTITY_TYPE
     LEFT JOIN SPEC_META sm ON sm.ENTITY_ID = e.ENTITY_ID AND sm.ENTITY_TYPE = e.ENTITY_TYPE
-    WHERE 1=1 {filter_where}
+    WHERE em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract {filter_where}
     ORDER BY vec_distance ASC
     FETCH FIRST :k ROWS ONLY
 ),
@@ -1072,9 +1188,7 @@ def reindex_entity(entity_id: str) -> bool:
     if not text:
         return False
     try:
-        embedding = generate_embedding(text)
-        store_embedding(entity_id, entity.get("entity_type", "MEMORY"), embedding)
-        return True
+        return store_embedding(entity_id, entity.get("entity_type", "MEMORY"), text)
     except Exception as e:
         logger.error("reindex_entity failed for %s: %s", entity_id, e)
         return False
@@ -1123,8 +1237,9 @@ def get_stale_entities(threshold_version: int = 1, entity_type: Optional[str] = 
     """
     _ensure_embedding_version_column()
     try:
+        context = _governed_context(require_platform_generation=True)
         conditions = []
-        params: Dict[str, Any] = {"tv": threshold_version}
+        params: Dict[str, Any] = {"tv": threshold_version, **_scope_params(context)}
         type_filter = ""
         if entity_type:
             conditions.append("e.ENTITY_TYPE = :etype")
@@ -1139,6 +1254,7 @@ def get_stale_entities(threshold_version: int = 1, entity_type: Optional[str] = 
             FROM ENTITIES e
             LEFT JOIN ENTITY_EMBEDDINGS em
               ON em.ENTITY_ID = e.ENTITY_ID AND em.ENTITY_TYPE = e.ENTITY_TYPE
+             AND em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract
             WHERE e.TITLE IS NOT NULL
               {type_filter}
               AND (
@@ -1182,8 +1298,9 @@ def batch_generate_embeddings(
     _ensure_embedding_version_column()
 
     try:
+        context = _governed_context(require_platform_generation=True)
         conditions = []
-        params: Dict[str, Any] = {"tv": target_version}
+        params: Dict[str, Any] = {"tv": target_version, **_scope_params(context)}
         type_filter = ""
         if entity_type:
             params["etype"] = entity_type
@@ -1194,6 +1311,7 @@ def batch_generate_embeddings(
             FROM ENTITIES e
             LEFT JOIN ENTITY_EMBEDDINGS em
               ON em.ENTITY_ID = e.ENTITY_ID AND em.ENTITY_TYPE = e.ENTITY_TYPE
+             AND em.EMBEDDING_SPACE_ID=:emb_space AND em.EMBEDDING_CONTRACT_ID=:emb_contract
             WHERE e.TITLE IS NOT NULL
               {type_filter}
               AND (

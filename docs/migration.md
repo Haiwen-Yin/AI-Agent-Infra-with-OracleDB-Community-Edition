@@ -1,4 +1,19 @@
-# Migration Guide - AI Agent Infra with DB v4.3.6
+# Migration Guide - AI Agent Infra with DB v4.3.7
+
+## v4.3.7 Bootstrap Migration
+
+For a prepared new target, use `scripts/install_platform.sh initialize` with
+the selected adapter and edition. It validates the package manifest and target
+prerequisites before running the migration chain. For an existing target, use
+`upgrade`; `status`, `verify`, and `resume` retain the same manifest and
+evidence boundary. Do not use the installer to create Oracle/YashanDB PDBs,
+tablespaces, or privileged infrastructure.
+
+Migration `33_v4_3_7_bootstrap_embedding.sql` is additive. It introduces
+deployment evidence and lease records plus Embedding Profile, Contract, Space,
+Binding, Probe, Job, and History records. Existing vectors are retained in the
+read-only `LEGACY_DEFAULT` Space; an authorized re-embedding process is
+required before a new Contract becomes the active retrieval Space.
 
 ## v4.3.5 Platform Capability Step
 

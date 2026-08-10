@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.6 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v4.3.7 - Community Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Supports encrypted database credentials, LDAP configuration, and enterprise features.
@@ -15,7 +15,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "4.3.6"
+VERSION = "4.3.7"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -45,6 +45,12 @@ class EmbeddingConfig:
     api_url: str = ""
     model: str = ""
     dimension: int = 0
+    api_key: str = ""
+    execution_mode: str = "PLATFORM_MANAGED"
+    profile_key: str = "platform-default"
+    distance_metric: str = "COSINE"
+    normalize_vectors: bool = True
+    secret_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -142,7 +148,9 @@ class Config:
 
 
 def _load_config_file() -> dict:
-    config_path = _PROJECT_ROOT / "config.json"
+    # Bootstrap commands may receive an explicit owner-only configuration
+    # path.  Keep the package default for normal Web/Skill operation.
+    config_path = Path(os.environ.get("CX_CONFIG_PATH") or (_PROJECT_ROOT / "config.json"))
     if config_path.exists():
         try:
             with open(config_path, "r") as f:
@@ -174,6 +182,18 @@ def _decrypt_llm_section(llm_raw: dict) -> dict:
     except Exception as e:
         logger.error("Failed to decrypt llm config: %s", e)
         return llm_raw
+
+
+def _decrypt_embedding_section(embedding_raw: dict) -> dict:
+    encrypted_blob = embedding_raw.get("_encrypted")
+    if not encrypted_blob:
+        return embedding_raw
+    try:
+        from .connection_crypto import decrypt_embedding_section as _dec
+        return _dec(embedding_raw)
+    except Exception as e:
+        logger.error("Failed to decrypt embedding config: %s", e)
+        return embedding_raw
 
 
 def _decrypt_security_section(sec_raw: dict) -> dict:
@@ -211,6 +231,7 @@ def load_config() -> Config:
     db_resolved = _decrypt_database_section(db_raw)
     sec_resolved = _decrypt_security_section(sec_raw)
     llm_resolved = _decrypt_llm_section(llm_raw)
+    emb_resolved = _decrypt_embedding_section(emb_raw)
     mr_resolved = _decrypt_model_routing_section(mr_raw)
 
     # Priority: config.json (decrypted) > Environment Variables > Defaults
@@ -233,9 +254,15 @@ def load_config() -> Config:
     )
 
     emb = EmbeddingConfig(
-        api_url=emb_raw.get("api_url") or os.environ.get("MEMORY_EMBEDDING_API", EmbeddingConfig.api_url),
-        model=emb_raw.get("model") or os.environ.get("MEMORY_EMBEDDING_MODEL", EmbeddingConfig.model),
-        dimension=int(emb_raw.get("dimension") or os.environ.get("MEMORY_EMBEDDING_DIM", EmbeddingConfig.dimension)),
+        api_url=emb_resolved.get("api_url") or os.environ.get("MEMORY_EMBEDDING_API", EmbeddingConfig.api_url),
+        model=emb_resolved.get("model") or os.environ.get("MEMORY_EMBEDDING_MODEL", EmbeddingConfig.model),
+        dimension=int(emb_resolved.get("dimension") or os.environ.get("MEMORY_EMBEDDING_DIM", EmbeddingConfig.dimension)),
+        api_key=emb_resolved.get("api_key") or os.environ.get("MEMORY_EMBEDDING_API_KEY", ""),
+        execution_mode=str(emb_resolved.get("execution_mode") or emb_resolved.get("mode") or "PLATFORM_MANAGED").upper(),
+        profile_key=str(emb_resolved.get("profile_key") or "platform-default"),
+        distance_metric=str(emb_resolved.get("distance_metric") or "COSINE").upper(),
+        normalize_vectors=bool(emb_resolved.get("normalize_vectors", True)),
+        secret_reference=str(emb_resolved.get("secret_reference") or ""),
     )
 
     sec = SecurityConfig(

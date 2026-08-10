@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.3.6
+# Deployment Guide - AI Agent Infra with DB v4.3.7
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -471,3 +471,32 @@ view, and the migration ledger after deployment. Keep database replication,
 backup, and failover configured according to the database vendor's production
 guidance and validate that topology separately from application runtime
 recovery.
+# v4.3.7 Bootstrap Deployment and Embedding Worker
+
+For a new prepared database target, use the package-local Bootstrap Deployment
+Agent instead of an external Skill runtime:
+
+```bash
+bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
+  --edition <community|enterprise> --config config.json
+```
+
+The command verifies its package manifest and records sanitized deployment
+evidence before handing over to native management Agents. It does not create
+Oracle/YashanDB PDBs, tablespaces, or privileged database infrastructure.
+Prepare those items first and use the returned remediation evidence if a
+preflight check is blocked. `status`, `verify`, `resume`, and `upgrade` use the
+same command shape.
+
+Embedding Profiles, Contracts, Spaces, and bindings are managed from the
+protected Dashboard view. The Dashboard never performs bulk vector work. Start
+the local worker separately for a bounded, lease-protected batch:
+
+```bash
+"$PYTHON_BIN" scripts/embedding_worker.py --limit 10
+```
+
+Only verified writable Spaces using `PLATFORM_MANAGED` or `ENTERPRISE_PROXY`
+Profiles can be processed by that worker. `ENTERPRISE_DIRECT` must be verified
+and written by the external Agent; `PRECOMPUTED_IMPORT` accepts governed
+vectors supplied by the enterprise; `NONE` disables vector work.

@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.6 - Community Edition - Connection Crypto Module
+"""AI Agent Infra v4.3.7 - Community Edition - Connection Crypto Module
 
 Encrypts and decrypts database connection information in config.json.
 Uses PBKDF2-HMAC-SHA512 key derivation and AES-256-GCM authenticated encryption.
@@ -154,6 +154,7 @@ def rotate_key(old_key: bytes, new_key: bytes, encrypted_blob: str) -> str:
 _DB_SENSITIVE_KEYS = {"user", "password", "dsn"}
 _SECURITY_SENSITIVE_KEYS = {"secret_key"}
 _LLM_SENSITIVE_KEYS = {"api_key"}
+_EMBEDDING_SENSITIVE_KEYS = {"api_key"}
 _ROUTING_SENSITIVE_KEYS = {"simple_api_key", "standard_api_key", "complex_api_key"}
 
 
@@ -190,6 +191,7 @@ def auto_encrypt_config(config_path: Path) -> bool:
     changed |= _encrypt_section_in_config(raw, "database", _DB_SENSITIVE_KEYS)
     changed |= _encrypt_section_in_config(raw, "security", _SECURITY_SENSITIVE_KEYS)
     changed |= _encrypt_section_in_config(raw, "llm", _LLM_SENSITIVE_KEYS)
+    changed |= _encrypt_section_in_config(raw, "embedding", _EMBEDDING_SENSITIVE_KEYS)
     changed |= _encrypt_section_in_config(raw, "model_routing", _ROUTING_SENSITIVE_KEYS)
 
     if not changed:
@@ -245,6 +247,11 @@ def decrypt_security_section(security_raw: dict) -> dict:
 
 def decrypt_llm_section(llm_raw: dict) -> dict:
     return _decrypt_section_in_config(llm_raw)
+
+
+def decrypt_embedding_section(embedding_raw: dict) -> dict:
+    """Resolve the Embedding API key without exposing the encrypted blob."""
+    return _decrypt_section_in_config(embedding_raw)
 
 
 def decrypt_model_routing_section(mr_raw: dict) -> dict:

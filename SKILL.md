@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.3.6 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.3.7 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -94,7 +94,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.3.6.md   # this release's notes
+├── RELEASE_NOTES_v4.3.7.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -171,7 +171,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.6.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.7.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -551,3 +551,23 @@ level, and audit reason. External Skill-first enrollment remains available
 and is controlled for new registrations by `ENABLED`, `APPROVAL_ONLY`, or
 `DISABLED` policy. Use `migration_runner.py --version 4.3.6` and do not put
 Schema Owner credentials in a Business Agent configuration.
+
+## v4.3.7 Bootstrap Deployment And Embedding Contracts
+
+For a prepared target, run the package-local Bootstrap Deployment Agent:
+
+```bash
+bash scripts/install_platform.sh initialize --database oracle \
+  --edition <community|enterprise> --config config.json
+```
+
+It verifies a checksum-bound package manifest, executes only packaged SQL, and
+records sanitized deployment evidence before retiring its temporary identity.
+It does not create PDBs, tablespaces, or privileged Oracle infrastructure.
+Use `status`, `verify`, `resume`, or `upgrade` with the same command wrapper.
+Embedding Profiles, immutable Contracts, Spaces, and bindings govern every
+vector write and retrieval. Choose exactly one mode: `PLATFORM_MANAGED`,
+`ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`, `PRECOMPUTED_IMPORT`, or `NONE`.
+Run bounded managed ingestion separately with
+`scripts/embedding_worker.py --limit 10`; LLM output never controls SQL or
+deployment authority.

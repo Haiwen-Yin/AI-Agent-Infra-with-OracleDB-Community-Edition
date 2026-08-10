@@ -92,6 +92,7 @@ const nav = [
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
   ["platform", "功能配置", "Capabilities", Settings2],
+  ["deployment", "部署与模型", "Deployment & models", Database],
   ["native-agents", "原生智能体", "Native Agents", Bot],
 ] as const;
 
@@ -839,6 +840,15 @@ function PageView({
         onCapabilitiesChanged={onCapabilitiesChanged}
       />
     );
+  if (page === "deployment")
+    return (
+      <DeploymentModelsPage
+        lang={lang}
+        capabilities={capabilities}
+        text={text}
+        onNotice={onNotice}
+      />
+    );
   if (page === "native-agents")
     return (
       <NativeAgentsPage
@@ -1016,6 +1026,77 @@ function PlatformCapabilitiesPage({
     <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
       {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
     </DetailDrawer>
+  </>;
+}
+
+function DeploymentModelsPage({
+  lang,
+  capabilities,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  capabilities: Row | null;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [payload, setPayload] = useState<Row>({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const canManage = canAction(capabilities, "platform.manage");
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [runs, readiness, profiles, contracts, spaces, bindings, jobs] = await Promise.all([
+        api<Row>("/api/deployment-runs?limit=20"), api<Row>("/api/embedding/readiness"),
+        api<Row>("/api/embedding/profiles?limit=100"), api<Row>("/api/embedding/contracts?limit=100"),
+        api<Row>("/api/embedding/spaces?limit=100"), api<Row>("/api/embedding/bindings?limit=100"),
+        api<Row>("/api/embedding/jobs?limit=100"),
+      ]);
+      setPayload({ runs, readiness, profiles, contracts, spaces, bindings, jobs });
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const submit = async (path: string, body: Row) => {
+    setBusy(true);
+    try {
+      await api(path, { method: "POST", body: JSON.stringify(body) });
+      await load();
+      onNotice(text("已写入数据库并记录审计", "Committed to the database and audited"));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const profiles = listPayload(payload.profiles, ["items"]);
+  const contracts = listPayload(payload.contracts, ["items"]);
+  const spaces = listPayload(payload.spaces, ["items"]);
+  const bindings = listPayload(payload.bindings, ["items"]);
+  const jobs = listPayload(payload.jobs, ["items"]);
+  const runs = listPayload(payload.runs, ["items"]);
+  const readiness = payload.readiness?.readiness || {};
+  return <>
+    <SectionHeading title={text("部署与模型", "Deployment & models")} subtitle={text("Bootstrap Deployment Agent 仅在本地执行受校验安装；此处管理部署证据、LLM/Embedding 契约与重嵌入队列。", "The Bootstrap Deployment Agent runs verified installation locally; this view governs deployment evidence, LLM/Embedding Contracts, and re-embedding jobs.")} text={text} />
+    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {loading ? <PageLoading text={text} /> : <>
+      <div className="metric-grid">
+        <InfoPanel title={text("向量就绪状态", "Embedding readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, readiness.state || "UNCONFIGURED")}</strong><p className="cx-form-hint">{text("只有已验证且可写的空间可以写入和参与向量检索。", "Only verified writable spaces can accept vectors or participate in vector retrieval.")}</p></InfoPanel>
+        <InfoPanel title={text("默认空间", "Default space")} text={text}><strong className="metric-value">{String(readiness.space_id || "-")}</strong><p className="cx-form-hint">{text("契约", "Contract")}: {String(readiness.contract_id || "-")} · {text("维度", "Dimension")}: {String(readiness.dimension || "-")}</p></InfoPanel>
+        <InfoPanel title={text("队列", "Queue")} text={text}><strong className="metric-value">{String(payload.readiness?.queue?.pending || 0)}</strong><p className="cx-form-hint">{text("待处理或已租约的重嵌入任务。", "Pending or leased re-embedding jobs.")}</p></InfoPanel>
+      </div>
+      {canManage && <InfoPanel title={text("创建 Embedding Profile", "Create Embedding Profile")} text={text}><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/profiles", { profile_key: String(form.get("profile_key") || ""), provider_url: String(form.get("provider_url") || ""), model_id: String(form.get("model_id") || ""), execution_mode: String(form.get("execution_mode") || "PLATFORM_MANAGED"), dimension: Number(form.get("dimension") || 0), distance_metric: String(form.get("distance_metric") || "COSINE"), normalize_vectors: form.get("normalize_vectors") === "on", api_key: String(form.get("api_key") || ""), secret_reference: String(form.get("secret_reference") || ""), reason: String(form.get("reason") || "") }); }}><input name="profile_key" required placeholder={text("配置键", "Profile key")} /><select name="execution_mode" defaultValue="PLATFORM_MANAGED"><option value="PLATFORM_MANAGED">{text("平台托管", "Platform managed")}</option><option value="ENTERPRISE_DIRECT">{text("企业直连", "Enterprise direct")}</option><option value="ENTERPRISE_PROXY">{text("企业代理", "Enterprise proxy")}</option><option value="PRECOMPUTED_IMPORT">{text("预计算导入", "Precomputed import")}</option><option value="NONE">{text("不使用向量", "No vectors")}</option></select><input name="provider_url" placeholder={text("模型地址", "Provider URL")} /><input name="model_id" placeholder={text("模型 ID", "Model ID")} /><input name="dimension" type="number" min="0" placeholder={text("维度", "Dimension")} /><input name="distance_metric" defaultValue="COSINE" placeholder={text("距离度量", "Distance metric")} /><label className="checkbox-label"><input name="normalize_vectors" type="checkbox" defaultChecked />{text("归一化", "Normalize")}</label><input name="api_key" type="password" placeholder={text("API Key（加密保存）", "API key (encrypted at rest)")} /><input name="secret_reference" placeholder={text("企业密钥引用", "Enterprise secret reference")} /><input name="reason" required placeholder={text("变更原因", "Change reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建", "Create")}</button></form></InfoPanel>}
+      <InfoPanel title={text("Embedding Profiles", "Embedding Profiles")} text={text}><DataTable headers={[text("配置", "Profile"), text("模式", "Mode"), text("模型", "Model"), text("维度", "Dimension"), text("密钥", "Secret"), text("状态", "State"), text("操作", "Actions")]} rows={profiles.map((item) => [item.profile_key, displayRowValue(lang, item.execution_mode), item.model_id || "-", item.dimension, item.secret_present ? text("已加密", "Encrypted") : "-", displayRowValue(lang, item.health_state), canManage ? <button className="small-button" disabled={busy} onClick={() => void submit(`/api/embedding/profiles/${encodeURIComponent(String(item.profile_id))}/probe`, { scope: "PLATFORM", timeout: 30 })}>{text("探测", "Probe")}</button> : "-"])} empty={text("尚未配置 Embedding Profile", "No Embedding Profile configured")} text={text} /></InfoPanel>
+      {canManage && profiles.length > 0 && <InfoPanel title={text("创建契约与空间", "Create Contract & Space")} text={text}><div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/contracts", { profile_id: String(form.get("profile_id") || ""), model_fingerprint: String(form.get("model_fingerprint") || ""), reason: String(form.get("reason") || "") }); }}><select name="profile_id">{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select><input name="model_fingerprint" placeholder={text("模型指纹（可选）", "Model fingerprint (optional)")} /><input name="reason" required placeholder={text("创建原因", "Creation reason")} /><button className="small-button" disabled={busy}>{text("创建契约", "Create Contract")}</button></form>{contracts.length > 0 && <form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/spaces", { space_key: String(form.get("space_key") || ""), contract_id: String(form.get("contract_id") || ""), default: form.get("default") === "on", writable: form.get("writable") === "on", physical_ref: String(form.get("physical_ref") || ""), reason: String(form.get("reason") || "") }); }}><input name="space_key" required placeholder={text("空间键", "Space key")} /><select name="contract_id">{contracts.map((item) => <option key={String(item.contract_id)} value={String(item.contract_id)}>{String(item.profile_key || item.contract_id)} · v{String(item.contract_version)}</option>)}</select><label className="checkbox-label"><input name="default" type="checkbox" />{text("默认", "Default")}</label><label className="checkbox-label"><input name="writable" type="checkbox" />{text("可写", "Writable")}</label><input name="physical_ref" placeholder={text("物理引用", "Physical reference")} /><input name="reason" required placeholder={text("创建原因", "Creation reason")} /><button className="small-button" disabled={busy}>{text("创建空间", "Create Space")}</button></form>}</div></InfoPanel>}
+      <InfoPanel title={text("Contracts 与空间", "Contracts & spaces")} text={text}><DataTable headers={[text("契约", "Contract"), text("模型", "Model"), text("维度", "Dimension"), text("模式", "Mode"), text("状态", "State")]} rows={contracts.map((item) => [item.contract_id, item.model_id || "-", item.dimension, displayRowValue(lang, item.execution_mode), displayRowValue(lang, item.status)])} empty={text("尚未创建契约", "No Contract created")} text={text} /><DataTable headers={[text("空间", "Space"), text("契约", "Contract"), text("验证", "Validation"), text("默认", "Default"), text("可写", "Writable")]} rows={spaces.map((item) => [item.space_key, item.contract_id || "-", displayRowValue(lang, item.validation_state), item.is_default, item.write_enabled])} empty={text("尚未创建空间", "No Space created")} text={text} /></InfoPanel>
+      {canManage && profiles.length > 0 && spaces.length > 0 && <InfoPanel title={text("绑定与任务", "Bindings & jobs")} text={text}><div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/bindings", { binding_scope: String(form.get("binding_scope") || "PLATFORM"), binding_subject_id: String(form.get("binding_subject_id") || "DEFAULT"), profile_id: String(form.get("profile_id") || ""), space_id: String(form.get("space_id") || ""), reason: String(form.get("reason") || "") }); }}><select name="binding_scope" defaultValue="PLATFORM"><option value="PLATFORM">{text("平台", "Platform")}</option><option value="TEMPLATE">{text("模板", "Template")}</option><option value="AGENT">{text("智能体", "Agent")}</option></select><input name="binding_subject_id" required defaultValue="DEFAULT" placeholder={text("绑定主体", "Binding subject")} /><select name="profile_id">{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select><select name="space_id">{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><input name="reason" required placeholder={text("绑定原因", "Binding reason")} /><button className="small-button" disabled={busy}>{text("保存绑定", "Save binding")}</button></form><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/jobs", { job_kind: String(form.get("job_kind") || "REEMBED"), target_space_id: String(form.get("target_space_id") || ""), source_space_id: String(form.get("source_space_id") || ""), input_data: { entity_type: String(form.get("entity_type") || "MEMORY"), limit: Number(form.get("limit") || 100) }, reason: String(form.get("reason") || "") }); }}><select name="job_kind" defaultValue="REEMBED"><option value="REEMBED">{text("重嵌入", "Re-embed")}</option><option value="INGEST">{text("写入", "Ingest")}</option><option value="VERIFY">{text("验证", "Verify")}</option></select><select name="target_space_id">{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><select name="source_space_id"><option value="">{text("无来源空间", "No source space")}</option>{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><input name="entity_type" defaultValue="MEMORY" placeholder={text("对象类型", "Entity type")} /><input name="limit" type="number" min="1" max="500" defaultValue="100" placeholder={text("最多 500", "Maximum 500")} /><input name="reason" required placeholder={text("任务原因", "Job reason")} /><button className="small-button" disabled={busy}>{text("加入队列", "Queue job")}</button></form></div><p className="cx-form-hint">{text("任务只会由单独启动的、受租约保护的受管 Worker 执行；页面操作不会直接触发批量向量化。", "Jobs run only in a separately started, lease-protected managed Worker; this page never runs bulk vectorization directly.")}</p></InfoPanel>}
+      <InfoPanel title={text("绑定与重嵌入任务", "Bindings & re-embedding jobs")} text={text}><DataTable headers={[text("范围", "Scope"), text("主体", "Subject"), text("Profile", "Profile"), text("空间", "Space"), text("版本", "Version")]} rows={bindings.map((item) => [item.binding_scope, item.binding_subject_id, item.profile_key || item.profile_id, item.space_key || item.space_id, item.version])} empty={text("平台默认绑定尚未建立", "No platform default binding") } text={text} /><DataTable headers={[text("任务", "Job"), text("类型", "Kind"), text("状态", "State"), text("目标空间", "Target space"), text("时间", "Time")]} rows={jobs.map((item) => [item.job_id, item.job_kind, displayRowValue(lang, item.status), item.target_space_id, displayRowValue(lang, item.created_at)])} empty={text("没有重嵌入任务", "No re-embedding jobs")} text={text} /></InfoPanel>
+      <InfoPanel title={text("部署证据", "Deployment evidence")} text={text}><DataTable headers={[text("运行", "Run"), text("数据库", "Database"), text("版本", "Version"), text("状态", "State"), text("当前步骤", "Current step"), text("时间", "Time")]} rows={runs.map((item) => [item.run_id, item.database_dialect, item.package_version, displayRowValue(lang, item.status), item.current_step || "-", displayRowValue(lang, item.updated_at)])} empty={text("当前数据库没有部署证据", "No deployment evidence in this database")} text={text} /></InfoPanel>
+    </>}
   </>;
 }
 

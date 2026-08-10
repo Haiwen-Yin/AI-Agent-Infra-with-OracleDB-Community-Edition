@@ -1,4 +1,23 @@
-# Security - AI Agent Infra with DB v4.3.6
+# Security - AI Agent Infra with DB v4.3.7
+
+## v4.3.7 Bootstrap And Embedding Boundary
+
+The Bootstrap Deployment Agent is an execution mechanism, not a privileged
+reasoning Agent. Its manifest is local and checksum-bound; LLM output, prompt
+text, remote callbacks, and logs cannot select SQL, commands, privileges, or
+deployment state transitions. Pre-control-plane journals are owner-only,
+integrity-checked, encrypted where secrets are present, and retain sanitized
+evidence only. Oracle/YashanDB infrastructure creation is outside the default
+installer and needs explicit operator action.
+
+Embedding API keys are encrypted after protected storage exists and are never
+returned by Dashboard APIs, audits, jobs, probes, or support evidence. A
+Contract is immutable once published. Every governed vector write and search
+checks the effective Space, Contract, dimension, numeric validity, source
+mode, and scoped Agent binding. Different Contract versions never enter the
+same similarity or multi-modal fusion calculation. `LEGACY_DEFAULT` is
+read-only until an authorized migration validates a separate Space and
+performs explicit read/write cutover.
 
 ## v4.3.6 Native Agent Boundary
 

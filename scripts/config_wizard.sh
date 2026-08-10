@@ -101,19 +101,56 @@ echo
 
 echo ""
 echo -e "${BLUE}[embedding]${NC}"
-read -r -p "  Embedding API URL: " EMB_URL
-EMB_URL="${EMB_URL:-<EMBEDDING_API_URL>}"
-read -r -p "  Embedding model [text-embedding-bge-m3]: " EMB_MODEL
-EMB_MODEL="${EMB_MODEL:-text-embedding-bge-m3}"
-read -r -p "  Embedding dimension [1024]: " EMB_DIM
-EMB_DIM="${EMB_DIM:-1024}"
+echo "  Execution mode:"
+echo "    1) PLATFORM_MANAGED   Platform calls the configured provider"
+echo "    2) ENTERPRISE_DIRECT  Agent calls the enterprise provider directly"
+echo "    3) ENTERPRISE_PROXY   Agent calls through an enterprise gateway"
+echo "    4) PRECOMPUTED_IMPORT Agent imports precomputed vectors"
+echo "    5) NONE               Disable vector generation and vector retrieval"
+read -r -p "  Select [1]: " EMB_MODE_SELECT
+case "${EMB_MODE_SELECT:-1}" in
+    1) EMB_MODE="PLATFORM_MANAGED" ;;
+    2) EMB_MODE="ENTERPRISE_DIRECT" ;;
+    3) EMB_MODE="ENTERPRISE_PROXY" ;;
+    4) EMB_MODE="PRECOMPUTED_IMPORT" ;;
+    5) EMB_MODE="NONE" ;;
+    *) echo -e "${RED}[wizard] ERROR: invalid Embedding execution mode${NC}"; exit 2 ;;
+esac
+if [ "$EMB_MODE" = "NONE" ]; then
+    EMB_URL=""
+    EMB_MODEL=""
+    EMB_DIM="0"
+    EMB_KEY=""
+    EMB_PROFILE_KEY="platform-default"
+    EMB_DISTANCE="COSINE"
+    EMB_NORMALIZE="true"
+    EMB_SECRET_REF=""
+else
+    read -r -p "  Embedding API URL (leave empty for Agent-side secret reference): " EMB_URL
+    read -r -p "  Embedding model [text-embedding-bge-m3]: " EMB_MODEL
+    EMB_MODEL="${EMB_MODEL:-text-embedding-bge-m3}"
+    read -r -p "  Embedding dimension [1024]: " EMB_DIM
+    EMB_DIM="${EMB_DIM:-1024}"
+    read -r -s -p "  Embedding API key (leave empty if none or Agent-side): " EMB_KEY
+    echo
+    read -r -p "  Profile key [platform-default]: " EMB_PROFILE_KEY
+    EMB_PROFILE_KEY="${EMB_PROFILE_KEY:-platform-default}"
+    read -r -p "  Distance metric [COSINE]: " EMB_DISTANCE
+    EMB_DISTANCE="${EMB_DISTANCE:-COSINE}"
+    read -r -p "  Normalize vectors? [Y/n]: " EMB_NORMALIZE_ANSWER
+    case "${EMB_NORMALIZE_ANSWER:-Y}" in
+        [Nn]*) EMB_NORMALIZE="false" ;;
+        *) EMB_NORMALIZE="true" ;;
+    esac
+    read -r -p "  Enterprise secret reference (optional): " EMB_SECRET_REF
+fi
 
 # --- Step 5: write back via python ------------------------------------------
 # Build the override as a JSON object, then merge into config.json. We pass
 # values via environment variables to avoid quoting pitfalls in the heredoc.
 export DB_USER DB_PASS DB_SHAPE DB_DSN DB_HOST DB_PORT DB_NAME
 export LLM_URL LLM_MODEL LLM_KEY
-export EMB_URL EMB_MODEL EMB_DIM
+export EMB_URL EMB_MODEL EMB_DIM EMB_KEY EMB_MODE EMB_PROFILE_KEY EMB_DISTANCE EMB_NORMALIZE EMB_SECRET_REF
 export CONFIG_FILE
 
 if [ ! -f "$RUNTIME_HELPER" ]; then
@@ -151,6 +188,12 @@ c.setdefault("embedding", {})
 c["embedding"]["api_url"] = os.environ["EMB_URL"]
 c["embedding"]["model"] = os.environ["EMB_MODEL"]
 c["embedding"]["dimension"] = int(os.environ["EMB_DIM"])
+c["embedding"]["api_key"] = os.environ["EMB_KEY"]
+c["embedding"]["execution_mode"] = os.environ["EMB_MODE"]
+c["embedding"]["profile_key"] = os.environ["EMB_PROFILE_KEY"]
+c["embedding"]["distance_metric"] = os.environ["EMB_DISTANCE"].upper()
+c["embedding"]["normalize_vectors"] = os.environ["EMB_NORMALIZE"].lower() == "true"
+c["embedding"]["secret_reference"] = os.environ["EMB_SECRET_REF"]
 
 with open(cfg_path, "w") as f:
     json.dump(c, f, indent=4)

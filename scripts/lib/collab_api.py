@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.6 - Community Edition - Collaboration Group API
+"""AI Agent Infra v4.3.7 - Community Edition - Collaboration Group API
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, and group memory sharing.

@@ -1,6 +1,21 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.3.6
+# Recovery and High Availability - AI Agent Infra with DB v4.3.7
 
 ## Recovery Authority
+
+## v4.3.7 Deployment And Embedding Recovery
+
+Bootstrap runs, deployment steps, evidence, and leases are durable database
+facts after the control plane is available. A resumed deployment verifies the
+same manifest, target identity, prior evidence, and retry classification before
+continuing; it never guesses an unknown partial schema. Completion retires the
+temporary Deployment Agent rather than retaining a standing bootstrap
+credential.
+
+Embedding jobs are independently leased and fenced. A worker crash leaves
+bounded work for retry after lease expiry; a stale worker cannot commit after a
+replacement claim. Re-embedding writes to a new Space and keeps the previous
+Space read-only until an authorized cutover, so failed migrations do not
+silently corrupt the active retrieval set.
 
 ## v4.3.6 Native Runtime Recovery
 

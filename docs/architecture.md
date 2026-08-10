@@ -1,4 +1,22 @@
-# Architecture - AI Agent Infra with DB v4.3.6
+# Architecture - AI Agent Infra with DB v4.3.7
+
+## v4.3.7 Bootstrap And Embedding Governance Plane
+
+For a prepared target, the package-local Bootstrap Deployment Agent validates
+the checksum-bound manifest, persists sanitized run, step, evidence, and lease
+facts, and executes only package SQL. It never turns LLM output into SQL,
+shell, privilege, manifest, or state authority. After the identity plane
+exists, it creates an attributable temporary Principal, hands off to protected
+human `admin`, Platform Admin Agent, and (Enterprise only) Compliance Admin
+Agent identities, releases the lease, and retires.
+
+Embedding Profiles describe provider and model identity while immutable
+Contracts freeze dimension, metric, normalization, preprocessing, modalities,
+and source mode. Logical Spaces and scoped Bindings select the only compatible
+contract for vector writes and retrieval. `PLATFORM_MANAGED`,
+`ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`, `PRECOMPUTED_IMPORT`, and `NONE` are
+explicit modes. Legacy vectors remain isolated in read-only `LEGACY_DEFAULT`.
+Managed bulk work is claimed outside HTTP requests by a leased, fenced worker.
 
 ## v4.3.6 Native Provisioning Plane
 
