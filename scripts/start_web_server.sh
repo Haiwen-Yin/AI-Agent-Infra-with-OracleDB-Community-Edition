@@ -95,7 +95,7 @@ start_server() {
     echo "Chuanxu is already running (PID $(<"$PID_FILE"))."
     return 0
   fi
-  if [[ -x "$SCRIPT_DIR/scripts/config_wizard.sh" && ! -f "$SCRIPT_DIR/config.json" ]]; then
+  if [[ -x "$SCRIPT_DIR/scripts/config_wizard.sh" && ! -f "$SCRIPT_DIR/config.json" && -z "${CX_CONFIG_PATH:-}" ]]; then
     "$SCRIPT_DIR/scripts/config_wizard.sh"
   fi
   if [[ -f "$SCRIPT_DIR/scripts/verify_deps.py" ]] && ! "$PYTHON" "$SCRIPT_DIR/scripts/verify_deps.py"; then

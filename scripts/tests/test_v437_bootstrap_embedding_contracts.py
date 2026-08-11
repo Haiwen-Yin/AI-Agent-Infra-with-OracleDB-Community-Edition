@@ -75,6 +75,47 @@ def test_precomputed_import_and_none_do_not_need_platform_provider():
         embedding_governance._validated_dimension(0, "ENTERPRISE_DIRECT")
 
 
+def test_draft_embedding_probe_never_persists_or_returns_api_key(monkeypatch):
+    tx = _Tx()
+    audit: list[tuple[Any, ...]] = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _amount):
+            return json.dumps({"model": "embedding-v1", "data": [{"embedding": [0.1, 0.2, 0.3]}]}).encode()
+
+    monkeypatch.setattr(embedding_governance.connection, "execute_transaction_callback", lambda work: work(tx))
+    monkeypatch.setattr(embedding_governance.identity_api, "_audit_tx", lambda *args: audit.append(args))
+    monkeypatch.setattr(embedding_governance, "_physical_dimension", lambda _profile: None)
+    monkeypatch.setattr(embedding_governance.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response())
+
+    result = embedding_governance.probe_draft(
+        "admin", profile_key="draft-profile", provider_url="https://embedding.example/v1",
+        model_id="embedding-v1", execution_mode="PLATFORM_MANAGED", dimension=3,
+        distance_metric="COSINE", normalize_vectors=True, api_key="never-persist-this",
+        secret_reference="", reason="verify before creation",
+    )
+
+    assert result["status"] == "VERIFIED"
+    assert "never-persist-this" not in json.dumps(result)
+    assert "never-persist-this" not in repr(audit)
+    assert not tx.executed
+
+
+def test_dashboard_uses_draft_probe_before_enabling_embedding_profile_creation():
+    root = Path(__file__).resolve().parents[1]
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    app = (root / "web_app.py").read_text(encoding="utf-8")
+    assert "/api/embedding/profiles/probe-draft" in ui
+    assert "testedDraftVersion !== draftVersion" in ui
+    assert '@app.post("/api/embedding/profiles/probe-draft")' in app
+
+
 def test_all_adapters_declare_fingerprint_and_space_isolation():
     root = Path(__file__).resolve().parents[2]
     adapters = root / "adapters"

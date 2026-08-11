@@ -85,6 +85,27 @@ def test_builtin_templates_include_sensitive_profiles_and_locked_fields():
     assert {item[0] for item in native_agent_api.BUILTIN_MANIFESTS} >= {"platform-admin-tools", "restricted-agent-skills"}
 
 
+def test_dashboard_exposes_governed_deployment_and_native_agents_to_platform_administrators():
+    source = (Path(__file__).resolve().parents[1] / "web_app.py").read_text(encoding="utf-8")
+    assert '"deployment": "platform.manage"' in source
+    assert '"native-agents": "platform.manage"' in source
+
+
+def test_native_agent_and_embedding_forms_expose_guarded_configuration_controls():
+    root = Path(__file__).resolve().parents[1] / "web" / "src"
+    ui = (root / "App.tsx").read_text(encoding="utf-8")
+    css = (root / "app.css").read_text(encoding="utf-8")
+    assert "leave empty to test and save without an API key" in ui
+    assert 'name="distance_metric"' in ui
+    assert all(metric in ui for metric in ("COSINE", "EUCLIDEAN", "DOT_PRODUCT"))
+    assert "config-multiline" in ui
+    assert "does not make Agents produce identical vectors" in ui
+    assert "Configure built-in Agent model" in ui
+    assert "Configure and activate" in ui
+    assert ".configuration-form" in css and ".policy-form" in css
+    assert ".config-field.config-multiline" in css
+
+
 def test_reference_deployment_adapters_share_lifecycle_without_granting_authority():
     adapters = deployment_adapters.reference_adapters()
     assert set(adapters) == set(deployment_adapters.TARGET_TYPES)

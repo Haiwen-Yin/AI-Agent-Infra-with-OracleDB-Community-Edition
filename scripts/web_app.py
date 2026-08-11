@@ -1469,7 +1469,8 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read", "compliance": "agents.read",
         "audit": "audit.read", "users": "users.read",
         "organization": "organizations.read",
-        "platform": "platform.manage",
+        "platform": "platform.manage", "deployment": "platform.manage",
+        "native-agents": "platform.manage",
     }
     feature_map = {
         "approvals": "approvals", "audit": "audit", "compliance": "compliance",
@@ -1766,6 +1767,26 @@ def embedding_profile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Embedding Profile could not be saved") from exc
+
+
+@app.post("/api/embedding/profiles/probe-draft")
+def embedding_profile_draft_probe(
+    body: EmbeddingProfileBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.probe_draft(
+            str(session["principal_id"]), profile_key=body.profile_key,
+            provider_url=body.provider_url, model_id=body.model_id,
+            execution_mode=body.execution_mode, dimension=body.dimension,
+            distance_metric=body.distance_metric, normalize_vectors=body.normalize_vectors,
+            api_key=body.api_key, secret_reference=body.secret_reference,
+            reason=body.reason,
+        )
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding draft probe failed") from exc
 
 
 @app.get("/api/embedding/contracts")

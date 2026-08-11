@@ -61,7 +61,7 @@ a {
   z-index: 30;
   top: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto minmax(280px, 1fr);
+  grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
   align-items: center;
   gap: 18px;
   width: 100%;
@@ -124,17 +124,19 @@ a {
 }
 .cx-nav {
   display: grid;
-  grid-template-columns: repeat(10, max-content);
+  grid-template-columns: repeat(11, max-content);
   grid-template-rows: repeat(2, auto);
   justify-content: center;
-  gap: 1px 7px;
+  gap: 1px 3px;
   min-width: 0;
 }
 .cx-nav a {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 7px;
+  min-width: 0;
+  justify-content: center;
+  padding: 5px 6px;
   border-bottom: 2px solid transparent;
   color: var(--muted);
   font-size: 12px;
@@ -1585,6 +1587,109 @@ tbody tr:hover {
   gap: 10px;
   margin-top: 16px;
 }
+.configuration-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 9px 10px;
+  margin-top: 11px;
+}
+.compact-configuration-form {
+  gap: 7px 10px;
+  margin-top: 9px;
+}
+.native-profile-form {
+  grid-template-columns: repeat(2, minmax(190px, 1fr));
+}
+.native-request-form {
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+}
+.config-field {
+  display: grid;
+  grid-template-rows: 16px 36px minmax(22px, auto);
+  min-width: 0;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.config-field > span {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-field > :is(input, select, textarea, button, .checkbox-control, .action-button-row) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+}
+.config-field > textarea {
+  min-height: 62px;
+  height: 62px;
+}
+.config-field.config-multiline {
+  grid-template-rows: 16px 62px minmax(22px, auto);
+}
+.config-field > small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.config-field.config-action .primary-button {
+  margin: 0;
+}
+.checkbox-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 12px;
+}
+.checkbox-control input {
+  width: auto;
+  min-width: 14px;
+  height: 14px;
+  margin: 0;
+}
+.policy-form {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.65fr) minmax(170px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.policy-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.policy-form .small-button {
+  min-width: 104px;
+  height: 36px;
+  margin: 0;
+}
+.native-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.action-button-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.action-button-row .small-button,
+.action-button-row .primary-button {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  margin: 0;
+  padding-inline: 9px;
+}
 .workbench-field {
   display: grid;
   grid-template-rows: 16px 38px minmax(30px, auto);
@@ -1695,11 +1800,11 @@ tbody tr:hover {
 }
 @media (max-width: 1280px) {
   .cx-header {
-    grid-template-columns: minmax(270px, 1fr) auto minmax(270px, 1fr);
+    grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
     padding-inline: 18px;
   }
   .cx-nav {
-    grid-template-columns: repeat(10, max-content);
+    grid-template-columns: repeat(11, max-content);
     grid-template-rows: repeat(2, auto);
   }
   .organization-workspace {
@@ -1716,14 +1821,14 @@ tbody tr:hover {
     grid-row: 2;
   }
   .cx-nav {
-    grid-template-columns: repeat(10, max-content);
+    grid-template-columns: repeat(11, max-content);
     grid-template-rows: repeat(2, auto);
     justify-content: center;
   }
 }
 @media (max-width: 780px) {
   .cx-nav {
-    grid-template-columns: repeat(10, max-content);
+    grid-template-columns: repeat(11, max-content);
     grid-template-rows: repeat(2, auto);
     justify-content: start;
     overflow-x: auto;
@@ -1769,6 +1874,15 @@ tbody tr:hover {
   }
   .workbench-form {
     grid-template-columns: 1fr;
+  }
+  .configuration-form,
+  .native-profile-form,
+  .native-request-form,
+  .policy-form {
+    grid-template-columns: 1fr;
+  }
+  .policy-form .small-button {
+    width: max-content;
   }
   .message-compose {
     flex-direction: column;
@@ -1854,7 +1968,7 @@ tbody tr:hover {
     font-size: 8px;
   }
   .cx-nav {
-    grid-template-columns: repeat(10, max-content);
+    grid-template-columns: repeat(11, max-content);
     grid-template-rows: repeat(2, auto);
   }
   .cx-main {

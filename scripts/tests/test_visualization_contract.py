@@ -778,10 +778,10 @@ def test_organization_graph_loading_tracks_focus_and_mode_without_duplicate_requ
 
 def test_dashboard_navigation_is_centered_against_equal_header_side_columns():
     css = re.sub(r"\s+", "", _react_css_source())
-    assert "grid-template-columns:minmax(280px,1fr)autominmax(280px,1fr);" in css
+    assert "grid-template-columns:minmax(240px,1fr)autominmax(240px,1fr);" in css
     assert ".cx-nav-stack{min-width:0;justify-self:center" in css
     assert "@media(max-width:1100px)" in css
-    assert "grid-template-columns:repeat(10,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
+    assert "grid-template-columns:repeat(11,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
 
 
 def test_compliance_tabs_use_the_shared_segmented_control():

@@ -446,6 +446,81 @@ def probe_profile(actor: str, profile_id: str, *, scope: str = "PLATFORM", timeo
     return connection.execute_transaction_callback(work)
 
 
+def probe_draft(actor: str, *, profile_key: str, provider_url: str, model_id: str,
+                execution_mode: str, dimension: int, distance_metric: str,
+                normalize_vectors: bool, api_key: str, secret_reference: str,
+                reason: str, timeout: int = 30) -> Dict[str, Any]:
+    """Verify an Embedding Profile before persisting it or its secret.
+
+    This preflight intentionally writes only bounded audit evidence.  The API
+    key stays in process memory for the outbound test and is never included in
+    audit payloads, result JSON, or a database row.
+    """
+    key = _text(profile_key, 128)
+    mode = _validated_mode(execution_mode)
+    if not key or len(_text(reason, 2000)) < 3:
+        raise EmbeddingGovernanceError("profile key and reason are required")
+    if mode != "NONE" and not _text(model_id, 256):
+        raise EmbeddingGovernanceError("Embedding model is required")
+    if mode in {"PLATFORM_MANAGED", "ENTERPRISE_DIRECT", "ENTERPRISE_PROXY"} and not _text(provider_url, 512) and not _text(secret_reference, 512):
+        raise EmbeddingGovernanceError("provider URL or secret reference is required")
+    configured_dimension = _validated_dimension(dimension, mode)
+    metric = _text(distance_metric or "COSINE", 32).upper()
+    if metric not in {"COSINE", "EUCLIDEAN", "DOT_PRODUCT"}:
+        raise EmbeddingGovernanceError("unsupported distance metric")
+
+    result: Dict[str, Any] = {
+        "scope": "DRAFT", "mode": mode, "configured_dimension": configured_dimension,
+        "distance_metric": metric, "normalize_vectors": bool(normalize_vectors),
+    }
+    status = "FAILED"
+    outcome = "DENY"
+    try:
+        if mode == "NONE":
+            status = "VERIFIED"
+            outcome = "ALLOW"
+            result["vector_enabled"] = False
+        elif not _text(provider_url, 512):
+            raise EmbeddingGovernanceError(
+                "A provider URL is required for pre-creation testing; a secret reference must be verified by an authenticated Agent after creation"
+            )
+        else:
+            headers = {"Content-Type": "application/json"}
+            if _text(api_key, 4096):
+                headers["Authorization"] = "Bearer " + _text(api_key, 4096)
+            request = urllib.request.Request(
+                _endpoint_url(_text(provider_url, 512)),
+                data=json.dumps({"model": _text(model_id, 256), "input": "chuanxu embedding contract probe"}).encode("utf-8"),
+                headers=headers, method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=max(1, min(int(timeout), 120))) as response:
+                payload = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
+            vector = ((payload.get("data") or [{}])[0] or {}).get("embedding")
+            if not isinstance(vector, list) or not vector or not all(isinstance(item, (int, float)) and math.isfinite(float(item)) for item in vector):
+                raise EmbeddingGovernanceError("Embedding provider returned an invalid vector")
+            observed_dimension = len(vector)
+            physical = _physical_dimension({"dimension": configured_dimension})
+            result.update({
+                "observed_dimension": observed_dimension,
+                "observed_model": _text(payload.get("model") or model_id, 256),
+                "physical_dimension": physical,
+            })
+            if observed_dimension != configured_dimension:
+                raise EmbeddingGovernanceError("Embedding response dimension differs from the Profile")
+            if physical and physical != observed_dimension:
+                raise EmbeddingGovernanceError("Embedding dimension is incompatible with deployed vector storage")
+            status = "VERIFIED"
+            outcome = "ALLOW"
+    except (EmbeddingGovernanceError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+        result["error"] = _text(str(exc), 256)
+
+    def work(tx: Any) -> Dict[str, Any]:
+        _audit(tx, actor, "EMBEDDING_PROFILE_DRAFT_PROBE", "EMBEDDING_PROFILE_DRAFT", key,
+               outcome, f"Draft probe: {status}")
+        return {"status": status, "result": result}
+    return connection.execute_transaction_callback(work)
+
+
 def record_agent_probe(actor: str, profile_id: str, *, observed_dimension: int,
                        observed_model: str, response_digest: str,
                        model_fingerprint: str = "") -> Dict[str, Any]:
