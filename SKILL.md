@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.3.7 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.4.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -94,7 +94,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.3.7.md   # this release's notes
+├── RELEASE_NOTES_v4.4.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -171,7 +171,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.3.7.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.0.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -196,7 +196,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.3.5 archive includes the verified glibc 2.28 wheel; do not
+The current v4.4.0 archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration
@@ -357,6 +357,10 @@ Once the server is running, these endpoints are available:
 | **Graph** | `/api/graph/neighbors` | POST | Neighbor traversal |
 | **Graph** | `/api/graph/causal` | GET | Causal subgraph |
 | **Tasks** | `/api/tasks` | GET/POST | Task management |
+| **SDD** | `/api/sdd/changes` | GET/POST | List or create database-native software-delivery Changes |
+| **SDD** | `/api/sdd/revisions/{id}/baseline` | POST | Approve an immutable execution baseline after required review |
+| **SDD** | `/api/sdd/revisions/{id}/runs` | POST | Compile an approved revision and create a bounded SDD Run |
+| **SDD** | `/api/sdd/evidence` | POST | Record independent Worker/CI evidence and artifact digest |
 | **Branches** | `/api/branches` | GET/POST | Context branches |
 | **Monitor** | `/api/monitor/overview` | GET | System overview |
 | **Monitor** | `/api/monitor/agents` | GET | Agent status |
@@ -571,3 +575,28 @@ vector write and retrieval. Choose exactly one mode: `PLATFORM_MANAGED`,
 Run bounded managed ingestion separately with
 `scripts/embedding_worker.py --limit 10`; LLM output never controls SQL or
 deployment authority.
+
+## v4.4.0 Database-Native SDD And Governed Delivery
+
+Use the database-native SDD control plane for multi-Agent software delivery.
+Create a Change with `POST /api/sdd/changes`, add typed requirement, scenario,
+acceptance-criterion and task clauses with
+`POST /api/sdd/revisions/{id}/clauses`, and use
+`POST /api/sdd/clauses/{id}/patch` only with the current `expected_version`.
+An authorized reviewer approves the immutable execution baseline with
+`POST /api/sdd/revisions/{id}/baseline`; only then may an authorized operator
+compile and start a bounded run through `POST /api/sdd/revisions/{id}/runs`.
+
+The database is the execution authority for Change, Working Revision,
+Approved Baseline, Task, Review, Gate, Resource Lease, SCM connection, and
+evidence. Record independent Worker or CI results, commit references, and
+artifact digests with `/api/sdd/evidence`; register only a controlled SCM
+credential reference through `/api/sdd/scm`. Do not put secrets, unrestricted
+source payloads, or model reasoning in task text or evidence.
+
+OpenSpec may create, import, export, or validate proposal/design/task/spec
+material before handoff. After a baseline is approved, OpenSpec CLI and local
+Markdown are not execution state and must not control code changes, tests,
+reviews, gates, or release decisions. Conflict, missing evidence, or high-risk
+Graph changes pause the affected run for governed review; do not bypass a gate
+by editing database tables or calling adapter SQL directly.
