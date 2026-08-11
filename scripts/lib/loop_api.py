@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.7 - Community Edition - Loop Engineering API
+"""AI Agent Infra v4.4.0 - Community Edition - Loop Engineering API
 
 Loop Engineering: design goal-driven autonomous feedback loops for AI agents.
 Each Loop definition is stored as an ENTITY (ENTITY_TYPE='LOOP_DEFINITION')
@@ -818,8 +818,12 @@ def _eval_spec_validation(cfg: Dict, iter_data: Dict) -> Dict[str, Any]:
     spec = get_spec(spec_id)
     if not spec:
         return {"passed": False, "eval_type": "SPEC_VALIDATION", "error": f"Spec {spec_id} not found"}
-    properties = spec.get("properties", {})
-    criteria = properties.get("acceptance_criteria", [])
+    criteria = spec.get("acceptance_criteria") or []
+    if isinstance(criteria, str):
+        try:
+            criteria = json.loads(criteria)
+        except (TypeError, json.JSONDecodeError):
+            criteria = []
     if not criteria:
         return {"passed": True, "eval_type": "SPEC_VALIDATION", "details": {"message": "No acceptance criteria defined, auto-pass"}}
     results = []

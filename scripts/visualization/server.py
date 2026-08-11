@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.3.7 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.0 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, memory_lifecycle, knowledge_api, agent_api
 from lib import task_plan_api, workspace_api, harness_api, graph_api
-from lib import spec_api, collab_api, branch_api
+from lib import spec_api, collab_api, branch_api, sdd_api, scm_adapter_api
 from lib import security, config, user_api
 from lib import loop_api
 from lib import message_api, event_bus, trace_api, monitor_api, tool_registry
@@ -51,7 +51,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.3.7"
+VERSION = "4.4.0"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -1046,6 +1046,10 @@ class VisHandler(BaseHTTPRequestHandler):
             return
         if path.startswith('/api/graph/events/inbox/') and path.endswith('/replay'):
             self._handle_graph_event_replay(path)
+            return
+
+        if path.startswith('/api/sdd/'):
+            self._handle_sdd_post(path)
             return
 
         if path.startswith('/api/governance/'):
@@ -2354,6 +2358,24 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._api_workspaces(summary_only=qs.get('view', [''])[0].lower() == 'summary')
             elif path == '/api/specs':
                 self._api_specs()
+            elif path == '/api/sdd/changes':
+                if self._require_admin() is None:
+                    return
+                self._send_json({'changes': [_clean_row(item) for item in sdd_api.list_changes(int(qs.get('limit', ['100'])[0]))]})
+            elif path.startswith('/api/sdd/changes/'):
+                if self._require_admin() is None:
+                    return
+                change_id = path.split('/')[4] if len(path.split('/')) > 4 else ''
+                item = sdd_api.get_change(change_id)
+                if not item:
+                    self._send_error(404, 'SDD Change not found')
+                    return
+                self._send_json(_clean_row(item))
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/graph'):
+                if self._require_admin() is None:
+                    return
+                revision_id = path.split('/')[4]
+                self._send_json(sdd_api.compile_execution_graph(revision_id))
             elif path == '/api/collab':
                 self._api_collab()
             elif path == '/api/agent/skills':
@@ -2715,6 +2737,64 @@ class VisHandler(BaseHTTPRequestHandler):
         for sp in specs:
             sp['plan_links'] = spec_api.get_spec_plan_links(sp['entity_id'])
         self._send_json({'specs': [_clean_row(s) for s in specs]})
+
+    def _handle_sdd_post(self, path):
+        """Native SDD write routes.  Each operation is database-authoritative."""
+        if self._require_admin() is None:
+            return
+        try:
+            data = json.loads(self._read_body() or b'{}')
+            if not isinstance(data, dict):
+                raise ValueError('JSON object required')
+            actor = self._authenticated_actor()
+            if path == '/api/sdd/changes':
+                result = sdd_api.create_change(data.get('title', ''), summary=str(data.get('summary') or ''),
+                                               scope=str(data.get('profile_key') or 'SOFTWARE_DELIVERY'),
+                                               security_domain_id=data.get('security_domain_id'), actor=actor)
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/clauses'):
+                revision_id = path.split('/')[4]
+                result = sdd_api.create_clause(revision_id, str(data.get('kind') or 'REQUIREMENT'), str(data.get('title') or ''),
+                                               body_text=str(data.get('body_text') or ''), structured=data.get('structured'),
+                                               ordinal=int(data.get('ordinal') or 0), actor=actor)
+            elif path.startswith('/api/sdd/clauses/') and path.endswith('/patch'):
+                clause_id = path.split('/')[4]
+                result = sdd_api.patch_clause(clause_id, expected_version=int(data.get('expected_version')),
+                                              title=data.get('title'), body_text=data.get('body_text'), structured=data.get('structured'),
+                                              reason=str(data.get('reason') or ''), actor=actor)
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/baseline'):
+                revision_id = path.split('/')[4]
+                result = sdd_api.approve_baseline(revision_id, reason=str(data.get('reason') or ''), actor=actor,
+                                                  approvals_complete=bool(data.get('approvals_complete', True)),
+                                                  reviews_complete=bool(data.get('reviews_complete', True)))
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/working-revision'):
+                revision_id = path.split('/')[4]
+                revision = sdd_api.get_revision(revision_id)
+                if not revision:
+                    raise ValueError('revision not found')
+                result = sdd_api.create_working_revision(str(revision['change_id']), reason=str(data.get('reason') or ''), actor=actor)
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/tasks'):
+                revision_id = path.split('/')[4]
+                result = sdd_api.create_task(revision_id, str(data.get('title') or ''), role_key=str(data.get('role_key') or ''),
+                                             risk_level=str(data.get('risk_level') or 'LOW'), read_set=data.get('read_set') or [],
+                                             write_set=data.get('write_set') or [], depends_on=data.get('depends_on') or [], actor=actor)
+            elif path.startswith('/api/sdd/revisions/') and path.endswith('/runs'):
+                revision_id = path.split('/')[4]
+                result = sdd_api.create_run(revision_id, budget=data.get('budget') or {}, actor=actor)
+            elif path == '/api/sdd/evidence':
+                result = sdd_api.record_evidence(str(data.get('revision_id') or ''), task_id=data.get('task_id'),
+                                                  criterion_clause_id=data.get('criterion_clause_id'), evidence_type=str(data.get('evidence_type') or 'TEST'),
+                                                  source_kind=str(data.get('source_kind') or 'WORKER'), reference_uri=str(data.get('reference_uri') or ''),
+                                                  artifact_digest=str(data.get('artifact_digest') or ''), detail=data.get('detail') or {}, actor=actor,
+                                                  independent=bool(data.get('independent')))
+            elif path == '/api/sdd/scm':
+                result = scm_adapter_api.register_connection(str(data.get('adapter_kind') or ''), str(data.get('repository_ref') or ''),
+                                                             credential_reference=data.get('credential_reference'), policy=data.get('policy') or {}, actor=actor)
+            else:
+                self._send_error(404, 'SDD route not found')
+                return
+            self._send_json(_clean_row(result), 201)
+        except (ValueError, PermissionError) as exc:
+            self._send_error(422, str(exc))
 
     def _api_collab(self):
         groups = connection.execute_query(
@@ -4481,8 +4561,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.3.7', VERSION)
-            html = html.replace('2026-08-10', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.0', VERSION)
+            html = html.replace('2026-08-11', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

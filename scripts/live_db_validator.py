@@ -161,6 +161,9 @@ V436_MIGRATION_SCRIPTS = V435_MIGRATION_SCRIPTS + (
 V437_MIGRATION_SCRIPTS = V436_MIGRATION_SCRIPTS + (
     "33_v4_3_7_bootstrap_embedding.sql",
 )
+V440_MIGRATION_SCRIPTS = V437_MIGRATION_SCRIPTS + (
+    "34_v4_4_0_governed_sdd.sql",
+)
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
     "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
@@ -200,6 +203,28 @@ V437_BOOTSTRAP_REQUIRED_COLUMNS = {
     "CX_EMBEDDING_JOBS": frozenset({"JOB_ID", "JOB_KIND", "STATUS", "IDEMPOTENCY_KEY", "FENCING_TOKEN"}),
     "CX_EMBEDDING_HISTORY": frozenset({"HISTORY_ID", "OBJECT_TYPE", "OBJECT_ID", "ACTION", "ACTOR"}),
     "ENTITY_EMBEDDINGS": frozenset({"EMBEDDING_SPACE_ID", "EMBEDDING_PROFILE_ID", "EMBEDDING_CONTRACT_ID", "CONTENT_DIGEST", "SOURCE_MODE", "VALIDATION_STATUS"}),
+}
+V440_SDD_TABLES = (
+    "SPEC_VERSIONS", "CX_SDD_CHANGES", "CX_SDD_SOURCE_SNAPSHOTS", "CX_SDD_REVISIONS",
+    "CX_SDD_CLAUSES", "CX_SDD_UNRESOLVED_FRAGMENTS", "CX_SDD_TASKS", "CX_SDD_RESOURCE_LEASES",
+    "CX_SDD_RUNS", "CX_SDD_RUN_NODES", "CX_SDD_EVIDENCE", "CX_SDD_REVIEWS", "CX_SDD_GATES",
+    "CX_SDD_SCM_CONNECTIONS", "CX_SDD_ARTIFACTS",
+)
+V440_SDD_REQUIRED_COLUMNS = {
+    "SPEC_VERSIONS": frozenset({"VERSION_ID", "SPEC_ID", "VERSION_NUMBER", "DIFF_JSON"}),
+    "CX_SDD_CHANGES": frozenset({"CHANGE_ID", "TITLE", "PROFILE_KEY", "CURRENT_REVISION_ID", "STATUS"}),
+    "CX_SDD_REVISIONS": frozenset({"REVISION_ID", "CHANGE_ID", "REVISION_NO", "REVISION_STATE", "CONTENT_DIGEST", "EXPECTED_VERSION"}),
+    "CX_SDD_CLAUSES": frozenset({"CLAUSE_ID", "REVISION_ID", "CLAUSE_KIND", "STRUCTURED_JSON", "EXPECTED_VERSION"}),
+    "CX_SDD_UNRESOLVED_FRAGMENTS": frozenset({"FRAGMENT_ID", "REVISION_ID", "FRAGMENT_KIND", "CONTENT_DIGEST", "STATUS"}),
+    "CX_SDD_TASKS": frozenset({"TASK_ID", "REVISION_ID", "ROLE_KEY", "RISK_LEVEL", "READ_SET_JSON", "WRITE_SET_JSON"}),
+    "CX_SDD_RESOURCE_LEASES": frozenset({"LEASE_ID", "TASK_ID", "RESOURCE_REF", "FENCING_TOKEN", "LEASE_EXPIRES_AT"}),
+    "CX_SDD_RUNS": frozenset({"RUN_ID", "REVISION_ID", "STATUS", "BUDGET_JSON"}),
+    "CX_SDD_RUN_NODES": frozenset({"RUN_NODE_ID", "RUN_ID", "NODE_KEY", "READ_SET_JSON", "WRITE_SET_JSON"}),
+    "CX_SDD_EVIDENCE": frozenset({"EVIDENCE_ID", "REVISION_ID", "EVIDENCE_TYPE", "ARTIFACT_DIGEST", "INDEPENDENT_FLAG", "STATUS"}),
+    "CX_SDD_REVIEWS": frozenset({"REVIEW_ID", "REVISION_ID", "REVIEW_KIND", "STATUS"}),
+    "CX_SDD_GATES": frozenset({"GATE_ID", "RUN_ID", "RISK_LEVEL", "STATUS"}),
+    "CX_SDD_SCM_CONNECTIONS": frozenset({"CONNECTION_ID", "ADAPTER_KIND", "REPOSITORY_REF", "CREDENTIAL_REFERENCE"}),
+    "CX_SDD_ARTIFACTS": frozenset({"ARTIFACT_ID", "REFERENCE_URI", "CONTENT_DIGEST", "STATUS"}),
 }
 
 V432_MEMORY_TABLES = (
@@ -930,7 +955,8 @@ def validate_v433_static_contract(database: str, scripts: Sequence[Path]) -> dic
     base = validate_v432_static_contract(database, scripts)
     selected = {path.name: path for path in scripts}
     migration = selected.get("28_v4_3_3_graph_assurance.sql")
-    source = _normalized_marker_text(migration.read_text(encoding="utf-8")) if migration and migration.is_file() else ""
+    raw_source = migration.read_text(encoding="utf-8") if migration and migration.is_file() else ""
+    source = _normalized_marker_text(raw_source)
     assurance = {
         "scripts_required": list(V433_MIGRATION_SCRIPTS),
         "scripts_missing": [name for name in V433_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
@@ -1023,6 +1049,25 @@ def validate_v437_static_contract(database: str, scripts: Sequence[Path]) -> dic
     bootstrap["passed"] = not any((bootstrap["scripts_missing"], bootstrap["tables_missing"])) and bootstrap["contract_markers"] and bootstrap["no_plaintext_secret_markers"]
     return {"database": database, "v436": base, "bootstrap_embedding": bootstrap,
             "passed": bool(base.get("passed")) and bool(bootstrap["passed"])}
+
+
+def validate_v440_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate v4.4.0 native SDD declarations without a database connection."""
+    base = validate_v437_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("34_v4_4_0_governed_sdd.sql")
+    raw_source = migration.read_text(encoding="utf-8") if migration and migration.is_file() else ""
+    source = _normalized_marker_text(raw_source)
+    sdd = {
+        "scripts_required": list(V440_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V440_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V440_SDD_TABLES if name not in source],
+        "baseline_markers": all(marker in raw_source.upper() for marker in ("APPROVED_BASELINE", "EXPECTED_VERSION", "ARTIFACT_DIGEST")),
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    sdd["passed"] = not any((sdd["scripts_missing"], sdd["tables_missing"])) and sdd["baseline_markers"] and sdd["no_plaintext_secret_markers"]
+    return {"database": database, "v437": base, "native_sdd": sdd,
+            "passed": bool(base.get("passed")) and bool(sdd["passed"])}
 
 
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
@@ -1498,19 +1543,22 @@ def main() -> int:
     # gate therefore has the same mandatory Graph object contract as the
     # v4.2.x experimental line; otherwise an incomplete v4.3.0 deployment
     # could be reported as ready.
-    requires_graph = target_version.startswith(("4.2.", "4.3."))
-    requires_v43 = target_version.startswith("4.3.")
-    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
-    requires_v432 = target_version.startswith(("4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
-    requires_v433 = target_version.startswith(("4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"))
-    requires_v434 = target_version.startswith(("4.3.4", "4.3.5", "4.3.6", "4.3.7"))
-    requires_v435 = target_version.startswith(("4.3.5", "4.3.6", "4.3.7"))
-    requires_v436 = target_version.startswith(("4.3.6", "4.3.7"))
-    requires_v437 = target_version.startswith("4.3.7")
+    requires_graph = target_version.startswith(("4.2.", "4.3.", "4.4."))
+    requires_v43 = target_version.startswith(("4.3.", "4.4."))
+    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
+    requires_v432 = target_version.startswith(("4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
+    requires_v433 = target_version.startswith(("4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
+    requires_v434 = target_version.startswith(("4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
+    requires_v435 = target_version.startswith(("4.3.5", "4.3.6", "4.3.7", "4.4."))
+    requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
+    requires_v437 = target_version.startswith(("4.3.7", "4.4."))
+    requires_v440 = target_version.startswith("4.4.")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v437:
+            if requires_v440:
+                migration_scripts, validator = V440_MIGRATION_SCRIPTS, validate_v440_static_contract
+            elif requires_v437:
                 migration_scripts, validator = V437_MIGRATION_SCRIPTS, validate_v437_static_contract
             elif requires_v436:
                 migration_scripts, validator = V436_MIGRATION_SCRIPTS, validate_v436_static_contract

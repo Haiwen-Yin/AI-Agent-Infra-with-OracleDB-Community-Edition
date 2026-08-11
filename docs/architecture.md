@@ -1,4 +1,24 @@
-# Architecture - AI Agent Infra with DB v4.3.7
+# Architecture - AI Agent Infra with DB v4.4.0
+
+## v4.4.0 Governed Software Delivery Graph
+
+The v4.4.0 control plane stores structured SDD Changes, Requirements,
+Scenarios, Acceptance Criteria, Tasks, Reviews, Evidence, Resource Leases,
+Run Nodes, Amendments and immutable Approved Baselines in the database.
+Relational facts are authorization truth; the existing Graph Runtime is the
+execution projection and is compiled from an approved baseline.
+
+OpenSpec is an optional authoring interoperability boundary. Chuanxu preserves
+an immutable source snapshot, normalizes the content, blocks unresolved
+security/interface/data/migration fragments, and then executes from database
+state. OpenSpec CLI and local Markdown are not required after handoff.
+
+The Software Delivery Profile uses registered, hardened roles and minimum
+context projections. Workers claim isolated worktrees, branches, containers or
+customer-equivalent resources with short-lived fencing leases. SCM credentials
+remain references to a controlled provider. Artifact digest changes make
+dependent evidence stale, and an Agent completion claim is never sufficient
+for independent acceptance.
 
 ## v4.3.7 Bootstrap And Embedding Governance Plane
 

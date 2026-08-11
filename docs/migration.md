@@ -1,4 +1,24 @@
-# Migration Guide - AI Agent Infra with DB v4.3.7
+# Migration Guide - AI Agent Infra with DB v4.4.0
+
+## v4.4.0 Native SDD Migration
+
+Migration `34_v4_4_0_governed_sdd.sql` is additive. It adds the missing
+`SPEC_VERSIONS` persistence and the `CX_SDD_*` Change, source snapshot,
+revision, clause, unresolved-fragment, task, lease, Run, evidence, review,
+gate, SCM and artifact tables. Existing SPEC, Task, Loop, Graph, Channel,
+approval and audit records are retained.
+
+Run `migration_runner.py --version 4.4.0 --edition
+<community|enterprise>` after recording recoverable backup evidence. The
+runner applies the edition-aware v4.3.7 prerequisite chain, validates checksums
+and resumes interrupted steps. The v4.4.0 baseline is created only after
+structured validation, review, approval and fragment checks. Do not edit an
+applied migration or delete ledger rows to retry it.
+
+After migration, use `live_db_validator.py --version 4.4.0` and verify the
+three-database six-edition matrix. Remove non-baseline test databases before
+the next upgrade; retain the documented baseline databases and Oracle `test`
+PDB.
 
 ## v4.3.7 Bootstrap Migration
 

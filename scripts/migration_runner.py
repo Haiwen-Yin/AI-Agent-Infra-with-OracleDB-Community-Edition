@@ -33,6 +33,9 @@ from live_db_validator import (
     V437_MIGRATION_SCRIPTS,
     V437_BOOTSTRAP_TABLES,
     V437_BOOTSTRAP_REQUIRED_COLUMNS,
+    V440_MIGRATION_SCRIPTS,
+    V440_SDD_TABLES,
+    V440_SDD_REQUIRED_COLUMNS,
     _load_database_config,
     validate_v43_static_contract,
     validate_v431_static_contract,
@@ -42,6 +45,7 @@ from live_db_validator import (
     validate_v435_static_contract,
     validate_v436_static_contract,
     validate_v437_static_contract,
+    validate_v440_static_contract,
 )
 
 
@@ -76,8 +80,9 @@ COMPLIANCE_MIGRATION_VERSIONS = frozenset({"4.3.4"})
 PLATFORM_CAPABILITY_MIGRATION_VERSIONS = frozenset({"4.3.5"})
 NATIVE_AGENT_MIGRATION_VERSIONS = frozenset({"4.3.6"})
 BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS = frozenset({"4.3.7"})
+NATIVE_SDD_MIGRATION_VERSIONS = frozenset({"4.4.0"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS
 )
 
 V434_COMPLIANCE_TABLES = frozenset({
@@ -551,6 +556,10 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V437_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V437_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v437_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.0":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V440_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V440_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v440_static_contract(database, full_scripts)
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
@@ -687,6 +696,11 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in NATIVE_SDD_MIGRATION_VERSIONS:
+        present = _schema_tables(cursor, database)
+        return set(V440_SDD_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V440_SDD_REQUIRED_COLUMNS, present,
+        )
     if MIGRATION_VERSION in BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS:
         present = _schema_tables(cursor, database)
         return set(V437_BOOTSTRAP_TABLES) <= present and _schema_columns_complete(
@@ -1003,6 +1017,11 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         return _memory_lifecycle_complete(cursor, database)
     if key == "28_v4_3_3_graph_assurance":
         return set(V433_GRAPH_ASSURANCE_TABLES) <= _schema_tables(cursor, database)
+    if key == "34_v4_4_0_governed_sdd":
+        present = _schema_tables(cursor, database)
+        return set(V440_SDD_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V440_SDD_REQUIRED_COLUMNS, present,
+        )
     return True
 
 
@@ -1190,6 +1209,14 @@ def _v437_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v440_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    """Add the native SDD step after the edition-aware v4.3.7 chain."""
+    names = _v437_script_names(database, config_path, edition)
+    if "34_v4_4_0_governed_sdd.sql" not in names:
+        names.append("34_v4_4_0_governed_sdd.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1356,7 +1383,11 @@ def _apply_statement_migration(
                 if existing:
                     if existing["checksum"] != result.checksum and existing["status"] == "APPLIED":
                         additive_upgrade = _channel_additive_columns_missing(cursor, database)
-                        if additive_upgrade:
+                        native_sdd_repair = (
+                            _script_key(script) == "34_v4_4_0_governed_sdd"
+                            and not _step_objects_complete(cursor, database, script)
+                        )
+                        if additive_upgrade or native_sdd_repair:
                             # Continue below and replay the idempotent script. The
                             # early v4.3 draft is not accepted as complete until
                             # every fencing/claim column is present.
@@ -1484,7 +1515,11 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
                 if existing:
                     if existing["checksum"] != result.checksum and existing["status"] == "APPLIED":
                         additive_upgrade = _channel_additive_columns_missing(cursor, "pg")
-                        if additive_upgrade:
+                        native_sdd_repair = (
+                            _script_key(script) == "34_v4_4_0_governed_sdd"
+                            and not _step_objects_complete(cursor, "pg", script)
+                        )
+                        if additive_upgrade or native_sdd_repair:
                             pass
                         elif _legacy_graph_step_compatible(cursor, "pg", script, existing["checksum"]):
                             _upsert_step_row(
@@ -1567,7 +1602,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1623,6 +1658,8 @@ def main() -> int:
             script_names = _v436_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.3.7":
             script_names = _v437_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.0":
+            script_names = _v440_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

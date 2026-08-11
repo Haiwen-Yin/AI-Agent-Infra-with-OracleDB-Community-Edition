@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.3.7 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.0 Unified Repository Guide
 
-> **v4.3.7** - The unified single-source repository that generates all 6 release
+> **v4.4.0** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -337,7 +337,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.3.7`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.0`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

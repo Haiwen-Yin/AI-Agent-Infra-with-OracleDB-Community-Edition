@@ -1,9 +1,10 @@
-"""AI Agent Infra v4.3.7 - Community Edition - Spec API
+"""AI Agent Infra v4.4.0 - Community Edition - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """
 
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 
 from .connection import (
@@ -73,10 +74,11 @@ def create_spec(
         "branch_id": branch_id,
     })
 
-    try:
-        create_spec_version(entity_id, "CREATED", "Initial version")
-    except Exception:
-        pass
+    # Version history is an integrity boundary in v4.4.  Do not silently
+    # accept a mutable specification when the required persistence failed.
+    version_id = create_spec_version(entity_id, "CREATED", "Initial version")
+    if not version_id:
+        raise RuntimeError("SPEC_VERSION_PERSISTENCE_FAILED")
 
     return entity_id
 
@@ -117,6 +119,8 @@ def get_spec(entity_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     result = sanitize_row(row)
+    if str(result.get("status", "")).upper() == "DELETED":
+        return None
 
     try:
         links_sql = """
@@ -178,17 +182,16 @@ def update_spec(entity_id: str, **kwargs: Any) -> bool:
 
     if affected > 0:
         updated_fields = sorted(list(entity_updates.keys()) + list(meta_updates.keys()))
-        try:
-            create_spec_version(
-                entity_id,
-                "MODIFIED",
-                f"Updated fields: {', '.join(updated_fields)}",
-                diff_json={"updated_fields": updated_fields,
-                           "entity": entity_updates,
-                           "meta": meta_updates},
-            )
-        except Exception:
-            pass
+        version_id = create_spec_version(
+            entity_id,
+            "MODIFIED",
+            f"Updated fields: {', '.join(updated_fields)}",
+            diff_json={"updated_fields": updated_fields,
+                       "entity": entity_updates,
+                       "meta": meta_updates},
+        )
+        if not version_id:
+            raise RuntimeError("SPEC_VERSION_PERSISTENCE_FAILED")
 
     return affected > 0
 
@@ -348,14 +351,26 @@ def validate_plan_against_spec(
 
         validated = 0
         passed = 0
+        details = []
         if isinstance(ac, list):
             for criterion in ac:
                 validated += 1
-                crit_str = criterion if isinstance(criterion, str) else json.dumps(criterion)
-                for desc in step_descs:
-                    if crit_str.lower() in desc.lower():
-                        passed += 1
-                        break
+                if isinstance(criterion, dict):
+                    criterion_id = criterion.get("id") or criterion.get("key") or str(validated)
+                    required_task_ids = {str(value) for value in criterion.get("task_ids", [])}
+                    required_tags = {str(value).lower() for value in criterion.get("tags", [])}
+                    task_ids = {str(step.get("step_id") or step.get("id") or "") for step in steps}
+                    task_tags = {str(tag).lower() for step in steps for tag in (step.get("tags") or [])}
+                    matched = (not required_task_ids or required_task_ids <= task_ids) and (not required_tags or required_tags <= task_tags)
+                    details.append({"criterion": criterion_id, "matched": matched, "mode": "structured"})
+                else:
+                    # Legacy string criteria cannot establish delivery
+                    # evidence. Keep their presence visible, but never infer
+                    # completion from substring matching.
+                    matched = False
+                    details.append({"criterion": str(criterion), "matched": False, "mode": "legacy_requires_migration"})
+                if matched:
+                    passed += 1
 
         results["validations"].append({
             "plan_id": pid,
@@ -364,6 +379,7 @@ def validate_plan_against_spec(
             "criteria_validated": validated,
             "criteria_passed": passed,
             "pass_rate": round(passed / validated, 2) if validated > 0 else 0,
+            "details": details,
         })
 
     return results
@@ -398,13 +414,22 @@ def derive_spec(
 
 
 def delete_spec(entity_id: str) -> bool:
-    """Delete a spec and all related data. Returns True/False."""
+    """Retire a spec instead of physically deleting governed history."""
     try:
-        execute("DELETE FROM SPEC_PLAN_LINKS WHERE SPEC_ID = :eid", {"eid": entity_id})
-        execute("DELETE FROM SPEC_META WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC'", {"eid": entity_id})
-        execute("DELETE FROM ENTITY_TAGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC'", {"eid": entity_id})
-        execute("DELETE FROM ENTITY_EDGES WHERE SOURCE_ID = :eid AND SOURCE_TYPE = 'SPEC'", {"eid": str(entity_id)})
-        affected = execute("DELETE FROM ENTITIES WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC'", {"eid": entity_id})
+        affected = execute(
+            "UPDATE ENTITIES SET STATUS = 'DELETED', UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC' AND STATUS <> 'DELETED'",
+            {"eid": entity_id},
+        )
+        if affected:
+            execute(
+                "UPDATE SPEC_META SET SPEC_STATUS = 'DEPRECATED' "
+                "WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'SPEC'",
+                {"eid": entity_id},
+            )
+            version_id = create_spec_version(entity_id, "DELETED", "Deleted without physical deletion")
+            if not version_id:
+                raise RuntimeError("SPEC_VERSION_PERSISTENCE_FAILED")
         return affected > 0
     except Exception:
         return False
@@ -509,8 +534,12 @@ def derive_loop_from_spec(spec_id: str, agent_id: str) -> Dict[str, Any]:
     if not spec:
         raise ValueError(f"Spec {spec_id} not found")
 
-    properties = spec.get("properties", {})
-    acceptance_criteria = properties.get("acceptance_criteria", [])
+    acceptance_criteria = spec.get("acceptance_criteria") or []
+    if isinstance(acceptance_criteria, str):
+        try:
+            acceptance_criteria = json.loads(acceptance_criteria)
+        except (TypeError, json.JSONDecodeError):
+            acceptance_criteria = []
 
     goal_definition = {
         "type": "SPEC_VALIDATION",
@@ -550,6 +579,9 @@ def create_spec_version(
 ) -> Optional[str]:
     """Record a new version entry for a spec. Returns VERSION_ID or None if unavailable."""
     try:
+        # PostgreSQL may expose legacy numeric ENTITY_ID values while the
+        # version ledger deliberately uses a portable string reference.
+        spec_id = str(spec_id)
         next_num_sql = (
             "SELECT COALESCE(MAX(VERSION_NUMBER), 0) + 1 AS NEXT_VER "
             "FROM SPEC_VERSIONS WHERE SPEC_ID = :sid"
@@ -566,19 +598,20 @@ def create_spec_version(
             ]
             diff_json = {k: current.get(k) for k in snapshot_keys if current}
 
-        diff_str = diff_json if isinstance(diff_json, str) else json.dumps(diff_json or {})
+        diff_str = diff_json if isinstance(diff_json, str) else json.dumps(diff_json or {}, default=str)
 
         from .connection import get_current_agent_id
         created_by = get_current_agent_id()
 
+        version_id = "SPECVER_" + uuid.uuid4().hex
         sql = """
             INSERT INTO SPEC_VERSIONS (VERSION_ID, SPEC_ID, VERSION_NUMBER,
                                        CHANGE_TYPE, CHANGE_SUMMARY, DIFF_JSON,
                                        CREATED_BY)
-            VALUES (AI_NEW_ID(), :sid, :vnum, :ctype, :csum, :djson, :cby)
-            RETURNING VERSION_ID INTO :ret_id
+            VALUES (:vid, :sid, :vnum, :ctype, :csum, :djson, :cby)
         """
-        return execute_insert_returning_id(sql, {
+        execute(sql, {
+            "vid": version_id,
             "sid": spec_id,
             "vnum": next_ver,
             "ctype": change_type,
@@ -586,6 +619,7 @@ def create_spec_version(
             "djson": diff_str,
             "cby": created_by,
         })
+        return version_id
     except Exception:
         return None
 

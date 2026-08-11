@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.4.0 - 2026-08-11
+
+- Added database-native governed SDD revisions, immutable baselines,
+  structured clauses, task graphs, leases, reviews, evidence and amendments.
+- Added OpenSpec source snapshots and normalized import interoperability;
+  execution continues from the Chuanxu database after handoff.
+- Added governed software delivery roles, isolated task resources, SCM
+  credential references and digest-bound independent evidence.
+- Added the Specifications and Delivery Workbench and six-edition v4.4.0
+  migration and validation gates.
+
 ## v4.3.7 - 2026-08-10
 
 - Added the local Bootstrap Deployment Agent, prepared-target preflight,

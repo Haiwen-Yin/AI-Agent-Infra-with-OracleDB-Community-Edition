@@ -1,4 +1,4 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.3.7
+# Recovery and High Availability - AI Agent Infra with DB v4.4.0
 
 ## Recovery Authority
 

@@ -915,6 +915,8 @@ function PageView({
     );
   if (page === "memory")
     return <MemoryLifecyclePage lang={lang} text={text} onNotice={onNotice} />;
+  if (page === "specs")
+    return <SddWorkbench lang={lang} text={text} onNotice={onNotice} />;
   if (page === "graph")
     return <GraphPage lang={lang} text={text} onNotice={onNotice} />;
   if (page === "approvals")
@@ -1566,7 +1568,7 @@ const statusLabels: Record<string, [string, string]> = {
   NEVER_SEEN: ["未观察", "Never observed"],
   ONLINE: ["在线", "Online"],
   IDLE: ["空闲", "Idle"],
-  STALE: ["状态陈旧", "Stale"],
+  STALE: ["已失效", "Stale"],
   OFFLINE: ["离线", "Offline"],
   BOUNDARY_ONLY: ["仅边界证据", "Boundary only"],
   SIGNED_ADAPTER: ["已签名适配器", "Signed adapter"],
@@ -1585,6 +1587,13 @@ const statusLabels: Record<string, [string, string]> = {
   PENDING_CONFIRMATION: ["待确认", "Pending confirmation"],
   CANCELLED: ["已取消", "Cancelled"],
   REVIEW_REQUIRED: ["需要复核", "Review required"],
+  DRAFT: ["草稿", "Draft"],
+  WORKING_REVISION: ["工作修订", "Working revision"],
+  APPROVED_BASELINE: ["已批准基线", "Approved baseline"],
+  AMENDMENT: ["修订", "Amendment"],
+  SUPERSEDED_BASELINE: ["已替代基线", "Superseded baseline"],
+  RETIRED: ["已退役", "Retired"],
+  VALID: ["有效", "Valid"],
 };
 
 const valueLabels: Record<string, [string, string]> = {
@@ -1752,6 +1761,88 @@ function parseIds(value: string): string[] {
         .map((item) => item.trim())
         .filter(Boolean),
     ),
+  );
+}
+
+function SddWorkbench({
+  lang,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [changes, setChanges] = useState<Row[]>([]);
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const load = async () => {
+    setLoading(true);
+    try {
+      const payload = await api<Row>("/api/sdd/changes?limit=100");
+      setChanges(listPayload(payload, ["changes"]));
+      if (selected) setSelected(await api<Row>(`/api/sdd/changes/${selected.change_id}`));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("加载规格失败", "Unable to load specifications"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+  const createChange = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      await api("/api/sdd/changes", { method: "POST", body: JSON.stringify({ title, summary }) });
+      setTitle(""); setSummary(""); await load();
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("创建失败", "Creation failed")); }
+    finally { setBusy(false); }
+  };
+  const action = async (path: string, body: Row = {}) => {
+    if (!selected?.revision?.revision_id) return;
+    setBusy(true);
+    try {
+      await api(path.replace(":revision", selected.revision.revision_id), { method: "POST", body: JSON.stringify(body) });
+      await load();
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("操作失败", "Operation failed")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section>
+      <SectionHeading
+        title={text("规格与交付工作台", "Specification and delivery workbench")}
+        subtitle={text("规格在数据库中形成可协作、可审查、可执行的版本基线；OpenSpec 仅作为导入与互操作入口。", "Specifications become collaborative, reviewable and executable database baselines; OpenSpec is only an import and interoperability entry point.")}
+        text={text}
+      />
+      <InfoPanel title={text("新建原生 Change", "Create native Change")} text={text}>
+        <form className="workbench-form" onSubmit={createChange}>
+          <label className="workbench-field"><span>{text("标题", "Title")}</span><input value={title} onChange={(event) => setTitle(event.target.value)} required /><small>{text("创建后进入工作修订状态。", "Starts as a working revision.")}</small></label>
+          <label className="workbench-field"><span>{text("摘要", "Summary")}</span><input value={summary} onChange={(event) => setSummary(event.target.value)} /><small>{text("摘要不会替代结构化条款。", "A summary does not replace structured clauses.")}</small></label>
+          <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建", "Create")}</button></div>
+        </form>
+      </InfoPanel>
+      <div className="cx-two-column">
+        <InfoPanel title={text("Change 列表", "Change list")} text={text}>
+          {loading ? <div className="cx-empty"><RefreshCw className="spin" size={16} />{text("正在加载", "Loading")}</div> : <DataTable headers={[text("标题", "Title"), text("状态", "Status"), text("更新时间", "Updated")]} rows={changes.map((item) => [<button className="text-button" onClick={() => void api<Row>(`/api/sdd/changes/${item.change_id}`).then(setSelected)}>{String(item.title || item.change_id)}</button>, displayRowValue(lang, item.status), displayRowValue(lang, item.updated_at)])} empty={text("暂无 Change", "No Change yet")} text={text} />}
+        </InfoPanel>
+        <InfoPanel title={text("选中 Change", "Selected Change")} text={text}>
+          {!selected ? <div className="cx-empty">{text("点击列表中的标题查看详情。", "Select a title to inspect its details.")}</div> : <>
+            <div className="detail-grid"><span>{text("状态", "Status")}</span><b>{displayRowValue(lang, selected.status)}</b><span>{text("当前修订", "Revision")}</span><b>{displayRowValue(lang, selected.revision?.revision_state)}</b><span>{text("条款", "Clauses")}</span><b>{selected.revision?.clauses?.length || 0}</b><span>{text("证据", "Evidence")}</span><b>{selected.evidence?.length || 0}</b></div>
+            <div className="page-toolbar">
+              <button className="secondary-button" disabled={busy} onClick={() => void action("/api/sdd/revisions/:revision/working-revision", { reason: text("工作修订", "Working revision") })}><Redo2 size={14} />{text("新建修订", "New revision")}</button>
+              <button className="secondary-button" disabled={busy || selected.revision?.revision_state !== "APPROVED_BASELINE"} onClick={() => void action("/api/sdd/revisions/:revision/runs", { budget: {} })}><PlayCircle size={14} />{text("创建 Run", "Create Run")}</button>
+              <button className="primary-button" disabled={busy || selected.revision?.revision_state !== "WORKING_REVISION"} onClick={() => void action("/api/sdd/revisions/:revision/baseline", { reason: text("管理员批准基线", "Administrator approved baseline") })}><ShieldCheck size={14} />{text("批准基线", "Approve baseline")}</button>
+            </div>
+            <p className="cx-form-hint">{text("任务、执行图、Agent/资源、证据、Review、Amendment 和 Release Baseline 均由数据库记录；Agent 的完成声明不会单独关闭验收。", "Tasks, execution graph, Agent/resources, evidence, Review, Amendment and Release Baseline are database records; an Agent completion claim alone never closes acceptance.")}</p>
+            <DataTable headers={[text("条款类型", "Clause"), text("标题", "Title"), text("状态", "Status")]} rows={(selected.revision?.clauses || []).map((item: Row) => [displayRowValue(lang, item.clause_kind), item.title, displayRowValue(lang, item.status)])} empty={text("暂无结构化条款", "No structured clauses")} text={text} />
+          </>}
+        </InfoPanel>
+      </div>
+    </section>
   );
 }
 

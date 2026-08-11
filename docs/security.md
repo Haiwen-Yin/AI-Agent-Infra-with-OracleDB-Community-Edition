@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.3.7
+# Security - AI Agent Infra with DB v4.4.0
 
 ## v4.3.7 Bootstrap And Embedding Boundary
 

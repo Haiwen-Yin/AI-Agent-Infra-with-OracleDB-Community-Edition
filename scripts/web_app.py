@@ -35,7 +35,7 @@ except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts
     from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance
 
 
-VERSION = "4.3.7"
+VERSION = "4.4.0"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():

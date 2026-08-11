@@ -1,4 +1,26 @@
-# API Reference - AI Agent Infra with DB v4.3.7
+# API Reference - AI Agent Infra with DB v4.4.0
+
+## v4.4.0 Native SDD And Delivery API
+
+All SDD mutations require an authenticated protected session, CSRF, role and
+security-domain checks, an explicit reason where required, and an atomic audit
+record. OpenSpec CLI is optional after baseline handoff.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/sdd/changes` | GET/POST | List or create database-native Changes. |
+| `/api/sdd/changes/{id}` | GET | Read the authorized Change, revision, clauses and evidence. |
+| `/api/sdd/revisions/{id}/clauses` | POST | Add a typed requirement, scenario, acceptance criterion or task clause. |
+| `/api/sdd/clauses/{id}/patch` | POST | Apply an expected-version protected clause patch. |
+| `/api/sdd/revisions/{id}/baseline` | POST | Validate and approve an immutable execution baseline. |
+| `/api/sdd/revisions/{id}/runs` | POST | Compile an approved revision and create a bounded SDD Run. |
+| `/api/sdd/revisions/{id}/graph` | GET | Inspect the deterministic execution-graph projection. |
+| `/api/sdd/evidence` | POST | Record independent Worker/CI evidence and an artifact digest. |
+| `/api/sdd/scm` | POST | Register a local Git/GitHub repository and credential reference. |
+
+Credential values, model reasoning and unrestricted source payloads are not
+returned by these routes. Large code, logs and packages stay in SCM/object
+storage and are referenced by digest.
 
 ## v4.3.7 Deployment And Embedding API
 
