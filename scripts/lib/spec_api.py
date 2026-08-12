@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Spec API
+"""AI Agent Infra v4.4.1 - Community Edition - Spec API
 
 Spec Driven Development: create/manage specification documents with plan linkage and validation.
 """
@@ -15,6 +15,7 @@ from .connection import (
     execute_insert_returning_id,
     sanitize_row,
 )
+from . import cursor_pagination, identity_api
 
 
 def create_spec(
@@ -226,6 +227,41 @@ def list_specs(
     """
     rows = execute_query(sql, params)
     return [sanitize_row(r) for r in rows]
+
+
+def list_specs_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "",
+                      spec_scope: Optional[str] = None, spec_status: Optional[str] = None) -> Dict[str, Any]:
+    """Return a principal-bound Spec inventory page."""
+    filters = {"spec_scope": spec_scope or "", "spec_status": spec_status or ""}
+    context = cursor_pagination.resolve(principal_id, "specs", filters, "entity_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "specs", "sort_key": "entity_id:asc"})
+    conditions = ["e.ENTITY_TYPE='SPEC'"]
+    params: Dict[str, Any] = {"lim": int(context["page_size"]) + 1}
+    if spec_scope:
+        conditions.append("sm.SPEC_SCOPE=:scope")
+        params["scope"] = spec_scope
+    if spec_status:
+        conditions.append("sm.SPEC_STATUS=:sstatus")
+        params["sstatus"] = spec_status
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+            "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
+            identity_api._agent_visibility_clause(principal_id) + "))"
+        )
+        params["principal_id"] = principal_id
+    after = str(context["position"].get("entity_id") or "")
+    if after:
+        conditions.append("e.ENTITY_ID>:after")
+        params["after"] = after
+    rows = execute_query(
+        "SELECT e.ENTITY_ID,e.TITLE,e.CATEGORY,e.STATUS,e.IMPORTANCE,sm.SPEC_VERSION,sm.SPEC_STATUS,"
+        "sm.SPEC_SCOPE,sm.COMPLEXITY,sm.BRANCH_ID FROM ENTITIES e JOIN SPEC_META sm "
+        "ON sm.ENTITY_ID=e.ENTITY_ID AND sm.ENTITY_TYPE=e.ENTITY_TYPE WHERE " + " AND ".join(conditions) +
+        " ORDER BY e.ENTITY_ID FETCH FIRST :lim ROWS ONLY", params,
+    )
+    values = [sanitize_row(row) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
 
 
 def create_plan_from_spec(spec_id: str, agent_id: str) -> str:

@@ -30,12 +30,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api
 except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api
 
 
-VERSION = "4.4.0"
+VERSION = "4.4.1"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -181,7 +181,7 @@ async def clear_agent_database_context(request: Request, call_next):
         raw_session_id = getattr(request.state, "cx_session_id", "")
         if session and raw_session_id and request.url.path != "/api/auth/logout" and response.status_code < 400:
             _set_session_cookie(response, {"session_id": raw_session_id})
-            expires_at = identity_api._iso(session.get("expires_at")) or ""
+            expires_at = _browser_session_expiry(session.get("expires_at"))
             if expires_at:
                 response.headers["X-Session-Expires-At"] = expires_at
         return response
@@ -270,6 +270,14 @@ def _bootstrap_native_agents() -> None:
         logger.info("Native Agent bootstrap is pending migration", exc_info=True)
 
 
+def _bootstrap_admin_management() -> None:
+    """Initialize v4.4.1 management objects after their additive migration."""
+    try:
+        admin_management.initialize()
+    except Exception:
+        logger.info("Platform Administration bootstrap is pending migration", exc_info=True)
+
+
 def _remove_enterprise_compliance_routes() -> None:
     """Keep Enterprise compliance HTTP surfaces out of Community runtimes."""
     features = _edition_features()
@@ -290,6 +298,7 @@ def on_startup() -> None:
     _COMPLIANCE_CONTROLLER_STOP.clear()
     _NATIVE_RUNTIME_STOP.clear()
     _bootstrap_native_agents()
+    _bootstrap_admin_management()
     _start_compliance_controller()
     _start_native_runtime()
 
@@ -1127,6 +1136,115 @@ class ExternalRegistrationPolicyBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class AdminEnrollmentBody(BaseModel):
+    admission_path: str = Field(min_length=1, max_length=32)
+    public_key: str = Field(min_length=16, max_length=10000)
+    node_id: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=3, max_length=2000)
+    package_digest: str = Field(default="", max_length=128)
+
+
+class AdminWeightBody(BaseModel):
+    weight: int = Field(ge=1, le=1_000_000)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class AdminObservationBody(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class AdminApprovalBody(BaseModel):
+    weight: int = Field(ge=1, le=1_000_000)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class AdminLeaderBody(BaseModel):
+    lease_seconds: int = Field(default=60, ge=15, le=300)
+
+
+class ProtectedInviteBody(BaseModel):
+    principal_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+    valid_until: str = Field(default="", max_length=64)
+
+
+class ContainmentCommandBody(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=128)
+    instance_id: str = Field(min_length=1, max_length=128)
+    requested_state: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+    expires_seconds: int = Field(default=300, ge=60, le=3600)
+
+
+class ContainmentAcknowledgementBody(BaseModel):
+    command_id: str = Field(min_length=1, max_length=128)
+    generation: int = Field(ge=1)
+    success: bool = True
+    cleanup_evidence: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UpgradeStageBody(BaseModel):
+    package_version: str = Field(min_length=1, max_length=64)
+    edition: str = Field(min_length=1, max_length=32)
+    package_digest: str = Field(min_length=32, max_length=128)
+    signature_state: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class UpgradeApprovalBody(BaseModel):
+    decision: str = Field(min_length=1, max_length=16)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class UpgradeVoteBody(UpgradeApprovalBody):
+    upgrade_id: str = Field(min_length=1, max_length=128)
+    term: int = Field(ge=1)
+    fencing_token: int = Field(ge=1)
+
+
+class UpgradeRolloutBody(BaseModel):
+    node_ids: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class UpgradeNodeBody(BaseModel):
+    target_state: str = Field(min_length=1, max_length=32)
+    active_work_count: int = Field(default=0, ge=0)
+    health_state: str = Field(default="UNKNOWN", max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class SkillDistributionBody(BaseModel):
+    agent_ids: list[str] = Field(min_length=1, max_length=100)
+    skill_version: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class SkillDistributionAcknowledgementBody(BaseModel):
+    upgrade_id: str = Field(min_length=1, max_length=128)
+    skill_version: str = Field(min_length=1, max_length=64)
+    safe_point: bool = False
+    verified: bool = True
+    detail: str = Field(default="", max_length=1000)
+
+
+class ArtifactReceiptBody(BaseModel):
+    artifact_id: str = Field(min_length=1, max_length=128)
+    node_id: str = Field(min_length=1, max_length=256)
+    received_digest: str = Field(min_length=64, max_length=64)
+    signature_state: str = Field(min_length=1, max_length=32)
+    available: bool = True
+    detail: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionPolicyBody(BaseModel):
+    idle_timeout_seconds: int = Field(ge=60, le=86400)
+    absolute_timeout_seconds: int = Field(ge=60, le=86400)
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 def _cookie_name() -> str:
     return f"session_id_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
 
@@ -1140,12 +1258,36 @@ def _session_timeout_seconds() -> int:
     return max(60, min(identity_api.SESSION_MAX_SECONDS, configured))
 
 
+def _dashboard_session_policy() -> Dict[str, Any]:
+    try:
+        return admin_management.session_policy("DASHBOARD")
+    except Exception:
+        return {"idle_timeout_seconds": _session_timeout_seconds(), "absolute_timeout_seconds": 28800, "version": 0}
+
+
+def _browser_session_expiry(value: Any) -> str:
+    """Serialize a naive database timestamp with its local time-zone offset.
+
+    Session rows intentionally use portable, naive ``TIMESTAMP`` values. A
+    browser treating this value as UTC shifts an Oracle/YashanDB session by
+    the server UTC offset, so response values must carry that offset.
+    """
+    try:
+        timestamp = identity_api._timestamp(value)
+    except identity_api.IdentityError:
+        return ""
+    if timestamp is None:
+        return ""
+    return timestamp.astimezone().isoformat()
+
+
 def _session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     raw = request.cookies.get(_cookie_name())
     if not raw:
         return None
     with _schema_owner_context():
-        session = identity_api.resolve_session(raw, ttl_seconds=_session_timeout_seconds())
+        policy = _dashboard_session_policy()
+        session = identity_api.resolve_session(raw, ttl_seconds=int(policy["idle_timeout_seconds"]), absolute_ttl_seconds=int(policy["absolute_timeout_seconds"]))
     if session:
         request.state.cx_session = session
         request.state.cx_session_id = raw
@@ -1221,7 +1363,7 @@ def _optional_module(name: str):
 def _set_session_cookie(response: Response, session: Dict[str, str]) -> None:
     secure = os.environ.get("CX_WEB_SECURE_COOKIE", "").lower() in {"1", "true", "yes"}
     response.set_cookie(
-        _cookie_name(), session["session_id"], max_age=_session_timeout_seconds(),
+        _cookie_name(), session["session_id"], max_age=int(_dashboard_session_policy()["absolute_timeout_seconds"]),
         httponly=True, samesite="lax", secure=secure, path="/",
     )
 
@@ -1305,7 +1447,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
             security_lifecycle.record_login_success(str(user["principal_id"]))
             session = identity_api.create_session(
                 str(user["principal_id"]), str(user["user_id"]), _local_node_id(),
-                mfa_level="SETUP", ttl_seconds=_session_timeout_seconds(),
+                mfa_level="SETUP", ttl_seconds=int(_dashboard_session_policy()["idle_timeout_seconds"]),
             )
             _set_session_cookie(response, session)
             return {
@@ -1317,7 +1459,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
                 "mfa_level": "SETUP",
                 "mfa_setup_required": True,
                 "csrf_token": session["csrf_token"],
-                "expires_at": session["expires_at"],
+                "expires_at": _browser_session_expiry(session.get("expires_at")),
                 "session_timeout_seconds": _session_timeout_seconds(),
             }
         admission = governed_contracts.mfa_admission_decision(
@@ -1337,7 +1479,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
         session = identity_api.create_session(
             str(user["principal_id"]), str(user["user_id"]), _local_node_id(),
             mfa_level=mfa_level,
-            ttl_seconds=_session_timeout_seconds(),
+            ttl_seconds=int(_dashboard_session_policy()["idle_timeout_seconds"]),
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
@@ -1351,7 +1493,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
         "mfa_level": mfa_level,
         "mfa_setup_required": False,
         "csrf_token": session["csrf_token"],
-        "expires_at": session["expires_at"],
+        "expires_at": _browser_session_expiry(session.get("expires_at")),
         "session_timeout_seconds": _session_timeout_seconds(),
     }
 
@@ -1441,7 +1583,7 @@ def me(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]:
         "access": access,
         "registration_mode": identity_api.registration_mode(),
         "profile": summary,
-        "expires_at": session.get("expires_at"),
+        "expires_at": _browser_session_expiry(session.get("expires_at")),
         "session_timeout_seconds": _session_timeout_seconds(),
     }
 
@@ -1553,6 +1695,217 @@ def platform_capability_update(
         raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
 
 
+@app.get("/api/platform/administration")
+def platform_administration_state(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.list_management_state(str(session["principal_id"]))
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Platform Administration service is unavailable") from exc
+
+
+@app.get("/api/platform/admin-enrollments")
+def platform_admin_enrollment_list(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return {"items": admin_management.list_admin_enrollments(str(session["principal_id"]), limit)}
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/session-policies")
+def platform_session_policies(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return {"dashboard": admin_management.session_policy("DASHBOARD"), "portal": admin_management.session_policy("PORTAL")}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Session policy service is unavailable") from exc
+
+
+@app.put("/api/platform/session-policies/{kind}")
+def platform_session_policy_update(
+    kind: str, body: SessionPolicyBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.update_session_policy(
+            str(session["principal_id"]), kind, body.idle_timeout_seconds,
+            body.absolute_timeout_seconds, body.expected_version, body.reason,
+        )
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/administration/initialize")
+def platform_administration_initialize(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.initialize()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Platform Administration initialization failed") from exc
+
+
+@app.post("/api/platform/administration/invitations")
+def platform_administration_invite(
+    body: ProtectedInviteBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.invite_protected_human(str(session["principal_id"]), body.principal_id, body.reason, body.valid_until)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-enrollments")
+def platform_admin_enrollment(
+    body: AdminEnrollmentBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.create_admin_enrollment(str(session["principal_id"]), body.admission_path, body.public_key, body.node_id, body.reason, body.package_digest)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-enrollments/{enrollment_id}/observe")
+def platform_admin_enrollment_observe(
+    enrollment_id: str, body: AdminObservationBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.observe_admin_enrollment(str(session["principal_id"]), enrollment_id, body.agent_id, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-members/{member_id}/approve")
+def platform_admin_member_approve(
+    member_id: str, body: AdminApprovalBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.approve_admin_member(str(session["principal_id"]), member_id, body.weight, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/platform/admin-members/{member_id}/weight")
+def platform_admin_weight(
+    member_id: str, body: AdminWeightBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.set_member_weight(str(session["principal_id"]), member_id, body.weight, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-members/{member_id}/leader")
+def platform_admin_leader(
+    member_id: str, body: AdminLeaderBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.acquire_leader(str(session["principal_id"]), member_id, body.lease_seconds)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/containment")
+def platform_containment(
+    body: ContainmentCommandBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.issue_containment(str(session["principal_id"]), body.agent_id, body.instance_id, body.requested_state, body.reason, body.expires_seconds)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/upgrades")
+def platform_upgrade_stage(
+    body: UpgradeStageBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.stage_upgrade(str(session["principal_id"]), body.package_version, body.edition, body.package_digest, body.signature_state, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/upgrades/upload")
+async def platform_upgrade_upload(
+    request: Request, reason: str = "",
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    """Accept one release archive into the isolated management staging area."""
+    filename = request.headers.get("X-Upload-Filename", "")
+    try:
+        content = await request.body()
+        return admin_management.stage_upgrade_archive(
+            str(session["principal_id"]), filename, content, reason, VERSION,
+        )
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Upgrade archive staging service is unavailable") from exc
+
+
+@app.post("/api/platform/upgrades/{upgrade_id}/preflight")
+def platform_upgrade_preflight(
+    upgrade_id: str,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        features = _edition_features()
+        edition = str(getattr(features, "EDITION", "Enterprise"))
+        return admin_management.preflight_upgrade(str(session["principal_id"]), upgrade_id, edition)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/upgrades/{upgrade_id}/human-approval")
+def platform_upgrade_human_approval(
+    upgrade_id: str, body: UpgradeApprovalBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.approve_upgrade(str(session["principal_id"]), upgrade_id, body.decision, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/upgrades/{upgrade_id}/rollout")
+def platform_upgrade_rollout(
+    upgrade_id: str, body: UpgradeRolloutBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.start_upgrade_rollout(str(session["principal_id"]), upgrade_id, body.node_ids, body.reason)
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/upgrades/{upgrade_id}/skill-distribution")
+def platform_upgrade_skill_distribution(
+    upgrade_id: str, body: SkillDistributionBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return admin_management.distribute_upgrade_skill(
+            str(session["principal_id"]), upgrade_id, body.agent_ids, body.skill_version, body.reason,
+        )
+    except (admin_management.ManagementError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/platform/native-bootstrap")
 def native_bootstrap_status(
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -1621,13 +1974,134 @@ def native_manifests(
 @app.get("/api/native-agents")
 def native_agents(
     limit: int = 100,
+    page_size: int = 0,
+    cursor: str = "",
     session: Dict[str, Any] = Depends(require_action("agents.read")),
 ) -> Dict[str, Any]:
     try:
+        if page_size:
+            return native_agent_api.list_native_agents_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor,
+            )
         items = native_agent_api.list_native_agents(str(session["principal_id"]), limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
         raise _identity_http_error(exc, "Native Agent inventory is unavailable") from exc
+
+
+@app.get("/api/tasks")
+def task_inventory(
+    limit: int = 100, page_size: int = 0, cursor: str = "", agent_id: str = "", status: str = "",
+    session: Dict[str, Any] = Depends(require_action("tasks.read")),
+) -> Dict[str, Any]:
+    """Keep legacy plans while exposing a bounded v4.4.1 inventory page."""
+    try:
+        if page_size:
+            result = task_plan_api.list_plans_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor,
+                agent_id=agent_id or None, status=status or None,
+            )
+            result["plans"] = result["items"]
+            return result
+        items = task_plan_api.list_plans(agent_id=agent_id or None, status=status or None, limit=max(1, min(limit, 500)))
+        return {"items": items, "plans": items, "count": len(items)}
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Task cursor is invalid") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Task inventory is unavailable") from exc
+
+
+@app.get("/api/knowledge/inventory")
+def knowledge_inventory(
+    limit: int = 100, page_size: int = 0, cursor: str = "", domain: str = "", topic: str = "",
+    keyword: str = "", difficulty: str = "", workspace_id: str = "", isolation_mode: str = "",
+    session: Dict[str, Any] = Depends(require_action("knowledge.read")),
+) -> Dict[str, Any]:
+    try:
+        if page_size:
+            result = knowledge_api.search_knowledge_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor, domain=domain or None,
+                topic=topic or None, keyword=keyword or None, difficulty=difficulty or None,
+                workspace_id=workspace_id or None, isolation_mode=isolation_mode or None,
+            )
+            result["knowledge"] = result["items"]
+            return result
+        items = knowledge_api.search_knowledge(
+            domain=domain or None, topic=topic or None, keyword=keyword or None,
+            difficulty=difficulty or None, workspace_id=workspace_id or None,
+            isolation_mode=isolation_mode or None, limit=max(1, min(limit, 500)),
+        )
+        return {"items": items, "knowledge": items, "count": len(items)}
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Knowledge cursor is invalid") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Knowledge inventory is unavailable") from exc
+
+
+@app.get("/api/memory/inventory")
+def memory_inventory(
+    page_size: int = 20, cursor: str = "", keyword: str = "", memory_type: str = "",
+    memory_scope: str = "", lifecycle_state: str = "", workspace_id: str = "", owner_agent_id: str = "",
+    session: Dict[str, Any] = Depends(require_action("memory.read")),
+) -> Dict[str, Any]:
+    """A page-only inventory route; /api/memory remains the legacy graph projection."""
+    try:
+        result = memory_lifecycle.current_memories_cursor(
+            str(session["principal_id"]), page_size=page_size, cursor=cursor, keyword=keyword or None,
+            memory_type=memory_type or None, memory_scope=memory_scope or None,
+            lifecycle_state=lifecycle_state or None, workspace_id=workspace_id or None,
+            owner_agent_id=owner_agent_id or None,
+        )
+        result["memories"] = result["items"]
+        return result
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Memory cursor is invalid") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Memory inventory is unavailable") from exc
+
+
+@app.get("/api/skills")
+def skill_inventory(
+    limit: int = 100, page_size: int = 0, cursor: str = "", skill_type: str = "", runtime: str = "",
+    skill_status: str = "ACTIVE", session: Dict[str, Any] = Depends(require_action("skills.read")),
+) -> Dict[str, Any]:
+    try:
+        if page_size:
+            result = skill_api.list_skills_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor,
+                skill_type=skill_type or None, runtime=runtime or None, skill_status=skill_status,
+            )
+            result["skills"] = result["items"]
+            return result
+        items = skill_api.list_skills(skill_type=skill_type or None, runtime=runtime or None,
+                                      skill_status=skill_status, limit=max(1, min(limit, 500)))
+        return {"items": items, "skills": items, "count": len(items)}
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Skill cursor is invalid") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Skill inventory is unavailable") from exc
+
+
+@app.get("/api/specs")
+def spec_inventory(
+    limit: int = 100, page_size: int = 0, cursor: str = "", spec_scope: str = "", spec_status: str = "",
+    session: Dict[str, Any] = Depends(require_action("specs.read")),
+) -> Dict[str, Any]:
+    try:
+        if page_size:
+            result = spec_api.list_specs_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor,
+                spec_scope=spec_scope or None, spec_status=spec_status or None,
+            )
+            result["specs"] = result["items"]
+            return result
+        items = spec_api.list_specs(spec_scope=spec_scope or None, spec_status=spec_status or None,
+                                    limit=max(1, min(limit, 500)))
+        return {"items": items, "specs": items, "count": len(items)}
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Spec cursor is invalid") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Spec inventory is unavailable") from exc
 
 
 @app.post("/api/native-agents/{agent_id}/activate")
@@ -2179,15 +2653,17 @@ def organization_sync_conflicts(batch_id: str = "", limit: int = 100, session: D
 
 
 @app.get("/api/approvals")
-def approvals(limit: int = 100, status: str = "", session: Dict[str, Any] = Depends(require_action("approvals.read"))) -> Dict[str, Any]:
+def approvals(limit: int = 100, status: str = "", page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("approvals.read"))) -> Dict[str, Any]:
     module = _optional_module("approval_api")
     if module is None:
         raise HTTPException(status_code=404, detail="Enterprise approvals are unavailable")
     try:
+        if page_size:
+            return module.list_all_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor, status=status)
         items = module.list_all(limit=max(1, min(int(limit), 500)))
         if status:
             expected = status.upper()
-            items = [item for item in items if str(item.get("status") or "").upper() == expected]
+            items = [item for item in items if str(item.get("approval_status") or item.get("status") or "").upper() == expected]
         return {"approvals": items, "items": items, "count": len(items)}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Approval governance service unavailable") from exc
@@ -2233,11 +2709,16 @@ def approval_reject(approval_id: str, body: DecisionBody, session: Dict[str, Any
 
 
 @app.get("/api/audit")
-def audit(limit: int = 100, session: Dict[str, Any] = Depends(require_action("audit.read"))) -> Dict[str, Any]:
+def audit(limit: int = 100, page_size: int = 0, cursor: str = "", resolution_status: str = "", audit_type: str = "", session: Dict[str, Any] = Depends(require_action("audit.read"))) -> Dict[str, Any]:
     module = _optional_module("audit_api")
     if module is None:
         raise HTTPException(status_code=404, detail="Enterprise audit is unavailable")
     try:
+        if page_size:
+            return module.get_audit_events_cursor(
+                str(session["principal_id"]), page_size=page_size, cursor=cursor,
+                resolution_status=resolution_status or None, audit_type=audit_type or None,
+            )
         events = module.get_audit_events(limit=max(1, min(int(limit), 1000)))
         try:
             stats = module.get_audit_stats()
@@ -2290,12 +2771,11 @@ def legal_hold(body: LegalHoldBody, session: Dict[str, Any] = Depends(require_ac
 
 
 @app.get("/api/users")
-def users(session: Dict[str, Any] = Depends(require_action("users.read"))) -> Dict[str, Any]:
+def users(page_size: int = 20, cursor: str = "", session: Dict[str, Any] = Depends(require_action("users.read"))) -> Dict[str, Any]:
     try:
-        rows = identity_api.list_users(str(session["principal_id"]))
-    except identity_api.IdentityError as exc:
+        return identity_api.list_users_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
+    except (identity_api.IdentityError, cursor_pagination.CursorError) as exc:
         raise HTTPException(status_code=503, detail="User authorization scope is unavailable") from exc
-    return {"items": rows, "count": len(rows)}
 
 
 @app.get("/api/registration/requests")
@@ -2541,12 +3021,24 @@ def user_permission_override(principal_id: str, body: PermissionOverrideBody, se
 
 
 @app.get("/api/agents")
-def agents(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def agents(page_size: int = 20, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
-        items = identity_api.list_agents(str(session["principal_id"]))
-    except identity_api.IdentityError as exc:
+        return identity_api.list_agents_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
+    except (identity_api.IdentityError, cursor_pagination.CursorError) as exc:
         raise HTTPException(status_code=503, detail="Agent authorization scope is unavailable") from exc
-    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/monitor/agents-page")
+def monitor_agents_page(page_size: int = 20, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    module = _optional_module("monitor_api")
+    if module is None:
+        raise HTTPException(status_code=404, detail="Monitoring is unavailable")
+    try:
+        return module.get_agent_health_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
+    except cursor_pagination.CursorError as exc:
+        raise HTTPException(status_code=422, detail="Monitor cursor is invalid") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Monitor inventory is unavailable") from exc
 
 
 @app.get("/api/agents/{agent_id}/posture")
@@ -2575,8 +3067,10 @@ def compliance_summary(session: Dict[str, Any] = Depends(require_action("agents.
 
 
 @app.get("/api/compliance/postures")
-def compliance_postures(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def compliance_postures(limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
+        if page_size:
+            return compliance_api.list_postures_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
         items = compliance_api.list_postures(str(session["principal_id"]), limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
@@ -2584,8 +3078,10 @@ def compliance_postures(limit: int = 100, session: Dict[str, Any] = Depends(requ
 
 
 @app.get("/api/compliance/findings")
-def compliance_findings(agent_id: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def compliance_findings(agent_id: str = "", limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
+        if page_size:
+            return compliance_api.list_findings_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor, agent_id=agent_id)
         items = compliance_api.list_findings(str(session["principal_id"]), agent_id, limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
@@ -2593,8 +3089,10 @@ def compliance_findings(agent_id: str = "", limit: int = 100, session: Dict[str,
 
 
 @app.get("/api/compliance/remediations")
-def compliance_remediations(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def compliance_remediations(limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
+        if page_size:
+            return compliance_api.list_remediation_cases_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
         items = compliance_api.list_remediation_cases(str(session["principal_id"]), limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
@@ -2610,8 +3108,10 @@ def compliance_remediation_create(finding_id: str, body: ComplianceRemediationBo
 
 
 @app.get("/api/compliance/exceptions")
-def compliance_exceptions(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def compliance_exceptions(limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
+        if page_size:
+            return compliance_api.list_exceptions_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
         items = compliance_api.list_exceptions(str(session["principal_id"]), limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
@@ -2638,8 +3138,10 @@ def compliance_exception_decide(exception_id: str, decision: str, body: Decision
 
 
 @app.get("/api/compliance/profiles")
-def compliance_profiles(limit: int = 100, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+def compliance_profiles(limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
+        if page_size:
+            return compliance_api.list_profiles_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
         items = compliance_api.list_profiles(str(session["principal_id"]), limit)
         return {"items": items, "count": len(items)}
     except Exception as exc:
@@ -2843,12 +3345,11 @@ def redeem(body: EnrollmentBody) -> Dict[str, Any]:
 
 
 @app.get("/api/channels")
-def channels(session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+def channels(page_size: int = 20, cursor: str = "", session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
     try:
-        items = identity_api.list_channels(str(session["principal_id"]))
+        return identity_api.list_channels_cursor(str(session["principal_id"]), page_size=page_size, cursor=cursor)
     except Exception as exc:
         raise _identity_http_error(exc, "Channel governance data is unavailable", identity_status=503) from exc
-    return {"items": items, "count": len(items)}
 
 
 @app.post("/api/channels")
@@ -3361,6 +3862,112 @@ def gateway_heartbeat(request: Request) -> Dict[str, Any]:
         return {"success": agent_gateway_api.heartbeat_instance(str(context["agent_id"]), str(context["instance_id"]))}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Agent instance service unavailable") from exc
+
+
+@app.get("/api/gateway/containment")
+@app.get("/api/agent-gateway/containment")
+def gateway_containment(request: Request) -> Dict[str, Any]:
+    """Let an authenticated instance retrieve at most its newest command."""
+    context = _gateway_context(request)
+    try:
+        command = admin_management.pull_containment_command(
+            str(context["agent_id"]), str(context["instance_id"]),
+        )
+        return {"command": command}
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Containment command service unavailable") from exc
+
+
+@app.post("/api/gateway/containment/ack")
+@app.post("/api/agent-gateway/containment/ack")
+def gateway_containment_ack(body: ContainmentAcknowledgementBody, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(request)
+    try:
+        return admin_management.acknowledge_containment(
+            str(context["agent_id"]), str(context["instance_id"]), body.command_id,
+            body.generation, body.cleanup_evidence, body.success,
+        )
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Containment acknowledgement service unavailable") from exc
+
+
+@app.post("/api/gateway/upgrades/vote")
+@app.post("/api/agent-gateway/upgrades/vote")
+def gateway_upgrade_vote(body: UpgradeVoteBody, request: Request) -> Dict[str, Any]:
+    """Accept an Admin Agent vote from its authenticated, fenced instance."""
+    context = _gateway_context(request)
+    try:
+        return admin_management.vote_upgrade(
+            str(context["agent_id"]), str(context["instance_id"]), body.upgrade_id,
+            body.decision, body.term, body.fencing_token, body.reason,
+        )
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Upgrade vote service unavailable") from exc
+
+
+@app.post("/api/gateway/upgrades/{upgrade_id}/node")
+@app.post("/api/agent-gateway/upgrades/{upgrade_id}/node")
+def gateway_upgrade_node(
+    upgrade_id: str, body: UpgradeNodeBody, request: Request,
+) -> Dict[str, Any]:
+    """Accept serialized node maintenance evidence only from the live Leader."""
+    context = _gateway_context(request)
+    try:
+        return admin_management.advance_upgrade_node_from_gateway(
+            str(context["agent_id"]), str(context["instance_id"]), upgrade_id,
+            body.target_state, body.active_work_count, body.health_state, body.reason,
+        )
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Upgrade node evidence service unavailable") from exc
+
+
+@app.get("/api/gateway/upgrades/skill-pending")
+@app.get("/api/agent-gateway/upgrades/skill-pending")
+def gateway_pending_upgrade_skills(request: Request) -> Dict[str, Any]:
+    """Return the caller's pending Skill updates without package contents."""
+    context = _gateway_context(request, "skills.read")
+    try:
+        return {"items": admin_management.pending_upgrade_skills(str(context["agent_id"]))}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Skill distribution status service unavailable") from exc
+
+
+@app.post("/api/gateway/upgrades/skill-ack")
+@app.post("/api/agent-gateway/upgrades/skill-ack")
+def gateway_upgrade_skill_ack(body: SkillDistributionAcknowledgementBody, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(request)
+    try:
+        return admin_management.acknowledge_upgrade_skill(
+            str(context["agent_id"]), body.upgrade_id, body.skill_version,
+            body.safe_point, body.verified, body.detail,
+        )
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Skill distribution acknowledgement service unavailable") from exc
+
+
+@app.post("/api/gateway/management-artifacts/receipt")
+@app.post("/api/agent-gateway/management-artifacts/receipt")
+def gateway_management_artifact_receipt(body: ArtifactReceiptBody, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(request)
+    try:
+        return admin_management.record_artifact_receipt(
+            str(context["agent_id"]), body.artifact_id, body.node_id, body.received_digest,
+            body.signature_state, body.available, body.detail,
+        )
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Management artifact receipt service unavailable") from exc
 
 
 @app.post("/api/gateway/evidence")

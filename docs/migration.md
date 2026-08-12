@@ -1,4 +1,36 @@
-# Migration Guide - AI Agent Infra with DB v4.4.0
+# Migration Guide - AI Agent Infra with DB v4.4.1
+
+## v4.4.1 Platform Administration Migration
+
+Migrations `35_v4_4_1_admin_ha_upgrade.sql` and
+`36_v4_4_1_upgrade_protocol.sql` are additive. They add the protected
+Platform Administration Channel, Admin Agent group and enrollment records,
+weighted quorum snapshots, Leader terms and fencing, staged upgrade evidence,
+Agent containment commands, independent web session policies, opaque cursor
+metadata, and upgrade approval evidence. Existing Agent, Channel, identity,
+SDD, memory, Graph, approval, and audit records are retained.
+
+Run `migration_runner.py --version 4.4.1 --edition
+<community|enterprise>` after recording recoverable backup evidence. The
+runner validates every journaled checksum and object contract. It can adopt
+only the explicitly recorded v4.4.1 development checksum on a complete test
+schema; unknown checksum changes remain blocked. Never edit an applied
+migration or delete ledger rows to retry it.
+
+After migration, restart one application node. Startup idempotently adopts an
+existing local bootstrap administrator into the unified Principal model, then
+creates or reconciles the protected management Channel, default Dashboard and
+Portal session policies (300-second idle, 28,800-second absolute limit), and
+eligible platform management Agents. Production should add at least three
+healthy Admin Agents with distinct positive weights. For a three-member group,
+the two lower weights must exceed the largest weight together.
+
+Controlled package rollout is evidence-driven: verified staging, preflight,
+non-submitter human approval, authenticated Admin Agent count-and-weight
+quorum, serialized node drain/migration/health acknowledgement, then signed
+Skill distribution. The Web service does not execute an uploaded package.
+NFS, object storage, unified storage, and infrastructure termination require
+customer-specific adapters; their absence is visible as an adapter boundary.
 
 ## v4.4.0 Native SDD Migration
 

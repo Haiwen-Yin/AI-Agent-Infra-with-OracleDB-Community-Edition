@@ -134,7 +134,9 @@ def test_portal_session_resolution_uses_schema_owner_context():
         "def _resolve_session_role_as_schema_owner", 1
     )[0]
     assert "connection.set_agent_context(None)" in resolver
-    assert "identity_api.resolve_session(raw_session_id)" in resolver
+    assert "identity_api.resolve_session(" in resolver
+    assert "ttl_seconds=" in resolver
+    assert "absolute_ttl_seconds=" in resolver
     assert "connection.set_agent_context(previous_agent_id)" in resolver
     assert "persisted = _resolve_session_as_schema_owner(session_id)" in content
 

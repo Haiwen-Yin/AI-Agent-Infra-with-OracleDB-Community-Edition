@@ -1,4 +1,33 @@
-# API Reference - AI Agent Infra with DB v4.4.0
+# API Reference - AI Agent Infra with DB v4.4.1
+
+## v4.4.1 Platform Administration API
+
+Platform Administration mutations require the protected Human session, CSRF,
+`platform.manage`, and a reason where indicated. Gateway actions derive the
+Agent and instance exclusively from the authenticated token.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/platform/administration` | GET | Read protected Channel, Admin group, rollout, Skill, and containment state. |
+| `/api/platform/administration/initialize` | POST | Idempotently reconcile legacy bootstrap admin, protected Channel, and default policies. |
+| `/api/platform/admin-enrollments` | GET/POST | List or create separate platform-deployed/external Admin Agent candidates. |
+| `/api/platform/admin-enrollments/{id}/observe` | POST | Bind an identity-proven candidate for observation. |
+| `/api/platform/admin-members/{id}/approve` | POST | Human-approve an observed candidate with a valid distinct weight. |
+| `/api/platform/admin-members/{id}/leader` | POST | Acquire a fenced Leader term for the deterministic eligible candidate. |
+| `/api/platform/session-policies` | GET | Read Dashboard and Portal idle/absolute policy. |
+| `/api/platform/session-policies/{kind}` | PUT | Change one policy with optimistic version and reason. |
+| `/api/platform/containment` | POST | Issue ordered drain/quarantine/termination intent after platform-side isolation. |
+| `/api/platform/upgrades/upload` | POST | Upload a release ZIP. The server validates the manifest, file digests, signature, database, edition, and version, then automatically creates the governed node and Skill distribution plan. |
+| `/api/platform/upgrades/{id}/preflight` | POST | Check verified package compatibility. |
+| `/api/platform/upgrades/{id}/human-approval` | POST | Compatibility route for an explicitly governed high-risk approval flow; the normal upload flow schedules controlled Agent updates automatically. |
+| `/api/platform/upgrades/{id}/rollout` | POST | Compatibility route for manually supplied node plans; the normal upload flow discovers governed nodes automatically. |
+| `/api/platform/upgrades/{id}/nodes/{node}` | POST | Record a permitted node drain/migration/health transition. |
+| `/api/platform/upgrades/{id}/skill-distribution` | POST | Queue safe-point Skill distribution facts. |
+| `/api/gateway/upgrades/vote` | POST | Submit a current-term, current-fence Admin Agent vote. |
+| `/api/gateway/upgrades/skill-pending` | GET | Return only the authenticated Agent's verified Skill update metadata; package contents and secrets are never returned. |
+| `/api/gateway/upgrades/skill-ack` | POST | Acknowledge verified Skill staging and safe-point activation. |
+| `/api/gateway/containment` | GET | Retrieve the caller instance's newest actionable containment command. |
+| `/api/gateway/containment/ack` | POST | Record one bounded cleanup/stop acknowledgement. |
 
 ## v4.4.0 Native SDD And Delivery API
 

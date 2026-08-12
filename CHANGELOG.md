@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.4.1 - 2026-08-12
+
+- Added the protected Platform Administration Channel, separate Admin Agent
+  enrollment paths, distinct weighted quorum, Leader lease/term/fencing, and
+  explicit high-availability readiness.
+- Added independent Dashboard/Portal idle and absolute session policies,
+  bounded opaque cursors for all high-frequency inventories, verified upgrade
+  protocol, safe-point Skill distribution, and ordered containment acknowledgements.
+- Kept NFS, object storage, unified storage, and infrastructure termination as
+  explicit customer adapter contracts rather than in-core claims.
+
 ## v4.4.0 - 2026-08-11
 
 - Added database-native governed SDD revisions, immutable baselines,

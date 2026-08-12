@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Optional
 
-from . import connection, identity_api
+from . import connection, identity_api, cursor_pagination
 from .connection import execute, execute_query, execute_query_one, execute_transaction_callback
 
 MEMORY_TYPES = frozenset({"EPISODIC", "FACT", "PREFERENCE", "DECISION", "PROCEDURAL", "EXPERIENCE"})
@@ -256,6 +256,64 @@ def current_memories(*, keyword: Optional[str] = None, memory_type: Optional[str
              ORDER BY v.CREATED_AT DESC OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY""", params,
     )
     return [_version_row(row) for row in rows]
+
+
+def current_memories_cursor(
+    principal_id: str, *, page_size: int = 20, cursor: str = "", keyword: Optional[str] = None,
+    memory_type: Optional[str] = None, memory_scope: Optional[str] = None,
+    lifecycle_state: Optional[str] = None, workspace_id: Optional[str] = None,
+    owner_agent_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return current Memory families as a bounded, opaque cursor page."""
+    filters = {"keyword": keyword or "", "memory_type": memory_type or "",
+               "memory_scope": memory_scope or "", "lifecycle_state": lifecycle_state or "",
+               "workspace_id": workspace_id or "", "owner_agent_id": owner_agent_id or ""}
+    context = cursor_pagination.resolve(principal_id, "memory", filters, "family_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "memory", "sort_key": "family_id:asc"})
+    conditions = ["f.CURRENT_VERSION_ID = v.VERSION_ID"]
+    params: dict[str, Any] = {"lim": int(context["page_size"]) + 1}
+    if lifecycle_state:
+        conditions.append("v.LIFECYCLE_STATE = :state")
+        params["state"] = _normal(lifecycle_state, LIFECYCLE_STATES, "lifecycle_state")
+    else:
+        conditions.append("v.LIFECYCLE_STATE IN ('ACTIVE','STALE','CONFLICTED','MIGRATED')")
+        conditions.append("(v.VALID_UNTIL IS NULL OR v.VALID_UNTIL > CURRENT_TIMESTAMP)")
+    if keyword:
+        conditions.append("(UPPER(v.TITLE) LIKE UPPER(:keyword) OR UPPER(v.BODY_TEXT) LIKE UPPER(:keyword))")
+        params["keyword"] = f"%{keyword}%"
+    if memory_type:
+        conditions.append("v.MEMORY_TYPE = :memory_type")
+        params["memory_type"] = _normal(memory_type, MEMORY_TYPES, "memory_type")
+    if memory_scope:
+        conditions.append("v.MEMORY_SCOPE = :memory_scope")
+        params["memory_scope"] = _normal(memory_scope, MEMORY_SCOPES, "memory_scope")
+    if workspace_id:
+        conditions.append("v.WORKSPACE_ID = :workspace_id")
+        params["workspace_id"] = workspace_id
+    if owner_agent_id:
+        conditions.append("v.OWNER_AGENT_ID = :owner_agent_id")
+        params["owner_agent_id"] = owner_agent_id
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "(v.OWNER_PRINCIPAL_ID=:principal_id OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+            "WHERE p.PRINCIPAL_ID=v.OWNER_AGENT_ID AND p.PRINCIPAL_TYPE='AGENT' AND " +
+            identity_api._agent_visibility_clause(principal_id) + "))"
+        )
+        params["principal_id"] = principal_id
+    after = str(context["position"].get("family_id") or "")
+    if after:
+        conditions.append("f.FAMILY_ID > :after")
+        params["after"] = after
+    rows = execute_query(
+        "SELECT f.FAMILY_ID,f.LEGACY_ENTITY_ID,f.CURRENT_VERSION_ID,f.FAMILY_STATE,v.VERSION_ID,v.VERSION_NUMBER,"
+        "v.TITLE,v.BODY_TEXT,v.CONTENT_DIGEST,v.MEMORY_TYPE,v.MEMORY_SCOPE,v.LIFECYCLE_STATE,v.CLASSIFICATION,"
+        "v.OWNER_PRINCIPAL_ID,v.OWNER_AGENT_ID,v.WORKSPACE_ID,v.SECURITY_DOMAIN_ID,v.VALID_FROM,v.VALID_UNTIL,"
+        "v.POLICY_VERSION,v.CREATED_BY,v.REASON,v.CREATED_AT FROM CX_MEMORY_FAMILIES f "
+        "JOIN CX_MEMORY_VERSIONS v ON v.VERSION_ID=f.CURRENT_VERSION_ID WHERE " + " AND ".join(conditions) +
+        " ORDER BY f.FAMILY_ID FETCH FIRST :lim ROWS ONLY", params,
+    )
+    values = [_version_row(row) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"family_id": str(item["family_id"])})
 
 
 def get_family(family_id: str, *, include_history: bool = False) -> Optional[dict[str, Any]]:

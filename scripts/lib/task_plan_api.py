@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Task Plan API
+"""AI Agent Infra v4.4.1 - Community Edition - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.
@@ -12,6 +12,7 @@ from .connection import (
     DATABASE_DIALECT, execute, execute_query, execute_query_one,
     execute_insert_returning_id,
 )
+from . import cursor_pagination, identity_api
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +397,53 @@ def list_plans(agent_id: Optional[str] = None, status: Optional[str] = None,
             FETCH FIRST :lim ROWS ONLY
         """
         return [_row_to_dict(r) for r in execute_query(sql, params)]
+
+
+def list_plans_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "",
+                      agent_id: Optional[str] = None, status: Optional[str] = None) -> Dict[str, Any]:
+    """Return a stable, principal-bound Task Plan page.
+
+    This deliberately orders by the immutable plan identifier.  A timestamp
+    order can move while a user is paging and would otherwise cause duplicate
+    or skipped records across the three supported database implementations.
+    Authorization remains at the web/gateway boundary; the opaque cursor
+    prevents a caller from changing filters or continuing another principal's
+    inventory.
+    """
+    filters = {"agent_id": str(agent_id or ""), "status": str(status or "").upper()}
+    context = cursor_pagination.resolve(principal_id, "tasks", filters, "plan_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "tasks", "sort_key": "plan_id:asc"})
+    conditions: List[str] = []
+    params: Dict[str, Any] = {"lim": int(context["page_size"]) + 1}
+    if agent_id:
+        conditions.append("AGENT_ID = :agent_id")
+        params["agent_id"] = agent_id
+    if status:
+        conditions.append("STATUS = :status")
+        params["status"] = str(status).upper()
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "EXISTS (SELECT 1 FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_ID=TASK_PLANS.AGENT_ID "
+            "AND p.PRINCIPAL_TYPE='AGENT' AND " + identity_api._agent_visibility_clause(principal_id) + ")"
+        )
+        params["principal_id"] = principal_id
+    after = str(context["position"].get("plan_id") or "")
+    if after:
+        conditions.append("PLAN_ID > :after")
+        params["after"] = after
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    try:
+        rows = execute_query(
+            "SELECT " + _plan_select_cols(pg_mode=True) + " FROM TASK_PLANS" + where +
+            " ORDER BY PLAN_ID FETCH FIRST :lim ROWS ONLY", params,
+        )
+    except Exception:
+        rows = execute_query(
+            "SELECT " + _plan_select_cols(pg_mode=False) + " FROM TASK_PLANS" + where +
+            " ORDER BY PLAN_ID FETCH FIRST :lim ROWS ONLY", params,
+        )
+    values = [_row_to_dict(row) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"plan_id": str(item["plan_id"])})
 
 
 def delete_plan(plan_id: str) -> bool:

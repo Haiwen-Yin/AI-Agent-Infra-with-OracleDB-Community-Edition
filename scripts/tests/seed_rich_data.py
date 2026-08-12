@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Rich Test Data Seeder
+"""AI Agent Infra v4.4.1 - Rich Test Data Seeder
 
 Seeds 50+ entities with embeddings, edges, tags, and metadata across MEMORY/KNOWLEDGE/SPEC types.
 Designed to validate multi-signal hybrid search (vector + keyword + relational + graph).
@@ -209,7 +209,7 @@ def seed_embeddings(entity_map):
 
 def main():
     print("=" * 60)
-    print("AI Agent Infra v4.4.0 - Rich Test Data Seeder")
+    print("AI Agent Infra v4.4.1 - Rich Test Data Seeder")
     print("=" * 60)
 
     print("\n--- Phase 1: Create Entities ---")

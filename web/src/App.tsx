@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  Send,
   ShieldCheck,
   StopCircle,
   Sun,
@@ -91,9 +92,8 @@ const nav = [
   ["audit", "审计", "Audit", FileKey2],
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
-  ["platform", "功能配置", "Capabilities", Settings2],
   ["deployment", "部署与模型", "Deployment & models", Database],
-  ["native-agents", "原生智能体", "Native Agents", Bot],
+  ["platform", "功能配置", "Capabilities", Settings2],
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -140,6 +140,17 @@ async function api<T = Row>(
       } catch {
         /* non-JSON error */
       }
+      const localized: Record<string, [string, string]> = {
+        "Monitor inventory is unavailable": ["监控智能体清单暂不可用", "Monitor inventory is unavailable"],
+        "Audit service unavailable": ["审计服务暂不可用", "Audit service unavailable"],
+        "Native Agent inventory is unavailable": ["平台原生智能体清单暂不可用", "Native Agent inventory is unavailable"],
+        "Native Agent activation was denied": ["平台原生智能体激活被拒绝", "Native Agent activation was denied"],
+        "Native Agent bootstrap failed": ["平台原生智能体初始化失败", "Native Agent bootstrap failed"],
+        "LLM Provider Profile is unavailable": ["LLM 服务商配置不可用", "LLM Provider Profile is unavailable"],
+        "Platform Administration service is unavailable": ["平台管理服务暂不可用", "Platform Administration service is unavailable"],
+      };
+      const pair = localized[String(message)];
+      if (pair) message = pair[localStorage.getItem("cxLang") === "en" ? 1 : 0];
       const error = new Error(message);
       (error as Error & { status?: number }).status = response.status;
       throw error;
@@ -338,13 +349,20 @@ function Header({
   text: (zh: string, en: string) => string;
 }) {
   const [deadline, setDeadline] = useState(expiresAt || "");
+  const parseExpiry = (value: string) => {
+    const raw = String(value || "").trim();
+    if (!raw) return 0;
+    // Older deployments returned a database-local naive timestamp. Treat it
+    // as local time for compatibility; new responses include an offset.
+    const hasTimezone = /[zZ]|[+-]\d\d:\d\d$/.test(raw);
+    const browserValue = hasTimezone ? raw : raw.replace(" ", "T");
+    const parsed = new Date(browserValue).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   const secondsUntilExpiry = (value = deadline) => {
-    const raw = value || "";
-    const normalized =
-      raw && !/[zZ]|[+-]\d\d:\d\d$/.test(raw) ? `${raw}Z` : raw;
     return Math.max(
       0,
-      Math.ceil((new Date(normalized || 0).getTime() - Date.now()) / 1000),
+      Math.ceil((parseExpiry(value) - Date.now()) / 1000),
     );
   };
   const [seconds, setSeconds] = useState(() =>
@@ -850,15 +868,7 @@ function PageView({
       />
     );
   if (page === "native-agents")
-    return (
-      <NativeAgentsPage
-        lang={lang}
-        me={me}
-        capabilities={capabilities}
-        text={text}
-        onNotice={onNotice}
-      />
-    );
+    return <AgentsPage lang={lang} me={me} capabilities={capabilities} text={text} onNotice={onNotice} initialView="native" />;
   if (page === "channels")
     return (
       <Channels
@@ -890,6 +900,7 @@ function PageView({
     return (
       <AgentsPage
         lang={lang}
+        me={me}
         capabilities={capabilities}
         text={text}
         onNotice={onNotice}
@@ -971,10 +982,23 @@ function PlatformCapabilitiesPage({
   const [selected, setSelected] = useState<Row | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
+  const [management, setManagement] = useState<Row>({});
+  const [policies, setPolicies] = useState<Row>({});
+  const [enrollments, setEnrollments] = useState<Row[]>([]);
   const load = async () => {
     setLoading(true);
     try {
-      setPayload(await api<Row>("/api/platform/capabilities?limit=50"));
+      const [capabilities, managementState, sessionPolicies, enrollmentState] = await Promise.all([
+        api<Row>("/api/platform/capabilities?limit=50"),
+        api<Row>("/api/platform/administration"),
+        api<Row>("/api/platform/session-policies"),
+        api<Row>("/api/platform/admin-enrollments?limit=100"),
+      ]);
+      setPayload(capabilities);
+      setManagement(managementState);
+      setPolicies(sessionPolicies);
+      setEnrollments(enrollmentState.items || []);
     } catch (error) {
       onNotice((error as Error).message);
     } finally {
@@ -1013,6 +1037,50 @@ function PlatformCapabilitiesPage({
       setBusy(false);
     }
   };
+  const updatePolicy = async (kind: "dashboard" | "portal", form: HTMLFormElement) => {
+    const data = new FormData(form);
+    const current = policies[kind] || {};
+    setBusy(true);
+    try {
+      await api(`/api/platform/session-policies/${kind}`, { method: "PUT", body: JSON.stringify({
+        idle_timeout_seconds: Number(data.get("idle_timeout_seconds")),
+        absolute_timeout_seconds: Number(data.get("absolute_timeout_seconds")),
+        expected_version: Number(current.version || 1), reason: String(data.get("reason") || ""),
+      }) });
+      await load();
+      onNotice(text("会话策略已更新；现有会话将在下一次请求按更严格策略校验。", "Session policy updated; active sessions are checked against a stricter policy on their next request."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const uploadUpgrade = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!upgradeFile || reason.trim().length < 3) {
+      onNotice(text("请选择 ZIP 文件并填写至少 3 个字符的升级原因", "Choose a ZIP file and enter an upgrade reason of at least 3 characters"));
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api<Row>(`/api/platform/upgrades/upload?reason=${encodeURIComponent(reason.trim())}`, {
+        method: "POST",
+        headers: { "X-Upload-Filename": upgradeFile.name },
+        body: await upgradeFile.arrayBuffer(),
+      });
+      setUpgradeFile(null);
+      setReason("");
+      const input = event.currentTarget.elements.namedItem("upgrade-package");
+      if (input instanceof HTMLInputElement) input.value = "";
+      await load();
+      onNotice(result.automation_state === "WAITING_FOR_TRUSTED_SIGNATURE"
+        ? text("升级包已暂存，但缺少受信任签名，尚未自动编排。", "Package staged, but automatic orchestration is waiting for a trusted signature.")
+        : text("升级包已校验并自动建立受控升级与 Skill 分发计划。运行任务将在安全点切换。", "The package was verified and controlled upgrade and Skill distribution were scheduled automatically. Running work switches at safe points."));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const adminGroup = management.admin_group || {};
+  const group = adminGroup.group || {};
+  const members = adminGroup.members || [];
   return <>
     <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />
     <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
@@ -1024,6 +1092,30 @@ function PlatformCapabilitiesPage({
         <button type="button" role="switch" aria-checked={Boolean(item.effective_enabled)} className={`capability-switch ${item.effective_enabled ? "active" : ""}`} disabled={blocked} onClick={() => { setSelected(item); setReason(""); }} title={blocked ? text("系统保护或当前版本不可用", "Protected by the system or unavailable in this edition") : text("变更功能状态", "Change capability state")}><span /><b>{item.effective_enabled ? text("开启", "On") : text("关闭", "Off")}</b></button>
       </div>;
     })}</div></InfoPanel>)}
+    {!loading && <>
+      <InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}>
+        <p className="cx-form-hint">{text("这是受保护的管理频道。仅管理员、平台管理智能体及经审批的 Admin Agent 可以加入；聊天内容只形成建议，变更必须转为结构化操作并保留审批与审计证据。", "This is a protected management Channel. Only administrators, platform management Agents, and approved Admin Agents may join. Conversation produces advice only; changes require structured actions, approval, and audit evidence.")}</p>
+        <div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong><p className="cx-form-hint">{displayRowValue(lang, management.channel?.classification || "RESTRICTED")}</p></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, adminGroup.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong><p className="cx-form-hint">{text("生产建议至少 3 个健康 Admin Agent。", "Production recommends at least three healthy Admin Agents.")}</p></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong><p className="cx-form-hint">{text("旧任期或旧 fencing token 的写入会被拒绝。", "Writes with an old term or fencing token are rejected.")}</p></InfoPanel></div>
+        <DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} />
+      </InfoPanel>
+      <InfoPanel title={text("Admin Agent 接入与运行控制", "Admin Agent admission and runtime controls")} text={text}>
+        <div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); api("/api/platform/admin-enrollments", { method: "POST", body: JSON.stringify({ admission_path: String(data.get("admission_path")), public_key: String(data.get("public_key")), node_id: String(data.get("node_id")), reason: String(data.get("reason")) }) }).then(() => load()).then(() => onNotice(text("Admin Agent 候选已登记，仍需验证、观察和审批后才能加入投票组。", "Admin Agent candidate recorded; verification, observation, and approval are still required before voting admission."))).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); }}><select name="admission_path" defaultValue="PLATFORM_DEPLOYED"><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select><input name="node_id" required placeholder={text("目标节点 ID", "Target node ID")} /><input name="public_key" required placeholder={text("公钥", "Public key")} /><input name="reason" required placeholder={text("接入原因", "Admission reason")} /><button className="small-button" disabled={busy}><UserPlus size={14} />{text("登记候选", "Register candidate")}</button></form><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); api("/api/platform/containment", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id")), instance_id: String(data.get("instance_id")), requested_state: String(data.get("requested_state")), reason: String(data.get("reason")) }) }).then(() => load()).then(() => onNotice(text("平台侧权限已优先隔离；远程进程终止仍需 Agent 或基础设施适配器确认。", "Platform-side authority was isolated first; remote process termination still requires Agent or infrastructure adapter confirmation."))).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); }}><input name="agent_id" required placeholder={text("智能体 ID", "Agent ID")} /><input name="instance_id" required placeholder={text("实例 ID", "Instance ID")} /><select name="requested_state" defaultValue="DRAIN"><option value="DRAIN">Drain</option><option value="QUARANTINE">Quarantine</option><option value="TERMINATE">Terminate</option><option value="INFRA_TERMINATE">Infrastructure terminate</option></select><input name="reason" required placeholder={text("阻断原因", "Containment reason")} /><button className="small-button danger" disabled={busy}><StopCircle size={14} />{text("提交阻断", "Issue containment")}</button></form></div>
+        <DataTable headers={[text("候选", "Candidate"), text("接入路径", "Path"), text("节点", "Node"), text("状态", "State"), text("操作", "Actions")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status), <span className="row-actions">{item.status === "CANDIDATE" && <button className="small-button" disabled={busy} onClick={() => { const agentId = window.prompt(text("输入已完成身份验证的 Agent ID", "Enter verified Agent ID")); const reason = askReason(text, text("候选观察", "Candidate observation")); if (agentId && reason) { setBusy(true); api(`/api/platform/admin-enrollments/${encodeURIComponent(String(item.enrollment_id))}/observe`, { method: "POST", body: JSON.stringify({ agent_id: agentId, reason }) }).then(load).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); } }}>{text("开始观察", "Observe")}</button>}{item.status === "OBSERVATION" && <button className="small-button" disabled={busy} onClick={() => { const weight = Number(window.prompt(text("输入互不相同的正整数权重", "Enter a distinct positive integer weight"), "4")); const reason = askReason(text, text("人工批准 Admin Agent", "Human approval of Admin Agent")); if (weight > 0 && reason) { const member = members.find((value: Row) => String(value.agent_id) === String(item.agent_id)); if (!member) { onNotice(text("未找到观察成员，请刷新页面", "Observed member was not found; refresh the page")); return; } setBusy(true); api(`/api/platform/admin-members/${encodeURIComponent(String(member.member_id))}/approve`, { method: "POST", body: JSON.stringify({ weight, reason }) }).then(load).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); } }}>{text("批准加入", "Approve")}</button>}</span>])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} />
+      </InfoPanel>
+      <InfoPanel title={text("会话策略", "Session policies")} text={text}><p className="cx-form-hint">{text("Dashboard 与 Portal 分别配置。空闲超时默认 5 分钟；绝对会话时长限制单次登录的最长存续时间。", "Dashboard and Portal are configured independently. Idle timeout defaults to five minutes; absolute lifetime caps one login session.")}</p><div className="two-column-panels">{(["dashboard", "portal"] as const).map((kind) => <form key={kind} className="compact-form" onSubmit={(event) => { event.preventDefault(); void updatePolicy(kind, event.currentTarget); }}><strong>{kind === "dashboard" ? "Dashboard" : "Portal"}</strong><label>{text("空闲秒数", "Idle seconds")}<input name="idle_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.idle_timeout_seconds || 300)} /></label><label>{text("绝对秒数", "Absolute seconds")}<input name="absolute_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.absolute_timeout_seconds || 28800)} /></label><label>{text("变更原因", "Change reason")}<input name="reason" required /></label><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></form>)}</div></InfoPanel>
+      <InfoPanel title={text("受控升级与 Skill 分发", "Controlled upgrade and Skill distribution")} text={text}>
+        <p className="cx-form-hint">{text("上传由发布流程生成的 ZIP 包即可。平台服务端会校验包内 manifest、文件摘要、签名、数据库类型、版本和企业版兼容性，然后自动建立本地节点维护计划，并向所有受控平台智能体和已登记智能体发送新版 Skill 通知。平台不执行 ZIP 内任意脚本；正在运行的任务保持旧版本，完成安全点回执后自动切换。", "Upload the ZIP produced by the release pipeline. The server validates its manifest, file digests, signature, database, version, and Enterprise compatibility, then automatically creates the local node maintenance plan and sends the new Skill notice to all governed platform and registered Agents. The platform never executes arbitrary ZIP scripts; running work keeps its old version and switches automatically after a safe-point acknowledgement.")}</p>
+        <form className="upgrade-upload-form" onSubmit={uploadUpgrade}>
+          <label className="file-picker upgrade-file-picker"><span>{upgradeFile?.name || text("选择新版 ZIP 压缩包", "Choose new release ZIP")}</span><input id="upgrade-package" name="upgrade-package" className="visually-hidden-file" type="file" accept=".zip,application/zip" onChange={(event) => setUpgradeFile(event.currentTarget.files?.[0] || null)} /><button type="button" className="small-button" onClick={() => document.getElementById("upgrade-package")?.click()}><Upload size={15} />{text("选择文件", "Choose file")}</button></label>
+          <label className="upgrade-reason-field"><span>{text("升级原因", "Upgrade reason")}</span><input value={reason} onChange={(event) => setReason(event.target.value)} required placeholder={text("例如：发布新版平台并同步受控智能体", "For example: release the new platform version and sync governed Agents")} /></label>
+          <button type="submit" className="primary-button" disabled={busy || !upgradeFile}><Upload size={15} />{busy ? text("校验并编排中", "Validating and scheduling") : text("上传并自动升级", "Upload and auto-schedule")}</button>
+        </form>
+        <p className="cx-form-hint">{text("上传人即本次发布授权人；受信任签名仍不可绕过。上传完成后不再需要手工填写升级 ID、节点或 Agent 列表。", "The uploader authorizes this release; trusted signature verification remains mandatory. No upgrade ID, node list, or Agent list is entered manually after upload.")}</p>
+        <DataTable headers={[text("升级 ID", "Upgrade ID"), text("版本", "Version"), text("签名", "Signature"), text("预检", "Preflight"), text("审批", "Approval"), text("发布", "Rollout"), text("状态", "Status")]} rows={(management.upgrades || []).map((item: Row) => [item.upgrade_id, item.package_version, displayRowValue(lang, item.signature_state), displayRowValue(lang, item.preflight_state), displayRowValue(lang, item.approval_state), displayRowValue(lang, item.rollout_state), displayRowValue(lang, item.status)])} empty={text("暂无暂存升级包", "No staged upgrade package")} text={text} />
+        <DataTable headers={[text("节点", "Node"), text("阶段", "Stage"), text("活动工作", "Active work"), text("健康", "Health"), text("Skill", "Skill")]} rows={(management.upgrade_nodes || []).map((item: Row) => [item.node_id, displayRowValue(lang, item.state), String(item.active_work_count), displayRowValue(lang, item.health_state), displayRowValue(lang, item.skill_state)])} empty={text("尚未建立节点维护计划", "No node maintenance plan")} text={text} />
+        <DataTable headers={[text("智能体", "Agent"), text("Skill 版本", "Skill version"), text("通知", "Message"), text("确认", "Acknowledgement"), text("激活", "Activation"), text("漂移", "Drift")]} rows={(management.skill_distributions || []).map((item: Row) => [item.agent_id, item.skill_version, displayRowValue(lang, item.message_state), displayRowValue(lang, item.acknowledgement_state), displayRowValue(lang, item.activation_state), displayRowValue(lang, item.drift_state)])} empty={text("尚无 Skill 分发记录", "No Skill distribution records")} text={text} />
+      </InfoPanel>
+    </>}
     <InfoPanel title={text("最近变更", "Recent changes")} text={text}><DataTable headers={[text("功能", "Capability"), text("变更", "Change"), text("操作人", "Actor"), text("原因", "Reason"), text("时间", "Time")]} rows={listPayload(payload, ["history"]).map((item) => [item.capability_key, `${item.from_enabled} -> ${item.to_enabled}`, item.changed_by, item.reason, displayRowValue(lang, item.created_at)])} empty={text("暂无功能状态变更", "No capability changes yet")} text={text} /></InfoPanel>
     <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
       {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
@@ -1157,12 +1249,14 @@ function NativeAgentsPage({
   capabilities,
   text,
   onNotice,
+  embedded = false,
 }: {
   lang: Lang;
   me: Row;
   capabilities: Row | null;
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
+  embedded?: boolean;
 }) {
   const [data, setData] = useState<Row>({ agents: [], templates: [], manifests: [], profiles: [], requests: [], targets: [], policy: null, bootstrap: null });
   const [loading, setLoading] = useState(true);
@@ -1170,23 +1264,29 @@ function NativeAgentsPage({
   const [reason, setReason] = useState("");
   const [selected, setSelected] = useState<Row | null>(null);
   const [configuringAgent, setConfiguringAgent] = useState<Row | null>(null);
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
   const canManage = canAction(capabilities, "platform.manage") || canAction(capabilities, "agents.manage");
   const canEnroll = canAction(capabilities, "agents.enroll");
   const canDecide = canAction(capabilities, "agents.manage");
-  const load = async () => {
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", size = pageSize) => {
     setLoading(true);
     try {
       const [bootstrap, agents, templates, manifests, profiles, requests, targets, policy] = await Promise.all([
         api<Row>("/api/platform/native-bootstrap"),
-        api<Row>("/api/native-agents?limit=100"),
+        api<Row>(`/api/native-agents?page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
         api<Row>("/api/agent-templates?limit=100"),
         api<Row>("/api/native-manifests?limit=100"),
         api<Row>("/api/llm-provider-profiles?limit=100"),
         api<Row>("/api/agent-provision-requests?limit=100"),
         api<Row>("/api/deployment-targets?limit=100"),
-        api<Row>("/api/platform/external-agent-registration"),
+        canAction(capabilities, "platform.manage")
+          ? api<Row>("/api/platform/external-agent-registration")
+          : Promise.resolve<Row>({}),
       ]);
       setData({ bootstrap, agents, templates, manifests, profiles, requests, targets, policy });
+      setNextCursor(String(agents.next_cursor || ""));
     } catch (error) {
       onNotice((error as Error).message);
     } finally {
@@ -1194,6 +1294,19 @@ function NativeAgentsPage({
     }
   };
   useEffect(() => { void load(); }, []);
+  const changePageSize = (value: number) => {
+    setPageSize(value); setCursorHistory([""]); setNextCursor(""); void load("", value);
+  };
+  const nextPage = () => {
+    if (!nextCursor) return;
+    const history = [...cursorHistory, nextCursor];
+    setCursorHistory(history); void load(nextCursor);
+  };
+  const previousPage = () => {
+    if (cursorHistory.length <= 1) return;
+    const history = cursorHistory.slice(0, -1);
+    setCursorHistory(history); void load(history[history.length - 1]);
+  };
   const agents = listPayload(data.agents, ["items"]);
   const templates = listPayload(data.templates, ["items"]);
   const manifests = listPayload(data.manifests, ["items"]);
@@ -1250,14 +1363,14 @@ function NativeAgentsPage({
   const policy = data.policy || {};
   const statusLabel = (value: unknown) => displayRowValue(lang, value || "-");
   return <>
-    <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} />
+    {!embedded && <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} />}
     <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     {loading ? <PageLoading text={text} /> : <>
       <div className="metric-grid native-summary-grid">
-        <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{statusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("启动初始化不调用模型；无 LLM 时仅保持待激活。", "Bootstrap makes no model call; without an LLM the Agent remains pending activation.")}</p>{canManage && <button className="primary-button" disabled={busy} onClick={async () => { setBusy(true); try { await api("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><Bot size={15} />{text("执行幂等初始化", "Run idempotent bootstrap")}</button>}</InfoPanel>
-        <InfoPanel title={text("外部 Skill-first 注册", "External Skill-first registration")} text={text}><strong className={`metric-value ${String(policy.state || "").toLowerCase()}`}>{statusLabel(policy.state)}</strong><p className="cx-form-hint">{text("关闭只影响新注册，既有外部智能体不被删除。策略变更及原因会进入审计。", "Disabling affects new registrations only; existing external Agents remain. The decision and reason are audited.")}</p>{canManage && <form className="policy-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await api("/api/platform/external-agent-registration", { method: "PUT", body: JSON.stringify({ state: String(form.get("state") || "DISABLED"), expected_version: Number(policy.version || 1), reason: String(form.get("reason") || "") }) }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><label><span>{text("注册策略", "Registration policy")}</span><select name="state" defaultValue={String(policy.state || "ENABLED")}><option value="ENABLED">{text("允许", "Enabled")}</option><option value="APPROVAL_ONLY">{text("仅审批", "Approval only")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option></select></label><label><span>{text("变更原因", "Change reason")}</span><input name="reason" required /></label><button className="small-button" disabled={busy}><Check size={15} />{text("保存策略", "Save policy")}</button></form>}</InfoPanel>
+        <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{statusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("启动初始化不调用模型；无 LLM 时仅保持待激活。", "Bootstrap makes no model call; without an LLM the Agent remains pending activation.")}</p>{canManage && <button type="button" className="primary-button" disabled={busy} onClick={async () => { setBusy(true); try { const result = await api<Row>("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); onNotice(result.status === "READY" ? text("平台原生智能体初始化已完成，当前无需重复操作。", "Platform-native Agent initialization is complete; no further action is required.") : text("平台原生智能体初始化状态已刷新。", "Platform-native Agent bootstrap status refreshed.")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><Bot size={15} />{text("初始化或刷新状态", "Initialize or refresh status")}</button>}</InfoPanel>
+        <InfoPanel title={text("外部 Skill-first 注册", "External Skill-first registration")} text={text}><span className={`compact-status ${String(policy.state || "").toLowerCase()}`}>{statusLabel(policy.state)}</span><p className="cx-form-hint">{text("配置位置：智能体 → 外部智能体注册。关闭只影响新注册，既有外部智能体不被删除；策略变更及原因会进入审计。", "Configuration: Agents → External Agent registration. Disabling affects new registrations only; existing external Agents remain. The decision and reason are audited.")}</p></InfoPanel>
       </div>
-      <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <button className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)}>{text("激活", "Activate")}</button>}</span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
+        <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button type="button" className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button type="button" className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <><button type="button" className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)} title={!profiles.length ? text("请先创建 LLM 服务商配置", "Create an LLM Provider Profile first") : text("激活智能体", "Activate Agent")}>{text("激活", "Activate")}</button>{!profiles.length && <small className="button-hint">{text("请先配置模型", "Configure a model first")}</small>}</>} </span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
       <InfoPanel title={text("受管 Skill / Tool 清单", "Managed Skill / Tool manifests")} text={text}><p className="cx-form-hint">{text("内置清单按版本和摘要固定，普通读取不暴露私钥；业务 Agent 只能继承已审批清单。", "Built-in manifests are pinned by version and digest; ordinary reads never expose private keys, and business Agents may inherit only approved manifests.")}</p><DataTable headers={[text("清单", "Manifest"), text("类型", "Kind"), text("版本", "Version"), text("校验", "Verification"), text("状态", "Status")]} rows={manifests.map((item) => [item.manifest_key, displayRowValue(lang, item.manifest_kind), item.version, statusLabel(item.signature_status), statusLabel(item.status)])} empty={text("暂无受管清单", "No managed manifests")} text={text} /></InfoPanel>
       <div className="two-column-panels">
         <InfoPanel title={text("LLM 服务商配置", "LLM Provider Profiles")} text={text}><p className="cx-form-hint">{text("模型服务只提供推理能力，不构成授权边界。API Key 如填写，将以加密密文保存；留空即按无 API Key 保存。", "The model service provides reasoning only and never defines authorization. When provided, the API key is stored as ciphertext; leave it empty to save without a key.")}</p><form className="configuration-form native-profile-form" onSubmit={submitProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required placeholder="platform-llm" /></ConfigField><ConfigField label={text("服务地址", "Provider URL")} hint={text("使用受控的 OpenAI 兼容服务根地址。", "Use an approved OpenAI-compatible service root.")}><input name="provider_url" type="url" required placeholder="https://llm.example/v1" /></ConfigField><ConfigField label={text("模型 ID", "Model ID")} hint={text("服务端实际发布的模型标识。", "Model identifier exposed by the provider.")}><input name="model_id" required /></ConfigField><ConfigField label={text("API Key", "API key")} hint={text("如填写，仅保存密文且不会回显；留空即按无 API Key 保存。", "When provided, stored as ciphertext and never returned; leave empty to save without a key.")}><input name="api_key" type="password" autoComplete="new-password" /></ConfigField><ConfigField label={text("保存原因", "Save reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后可在上方为内置智能体选择该配置。", "After saving, choose this profile for a built-in Agent above.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("保存配置", "Save profile")}</button></ConfigField></form><DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health")]} rows={profiles.map((item) => [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), statusLabel(item.health_state)])} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} /></InfoPanel>
@@ -1447,7 +1560,7 @@ const dataPageConfigs: Record<string, DataPageConfig> = {
     payloadKeys: ["workspaces"],
   },
   knowledge: {
-    endpoint: "/api/knowledge",
+    endpoint: "/api/knowledge/inventory",
     title: ["知识", "Knowledge"],
     subtitle: [
       "知识内容、来源和检索结果由数据库保存并按权限返回。",
@@ -1654,6 +1767,17 @@ const statusLabels: Record<string, [string, string]> = {
   VERIFIED: ["已验证", "Verified"],
   AGENT_VERIFIED: ["智能体验证", "Agent verified"],
   GATEWAY_VERIFIED: ["网关验证", "Gateway verified"],
+  HIGH_AVAILABILITY_NOT_READY: ["高可用尚未就绪", "High availability not ready"],
+  HIGH_AVAILABILITY_READY: ["高可用已就绪", "High availability ready"],
+  SYSTEM_PROTECTED: ["系统保护", "System protected"],
+  RESTRICTED: ["受限", "Restricted"],
+  CANDIDATE: ["候选", "Candidate"],
+  OBSERVATION: ["观察中", "Observation"],
+  HEALTHY: ["健康", "Healthy"],
+  STAGED: ["已暂存", "Staged"],
+  PUBLISHED: ["已发布", "Published"],
+  NOT_CONFIGURED: ["未配置", "Not configured"],
+  NOT_READY: ["未就绪", "Not ready"],
 };
 
 const valueLabels: Record<string, [string, string]> = {
@@ -1736,6 +1860,13 @@ const valueLabels: Record<string, [string, string]> = {
   VERIFY: ["验证", "Verify"],
   PLATFORM: ["平台", "Platform"],
   TEMPLATE: ["模板", "Template"],
+  PLATFORM_ADMINISTRATION: ["平台管理频道", "Platform Administration"],
+  PLATFORM_DEPLOYED: ["平台部署", "Platform deployed"],
+  EXTERNAL_ADMIN: ["外部 Admin 接入", "External Admin admission"],
+  SYSTEM_PROTECTED: ["系统保护", "System protected"],
+  PLATFORM_ADMIN: ["平台管理", "Platform administration"],
+  HIGH_AVAILABILITY_NOT_READY: ["高可用尚未就绪", "High availability not ready"],
+  LOCAL_BOOTSTRAP: ["本地初始化节点", "Local bootstrap node"],
 };
 
 function listPayload(payload: Row, keys: string[] = []): Row[] {
@@ -1826,6 +1957,21 @@ function askReason(
     defaultValue,
   );
   return reason && reason.trim() ? reason.trim() : null;
+}
+
+function CursorPager({
+  pageSize, page, hasMore, loading, onPageSize, onPrevious, onNext, text,
+}: {
+  pageSize: number; page: number; hasMore: boolean; loading: boolean;
+  onPageSize: (value: number) => void; onPrevious: () => void; onNext: () => void;
+  text: (zh: string, en: string) => string;
+}) {
+  return <div className="cursor-pager">
+    <label>{text("每页", "Per page")}<select value={pageSize} disabled={loading} onChange={(event) => onPageSize(Number(event.target.value))}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+    <span>{text("第", "Page ")}{page}{text("页", "")}</span>
+    <button className="small-button" disabled={loading || page <= 1} onClick={onPrevious}>{text("上一页", "Previous")}</button>
+    <button className="small-button" disabled={loading || !hasMore} onClick={onNext}>{text("下一页", "Next")}</button>
+  </div>;
 }
 
 function parseIds(value: string): string[] {
@@ -1938,12 +2084,22 @@ function DataPage({
   const [detail, setDetail] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "graph">("list");
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", size = pageSize) => {
     setLoading(true);
     try {
-      const value = await api<Row>(config.endpoint);
+      const separator = config.endpoint.includes("?") ? "&" : "?";
+      const value = await api<Row>(`${config.endpoint}${separator}page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
       setItems(listPayload(value, [...(config.payloadKeys || []), "nodes"]));
-      setGraphData({ nodes: value.nodes || [], edges: value.edges || [] });
+      setNextCursor(String(value.next_cursor || ""));
+      if (visual) {
+        const graph = await api<Row>(page === "knowledge" ? "/api/knowledge" : "/api/memory");
+        setGraphData({ nodes: graph.nodes || [], edges: graph.edges || [] });
+      } else {
+        setGraphData({ nodes: value.nodes || [], edges: value.edges || [] });
+      }
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -1957,6 +2113,19 @@ function DataPage({
   useEffect(() => {
     void load();
   }, [config.endpoint]);
+  const changePageSize = (value: number) => {
+    setPageSize(value); setCursorHistory([""]); setNextCursor(""); void load("", value);
+  };
+  const nextPage = () => {
+    if (!nextCursor) return;
+    const history = [...cursorHistory, nextCursor];
+    setCursorHistory(history); void load(nextCursor);
+  };
+  const previousPage = () => {
+    if (cursorHistory.length <= 1) return;
+    const history = cursorHistory.slice(0, -1);
+    setCursorHistory(history); void load(history[history.length - 1]);
+  };
   const rows = items.map((row) =>
     config.fields.map((fields, index) => {
       const value = displayRowValue(lang, rowField(row, fields));
@@ -2030,6 +2199,7 @@ function DataPage({
               text={text}
             />
           )}
+          {!loading && <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
         </InfoPanel>
       )}
       <DetailDrawer
@@ -3661,21 +3831,31 @@ function ApprovalsPage({
   const [items, setItems] = useState<Row[]>([]);
   const [filter, setFilter] = useState("ALL");
   const [detail, setDetail] = useState<Row | null>(null);
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", status = filter) => {
+    setLoading(true);
     try {
-      const value = await api<Row>("/api/approvals");
+      const query = `/api/approvals?page_size=${pageSize}${status !== "ALL" ? `&status=${encodeURIComponent(status)}` : ""}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const value = await api<Row>(query);
       setItems(listPayload(value, ["approvals"]));
+      setNextCursor(String(value.next_cursor || ""));
     } catch (error) {
       onNotice(
         error instanceof Error
           ? error.message
           : text("审批加载失败", "Approvals could not be loaded"),
       );
-    }
+    } finally { setLoading(false); }
   };
   useEffect(() => {
-    void load();
-  }, []);
+    setCursorHistory([""]); setNextCursor(""); void load("", filter);
+  }, [filter, pageSize]);
+  const setPage = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const decide = async (row: Row, decision: string) => {
     const reason = window.prompt(
       text("请输入审批原因", "Enter decision reason"),
@@ -3696,15 +3876,6 @@ function ApprovalsPage({
       );
     }
   };
-  const visible =
-    filter === "ALL"
-      ? items
-      : items.filter(
-          (row) =>
-            approvalStatus(
-              rowField(row, ["approval_status", "status", "decision"]),
-            ) === filter,
-        );
   const states: [string, string, string][] = [
     ["ALL", "全部", "All"],
     ["PENDING", "待处理", "Pending"],
@@ -3754,6 +3925,7 @@ function ApprovalsPage({
         </div>
       </InfoPanel>
       <InfoPanel title={text("审批请求", "Approval requests")} text={text}>
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <DataTable
           headers={[
             "ID",
@@ -3761,7 +3933,7 @@ function ApprovalsPage({
             text("状态", "Status"),
             text("操作", "Actions"),
           ]}
-          rows={visible.map((row) => {
+          rows={items.map((row) => {
             const id = String(
               rowField(row, ["approval_id", "request_id", "id"]),
             );
@@ -3833,21 +4005,30 @@ function AuditPage({
 }) {
   const [items, setItems] = useState<Row[]>([]);
   const [detail, setDetail] = useState<Row | null>(null);
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
+    setLoading(true);
     try {
-      const value = await api<Row>("/api/audit");
+      const value = await api<Row>(`/api/audit?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
       setItems(listPayload(value, ["events", "audit"]));
+      setNextCursor(String(value.next_cursor || ""));
     } catch (error) {
       onNotice(
         error instanceof Error
           ? error.message
           : text("审计加载失败", "Audit could not be loaded"),
       );
-    }
+    } finally { setLoading(false); }
   };
   useEffect(() => {
-    void load();
-  }, []);
+    setCursorHistory([""]); setNextCursor(""); void load("");
+  }, [pageSize]);
+  const setPage = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const exportEvidence = async () => {
     const reason = window.prompt(
       text("请输入证据导出原因", "Enter evidence export reason"),
@@ -3881,6 +4062,7 @@ function AuditPage({
         text={text}
       />
       <InfoPanel title={text("审计事件", "Audit events")} text={text}>
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <DataTable
           headers={[
             "ID",
@@ -4297,25 +4479,45 @@ function CompliancePage({
   const [tab, setTab] = useState<"overview" | "findings" | "profiles" | "remediation" | "exceptions" | "controller">("overview");
   const [selected, setSelected] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const endpointFor = (value: typeof tab) => ({
+    findings: "/api/compliance/findings", profiles: "/api/compliance/profiles",
+    remediation: "/api/compliance/remediations", exceptions: "/api/compliance/exceptions",
+  } as Partial<Record<typeof tab, string>>)[value] || "";
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", currentTab = tab, size = pageSize) => {
     try {
-      const [nextSummary, nextFindings, nextProfiles, nextRemediations, nextExceptions] = await Promise.all([
+      const endpoint = endpointFor(currentTab);
+      const [nextSummary, page] = await Promise.all([
         api<Row>("/api/compliance/summary"),
-        api<Row>("/api/compliance/findings"),
-        api<Row>("/api/compliance/profiles"),
-        api<Row>("/api/compliance/remediations"),
-        api<Row>("/api/compliance/exceptions"),
+        endpoint ? api<Row>(`${endpoint}?page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`) : Promise.resolve({}),
       ]);
       setSummary(nextSummary);
-      setFindings(nextFindings.items || []);
-      setProfiles(nextProfiles.items || []);
-      setRemediations(nextRemediations.items || []);
-      setExceptions(nextExceptions.items || []);
+      setNextCursor(String(page.next_cursor || ""));
+      if (currentTab === "findings") setFindings(page.items || []);
+      if (currentTab === "profiles") setProfiles(page.items || []);
+      if (currentTab === "remediation") setRemediations(page.items || []);
+      if (currentTab === "exceptions") setExceptions(page.items || []);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : text("合规数据加载失败", "Compliance data could not be loaded"));
     }
   };
   useEffect(() => { void load(); }, []);
+  const selectTab = (value: typeof tab) => {
+    setTab(value); setCursorHistory([""]); setNextCursor(""); void load("", value);
+  };
+  const changePageSize = (value: number) => {
+    setPageSize(value); setCursorHistory([""]); setNextCursor(""); void load("", tab, value);
+  };
+  const nextPage = () => {
+    if (!nextCursor) return;
+    const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor);
+  };
+  const previousPage = () => {
+    if (cursorHistory.length <= 1) return;
+    const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]);
+  };
   const decideException = async (decision: "approve" | "reject" | "revoke", reason: string) => {
     if (!selected?.exception_id || !reason.trim()) return;
     setBusy(true);
@@ -4375,7 +4577,7 @@ function CompliancePage({
           aria-selected={tab === key}
           key={key}
           className={tab === key ? "active" : ""}
-          onClick={() => setTab(key)}
+          onClick={() => selectTab(key)}
         >
           {text(zh, en)}
         </button>
@@ -4393,6 +4595,7 @@ function CompliancePage({
         <InfoPanel title={text("控制器", "Controller")} text={text}><div className="empty-state">{text("状态：", "Status: ")}{displayRowValue(lang, summary.controller || "UNKNOWN")}{summary.scope_limited ? text("。仅显示当前授权范围，不显示全局队列。", ". Only the authorized scope is shown; global queues are hidden.") : ""}</div></InfoPanel>
       </div>
     </>}
+    {["findings", "profiles", "remediation", "exceptions"].includes(tab) && <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={busy} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
     {tab === "findings" && <InfoPanel title={text("发现", "Findings")} text={text}>
       <p className="cx-form-hint">{text("仅确定性规则和已验证证据可以标记为不合规；缺少活动或边界证据不会自动定性为违规。点击条目查看详情。", "Only deterministic rules with verified evidence may mark an Agent non-compliant. Missing activity or boundary evidence is not a violation by itself. Select a row for details.")}</p>
       <DataTable headers={[text("严重性", "Severity"), text("智能体", "Agent"), text("规则", "Rule"), text("状态", "Status"), text("最近观察", "Last observed"), text("", "")]} rows={findings.map((item) => [displayRowValue(lang, item.severity), String(item.agent_id || "-"), String(item.rule_code || "-"), displayRowValue(lang, item.status), String(item.last_observed_at || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "finding" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规发现", "No compliance findings")} />
@@ -4427,23 +4630,37 @@ function CompliancePage({
 
 function AgentsPage({
   lang,
+  me,
   capabilities,
   text,
   onNotice,
+  initialView = "registered",
 }: {
   lang: Lang;
+  me: Row;
   capabilities: Row | null;
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
+  initialView?: "registered" | "native";
 }) {
+  const [view, setView] = useState<"registered" | "external" | "native">(initialView === "native" ? "native" : "registered");
   const [agents, setAgents] = useState<Row[]>([]);
   const [grants, setGrants] = useState<Row[]>([]);
+  const [externalPolicy, setExternalPolicy] = useState<Row>({});
   const [token, setToken] = useState<Row | null>(null);
-  const load = async () => {
+  const [policyEditorOpen, setPolicyEditorOpen] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
+    setLoading(true);
     try {
-      const [registered, grantData] = await Promise.all([
-        api<Row>("/api/agents"),
+      const [registered, grantData, policyData] = await Promise.all([
+        api<Row>(`/api/agents?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
         api<Row>("/api/enrollment/grants"),
+        api<Row>("/api/platform/external-agent-registration"),
       ]);
       const governed = (registered.items || []).map((item: Row) => ({
         ...item,
@@ -4462,17 +4679,22 @@ function AgentsPage({
       }
       setAgents(governed);
       setGrants(grantData.items || []);
+      setExternalPolicy(policyData);
+      setNextCursor(String(registered.next_cursor || ""));
     } catch (error) {
       onNotice(
         error instanceof Error
           ? error.message
           : text("智能体清单加载失败", "Agent inventory loading failed"),
       );
-    }
+    } finally { setLoading(false); }
   };
   useEffect(() => {
     void load();
-  }, []);
+  }, [pageSize]);
+  const setPage = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const createGrant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     try {
@@ -4494,6 +4716,28 @@ function AgentsPage({
           ? error.message
           : text("生成失败", "Creation failed"),
       );
+    }
+  };
+  const updateExternalPolicy = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setPolicyBusy(true);
+    try {
+      await api("/api/platform/external-agent-registration", {
+        method: "PUT",
+        body: JSON.stringify({
+          state: String(form.get("state") || "DISABLED"),
+          expected_version: Number(externalPolicy.version || 1),
+          reason: String(form.get("reason") || ""),
+        }),
+      });
+      setPolicyEditorOpen(false);
+      await load();
+      onNotice(text("外部智能体注册策略已更新并记录审计。", "External Agent registration policy was updated and audited."));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setPolicyBusy(false);
     }
   };
   const status = async (item: Row, value: string) => {
@@ -4618,6 +4862,40 @@ function AgentsPage({
       controls,
     ];
   });
+  const agentViews: [string, string, React.ComponentType<{ size?: number }>?][] = [
+    ["registered", text("已注册智能体", "Registered Agents"), Users],
+    ["external", text("外部智能体注册", "External Agent registration"), UserPlus],
+    ["native", text("平台原生智能体生成", "Platform-native Agent provisioning"), Bot],
+  ];
+  const externalRegistration = <>
+    <InfoPanel title={text("外部注册状态", "External registration status")} text={text}>
+      <div className="external-registration-status"><span className={`compact-status ${String(externalPolicy.state || "").toLowerCase()}`}>{displayRowValue(lang, externalPolicy.state || "DISABLED")}</span><p className="cx-form-hint">{text("此状态仅影响新的外部智能体注册；既有智能体不会被删除。", "This state affects new external Agent registrations only; existing Agents are not deleted.")}</p>{canAction(capabilities, "agents.manage") && <button type="button" className="small-button" onClick={() => setPolicyEditorOpen((value) => !value)}>{policyEditorOpen ? text("收起配置", "Hide settings") : text("配置", "Configure")}</button>}</div>
+      {policyEditorOpen && <form className="policy-form external-policy-form" onSubmit={updateExternalPolicy}><label><span>{text("注册策略", "Registration policy")}</span><select name="state" defaultValue={String(externalPolicy.state || "ENABLED")}><option value="ENABLED">{text("允许", "Enabled")}</option><option value="APPROVAL_ONLY">{text("仅审批", "Approval only")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option></select></label><label><span>{text("变更原因", "Change reason")}</span><input name="reason" required /></label><button type="submit" className="small-button" disabled={policyBusy}><Check size={15} />{text("保存策略", "Save policy")}</button></form>}
+    </InfoPanel>
+    <InfoPanel title={text("生成注册令牌", "Create Enrollment Token")} text={text}>
+      <p className="cx-form-hint">{text("外部智能体必须携带一次性令牌通过 Skill-first 注册。令牌只显示一次，并确定智能体归属、环境和风险范围。", "An external Agent must present a one-time Token for Skill-first registration. The Token is shown once and fixes ownership, environment, and risk scope.")}</p>
+      <form className="external-registration-form" onSubmit={createGrant}>
+        <label>{text("运行时", "Runtime")}<input name="runtime" defaultValue="OpenClaw / Hermes" /></label>
+        <label>{text("环境", "Environment")}<select name="environment"><option value="development">{text("开发", "Development")}</option><option value="production">{text("生产", "Production")}</option></select></label>
+        <label>{text("风险等级", "Risk tier")}<select name="risk_tier"><option value="LOW">{text("低", "Low")}</option><option value="STANDARD">{text("标准", "Standard")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></label>
+        <label>{text("有效秒数", "TTL seconds")}<input name="ttl_seconds" type="number" min="60" max="3600" defaultValue="900" /></label>
+        <button className="primary-button" type="submit"><Plus size={16} />{text("生成并仅显示一次", "Create and show once")}</button>
+      </form>
+      {token && <div className="one-time-token"><b>{text("请立即保存令牌", "Save this Token now")}</b><code>{token.token}</code><small>{text("平台只保存摘要，不会再次显示明文。", "Only a digest is stored; plaintext will not be shown again.")}</small></div>}
+    </InfoPanel>
+    <InfoPanel title={text("外部注册边界", "External registration boundary")} text={text}>
+      <p>{text("外部注册不会直接获得平台管理权限。注册后仍需经过身份、归属、安全域、Skill、Tool 和审批策略检查。管理员可以在功能配置中关闭新的外部注册。", "External registration never grants platform-management authority. Identity, ownership, Security Domain, Skill, Tool, and approval policies are still checked after registration. Administrators can disable new external registration in Capability configuration.")}</p>
+    </InfoPanel>
+    <InfoPanel title={text("注册历史", "Enrollment history")} text={text}>
+      <DataTable headers={[text("令牌记录", "Grant"), text("运行时", "Runtime"), text("环境", "Environment"), text("使用次数", "Usage"), text("状态", "Status")]} rows={grants.map((item) => [item.grant_id, item.runtime, displayRowValue(lang, item.environment), `${item.used_count || 0}/${item.max_uses || 1}`, displayRowValue(lang, item.status)])} empty={text("暂无外部注册记录", "No external registration records")} text={text} />
+    </InfoPanel>
+  </>;
+  if (view === "native") {
+    return <section><SectionHeading title={text("智能体管理", "Agent management")} subtitle={text("平台原生管理智能体、业务智能体申请与外部 Skill-first 注册彼此分开显示，但共享同一数据库安全边界。", "Platform-native management Agents, business Agent requests, and external Skill-first registration are shown separately while sharing one database security boundary.")} text={text} /><ViewToggle value={view} onChange={(value) => setView(value as "registered" | "external" | "native")} options={agentViews} /><NativeAgentsPage lang={lang} me={me} capabilities={capabilities} text={text} onNotice={onNotice} embedded /></section>;
+  }
+  if (view === "external") {
+    return <section><SectionHeading title={text("智能体管理", "Agent management")} subtitle={text("外部智能体通过一次性注册令牌接入，适用于 OpenClaw、Hermes 等 Skill-first Agent。", "External Agents join with a one-time enrollment Token, including Skill-first Agents such as OpenClaw and Hermes.")} text={text} /><ViewToggle value={view} onChange={(value) => setView(value as "registered" | "external" | "native")} options={agentViews} />{externalRegistration}</section>;
+  }
   return (
     <section>
       <SectionHeading
@@ -4628,65 +4906,12 @@ function AgentsPage({
         )}
         text={text}
       />
-      <div className="split-grid">
-        <InfoPanel
-          title={text("生成注册令牌", "Create Enrollment Token")}
+      <ViewToggle value={view} onChange={(value) => setView(value as "registered" | "external" | "native")} options={agentViews} />
+      <InfoPanel
+          title={text("已注册智能体", "Registered Agents")}
           text={text}
         >
-          <form className="compact-form" onSubmit={createGrant}>
-            <label>
-              {text("运行时", "Runtime")}
-              <input name="runtime" defaultValue="OpenClaw / Hermes" />
-            </label>
-            <label>
-              {text("环境", "Environment")}
-              <select name="environment">
-                <option value="development">
-                  {text("开发", "Development")}
-                </option>
-                <option value="production">{text("生产", "Production")}</option>
-              </select>
-            </label>
-            <label>
-              {text("风险等级", "Risk tier")}
-              <select name="risk_tier">
-                <option value="LOW">{text("低", "Low")}</option>
-                <option value="STANDARD">{text("标准", "Standard")}</option>
-                <option value="RESTRICTED">{text("受限", "Restricted")}</option>
-              </select>
-            </label>
-            <label>
-              {text("有效秒数", "TTL seconds")}
-              <input
-                name="ttl_seconds"
-                type="number"
-                min="60"
-                max="3600"
-                defaultValue="900"
-              />
-            </label>
-            <button className="primary-button">
-              <Plus size={16} />
-              {text("生成并仅显示一次", "Create and show once")}
-            </button>
-          </form>
-          {token && (
-            <div className="one-time-token">
-              <b>{text("请立即保存令牌", "Save this Token now")}</b>
-              <code>{token.token}</code>
-              <small>
-                {text(
-                  "平台只保存摘要，不会再次显示明文。",
-                  "Only a digest is stored; plaintext will not be shown again.",
-                )}
-              </small>
-            </div>
-          )}
-        </InfoPanel>
-        <InfoPanel
-          title={text("已登记智能体", "Registered Agents")}
-          text={text}
-        >
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
           <DataTable
             headers={[
               text("智能体 ID", "Agent ID"),
@@ -4701,8 +4926,7 @@ function AgentsPage({
             )}
             text={text}
           />
-        </InfoPanel>
-      </div>
+      </InfoPanel>
       <InfoPanel
         title={text("Enrollment 历史", "Enrollment history")}
         text={text}
@@ -4753,11 +4977,17 @@ function Channels({
   const [body, setBody] = useState("");
   const [threadId, setThreadId] = useState("");
   const [view, setView] = useState("chat");
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
+    setLoading(true);
     try {
-      const value = await api<Row>("/api/channels");
+      const value = await api<Row>(`/api/channels?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
       const list = value.items || [];
       setChannels(list);
+      setNextCursor(String(value.next_cursor || ""));
       if (!selected && list[0]) setSelected(list[0]);
     } catch (error) {
       onNotice(
@@ -4765,7 +4995,7 @@ function Channels({
           ? error.message
           : text("频道加载失败", "Channel loading failed"),
       );
-    }
+    } finally { setLoading(false); }
   };
   const loadSelected = async (channel: Row) => {
     const id = encodeURIComponent(String(channel.channel_id));
@@ -4801,7 +5031,7 @@ function Channels({
   };
   useEffect(() => {
     void load();
-  }, []);
+  }, [pageSize]);
   useEffect(() => {
     if (selected) {
       setThreadId("");
@@ -4812,6 +5042,9 @@ function Channels({
     await load();
     if (selected) await loadSelected(selected);
   };
+  const pageChange = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const createChannel = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -5162,6 +5395,7 @@ function Channels({
                 <RefreshCw size={15} />
               </button>
             </div>
+            <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
             {channels.map((item) => (
               <button
                 key={item.channel_id}
@@ -5856,11 +6090,16 @@ function UsersPage({
   const [access, setAccess] = useState<Row | null>(null);
   const [factor, setFactor] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [loading, setLoading] = useState(false);
   const userRequest = useRef(0);
 
-  const load = () =>
-    Promise.all([
-      api<Row>("/api/users"),
+  const load = (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
+    setLoading(true);
+    return Promise.all([
+      api<Row>(`/api/users?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
       api<Row>("/api/registration/requests?status=PENDING"),
       api<Row>("/api/organization/options"),
     ])
@@ -5868,6 +6107,7 @@ function UsersPage({
         const pending = requestResponse.items || [];
         const options = organizationResponse.items || [];
         setUsers(userResponse.items || []);
+        setNextCursor(String(userResponse.next_cursor || ""));
         setRequests(pending);
         setOrganizations(options);
         setApprovalOrganizations((current) => {
@@ -5884,13 +6124,17 @@ function UsersPage({
         onNotice(
           error instanceof Error
             ? error.message
-            : text("用户数据加载失败", "Unable to load users"),
+          : text("用户数据加载失败", "Unable to load users"),
         ),
-      );
+      ).finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [pageSize]);
+  const pageChange = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
 
   const choose = async (user: Row) => {
     const requestId = ++userRequest.current;
@@ -6332,6 +6576,7 @@ function UsersPage({
           />
         </InfoPanel>
         <InfoPanel title={text("用户清单", "Users")} text={text}>
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
           <div className="user-list">
             {users.map((user) => (
               <button
@@ -6778,14 +7023,18 @@ function MonitorDetails({
   const [metrics, setMetrics] = useState<Row>({});
   const [filter, setFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
-  const load = async () => {
+  const [pageSize, setPageSize] = useState(20);
+  const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
+  const [nextCursor, setNextCursor] = useState("");
+  const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
     try {
       const [agentData, metricData] = await Promise.all([
-        api<Row>("/api/monitor/agents"),
+        api<Row>(`/api/monitor/agents-page?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
         api<Row>("/api/monitor/metrics"),
       ]);
-      setAgents(agentData.agents || []);
+      setAgents(listPayload(agentData, ["agents"]));
+      setNextCursor(String(agentData.next_cursor || ""));
       setMetrics(metricData);
     } catch (error) {
       onNotice(
@@ -6798,10 +7047,13 @@ function MonitorDetails({
     }
   };
   useEffect(() => {
-    void load();
+    setCursorHistory([""]); setNextCursor(""); void load("");
     const timer = window.setInterval(() => void load(), 30000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [pageSize]);
+  const setPage = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
+  const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
+  const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const statuses = Array.from(
     new Set(
       agents.map((item) => String(item.status || "UNKNOWN").toUpperCase()),
@@ -6853,6 +7105,7 @@ function MonitorDetails({
         </div>
       </InfoPanel>
       <InfoPanel title={text("智能体列表", "Agent inventory")} text={text}>
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <div className="filter-row">
           <button
             className={`filter-button ${filter === "ALL" ? "active" : ""}`}

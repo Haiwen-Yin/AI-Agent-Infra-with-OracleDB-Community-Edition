@@ -14,7 +14,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import connection, identity_api
+from . import connection, identity_api, cursor_pagination
 
 
 REGISTRATION_STATES = frozenset({"PENDING_CONFIRMATION", "PENDING_ACTIVATION", "ACTIVE", "DISABLED"})
@@ -214,6 +214,28 @@ def list_postures(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
     return _rows(connection.execute_query(query, params))
 
 
+def list_postures_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return posture rows with principal-bound opaque pagination."""
+    _require(actor, "agents.read")
+    context = cursor_pagination.resolve(actor, "compliance_postures", {}, "posture_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_postures", "sort_key": "posture_id:asc"})
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after = str(context["position"].get("posture_id") or "")
+    after_clause = " AND p.POSTURE_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    columns = ("p.POSTURE_ID,p.AGENT_ID,p.INSTANCE_ID,p.REGISTRATION_STATE,p.RUNTIME_STATE,p.POSTURE_STATE,"
+               "p.CONTROL_STATE,p.EVIDENCE_STRENGTH,p.PROFILE_VERSION_ID,p.LAST_EVALUATED_AT,p.GRACE_UNTIL,p.UPDATED_AT")
+    if identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        query = "SELECT " + columns + " FROM CX_AGENT_POSTURES p WHERE 1=1" + after_clause + " ORDER BY p.POSTURE_ID" + _limit(int(context["page_size"]) + 1)[0]
+    else:
+        params["actor"] = actor
+        query = ("SELECT DISTINCT " + columns + " FROM CX_AGENT_POSTURES p JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=p.AGENT_ID "
+                 "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY p.POSTURE_ID" + _limit(int(context["page_size"]) + 1)[0])
+    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                  lambda item: {"posture_id": str(item["posture_id"])})
+
+
 def posture_detail(actor: str, agent_id: str) -> Dict[str, Any]:
     _require(actor, "agents.read")
     _visible(actor, agent_id)
@@ -244,6 +266,25 @@ def list_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
         "v.STATUS AS VERSION_STATUS,v.PUBLISHED_AT,v.CREATED_AT FROM CX_AGENT_PROFILES p "
         "LEFT JOIN CX_AGENT_PROFILE_VERSIONS v ON v.PROFILE_ID=p.PROFILE_ID "
         "ORDER BY p.CREATED_AT DESC,v.CREATED_AT DESC" + suffix, params))
+
+
+def list_profiles_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.read")
+    context = cursor_pagination.resolve(actor, "compliance_profiles", {}, "profile_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_profiles", "sort_key": "profile_id:asc"})
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after = str(context["position"].get("profile_id") or "")
+    clause = " WHERE p.PROFILE_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    rows = connection.execute_query(
+        "SELECT p.PROFILE_ID,p.PROFILE_KEY,p.DISPLAY_NAME,p.STATUS,v.PROFILE_VERSION_ID,v.VERSION_LABEL,v.CONTENT_DIGEST,"
+        "v.STATUS AS VERSION_STATUS,v.PUBLISHED_AT,v.CREATED_AT FROM CX_AGENT_PROFILES p LEFT JOIN CX_AGENT_PROFILE_VERSIONS v "
+        "ON v.PROFILE_ID=p.PROFILE_ID" + clause + " ORDER BY p.PROFILE_ID,v.PROFILE_VERSION_ID" +
+        _limit(int(context["page_size"]) + 1)[0], params,
+    )
+    return cursor_pagination.page(_rows(rows), context, lambda item: {"profile_id": str(item["profile_id"])})
 
 
 def ensure_seed_profiles() -> int:
@@ -631,6 +672,35 @@ def list_findings(actor: str, agent_id: str = "", limit: int = 100) -> List[Dict
     return _rows(connection.execute_query(query, params))
 
 
+def list_findings_cursor(actor: str, *, page_size: int = 20, cursor: str = "", agent_id: str = "") -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.read")
+    if agent_id:
+        _visible(actor, agent_id)
+    filters = {"agent_id": agent_id}
+    context = cursor_pagination.resolve(actor, "compliance_findings", filters, "finding_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_findings", "sort_key": "finding_id:asc"})
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after = str(context["position"].get("finding_id") or "")
+    after_clause = " AND f.FINDING_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    columns = ("f.FINDING_ID,f.AGENT_ID,f.RULE_CODE,f.RULE_VERSION,f.SEVERITY,f.STATUS,f.EVIDENCE_ID,f.DETAIL,"
+               "f.AUTOMATIC_ACTION,f.FIRST_OBSERVED_AT,f.LAST_OBSERVED_AT,f.UPDATED_AT")
+    if agent_id:
+        params["agent_id"] = agent_id
+        where = "f.AGENT_ID=:agent_id" + after_clause
+        query = "SELECT " + columns + " FROM CX_COMPLIANCE_FINDINGS f WHERE " + where + " ORDER BY f.FINDING_ID" + _limit(int(context["page_size"]) + 1)[0]
+    elif identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        query = "SELECT " + columns + " FROM CX_COMPLIANCE_FINDINGS f WHERE 1=1" + after_clause + " ORDER BY f.FINDING_ID" + _limit(int(context["page_size"]) + 1)[0]
+    else:
+        params["actor"] = actor
+        query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_FINDINGS f JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=f.AGENT_ID "
+                 "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY f.FINDING_ID" + _limit(int(context["page_size"]) + 1)[0])
+    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                  lambda item: {"finding_id": str(item["finding_id"])})
+
+
 def create_remediation(actor: str, finding_id: str, required_action: str, reason: str,
                        deadline_at: str = "") -> Dict[str, Any]:
     """Open one idempotent, structured remediation case for an active finding."""
@@ -719,6 +789,27 @@ def list_remediation_cases(actor: str, limit: int = 100) -> List[Dict[str, Any]]
     return _rows(connection.execute_query(query, params))
 
 
+def list_remediation_cases_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.read")
+    context = cursor_pagination.resolve(actor, "compliance_remediations", {}, "case_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_remediations", "sort_key": "case_id:asc"})
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after = str(context["position"].get("case_id") or "")
+    after_clause = " AND c.CASE_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    columns = "c.CASE_ID,c.FINDING_ID,c.AGENT_ID,c.REQUIRED_ACTION,c.STATUS,c.DEADLINE_AT,c.CREATED_AT,c.UPDATED_AT"
+    if identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        query = "SELECT " + columns + " FROM CX_COMPLIANCE_REMEDIATION_CASES c WHERE 1=1" + after_clause + " ORDER BY c.CASE_ID" + _limit(int(context["page_size"]) + 1)[0]
+    else:
+        params["actor"] = actor
+        query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_REMEDIATION_CASES c JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=c.AGENT_ID "
+                 "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY c.CASE_ID" + _limit(int(context["page_size"]) + 1)[0])
+    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                  lambda item: {"case_id": str(item["case_id"])})
+
+
 def create_exception(actor: str, policy_key: str, reason: str, *, agent_id: str = "", profile_version_id: str = "",
                      environment: str = "", expires_at: str = "", compensating_controls: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     enterprise_required()
@@ -752,6 +843,28 @@ def list_exceptions(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
         params["actor"] = actor
         query = "SELECT DISTINCT e.EXCEPTION_ID,e.AGENT_ID,e.PROFILE_VERSION_ID,e.POLICY_KEY,e.ENVIRONMENT,e.REASON,e.REQUESTED_BY,e.APPROVED_BY,e.DECISION_REASON,e.DECIDED_AT,e.APPROVAL_COUNT,e.STATUS,e.EFFECTIVE_AT,e.EXPIRES_AT,e.REVOKED_AT,e.CREATED_AT FROM CX_COMPLIANCE_EXCEPTIONS e JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=e.AGENT_ID WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE' ORDER BY e.CREATED_AT DESC" + suffix
     return _rows(connection.execute_query(query, params))
+
+
+def list_exceptions_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.read")
+    context = cursor_pagination.resolve(actor, "compliance_exceptions", {}, "exception_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_exceptions", "sort_key": "exception_id:asc"})
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after = str(context["position"].get("exception_id") or "")
+    after_clause = " AND e.EXCEPTION_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    columns = ("e.EXCEPTION_ID,e.AGENT_ID,e.PROFILE_VERSION_ID,e.POLICY_KEY,e.ENVIRONMENT,e.REASON,e.REQUESTED_BY,"
+               "e.APPROVED_BY,e.DECISION_REASON,e.DECIDED_AT,e.APPROVAL_COUNT,e.STATUS,e.EFFECTIVE_AT,e.EXPIRES_AT,e.REVOKED_AT,e.CREATED_AT")
+    if identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        query = "SELECT " + columns + " FROM CX_COMPLIANCE_EXCEPTIONS e WHERE 1=1" + after_clause + " ORDER BY e.EXCEPTION_ID" + _limit(int(context["page_size"]) + 1)[0]
+    else:
+        params["actor"] = actor
+        query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_EXCEPTIONS e JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=e.AGENT_ID "
+                 "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY e.EXCEPTION_ID" + _limit(int(context["page_size"]) + 1)[0])
+    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                  lambda item: {"exception_id": str(item["exception_id"])})
 
 
 def decide_exception(actor: str, exception_id: str, decision: str, reason: str) -> Dict[str, Any]:

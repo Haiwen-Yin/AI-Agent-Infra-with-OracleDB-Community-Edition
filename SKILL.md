@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.4.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.4.1 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -86,6 +86,28 @@ and `organizations.*` scope. Reading this Skill does not grant graphical edit,
 Human administration, directory synchronization, or publication authority.
 Relational facts remain authoritative; Oracle SQL/PGQ is a projection only.
 
+v4.4.1 adds a protected Platform Administration Channel and an Admin Agent
+availability control plane. Only the protected local administrator, enabled
+management Agents, and separately approved Admin Agents may use that Channel;
+Business Agents cannot join or read it. Platform-deployed and external Admin
+Agents follow different identity-proof, observation, and human-approval paths.
+Production should use three healthy Admin Agents with different positive
+weights; machine decisions require both member-count and weight majorities,
+and Leader term/lease/fencing rejects stale writes. Dashboard and Portal idle
+and absolute session policies are independently database-authoritative.
+
+Dashboard upgrades use one signed ZIP upload. The platform validates the
+manifest, file digests, database, edition, and version, then discovers governed
+nodes and active Agents and records their controlled rollout and Skill update
+notifications automatically. Running work remains on its pinned version until
+the authenticated Agent reports a safe point. High-risk compatibility routes
+retain separated human approval, Admin Agent quorum, and recorded node drain/
+migration/health transitions. The Web service does not execute uploaded packages.
+Agents poll `/api/gateway/upgrades/skill-pending` through their instance token;
+the endpoint returns metadata only. Containment revokes platform access before
+asking an Agent to clear memory and stop; NFS, object storage, unified storage,
+and infrastructure process termination require customer-specific adapters.
+
 ## 2. Package Contents
 
 After extracting the release zip, you have:
@@ -94,7 +116,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.0.md   # this release's notes
+├── RELEASE_NOTES_v4.4.1.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -171,7 +193,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.0.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.1.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -196,7 +218,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.4.0 archive includes the verified glibc 2.28 wheel; do not
+The current v4.4.1 archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration

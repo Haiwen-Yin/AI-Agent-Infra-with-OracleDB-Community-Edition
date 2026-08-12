@@ -14,7 +14,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import connection, identity_api
+from . import connection, identity_api, cursor_pagination
 
 
 PLATFORM_ADMIN_AGENT_ID = "SYSTEM_PLATFORM_ADMIN_AGENT"
@@ -339,6 +339,34 @@ def list_native_agents(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
         "FROM CX_NATIVE_AGENTS" + where + " ORDER BY CREATED_AT DESC" + suffix, params,
     )
     return _rows(rows)
+
+
+def list_native_agents_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return authorized platform-native Agents without a whole-inventory scan."""
+    context = cursor_pagination.resolve(actor, "native_agents", {}, "agent_id:asc", page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "native_agents", "sort_key": "agent_id:asc"})
+    all_access = False
+    try:
+        all_access = identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW"
+    except Exception:
+        pass
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    conditions: list[str] = []
+    if not all_access:
+        conditions.append("(OWNER_PRINCIPAL_ID=:actor OR AGENT_ID=:actor)")
+        params["actor"] = actor
+    after = str(context["position"].get("agent_id") or "")
+    if after:
+        conditions.append("AGENT_ID>:after")
+        params["after"] = after
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    rows = connection.execute_query(
+        "SELECT AGENT_ID,SOURCE,AGENT_KIND,TEMPLATE_ID,OWNER_PRINCIPAL_ID,STATUS,ACTIVATION_STATE,"
+        "LLM_PROFILE_ID,DEPLOYMENT_TARGET_ID,SECURITY_DOMAIN_ID,IS_PROTECTED,CREATED_AT,UPDATED_AT "
+        "FROM CX_NATIVE_AGENTS" + where + " ORDER BY AGENT_ID" + _limit(int(context["page_size"]) + 1)[0], params,
+    )
+    values = _rows(rows)
+    return cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
 
 
 def list_templates(actor: str, limit: int = 100) -> List[Dict[str, Any]]:

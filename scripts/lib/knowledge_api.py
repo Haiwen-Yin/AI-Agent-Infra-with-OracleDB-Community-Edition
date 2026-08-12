@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Knowledge API
+"""AI Agent Infra v4.4.1 - Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.
@@ -12,6 +12,7 @@ from .connection import (
     DATABASE_DIALECT, execute, execute_query, execute_query_one,
     execute_insert_returning_id,
 )
+from . import cursor_pagination, identity_api
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,13 @@ def search_knowledge(
     elif workspace_id:
         conditions.append("e.WORKSPACE_ID = :wsid")
         params["wsid"] = workspace_id
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+            "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
+            identity_api._agent_visibility_clause(principal_id) + "))"
+        )
+        params["principal_id"] = principal_id
 
     where = " AND ".join(conditions)
     sql = f"""
@@ -181,6 +189,66 @@ def search_knowledge(
         OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
     """
     return [_row_to_dict(r) for r in execute_query(sql, params)]
+
+
+def search_knowledge_cursor(
+    principal_id: str, *, page_size: int = 20, cursor: str = "", domain: Optional[str] = None,
+    topic: Optional[str] = None, keyword: Optional[str] = None, difficulty: Optional[str] = None,
+    workspace_id: Optional[str] = None, isolation_mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return a keyset page for the Knowledge inventory.
+
+    The cursor is opaque and binds all search dimensions.  It is intentionally
+    separate from retrieval APIs so a browser cannot turn an inventory cursor
+    into an unrestricted text search continuation.
+    """
+    filters = {"domain": domain or "", "topic": topic or "", "keyword": keyword or "",
+               "difficulty": difficulty or "", "workspace_id": workspace_id or "",
+               "isolation_mode": isolation_mode or ""}
+    context = cursor_pagination.resolve(principal_id, "knowledge", filters, "entity_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "knowledge", "sort_key": "entity_id:asc"})
+    conditions = ["e.ENTITY_TYPE = 'KNOWLEDGE'"]
+    params: Dict[str, Any] = {"lim": int(context["page_size"]) + 1}
+    if domain:
+        conditions.append("km.DOMAIN = :domain")
+        params["domain"] = domain
+    if topic:
+        conditions.append("km.TOPIC = :topic")
+        params["topic"] = topic
+    if difficulty:
+        conditions.append("km.DIFFICULTY = :difficulty")
+        params["difficulty"] = difficulty
+    if keyword:
+        conditions.append("(UPPER(e.TITLE) LIKE UPPER(:kw) OR UPPER(e.CONTENT) LIKE UPPER(:kw))")
+        params["kw"] = f"%{keyword}%"
+    if isolation_mode == "SHARED":
+        conditions.append("e.WORKSPACE_ID IS NULL")
+    elif isolation_mode == "ISOLATED" and workspace_id:
+        conditions.append("e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
+    elif workspace_id:
+        conditions.append("e.WORKSPACE_ID = :wsid")
+        params["wsid"] = workspace_id
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+            "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
+            identity_api._agent_visibility_clause(principal_id) + "))"
+        )
+        params["principal_id"] = principal_id
+    after = str(context["position"].get("entity_id") or "")
+    if after:
+        conditions.append("e.ENTITY_ID > :after")
+        params["after"] = after
+    rows = execute_query(
+        "SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.SUMMARY, e.CATEGORY, e.IMPORTANCE, e.STATUS, "
+        "e.OWNED_BY_AGENT, e.SOURCE_AGENT, e.VISIBILITY, e.RETRIEVAL_COUNT, e.CREATED_AT, e.UPDATED_AT, "
+        "km.DOMAIN, km.TOPIC, km.DIFFICULTY, km.REVIEW_COUNT, km.LAST_REVIEWED, km.NEXT_REVIEW "
+        "FROM ENTITIES e JOIN KNOWLEDGE_META km ON km.ENTITY_ID=e.ENTITY_ID AND km.ENTITY_TYPE='KNOWLEDGE' "
+        "WHERE " + " AND ".join(conditions) + " ORDER BY e.ENTITY_ID FETCH FIRST :lim ROWS ONLY", params,
+    )
+    values = [_row_to_dict(row) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
 
 
 def get_due_reviews(limit: int = 50) -> List[Dict[str, Any]]:

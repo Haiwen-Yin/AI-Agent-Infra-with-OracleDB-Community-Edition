@@ -172,9 +172,11 @@ def test_session_ttl_is_capped_and_expiry_is_enforced(monkeypatch):
     db = _SessionConnection()
     monkeypatch.setattr(identity_api, "connection", db)
 
-    session = identity_api.create_session("human-1", "user-1", "node-1", ttl_seconds=3600)
+    session = identity_api.create_session(
+        "human-1", "user-1", "node-1", ttl_seconds=identity_api.SESSION_MAX_SECONDS * 2,
+    )
     assert db.session is not None
-    assert 0 < (db.session["expires_at"] - db.session["created_at"]).total_seconds() <= 300
+    assert 0 < (db.session["expires_at"] - db.session["created_at"]).total_seconds() <= identity_api.SESSION_MAX_SECONDS
     assert identity_api.resolve_session(session["session_id"]) is not None
 
     db.session["expires_at"] = identity_api._now() - timedelta(seconds=1)

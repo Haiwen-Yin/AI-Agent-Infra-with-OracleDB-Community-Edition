@@ -1,4 +1,28 @@
-# Architecture - AI Agent Infra with DB v4.4.0
+# Architecture - AI Agent Infra with DB v4.4.1
+
+## v4.4.1 Platform Administration And Availability Plane
+
+The Platform Administration Channel is a restricted system Channel for the
+protected local administrator, enabled platform management Agents, and only
+approved Admin Agents. Ordinary production Agents cannot create an instance,
+join, read events, use private/direct threads, or send free-form management
+messages in this Channel. Management conversation is advisory context only;
+every state change remains a structured, authorized, auditable database action.
+
+Admin Agent membership has two separate admission paths: a platform-deployed
+candidate using the Platform Admin template and an externally deployed Admin
+candidate with an independent package and Ed25519 public-key proof. Both pass
+candidate observation and separated human approval before voting or Channel
+membership. The group records distinct positive weights, count-and-weight
+majority snapshots, deterministic succession, Leader terms, a database lease,
+and fencing tokens. A stale Leader cannot commit after replacement.
+
+The controlled upgrade plane stores package digest/signature state, human and
+Admin Agent approval evidence, node drain/migration/health state, and Skill
+distribution acknowledgements. The deployment adapter or node performs the
+actual maintenance action only after the database plan enters its permitted
+state. An Agent retains its old Skill snapshot until it declares a safe point;
+failed or unreachable recipients remain explicitly marked as drift.
 
 ## v4.4.0 Governed Software Delivery Graph
 

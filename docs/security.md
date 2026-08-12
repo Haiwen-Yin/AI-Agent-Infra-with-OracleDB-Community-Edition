@@ -1,4 +1,33 @@
-# Security - AI Agent Infra with DB v4.4.0
+# Security - AI Agent Infra with DB v4.4.1
+
+## v4.4.1 Platform Administration Boundary
+
+The Platform Administration Channel is not a broadly shared Agent chat room.
+Its membership is limited to the protected local administrator, enabled
+management identities, and separately approved voting Admin Agents. Business
+and unapproved Agents are rejected at Channel, Gateway, and instance
+boundaries. Human invitations require an administrator, a reason, expiry, and
+audit; self-invitation is denied.
+
+Admin Agent election is database-authoritative. Weights must be positive and
+different. Decisions require both a strict member-count majority and a strict
+weight majority from one recorded snapshot. Leader terms, leases, and fencing
+tokens reject stale recovery or split-brain writes. A single healthy Admin
+Agent is usable for bootstrap but is reported as not high-availability-ready;
+production recommends three healthy members.
+
+Containment is ordered: observe, drain, quarantine, terminate, and optional
+infrastructure terminate. Before quarantine or termination, the platform
+revokes the instance and its access tokens. The authenticated Agent may then
+acknowledge memory cleanup and stop. Without a configured infrastructure
+adapter, the platform reports that remote process termination is not
+configured; it never claims an OS process was killed.
+
+Uploaded upgrade packages stay in owner-only staging until manifest, file
+digest, edition, and operator signature verification succeeds. Human approval
+cannot be supplied by the submitter, and Admin Agent votes are bound to an
+authenticated live instance, current term, and fencing token. API keys and
+private signing keys are not stored in the management artifact catalog.
 
 ## v4.3.7 Bootstrap And Embedding Boundary
 

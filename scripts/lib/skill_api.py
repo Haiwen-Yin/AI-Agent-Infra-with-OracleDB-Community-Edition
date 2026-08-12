@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Skill Storage & Distribution API
+"""AI Agent Infra v4.4.1 - Skill Storage & Distribution API
 
 Supports direct database access and Admin API mode for Business Agents.
 """
@@ -13,6 +13,7 @@ from .connection import (
     execute_insert_returning_id,
     sanitize_row,
 )
+from . import cursor_pagination, identity_api
 from .skill_storage import save_resource, delete_resource, get_resource_info, resource_exists
 
 _JSON_COLUMNS = {"parameters", "dependencies"}
@@ -193,6 +194,47 @@ def list_skills(
         import logging
         logging.getLogger(__name__).debug(f"list_skills PG fallback failed: {e}")
         return []
+
+
+def list_skills_cursor(
+    principal_id: str, *, page_size: int = 20, cursor: str = "", skill_type: Optional[str] = None,
+    runtime: Optional[str] = None, skill_status: str = "ACTIVE",
+) -> Dict[str, Any]:
+    """Return a bounded Skill catalog page using an immutable entity key."""
+    filters = {"skill_type": skill_type or "", "runtime": runtime or "", "skill_status": skill_status or ""}
+    context = cursor_pagination.resolve(principal_id, "skills", filters, "entity_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "skills", "sort_key": "entity_id:asc"})
+    conditions = ["e.ENTITY_TYPE='SKILL'"]
+    params: Dict[str, Any] = {"lim": int(context["page_size"]) + 1}
+    if skill_type:
+        conditions.append("sm.SKILL_TYPE=:skill_type")
+        params["skill_type"] = skill_type
+    if runtime:
+        conditions.append("sm.RUNTIME=:runtime")
+        params["runtime"] = runtime
+    if skill_status:
+        conditions.append("sm.SKILL_STATUS=:skill_status")
+        params["skill_status"] = skill_status
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        conditions.append(
+            "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+            "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
+            identity_api._agent_visibility_clause(principal_id) + "))"
+        )
+        params["principal_id"] = principal_id
+    after = str(context["position"].get("entity_id") or "")
+    if after:
+        conditions.append("e.ENTITY_ID>:after")
+        params["after"] = after
+    rows = execute_query(
+        "SELECT e.ENTITY_ID,e.TITLE,e.CATEGORY,e.STATUS,e.VISIBILITY,e.WORKSPACE_ID,sm.SKILL_NAME,sm.SKILL_VERSION,"
+        "sm.SKILL_TYPE,sm.SKILL_FORMAT,sm.RUNTIME,sm.SKILL_STATUS,sm.RESOURCE_FILENAME,sm.RESOURCE_SIZE,"
+        "sm.RESOURCE_MIME_TYPE,sm.RESOURCE_URI,sm.RESOURCE_SERVER_HOST FROM ENTITIES e JOIN SKILL_META sm "
+        "ON sm.ENTITY_ID=e.ENTITY_ID WHERE " + " AND ".join(conditions) +
+        " ORDER BY e.ENTITY_ID FETCH FIRST :lim ROWS ONLY", params,
+    )
+    values = [sanitize_row(row) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
 
 
 def update_skill(skill_id: str, **kwargs: Any) -> bool:

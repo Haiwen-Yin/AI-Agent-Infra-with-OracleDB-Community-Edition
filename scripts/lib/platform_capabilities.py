@@ -50,6 +50,10 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
     "compliance": {"zh": "合规", "en": "Compliance", "mandatory": False, "page": "compliance", "edition": "compliance"},
     "audit_view": {"zh": "审计查看", "en": "Audit view", "mandatory": False, "page": "audit", "edition": "audit"},
     "organization": {"zh": "组织架构", "en": "Organization", "mandatory": False, "page": "organization"},
+    "admin_channel_ha": {"zh": "平台管理频道与高可用", "en": "Platform Administration and HA", "mandatory": True, "page": "platform"},
+    "controlled_upgrade": {"zh": "受控升级", "en": "Controlled upgrade", "mandatory": True, "page": "platform"},
+    "agent_containment": {"zh": "智能体阻断", "en": "Agent containment", "mandatory": True, "page": "platform"},
+    "session_policy": {"zh": "会话策略", "en": "Session policy", "mandatory": True, "page": "platform"},
 }
 
 DEPENDENCIES = {
@@ -67,6 +71,10 @@ DEPENDENCIES = {
     "compliance": ("agents", "audit_write"),
     "audit_view": ("audit_write",),
     "organization": ("users", "agents"),
+    "admin_channel_ha": ("agents", "audit_write"),
+    "controlled_upgrade": ("admin_channel_ha", "audit_write"),
+    "agent_containment": ("admin_channel_ha", "audit_write"),
+    "session_policy": ("identity", "audit_write"),
 }
 
 

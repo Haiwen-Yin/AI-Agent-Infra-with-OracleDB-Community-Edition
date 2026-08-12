@@ -1,6 +1,6 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.4.0 · Community Edition · Oracle**
+> **v4.4.1 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
@@ -20,6 +20,24 @@ package, and implementation references.
 ## Product Overview
 
 ### Native and External Agent Paths
+
+### Platform Administration And Controlled Operations
+
+v4.4.1 adds the protected Platform Administration Channel and an
+availability-oriented Admin Agent control plane. The existing local `admin`
+account remains a protected Human identity; platform-deployed and external
+Admin Agents follow different identity-proof, observation, and separated
+approval paths. Production should use three healthy Admin Agents with distinct
+weights. Decisions require both member-count and weight majorities, while
+Leader terms, leases, and fencing reject stale recovery writes.
+
+Dashboard and Portal idle/absolute session policies are independently stored
+in the database. Verified release packages can be staged and preflighted, then
+require human approval, Admin Agent quorum, recorded node drain/migration/
+health transitions, and safe-point Skill acknowledgements. The Web process
+does not execute uploaded packages. Agent containment revokes platform access
+before requesting cleanup; NFS/object/unified storage and infrastructure kill
+actions remain customer adapter integrations rather than implied capabilities.
 
 v4.4.0 adds a database-native governed SDD control plane, deterministic
 execution graph, Software Delivery Profile, SCM adapter boundary and evidence
@@ -108,7 +126,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.4.0. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.4.1. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -119,7 +137,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.4.0.md   # release notes for this version
+├── RELEASE_NOTES_v4.4.1.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...

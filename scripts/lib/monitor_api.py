@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Monitoring & Observability
+"""AI Agent Infra v4.4.1 - Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.
@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .connection import execute, execute_query, execute_query_one, sanitize_row
+from . import cursor_pagination
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,39 @@ def get_agent_health(agent_id: Optional[str] = None) -> Dict[str, Any]:
             health = get_agent_health(a.get("agent_id"))
             result.append(health)
         return {"agents": result}
+
+
+def get_agent_health_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return a bounded monitoring inventory without an unbounded registry scan."""
+    context = cursor_pagination.resolve(
+        principal_id, "monitor_agents", {}, "agent_id:asc", page_size, cursor,
+    )
+    context.update({"principal_id": principal_id, "resource_key": "monitor_agents", "sort_key": "agent_id:asc"})
+    after = str(context["position"].get("agent_id") or "")
+    params: Dict[str, Any] = {"row_limit": int(context["page_size"]) + 1}
+    conditions = []
+    if after:
+        conditions.append("a.AGENT_ID > :after")
+        params["after"] = after
+    try:
+        from . import identity_api
+        all_access = identity_api.effective_access(principal_id, "agents.read.all").get("decision") == "ALLOW"
+        if not all_access:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_ID=a.AGENT_ID "
+                "AND p.PRINCIPAL_TYPE='AGENT' AND " + identity_api._agent_visibility_clause(principal_id) + ")"
+            )
+            params["principal_id"] = principal_id
+    except Exception:
+        # A scope-service error must fail closed for delegated users.
+        conditions.append("1=0")
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    rows = execute_query(
+        "SELECT a.AGENT_ID FROM AGENT_REGISTRY a" + where + " ORDER BY a.AGENT_ID FETCH FIRST :row_limit ROWS ONLY",
+        params,
+    )
+    values = [get_agent_health(str(row.get("agent_id"))) for row in rows]
+    return cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
 
 
 def get_system_overview() -> Dict[str, Any]:

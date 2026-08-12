@@ -288,6 +288,8 @@ a {
   color: var(--brand-deep);
   font-size: 24px;
   line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .two-column-panels {
   display: grid;
@@ -531,6 +533,22 @@ textarea {
 .table-wrap {
   overflow-x: auto;
   margin-top: 14px;
+  max-height: 440px;
+  overflow-y: auto;
+}
+.cursor-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.cursor-pager label { display: inline-flex; align-items: center; gap: 5px; }
+.cursor-pager select { min-height: 30px; padding: 3px 6px; }
+@media (max-width: 700px) {
+  .cursor-pager { justify-content: flex-start; flex-wrap: wrap; }
 }
 table {
   width: 100%;
@@ -1569,6 +1587,87 @@ tbody tr:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.compact-status {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-soft);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.compact-status.enabled,
+.compact-status.active,
+.compact-status.verified {
+  border-color: rgba(26, 126, 91, 0.35);
+  color: #176f54;
+}
+.compact-status.disabled,
+.compact-status.failed {
+  border-color: rgba(177, 68, 67, 0.35);
+  color: #a43f3d;
+}
+.external-registration-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.external-registration-status .cx-form-hint {
+  margin: 0;
+  flex: 1 1 260px;
+}
+.external-policy-form {
+  margin-top: 10px;
+}
+.external-registration-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(170px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+.external-registration-form label,
+.upgrade-reason-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.external-registration-form input,
+.external-registration-form select,
+.upgrade-reason-field input {
+  width: 100%;
+  min-width: 0;
+}
+.upgrade-upload-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1.4fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+.upgrade-file-picker {
+  min-height: 38px;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+.upgrade-file-picker .small-button {
+  flex: 0 0 auto;
+}
+.upgrade-reason-field input {
+  height: 38px;
+}
 .visually-hidden-file {
   position: absolute;
   width: 1px;
@@ -1675,6 +1774,39 @@ tbody tr:hover {
 }
 .native-summary-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.management-metric-grid .info-panel {
+  min-width: 0;
+}
+.management-metric-grid .metric-value {
+  max-width: 100%;
+  font-size: clamp(17px, 2vw, 24px);
+}
+.management-metric-grid .info-panel > p {
+  overflow-wrap: anywhere;
+}
+.management-metric-grid .metric-value,
+.management-metric-grid .cx-form-hint,
+.management-metric-grid .panel-title,
+.management-metric-grid .panel-title h2 {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.management-metric-grid .info-panel {
+  overflow: hidden;
+}
+.button-hint {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: normal;
+}
+.management-metric-grid + .table-wrap,
+.info-panel .table-wrap {
+  max-width: 100%;
+}
+.info-panel > .table-wrap {
+  width: 100%;
 }
 .action-button-row {
   display: flex;
@@ -1869,7 +2001,9 @@ tbody tr:hover {
     overflow: auto;
   }
   .inline-form,
-  .wide-inline-form {
+  .wide-inline-form,
+  .external-registration-form,
+  .upgrade-upload-form {
     grid-template-columns: 1fr;
   }
   .workbench-form {

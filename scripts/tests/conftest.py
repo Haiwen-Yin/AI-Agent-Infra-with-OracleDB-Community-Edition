@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Pytest Configuration and Shared Fixtures
+"""AI Agent Infra v4.4.1 - Pytest Configuration and Shared Fixtures
 
 Provides parameterized database fixtures so the same test suite can run
 against Oracle, PostgreSQL, and YashanDB backends without duplication.
@@ -230,7 +230,7 @@ def db_connection(db_type: str, _db_reachable):
 def pytest_report_header(config) -> List[str]:
     """Add backend info to the pytest header."""
     lines = [
-        "AI Agent Infra v4.4.0 - parameterized DB fixtures",
+        "AI Agent Infra v4.4.1 - parameterized DB fixtures",
         f"  Active backends: {_active_backends()}",
     ]
     forced = os.environ.get("AIAGENT_TEST_DB")

@@ -17,7 +17,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import connection, governed_contracts
+from . import connection, governed_contracts, cursor_pagination
 
 
 REGISTRATION_MODES = {"CLOSED", "APPROVAL", "INVITE_ONLY", "DIRECTORY", "OPEN"}
@@ -112,7 +112,9 @@ CLASSIFICATION_LEVELS = {
 # The web contract deliberately has a five-minute upper bound.  Deployment
 # configuration may shorten the lease, but it must never turn a database
 # session into a long-lived bearer credential.
-SESSION_MAX_SECONDS = 300
+# Individual session policies remain conservative by default (five minutes
+# idle).  The global ceiling permits a separately governed absolute lifetime.
+SESSION_MAX_SECONDS = 86400
 
 
 class IdentityError(ValueError):
@@ -1058,6 +1060,36 @@ def list_users(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     return rows
 
 
+def list_users_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return a principal-bound keyset page of human users."""
+    _require(principal_id, "users.read")
+    context = cursor_pagination.resolve(principal_id, "users", {}, "principal_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "users", "sort_key": "principal_id:asc"})
+    visibility = _principal_visibility_clause(principal_id)
+    after = str(context["position"].get("principal_id") or "")
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    if ":principal_id" in visibility:
+        params["principal_id"] = principal_id
+    after_clause = " AND p.PRINCIPAL_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    rows = _required_query(
+        "SELECT p.PRINCIPAL_ID,p.PRINCIPAL_TYPE,p.DISPLAY_NAME,p.STATUS,p.PERMISSION_VERSION,p.PORTAL_ACCESS,p.APP_ACCESS,"
+        "(SELECT MIN(i.USERNAME) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID=p.PRINCIPAL_ID AND i.STATUS='ACTIVE') AS USERNAME,"
+        "(SELECT MIN(i.EMAIL) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID=p.PRINCIPAL_ID AND i.STATUS='ACTIVE') AS EMAIL,"
+        "m.ORGANIZATION_ID,o.ORGANIZATION_NAME FROM CX_PRINCIPALS p LEFT JOIN CX_ORGANIZATION_MEMBERS m ON m.PRINCIPAL_ID=p.PRINCIPAL_ID "
+        "AND m.MEMBERSHIP_KIND='PRIMARY' AND m.STATUS='ACTIVE' LEFT JOIN CX_ORGANIZATIONS o ON o.ORGANIZATION_ID=m.ORGANIZATION_ID "
+        "WHERE p.PRINCIPAL_TYPE='HUMAN' AND " + visibility + after_clause + " ORDER BY p.PRINCIPAL_ID " + _limit_clause(), params,
+    )
+    for row in rows:
+        protected = _protected_bootstrap_admin(str(row["principal_id"]))
+        row["display_name"] = "管理员" if protected else row.get("display_name")
+        row["portal_enabled"] = protected or str(row.get("portal_access") or "N").upper() == "Y"
+        row["app_enabled"] = protected or str(row.get("app_access") or "N").upper() == "Y"
+        row["protected_system_admin"] = protected
+    return cursor_pagination.page(rows, context, lambda item: {"principal_id": str(item["principal_id"])})
+
+
 def _principal_visible_to(actor_principal_id: str, target_principal_id: str) -> bool:
     """Apply the same bounded scope used by the user and Agent inventories."""
     if actor_principal_id == target_principal_id:
@@ -1323,7 +1355,8 @@ def create_session(principal_id: str, user_id: str, node_id: str, auth_method: s
     return {"session_id": raw_id, "csrf_token": csrf, "expires_at": _iso(expires) or ""}
 
 
-def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 300) -> Optional[Dict[str, Any]]:
+def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 300,
+                    absolute_ttl_seconds: int = SESSION_MAX_SECONDS) -> Optional[Dict[str, Any]]:
     if not raw_session_id:
         return None
     digest = hashlib.sha256(raw_session_id.encode("utf-8")).hexdigest()
@@ -1339,7 +1372,12 @@ def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 
         created = _timestamp(row.get("created_at"))
     except IdentityError:
         return None
-    if expiry is not None and expiry <= now:
+    try:
+        absolute_ttl = int(absolute_ttl_seconds)
+    except (TypeError, ValueError):
+        absolute_ttl = SESSION_MAX_SECONDS
+    absolute_deadline = created + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, absolute_ttl))) if created else None
+    if (expiry is not None and expiry <= now) or (absolute_deadline is not None and absolute_deadline <= now):
         return None
     principal = _row(connection.execute_query_one(
         "SELECT STATUS, MFA_REQUIRED, PERMISSION_VERSION FROM CX_PRINCIPALS WHERE PRINCIPAL_ID = :principal_id", {"principal_id": row["principal_id"]}
@@ -1357,6 +1395,8 @@ def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 
         except (TypeError, ValueError):
             requested_ttl = 300
         new_expiry = now + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, requested_ttl)))
+        if absolute_deadline is not None:
+            new_expiry = min(new_expiry, absolute_deadline)
         connection.execute(
             "UPDATE CX_WEB_SESSIONS SET LAST_SEEN_AT = :last_seen_at, EXPIRES_AT = :expires_at "
             "WHERE SESSION_DIGEST = :digest AND REVOKED_AT IS NULL",
@@ -1726,6 +1766,36 @@ def list_agents(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     )
 
 
+def list_agents_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return a keyset page of Agents without widening ownership scope."""
+    _require(principal_id, "agents.read")
+    context = cursor_pagination.resolve(principal_id, "agents", {}, "agent_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "agents", "sort_key": "agent_id:asc"})
+    after = str(context["position"].get("agent_id") or "")
+    params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
+    after_clause = " AND p.PRINCIPAL_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    if effective_access(principal_id, "agents.read.all")["decision"] == "ALLOW":
+        sql = (
+            "SELECT p.PRINCIPAL_ID AS AGENT_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT,MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE,"
+            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID FROM CX_PRINCIPALS p LEFT JOIN CX_AGENT_RELATIONSHIPS r "
+            "ON r.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT'" + after_clause + " "
+            "GROUP BY p.PRINCIPAL_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT ORDER BY p.PRINCIPAL_ID " + _limit_clause()
+        )
+    else:
+        visibility = _agent_visibility_clause(principal_id)
+        params["principal_id"] = principal_id
+        sql = (
+            "SELECT p.PRINCIPAL_ID AS AGENT_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT,MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE,"
+            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID FROM CX_PRINCIPALS p JOIN CX_AGENT_RELATIONSHIPS r "
+            "ON r.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT' AND r.STATUS='ACTIVE' AND " + visibility +
+            after_clause + " GROUP BY p.PRINCIPAL_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT ORDER BY p.PRINCIPAL_ID " + _limit_clause()
+        )
+    rows = _required_query(sql, params)
+    return cursor_pagination.page(rows, context, lambda item: {"agent_id": str(item["agent_id"])})
+
+
 def _agent_visible_to(actor_principal_id: str, agent_id: str) -> bool:
     """Check an Agent relationship or organization scope server-side."""
     if effective_access(actor_principal_id, "agents.read.all")["decision"] == "ALLOW":
@@ -1886,6 +1956,8 @@ def transition_channel_lifecycle(
     deletion_after: Any = None,
 ) -> Dict[str, Any]:
     """Apply a governed Channel lifecycle transition and its runtime effects."""
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION":
+        raise PermissionError("protected Platform Administration Channel lifecycle is managed by the administration service")
     _require(actor_principal_id, "channels.lifecycle")
     row = _row(connection.execute_query_one(
         "SELECT CHANNEL_ID, STATUS, LEGAL_HOLD, RETENTION_UNTIL, DELETION_AFTER, SECURITY_DOMAIN_ID, METADATA_JSON "
@@ -1989,6 +2061,8 @@ def transition_channel_lifecycle(
 
 def set_channel_legal_hold(actor_principal_id: str, channel_id: str, enabled: bool, reason: str) -> Dict[str, Any]:
     """Set or release a Channel hold and its immutable evidence atomically."""
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION":
+        raise PermissionError("protected Platform Administration Channel hold is managed by the administration service")
     _require(actor_principal_id, "channels.lifecycle")
     if not str(reason or "").strip():
         raise IdentityError("legal hold reason is required")
@@ -2525,6 +2599,25 @@ def list_channels(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     )
 
 
+def list_channels_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
+    """Return a Channel page with the same server-side visibility contract."""
+    _require(principal_id, "channels.read")
+    context = cursor_pagination.resolve(principal_id, "channels", {}, "channel_id:asc", page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "channels", "sort_key": "channel_id:asc"})
+    after = str(context["position"].get("channel_id") or "")
+    params: Dict[str, Any] = {"principal_id": principal_id, "limit": int(context["page_size"]) + 1}
+    after_clause = " AND c.CHANNEL_ID>:after" if after else ""
+    if after:
+        params["after"] = after
+    common = "SELECT c.CHANNEL_ID,c.CHANNEL_NAME,c.SECURITY_DOMAIN_ID,c.CLASSIFICATION,c.CHANNEL_TYPE,c.STATUS,c.LEGAL_HOLD,c.UPDATED_AT,"
+    if effective_access(principal_id, "channels.read.all")["decision"] == "ALLOW":
+        sql = common + "COALESCE(m.MEMBER_ROLE,'SYSTEM_ADMIN') AS MEMBER_ROLE FROM CX_CHANNELS c LEFT JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID AND m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' WHERE c.STATUS<>'DELETED'" + after_clause + " ORDER BY c.CHANNEL_ID " + _limit_clause()
+    else:
+        sql = common + "m.MEMBER_ROLE FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' AND c.STATUS<>'DELETED'" + after_clause + " ORDER BY c.CHANNEL_ID " + _limit_clause()
+    rows = _required_query(sql, params)
+    return cursor_pagination.page(rows, context, lambda item: {"channel_id": str(item["channel_id"])})
+
+
 def list_channel_members(principal_id: str, channel_id: str) -> List[Dict[str, Any]]:
     _assert_channel_member(principal_id, channel_id, "channels.read")
     return _required_query(
@@ -2581,6 +2674,8 @@ def create_channel_thread(
     policy: Optional[Dict[str, Any]] = None,
     participant_principal_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and str(thread_type or "CHANNEL").upper() in {"PRIVATE", "DIRECT"}:
+        raise PermissionError("private and direct threads are disabled in the Platform Administration Channel")
     """Create a bounded collaboration thread under one Channel.
 
     A thread is a navigation and execution-context boundary only.  It never
@@ -2735,6 +2830,8 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
     normalized_thread_type = str(thread_type or "CHANNEL").strip().upper()
     if normalized_thread_type not in {"CHANNEL", "TASK", "RUN", "BARRIER", "PRIVATE", "DIRECT"}:
         raise IdentityError("message thread type is invalid")
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and normalized_thread_type in {"PRIVATE", "DIRECT"}:
+        raise PermissionError("private and direct messages are disabled in the Platform Administration Channel")
     if thread_id:
         thread = _assert_thread_member(principal_id, thread_id, "channels.write")
         if str(thread.get("channel_id") or "") != channel_id:
@@ -3167,6 +3264,8 @@ def create_action_card(principal_id: str, channel_id: str, action_type: str, pay
     if not reason.strip() or not idempotency_key.strip():
         raise IdentityError("Action reason and idempotency key are required")
     _assert_channel_member(principal_id, channel_id, "channels.write")
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and not str(action_type or "").upper().startswith("PLATFORM_"):
+        raise PermissionError("protected Platform Administration Channel requires a PLATFORM_ Action Card")
     existing = _row(connection.execute_query_one(
         "SELECT ACTION_ID, CHANNEL_ID, ACTION_TYPE, VERSION, PAYLOAD_JSON, STATUS, REASON, CREATED_AT "
         "FROM CX_ACTION_CARDS WHERE IDEMPOTENCY_KEY = :idempotency_key",

@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.0 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.1 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -51,7 +51,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.0"
+VERSION = "4.4.1"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -62,13 +62,25 @@ sessions = {}
 
 def _session_timeout():
     """Return the configured web session timeout in seconds."""
-    return max(1, int(getattr(_load_server_config(), 'session_timeout', 300)))
+    try:
+        from lib import admin_management
+        return int(admin_management.session_policy('PORTAL')['idle_timeout_seconds'])
+    except Exception:
+        return max(1, int(getattr(_load_server_config(), 'session_timeout', 300)))
+
+
+def _portal_absolute_session_timeout():
+    try:
+        from lib import admin_management
+        return int(admin_management.session_policy('PORTAL')['absolute_timeout_seconds'])
+    except Exception:
+        return 28800
 
 
 def _session_cookie(session_id):
     secure = '; Secure' if os.environ.get('CX_WEB_SECURE_COOKIE', '').lower() in {'1', 'true', 'yes'} else ''
     return '{}={}; Path=/; HttpOnly; Max-Age={}; SameSite=Lax{}'.format(
-        _get_cookie_name(), session_id, _session_timeout(), secure
+        _get_cookie_name(), session_id, _portal_absolute_session_timeout(), secure
     )
 
 PAGE_ROUTES = {
@@ -250,7 +262,10 @@ def _resolve_session_as_schema_owner(raw_session_id):
     if previous_agent_id:
         connection.set_agent_context(None)
     try:
-        return identity_api.resolve_session(raw_session_id)
+        return identity_api.resolve_session(
+            raw_session_id, ttl_seconds=_session_timeout(),
+            absolute_ttl_seconds=_portal_absolute_session_timeout(),
+        )
     finally:
         connection.set_agent_context(previous_agent_id)
 
@@ -4561,8 +4576,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.0', VERSION)
-            html = html.replace('2026-08-11', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.1', VERSION)
+            html = html.replace('2026-08-12', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

@@ -171,6 +171,18 @@ def create_instance(agent_id: str, *, channel_id: str = "", security_domain_id: 
         raise GatewayError("agent is unavailable")
     if str(agent.get("status") or "").upper() != "ACTIVE":
         raise GatewayError("agent activation is required")
+    if channel_id == "CH_PLATFORM_ADMINISTRATION":
+        try:
+            from . import admin_management
+            member = identity_api._row(connection.execute_query_one(
+                "SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent "
+                "AND STATUS='ACTIVE' AND VOTING_ENABLED='Y'",
+                {"group_id": admin_management.ADMIN_GROUP_ID, "agent": agent_id},
+            ))
+            if not member:
+                raise GatewayError("only approved Admin Agents may run in the Platform Administration Channel")
+        except ImportError:
+            raise GatewayError("Platform Administration control service is unavailable")
     if not _compliance_allows(agent_id, "work"):
         raise GatewayError("agent control state blocks new work")
     if channel_id:
@@ -446,6 +458,18 @@ def submit_arrival(agent_id: str, instance_id: str, barrier_id: str, report: Dic
 
 def list_channel_events(principal_id: str, channel_id: str = "", limit: int = 100, before: str = "") -> list[Dict[str, Any]]:
     """Pull only messages from Channels where the Agent is an active member."""
+    if channel_id == "CH_PLATFORM_ADMINISTRATION":
+        try:
+            from . import admin_management
+            member = identity_api._row(connection.execute_query_one(
+                "SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent "
+                "AND STATUS='ACTIVE' AND VOTING_ENABLED='Y'",
+                {"group_id": admin_management.ADMIN_GROUP_ID, "agent": principal_id},
+            ))
+            if not member:
+                raise GatewayError("Platform Administration Channel events require approved Admin Agent membership")
+        except ImportError:
+            raise GatewayError("Platform Administration control service is unavailable")
     suffix, params = _limit(limit)
     params["principal_id"] = principal_id
     query = (
@@ -472,6 +496,14 @@ def list_channel_events(principal_id: str, channel_id: str = "", limit: int = 10
 
 def add_channel_member(actor_principal_id: str, channel_id: str, member_principal_id: str,
                        role: str = "MEMBER", reason: str = "") -> bool:
+    try:
+        from . import admin_management
+        if admin_management._protected_channel(channel_id):
+            admin_management.can_add_protected_member(actor_principal_id, member_principal_id, reason)
+            if str(role or "").upper() not in {"REVIEWER", "OPERATOR"}:
+                raise GatewayError("protected Platform Administration Channel role is invalid")
+    except ImportError:
+        pass
     if not reason.strip():
         raise GatewayError("membership addition reason is required")
     identity_api._assert_channel_member(actor_principal_id, channel_id, "channels.manage_members")
@@ -523,6 +555,12 @@ def add_channel_member(actor_principal_id: str, channel_id: str, member_principa
 
 
 def remove_channel_member(actor_principal_id: str, channel_id: str, member_principal_id: str, reason: str) -> bool:
+    try:
+        from . import admin_management
+        if admin_management._protected_channel(channel_id):
+            raise GatewayError("protected Platform Administration Channel membership is managed by the administration service")
+    except ImportError:
+        pass
     if not reason.strip():
         raise GatewayError("membership removal reason is required")
     identity_api._assert_channel_member(actor_principal_id, channel_id, "channels.manage_members")

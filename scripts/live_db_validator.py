@@ -164,6 +164,10 @@ V437_MIGRATION_SCRIPTS = V436_MIGRATION_SCRIPTS + (
 V440_MIGRATION_SCRIPTS = V437_MIGRATION_SCRIPTS + (
     "34_v4_4_0_governed_sdd.sql",
 )
+V441_MIGRATION_SCRIPTS = V440_MIGRATION_SCRIPTS + (
+    "35_v4_4_1_admin_ha_upgrade.sql",
+    "36_v4_4_1_upgrade_protocol.sql",
+)
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
     "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
@@ -225,6 +229,30 @@ V440_SDD_REQUIRED_COLUMNS = {
     "CX_SDD_GATES": frozenset({"GATE_ID", "RUN_ID", "RISK_LEVEL", "STATUS"}),
     "CX_SDD_SCM_CONNECTIONS": frozenset({"CONNECTION_ID", "ADAPTER_KIND", "REPOSITORY_REF", "CREDENTIAL_REFERENCE"}),
     "CX_SDD_ARTIFACTS": frozenset({"ARTIFACT_ID", "REFERENCE_URI", "CONTENT_DIGEST", "STATUS"}),
+}
+V441_ADMIN_HA_TABLES = (
+    "CX_ADMIN_AGENT_GROUPS", "CX_ADMIN_AGENT_MEMBERS", "CX_ADMIN_ENROLLMENTS",
+    "CX_ADMIN_QUORUM_SNAPSHOTS", "CX_ADMIN_LEADER_EVIDENCE", "CX_MANAGEMENT_ARTIFACTS",
+    "CX_MANAGEMENT_ARTIFACT_RECEIPTS", "CX_UPGRADE_PLANS", "CX_UPGRADE_NODES",
+    "CX_SKILL_DISTRIBUTION", "CX_AGENT_CONTAINMENT_COMMANDS", "CX_WEB_SESSION_POLICIES",
+    "CX_WEB_SESSION_POLICY_HISTORY", "CX_API_CURSORS", "CX_UPGRADE_APPROVALS",
+)
+V441_ADMIN_HA_REQUIRED_COLUMNS = {
+    "CX_ADMIN_AGENT_GROUPS": frozenset({"GROUP_ID", "GROUP_KEY", "CURRENT_TERM", "FENCING_TOKEN", "CONFIGURATION_STATE"}),
+    "CX_ADMIN_AGENT_MEMBERS": frozenset({"MEMBER_ID", "GROUP_ID", "AGENT_ID", "ADMISSION_PATH", "VOTING_ENABLED", "WEIGHT"}),
+    "CX_ADMIN_ENROLLMENTS": frozenset({"ENROLLMENT_ID", "ADMISSION_PATH", "PUBLIC_KEY_DIGEST", "PACKAGE_DIGEST", "STATUS", "REQUESTED_BY"}),
+    "CX_ADMIN_QUORUM_SNAPSHOTS": frozenset({"SNAPSHOT_ID", "GROUP_ID", "TERM", "MEMBERS_JSON", "TOTAL_WEIGHT"}),
+    "CX_ADMIN_LEADER_EVIDENCE": frozenset({"EVIDENCE_ID", "GROUP_ID", "NEW_TERM", "NEW_FENCING_TOKEN", "EVENT_TYPE"}),
+    "CX_MANAGEMENT_ARTIFACTS": frozenset({"ARTIFACT_ID", "CONTENT_DIGEST", "SIGNATURE", "SECRET_FREE", "STORAGE_ADAPTER"}),
+    "CX_MANAGEMENT_ARTIFACT_RECEIPTS": frozenset({"RECEIPT_ID", "ARTIFACT_ID", "NODE_ID", "SIGNATURE_STATE", "AVAILABILITY_STATE"}),
+    "CX_UPGRADE_PLANS": frozenset({"UPGRADE_ID", "PACKAGE_VERSION", "PACKAGE_DIGEST", "SIGNATURE_STATE", "ROLLOUT_STATE"}),
+    "CX_UPGRADE_NODES": frozenset({"UPGRADE_NODE_ID", "UPGRADE_ID", "NODE_ID", "STATE", "SKILL_STATE", "HEALTH_STATE"}),
+    "CX_SKILL_DISTRIBUTION": frozenset({"DISTRIBUTION_ID", "UPGRADE_ID", "AGENT_ID", "SKILL_VERSION", "DRIFT_STATE"}),
+    "CX_AGENT_CONTAINMENT_COMMANDS": frozenset({"COMMAND_ID", "INSTANCE_ID", "REQUESTED_STATE", "CONTROL_GENERATION", "NONCE_DIGEST"}),
+    "CX_WEB_SESSION_POLICIES": frozenset({"POLICY_KEY", "IDLE_TIMEOUT_SECONDS", "ABSOLUTE_TIMEOUT_SECONDS", "VERSION"}),
+    "CX_WEB_SESSION_POLICY_HISTORY": frozenset({"HISTORY_ID", "POLICY_KEY", "VERSION", "CHANGED_BY"}),
+    "CX_API_CURSORS": frozenset({"CURSOR_ID", "PRINCIPAL_ID", "RESOURCE_KEY", "FILTER_DIGEST", "PAGE_SIZE"}),
+    "CX_UPGRADE_APPROVALS": frozenset({"APPROVAL_ID", "UPGRADE_ID", "APPROVAL_KIND", "PRINCIPAL_ID", "DECISION", "TERM", "FENCING_TOKEN", "REASON"}),
 }
 
 V432_MEMORY_TABLES = (
@@ -1070,6 +1098,30 @@ def validate_v440_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(sdd["passed"])}
 
 
+def validate_v441_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate v4.4.1 management-plane declarations without a database."""
+    base = validate_v440_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migrations = [selected.get(name) for name in (
+        "35_v4_4_1_admin_ha_upgrade.sql", "36_v4_4_1_upgrade_protocol.sql",
+    )]
+    raw_source = "\n".join(
+        migration.read_text(encoding="utf-8") for migration in migrations
+        if migration and migration.is_file()
+    )
+    source = _normalized_marker_text(raw_source)
+    control = {
+        "scripts_required": list(V441_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V441_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V441_ADMIN_HA_TABLES if name not in source],
+        "safety_markers": all(marker in raw_source.upper() for marker in ("FENCING_TOKEN", "CONTROL_GENERATION", "SECRET_FREE", "SIGNATURE_STATE")),
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    control["passed"] = not any((control["scripts_missing"], control["tables_missing"])) and control["safety_markers"] and control["no_plaintext_secret_markers"]
+    return {"database": database, "v440": base, "admin_ha_upgrade": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1553,10 +1605,13 @@ def main() -> int:
     requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
     requires_v437 = target_version.startswith(("4.3.7", "4.4."))
     requires_v440 = target_version.startswith("4.4.")
+    requires_v441 = target_version.startswith("4.4.1")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v440:
+            if requires_v441:
+                migration_scripts, validator = V441_MIGRATION_SCRIPTS, validate_v441_static_contract
+            elif requires_v440:
                 migration_scripts, validator = V440_MIGRATION_SCRIPTS, validate_v440_static_contract
             elif requires_v437:
                 migration_scripts, validator = V437_MIGRATION_SCRIPTS, validate_v437_static_contract

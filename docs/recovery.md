@@ -1,4 +1,26 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.4.0
+# Recovery and High Availability - AI Agent Infra with DB v4.4.1
+
+## v4.4.1 Management Plane Recovery
+
+The protected management Channel, Admin Agent group, quorum snapshots, Leader
+terms, fencing tokens, staged package facts, node rollout state, Skill
+distribution state, containment commands, and session-policy history are
+durable database facts. Repeating initialization does not duplicate Channel
+members, platform Admin membership, or default policies.
+
+On Leader failure or lease expiry, the eligible member with the deterministic
+highest distinct weight may acquire a new term and fencing token. The previous
+Leader can reconnect but cannot write using its old term or fence. This is
+application-control-plane availability, not a claim that a single database
+instance has been made highly available. Database replication, backup,
+promotion, RPO, and RTO remain customer deployment responsibilities.
+
+During upgrade recovery, a node in `DRAINING` retains existing active work and
+stops new claims. It cannot move to `MIGRATING` while active work remains.
+After a node health acknowledgement, Skill distribution still leaves each
+Agent on its old pinned version until a verified safe-point acknowledgement.
+Missing acknowledgements are recorded as drift rather than force-switching a
+running task.
 
 ## Recovery Authority
 

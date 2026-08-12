@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.0 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.1 Unified Repository Guide
 
-> **v4.4.0** - The unified single-source repository that generates all 6 release
+> **v4.4.1** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -273,6 +273,11 @@ file and rebuilding. Example (`editions/oracle-enterprise.json`):
 }
 ```
 
+For PostgreSQL, `pool_min` and `pool_max` are the supported configuration
+names as well. The adapter accepts them from existing encrypted configurations
+and bounds short request bursts by the configured maximum; sustained overload
+must be handled by an operator capacity decision.
+
 `extra_features` controls which Enterprise-only modules are wired in.
 
 ## 8. Common Workflows
@@ -337,7 +342,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.0`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.1`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration
