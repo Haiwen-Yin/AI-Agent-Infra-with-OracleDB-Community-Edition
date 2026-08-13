@@ -78,6 +78,9 @@ _MFA_SETUP_ALLOWED_PATHS = {
     "/api/auth/mfa/enroll",
     "/api/auth/mfa/confirm",
     "/api/auth/logout",
+    "/portal/api/auth/mfa/enroll",
+    "/portal/api/auth/mfa/confirm",
+    "/portal/api/auth/logout",
 }
 
 
@@ -222,8 +225,14 @@ async def clear_agent_database_context(request: Request, call_next):
         response = await call_next(request)
         session = getattr(request.state, "cx_session", None)
         raw_session_id = getattr(request.state, "cx_session_id", "")
-        if session and raw_session_id and request.url.path != "/api/auth/logout" and response.status_code < 400:
-            _set_session_cookie(response, {"session_id": raw_session_id})
+        session_scope = getattr(request.state, "cx_session_scope", "DASHBOARD")
+        session_exit_paths = {
+            "/api/auth/logout",
+            "/portal/api/auth/logout",
+            "/portal/api/agent/release",
+        }
+        if session and raw_session_id and request.url.path not in session_exit_paths and response.status_code < 400:
+            _set_session_cookie(response, {"session_id": raw_session_id}, session_scope)
             expires_at = _browser_session_expiry(session.get("expires_at"))
             if expires_at:
                 response.headers["X-Session-Expires-At"] = expires_at
@@ -640,10 +649,12 @@ def _legacy_gate(request: Request, path: str) -> Optional[Response]:
         # forced to manufacture a human CSRF token.
         return None
 
-    session = _session_from_request(request)
+    entry = "PORTAL" if path.startswith("/portal/api/") else "APP"
+    session = _session_from_request(
+        request, "PORTAL" if entry == "PORTAL" else "DASHBOARD"
+    )
     if not session:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    entry = "PORTAL" if path.startswith("/portal/api/") else "APP"
     try:
         with _schema_owner_context():
             allowed = identity_api.entry_allowed(str(session["principal_id"]), entry)
@@ -679,7 +690,9 @@ def static_file(file_path: str) -> Response:
     ]
     for candidate in candidates:
         if candidate.is_file():
-            return FileResponse(candidate)
+            # The control-plane UI is security-sensitive. Do not let a browser
+            # reuse an older bundle after a session-boundary or UI correction.
+            return FileResponse(candidate, headers={"Cache-Control": "no-store"})
     raise HTTPException(status_code=404, detail="Static asset not found")
 
 
@@ -1376,8 +1389,16 @@ class SessionPolicyBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
-def _cookie_name() -> str:
-    return f"session_id_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
+def _session_scope_for_path(path: str) -> str:
+    return "PORTAL" if str(path or "").startswith("/portal/") else "DASHBOARD"
+
+
+def _cookie_name(scope: str = "DASHBOARD") -> str:
+    normalized = str(scope or "").upper()
+    if normalized not in {"DASHBOARD", "PORTAL"}:
+        raise ValueError("invalid session scope")
+    prefix = "portal_session_id" if normalized == "PORTAL" else "dashboard_session_id"
+    return f"{prefix}_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
 
 
 def _session_timeout_seconds() -> int:
@@ -1390,8 +1411,12 @@ def _session_timeout_seconds() -> int:
 
 
 def _dashboard_session_policy() -> Dict[str, Any]:
+    return _session_policy("DASHBOARD")
+
+
+def _session_policy(scope: str) -> Dict[str, Any]:
     try:
-        return admin_management.session_policy("DASHBOARD")
+        return admin_management.session_policy(str(scope or "DASHBOARD").upper())
     except Exception:
         return {"idle_timeout_seconds": _session_timeout_seconds(), "absolute_timeout_seconds": 28800, "version": 0}
 
@@ -1412,28 +1437,32 @@ def _browser_session_expiry(value: Any) -> str:
     return timestamp.astimezone().isoformat()
 
 
-def _session_from_request(request: Request) -> Optional[Dict[str, Any]]:
-    raw = request.cookies.get(_cookie_name())
+def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optional[Dict[str, Any]]:
+    normalized_scope = str(scope or "").upper()
+    raw = request.cookies.get(_cookie_name(normalized_scope))
     if not raw:
         return None
     with _schema_owner_context():
-        policy = _dashboard_session_policy()
-        session = identity_api.resolve_session(raw, ttl_seconds=int(policy["idle_timeout_seconds"]), absolute_ttl_seconds=int(policy["absolute_timeout_seconds"]))
+        policy = _session_policy(normalized_scope)
+        session = identity_api.resolve_session(raw, ttl_seconds=int(policy["idle_timeout_seconds"]), absolute_ttl_seconds=int(policy["absolute_timeout_seconds"]), expected_scope=normalized_scope)
     if session:
         request.state.cx_session = session
         request.state.cx_session_id = raw
+        request.state.cx_session_scope = normalized_scope
     return session
 
 
 def principal(request: Request) -> Dict[str, Any]:
-    session = _session_from_request(request)
+    scope = _session_scope_for_path(request.url.path)
+    session = _session_from_request(request, scope)
     if not session:
         raise HTTPException(status_code=401, detail="Authentication required")
+    entry = "PORTAL" if scope == "PORTAL" else "APP"
     try:
         with _schema_owner_context():
-            allowed = identity_api.entry_allowed(str(session["principal_id"]), "APP")
+            allowed = identity_api.entry_allowed(str(session["principal_id"]), entry)
         if not allowed:
-            raise HTTPException(status_code=403, detail="Application access is disabled")
+            raise HTTPException(status_code=403, detail=f"{entry.title()} access is disabled")
     except HTTPException:
         raise
     except Exception as exc:
@@ -1498,10 +1527,10 @@ def _optional_module(name: str):
             return None
 
 
-def _set_session_cookie(response: Response, session: Dict[str, str]) -> None:
+def _set_session_cookie(response: Response, session: Dict[str, str], scope: str = "DASHBOARD") -> None:
     secure = os.environ.get("CX_WEB_SECURE_COOKIE", "").lower() in {"1", "true", "yes"}
     response.set_cookie(
-        _cookie_name(), session["session_id"], max_age=int(_dashboard_session_policy()["absolute_timeout_seconds"]),
+        _cookie_name(scope), session["session_id"], max_age=int(_session_policy(scope)["absolute_timeout_seconds"]),
         httponly=True, samesite="lax", secure=secure, path="/",
     )
 
@@ -1586,6 +1615,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
             session = identity_api.create_session(
                 str(user["principal_id"]), str(user["user_id"]), _local_node_id(),
                 mfa_level="SETUP", ttl_seconds=int(_dashboard_session_policy()["idle_timeout_seconds"]),
+                session_scope="DASHBOARD",
             )
             _set_session_cookie(response, session)
             return {
@@ -1618,6 +1648,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
             str(user["principal_id"]), str(user["user_id"]), _local_node_id(),
             mfa_level=mfa_level,
             ttl_seconds=int(_dashboard_session_policy()["idle_timeout_seconds"]),
+            session_scope="DASHBOARD",
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
@@ -1637,14 +1668,20 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
 
 
 @app.post("/api/auth/logout")
+@app.post("/portal/api/auth/logout")
 def logout(request: Request, session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, bool]:
-    raw = request.cookies.get(_cookie_name(), "")
+    scope = _session_scope_for_path(request.url.path)
+    scopes = ("PORTAL", "DASHBOARD") if scope == "PORTAL" else ("DASHBOARD",)
     try:
-        identity_api.revoke_session(raw, "logout")
+        for candidate_scope in scopes:
+            raw = request.cookies.get(_cookie_name(candidate_scope), "")
+            if raw:
+                identity_api.revoke_session(raw, "logout")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
     response = JSONResponse({"success": True})
-    response.delete_cookie(_cookie_name(), path="/")
+    for candidate_scope in scopes:
+        response.delete_cookie(_cookie_name(candidate_scope), path="/")
     return response
 
 
@@ -1674,6 +1711,7 @@ def password_reset_consume(body: PasswordResetConsumeBody) -> Dict[str, Any]:
 
 
 @app.post("/api/auth/mfa/enroll")
+@app.post("/portal/api/auth/mfa/enroll")
 def mfa_enroll(body: MfaEnrollBody, session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, Any]:
     target = body.target_principal_id or str(session["principal_id"])
     if target != str(session["principal_id"]):
@@ -1685,6 +1723,7 @@ def mfa_enroll(body: MfaEnrollBody, session: Dict[str, Any] = Depends(require_cs
 
 
 @app.post("/api/auth/mfa/confirm")
+@app.post("/portal/api/auth/mfa/confirm")
 def mfa_confirm(body: MfaConfirmBody, session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, Any]:
     try:
         confirmed = security_lifecycle.confirm_totp(
@@ -4444,4 +4483,11 @@ async def legacy_compatibility(path: str, request: Request) -> Response:
             return await _legacy_stream_dispatch(
                 request.method, normalized, request.url.query, dict(request.headers), body,
             )
-    return _legacy_dispatch(request.method, normalized, request.url.query, dict(request.headers), body)
+    response = _legacy_dispatch(request.method, normalized, request.url.query, dict(request.headers), body)
+    if normalized == "/portal/api/agent/release":
+        # The legacy handler clears both browser-entry Cookies. Preserve both
+        # headers across the compatibility bridge and never let the session
+        # renewal middleware recreate either one on this security boundary.
+        response.delete_cookie(_cookie_name("PORTAL"), path="/")
+        response.delete_cookie(_cookie_name("DASHBOARD"), path="/")
+    return response

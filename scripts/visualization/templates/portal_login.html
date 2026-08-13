@@ -144,7 +144,7 @@ function portalFetch(url,options){
   var headers={};
   Object.keys(options.headers||{}).forEach(function(key){headers[key]=options.headers[key]});
   var method=String(options.method||'GET').toUpperCase();
-  var csrf=localStorage.getItem('cxCsrf');
+  var csrf=localStorage.getItem('cxPortalCsrf');
   if(csrf&&method!=='GET'&&method!=='HEAD')headers['X-CSRF-Token']=csrf;
   options.headers=headers;
   options.credentials='same-origin';
@@ -152,7 +152,7 @@ function portalFetch(url,options){
 }
 
 function saveCsrf(data){
-  if(data&&data.csrf_token)localStorage.setItem('cxCsrf',data.csrf_token);
+  if(data&&data.csrf_token)localStorage.setItem('cxPortalCsrf',data.csrf_token);
 }
 
 function responseJson(response,fallback){
@@ -179,7 +179,7 @@ function beginPortalMfa(){
   var btn=document.getElementById('mfaBeginBtn');
   btn.disabled=true;
   document.getElementById('mfaError').textContent='';
-  portalFetch('/api/auth/mfa/enroll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:'initial Portal MFA enrollment'})})
+  portalFetch('/portal/api/auth/mfa/enroll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:'initial Portal MFA enrollment'})})
   .then(function(r){return responseJson(r,'MFA setup failed')})
   .then(function(data){
     document.getElementById('mfaSecret').textContent=data.secret||'';
@@ -201,7 +201,7 @@ function confirmPortalMfa(event){
   var code=document.getElementById('mfaConfirmCode').value.trim();
   btn.disabled=true;
   document.getElementById('mfaError').textContent='';
-  portalFetch('/api/auth/mfa/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({factor_id:document.getElementById('mfaSecret').dataset.factorId,code:code,reason:'confirm initial Portal MFA enrollment'})})
+  portalFetch('/portal/api/auth/mfa/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({factor_id:document.getElementById('mfaSecret').dataset.factorId,code:code,reason:'confirm initial Portal MFA enrollment'})})
   .then(function(r){return responseJson(r,'MFA confirmation failed')})
   .then(function(){
     return portalFetch('/portal/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:_pendingPortalLogin.username,password:_pendingPortalLogin.password,mfa_code:code,auth_mode:'local'})}).then(function(r){return responseJson(r,'Portal login failed')});

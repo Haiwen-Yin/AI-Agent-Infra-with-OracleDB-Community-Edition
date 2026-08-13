@@ -63,6 +63,26 @@ def test_channel_inbox_orders_pinned_channels_then_recent_activity_and_admin_get
     assert "enabledFlag(selected.pinned)" in ui
 
 
+def test_channel_background_refresh_preserves_manual_history_scroll_position():
+    root = Path(__file__).resolve().parents[1]
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    channels = ui.split("function Channels", 1)[1].split("function BarriersPage", 1)[0]
+    assert "onScroll={handleMessageScroll}" in channels
+    assert "followLatestRef.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 72" in channels
+    assert "if (followLatestRef.current)" in channels
+    assert "followLatestRef.current || nearBottom" not in channels
+
+
+def test_cursor_pager_select_keeps_the_selected_number_readable():
+    root = Path(__file__).resolve().parents[1]
+    css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")
+    pager = css.split(".cursor-pager {", 1)[1].split(".operation-feedback", 1)[0]
+    assert "width: 54px" in pager
+    assert "padding: 2px 4px" in pager
+    assert "color: var(--ink)" in pager
+    assert "background: var(--surface-strong)" in pager
+
+
 def test_channel_composer_keeps_controls_aligned_when_hints_or_feedback_expand():
     root = Path(__file__).resolve().parents[1]
     css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")

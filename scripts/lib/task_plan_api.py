@@ -443,7 +443,17 @@ def list_plans_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "
             " ORDER BY PLAN_ID FETCH FIRST :lim ROWS ONLY", params,
         )
     values = [_row_to_dict(row) for row in rows]
-    return cursor_pagination.page(values, context, lambda item: {"plan_id": str(item["plan_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"plan_id": str(item["plan_id"])})
+    count_conditions = [condition for condition in conditions if condition != "PLAN_ID > :after"]
+    count_where = " WHERE " + " AND ".join(count_conditions) if count_conditions else ""
+    count_params = {key: value for key, value in params.items() if key not in {"lim", "after"}}
+    try:
+        total = execute_query_one("SELECT COUNT(*) AS CNT FROM TASK_PLANS" + count_where, count_params)
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        # Paging remains available when an older database cannot calculate a count.
+        pass
+    return result
 
 
 def delete_plan(plan_id: str) -> bool:

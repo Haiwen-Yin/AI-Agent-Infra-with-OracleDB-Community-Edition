@@ -61,27 +61,31 @@ logger = logging.getLogger(__name__)
 sessions = {}
 
 
-def _session_timeout():
+def _session_timeout(scope='PORTAL'):
     """Return the configured web session timeout in seconds."""
     try:
         from lib import admin_management
-        return int(admin_management.session_policy('PORTAL')['idle_timeout_seconds'])
+        return int(admin_management.session_policy(str(scope or 'PORTAL').upper())['idle_timeout_seconds'])
     except Exception:
         return max(1, int(getattr(_load_server_config(), 'session_timeout', 300)))
 
 
-def _portal_absolute_session_timeout():
+def _session_absolute_timeout(scope='PORTAL'):
     try:
         from lib import admin_management
-        return int(admin_management.session_policy('PORTAL')['absolute_timeout_seconds'])
+        return int(admin_management.session_policy(str(scope or 'PORTAL').upper())['absolute_timeout_seconds'])
     except Exception:
         return 28800
 
 
-def _session_cookie(session_id):
+def _portal_absolute_session_timeout():
+    return _session_absolute_timeout('PORTAL')
+
+
+def _session_cookie(session_id, scope='PORTAL'):
     secure = '; Secure' if os.environ.get('CX_WEB_SECURE_COOKIE', '').lower() in {'1', 'true', 'yes'} else ''
     return '{}={}; Path=/; HttpOnly; Max-Age={}; SameSite=Lax{}'.format(
-        _get_cookie_name(), session_id, _portal_absolute_session_timeout(), secure
+        _get_cookie_name(scope), session_id, _session_absolute_timeout(scope), secure
     )
 
 PAGE_ROUTES = {
@@ -207,15 +211,19 @@ def _is_admin_role(role):
     return str(role or '').strip().upper() in {'ADMIN', 'ADMINISTRATOR'}
 
 
-def _get_cookie_name():
-    """Return port-specific cookie name to avoid cross-port session conflicts."""
+def _get_cookie_name(scope='PORTAL'):
+    """Return entry-scoped, port-specific cookie name for Web sessions."""
     # FastAPI is the network entrypoint from v4.3.0 onward.  Legacy page/API
     # handlers run in-process behind it, so they must use its runtime port
     # rather than the packaged config.json default (normally 8000).
     port = os.environ.get('MEMORY_SERVER_PORT', '').strip()
     if not port:
         port = str(_load_server_config().port)
-    return f"session_id_{port}"
+    normalized = str(scope or '').upper()
+    if normalized not in {'DASHBOARD', 'PORTAL'}:
+        raise ValueError('invalid session scope')
+    prefix = 'portal_session_id' if normalized == 'PORTAL' else 'dashboard_session_id'
+    return f"{prefix}_{port}"
 
 def _load_server_config():
     cfg = config.get_config()
@@ -257,7 +265,7 @@ def _portal_node_id():
     return node_id[:128]
 
 
-def _create_session(username, user_id, role, mfa_level='NONE', require_identity=False):
+def _create_session(username, user_id, role, mfa_level='NONE', require_identity=False, session_scope='PORTAL'):
     created_session = None
     try:
         principal = identity_api._row(identity_api.connection.execute_query_one(
@@ -267,7 +275,7 @@ def _create_session(username, user_id, role, mfa_level='NONE', require_identity=
         principal_id = str((principal or {}).get('principal_id') or user_id)
         created_session = identity_api.create_session(
             principal_id, str(user_id), _portal_node_id(), auth_method='LOCAL',
-            mfa_level=mfa_level, ttl_seconds=_session_timeout(),
+            mfa_level=mfa_level, ttl_seconds=_session_timeout(session_scope), session_scope=session_scope,
         )
         session_id = created_session['session_id']
     except Exception:
@@ -300,15 +308,15 @@ def _clear_portal_agent_context():
     connection.set_agent_context(None)
 
 
-def _resolve_session_as_schema_owner(raw_session_id):
+def _resolve_session_as_schema_owner(raw_session_id, session_scope='PORTAL'):
     """Resolve human Web Sessions outside the Business Agent context."""
     previous_agent_id = connection.get_current_agent_id()
     if previous_agent_id:
         connection.set_agent_context(None)
     try:
         return identity_api.resolve_session(
-            raw_session_id, ttl_seconds=_session_timeout(),
-            absolute_ttl_seconds=_portal_absolute_session_timeout(),
+            raw_session_id, ttl_seconds=_session_timeout(session_scope),
+            absolute_ttl_seconds=_session_absolute_timeout(session_scope), expected_scope=session_scope,
         )
     finally:
         connection.set_agent_context(previous_agent_id)
@@ -406,7 +414,8 @@ def _get_session(request_handler):
         return cached
     cookie = SimpleCookie(request_handler.headers.get('Cookie', ''))
     session_id = None
-    _cookie_name = _get_cookie_name()
+    session_scope = 'PORTAL' if request_handler.path.startswith('/portal') or request_handler.path == '/logout' else 'DASHBOARD'
+    _cookie_name = _get_cookie_name(session_scope)
     if _cookie_name in cookie:
         session_id = cookie[_cookie_name].value
     if not session_id:
@@ -415,7 +424,7 @@ def _get_session(request_handler):
     sess = sessions.get(session_id)
     if sess:
         try:
-            persisted = _resolve_session_as_schema_owner(session_id)
+            persisted = _resolve_session_as_schema_owner(session_id, session_scope)
             if persisted is None:
                 sessions.pop(session_id, None)
                 request_handler._cx_session_cache = None
@@ -424,9 +433,28 @@ def _get_session(request_handler):
             sess['mfa_level'] = persisted.get('mfa_level') or 'NONE'
         except Exception:
             pass
+        # The cached session may predate a server restart or an earlier
+        # workspace recovery fix. Restore its conversation lazily as well so
+        # a valid Portal user never receives an empty history by accident.
+        if session_scope == 'PORTAL' and sess.get('user_id') and not sess.get('workspace_id'):
+            previous_agent_id = connection.get_current_agent_id()
+            try:
+                connection.set_agent_context(None)
+                recent_workspace = connection.execute_query_one(
+                    "SELECT WORKSPACE_ID FROM WORKSPACES "
+                    "WHERE OWNER_USER_ID = :v_uid AND WORKSPACE_TYPE = 'CONVERSATION' "
+                    "AND STATUS = 'ACTIVE' ORDER BY UPDATED_AT DESC",
+                    {'v_uid': sess['user_id']},
+                )
+                if recent_workspace:
+                    sess['workspace_id'] = str(recent_workspace.get('workspace_id') or recent_workspace.get('WORKSPACE_ID') or '')
+            except Exception:
+                logger.warning('Unable to restore cached Portal conversation workspace', exc_info=True)
+            finally:
+                connection.set_agent_context(previous_agent_id)
     else:
         try:
-            persisted = _resolve_session_as_schema_owner(session_id)
+            persisted = _resolve_session_as_schema_owner(session_id, session_scope)
         except Exception:
             persisted = None
         if not persisted:
@@ -448,6 +476,26 @@ def _get_session(request_handler):
                 sess['role'] = role_code
         except Exception:
             pass
+        # A persisted Portal session survives a web-service restart, while
+        # this in-memory cache does not. Restore the user's latest active
+        # conversation so history remains available before any new message is
+        # sent or an Agent is reassigned.
+        if session_scope == 'PORTAL' and sess.get('user_id'):
+            previous_agent_id = connection.get_current_agent_id()
+            try:
+                connection.set_agent_context(None)
+                recent_workspace = connection.execute_query_one(
+                    "SELECT WORKSPACE_ID FROM WORKSPACES "
+                    "WHERE OWNER_USER_ID = :v_uid AND WORKSPACE_TYPE = 'CONVERSATION' "
+                    "AND STATUS = 'ACTIVE' ORDER BY UPDATED_AT DESC",
+                    {'v_uid': sess['user_id']},
+                )
+                if recent_workspace:
+                    sess['workspace_id'] = str(recent_workspace.get('workspace_id') or recent_workspace.get('WORKSPACE_ID') or '')
+            except Exception:
+                logger.warning('Unable to restore Portal conversation workspace', exc_info=True)
+            finally:
+                connection.set_agent_context(previous_agent_id)
         sessions[session_id] = sess
     timeout = _session_timeout()
     if time.time() - sess.get('last_access', sess['created_at']) > timeout:
@@ -1014,23 +1062,29 @@ class VisHandler(BaseHTTPRequestHandler):
 
         if path == '/logout':
             session_data = _get_session(self)
-            if session_data:
-                raw_session_id, sess = session_data
+            if session_data and session_data[1].get('agent_id'):
+                # A Portal exit/logout may only release an Agent claimed by
+                # this node.  The node binding prevents cross-node recycling.
+                try:
+                    agent_api.hibernate_agent(session_data[1]['agent_id'], _portal_node_id())
+                except Exception:
+                    logger.warning('Unable to release Portal Agent during logout', exc_info=True)
+            cookies = SimpleCookie(self.headers.get('Cookie', ''))
+            session_ids = []
+            for scope in ('PORTAL', 'DASHBOARD'):
+                name = _get_cookie_name(scope)
+                if name in cookies:
+                    session_ids.append(cookies[name].value)
+            for raw_session_id in session_ids:
                 sessions.pop(raw_session_id, None)
                 try:
                     identity_api.revoke_session(raw_session_id, 'logout')
                 except Exception:
-                    pass
-                # A Portal exit/logout may only release an Agent claimed by
-                # this node.  The node binding prevents cross-node recycling.
-                if sess.get('agent_id'):
-                    try:
-                        agent_api.hibernate_agent(sess['agent_id'], _portal_node_id())
-                    except Exception:
-                        pass
+                    logger.warning('Unable to revoke browser session during logout', exc_info=True)
             self.send_response(302)
             self.send_header('Location', '/login')
-            self.send_header('Set-Cookie', '{}=; Path=/; Max-Age=0; SameSite=Lax'.format(_get_cookie_name()))
+            for scope in ('PORTAL', 'DASHBOARD'):
+                self.send_header('Set-Cookie', '{}=; Path=/; Max-Age=0; SameSite=Lax'.format(_get_cookie_name(scope)))
             self.end_headers()
             return
 
@@ -1941,10 +1995,12 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'success': False, 'error': 'Invalid credentials'}, 401)
             return
 
-        session_id = _create_session(user['username'], str(user['user_id']), user.get('role', 'user'))
+        session_id = _create_session(
+            user['username'], str(user['user_id']), user.get('role', 'user'), session_scope='DASHBOARD'
+        )
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Set-Cookie', _session_cookie(session_id))
+        self.send_header('Set-Cookie', _session_cookie(session_id, 'DASHBOARD'))
         body = json.dumps({'success': True, 'session_id': session_id}).encode()
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -4187,6 +4243,7 @@ class VisHandler(BaseHTTPRequestHandler):
         if not session_data:
             self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
             return
+        release_error = ''
         try:
             connection.set_agent_context(None)
             _clear_portal_agent_context()
@@ -4196,13 +4253,46 @@ class VisHandler(BaseHTTPRequestHandler):
                 agent_api.end_session(agent_session_id)
             agent_id = sess.get('agent_id')
             if agent_id and not agent_api.hibernate_agent(agent_id, _portal_node_id()):
-                self._send_json({'success': False, 'error': 'Agent could not be released'}, 409)
-                return
+                release_error = 'Agent could not be released'
             sess.pop('agent_id', None)
             sess.pop('agent_session_id', None)
-            self._send_json({'success': True, 'message': 'Agent released'})
-        except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
+        except Exception as exc:
+            release_error = str(exc)
+            logger.warning('Portal Agent release failed; completing browser sign-out', exc_info=True)
+        finally:
+            # Portal Exit is a security boundary, not merely an Agent-pool
+            # release. Revoke this Portal session and any Dashboard session
+            # presented by the same browser so switching to /app requires a
+            # fresh Dashboard admission.
+            raw_portal_session_id = session_data[0]
+            dashboard_cookie = SimpleCookie(self.headers.get('Cookie', ''))
+            dashboard_name = _get_cookie_name('DASHBOARD')
+            raw_dashboard_session_id = (
+                dashboard_cookie[dashboard_name].value
+                if dashboard_name in dashboard_cookie else ''
+            )
+            for raw_session_id, reason in (
+                (raw_portal_session_id, 'portal exit'),
+                (raw_dashboard_session_id, 'portal exit browser sign-out'),
+            ):
+                if raw_session_id:
+                    try:
+                        identity_api.revoke_session(raw_session_id, reason)
+                    except Exception:
+                        logger.warning('Unable to revoke browser session during Portal Exit', exc_info=True)
+            sessions.pop(raw_portal_session_id, None)
+        body = json.dumps({
+            'success': True,
+            'message': 'Agent released' if not release_error else 'Browser session ended; Agent release will be reconciled',
+            'agent_release_pending': bool(release_error),
+        }).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        for scope in ('PORTAL', 'DASHBOARD'):
+            self.send_header('Set-Cookie', '{}=; Path=/; Max-Age=0; SameSite=Lax'.format(_get_cookie_name(scope)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_portal_chat_delete(self):
         session_data = _get_session(self)

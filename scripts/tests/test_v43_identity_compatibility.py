@@ -129,12 +129,13 @@ def test_server_controller_exports_the_resolved_cookie_port():
     assert 'export MEMORY_SERVER_PORT="$PORT"' in source
 
 
-def test_legacy_cookie_name_uses_fastapi_runtime_port():
+def test_legacy_cookie_name_uses_entry_scope_and_fastapi_runtime_port():
     server = Path(identity_api.__file__).resolve().parents[1] / "visualization" / "server.py"
     source = server.read_text(encoding="utf-8")
-    function = source.split("def _get_cookie_name():", 1)[1].split("\ndef _load_server_config", 1)[0]
+    function = source.split("def _get_cookie_name(scope='PORTAL'):", 1)[1].split("\ndef _load_server_config", 1)[0]
     assert "os.environ.get('MEMORY_SERVER_PORT'" in function
-    assert "return f\"session_id_{port}\"" in function
+    assert "portal_session_id" in function
+    assert "dashboard_session_id" in function
 
 
 def test_system_admin_channel_inventory_uses_global_scope(monkeypatch):

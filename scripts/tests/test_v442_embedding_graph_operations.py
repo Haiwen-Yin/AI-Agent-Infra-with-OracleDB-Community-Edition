@@ -243,9 +243,10 @@ def test_v442_all_cursor_pagers_are_single_line():
     assert ".pager-size-control" in css
     assert "flex-wrap: nowrap" in css
     assert "overflow-x: auto" in css
-    assert "min-height: 32px" in css
-    assert 'className="pager-unit"' in ui
-    assert ".cursor-pager .pager-size-control .pager-unit" in css
+    assert "min-height: 28px" in css
+    assert 'className="pager-page-status"' in ui
+    assert 'text(`${page} / ${totalPages} 页`, `${page} / ${totalPages}`)' in ui
+    assert "width: 48px" in css
 
 
 def test_v442_external_registration_is_agent_named_and_never_runtime_prefilled():

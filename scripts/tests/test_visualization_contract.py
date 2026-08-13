@@ -129,8 +129,8 @@ def test_portal_registration_check_uses_schema_owner_context():
 
 def test_portal_session_resolution_uses_schema_owner_context():
     content = SERVER_PATH.read_text(encoding="utf-8")
-    assert "def _resolve_session_as_schema_owner(raw_session_id):" in content
-    resolver = content.split("def _resolve_session_as_schema_owner(raw_session_id):", 1)[1].split(
+    assert "def _resolve_session_as_schema_owner(raw_session_id, session_scope='PORTAL'):" in content
+    resolver = content.split("def _resolve_session_as_schema_owner(raw_session_id, session_scope='PORTAL'):", 1)[1].split(
         "def _resolve_session_role_as_schema_owner", 1
     )[0]
     assert "connection.set_agent_context(None)" in resolver
@@ -138,7 +138,7 @@ def test_portal_session_resolution_uses_schema_owner_context():
     assert "ttl_seconds=" in resolver
     assert "absolute_ttl_seconds=" in resolver
     assert "connection.set_agent_context(previous_agent_id)" in resolver
-    assert "persisted = _resolve_session_as_schema_owner(session_id)" in content
+    assert "persisted = _resolve_session_as_schema_owner(session_id, session_scope)" in content
 
 
 def test_graph_profile_gate_uses_request_handler_and_stops_denied_requests():
@@ -167,11 +167,32 @@ def test_portal_login_uses_identity_mfa_and_csrf_session_contract():
     assert "mfa_level='SETUP', require_identity=True" in server
     assert "'mfa_setup_required': True" in server
     assert "id=\"mfaPanel\"" in login
-    assert "/api/auth/mfa/enroll" in login
-    assert "/api/auth/mfa/confirm" in login
-    assert "localStorage.setItem('cxCsrf',data.csrf_token)" in login
+    assert "/portal/api/auth/mfa/enroll" in login
+    assert "/portal/api/auth/mfa/confirm" in login
+    assert "localStorage.setItem('cxPortalCsrf',data.csrf_token)" in login
     assert "function portalFetch(url,options)" in chat
     assert "headers['X-CSRF-Token']=csrf" in chat
+
+
+def test_portal_exit_revokes_the_browser_dashboard_session_too():
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    chat = (TEMPLATES_DIR / "portal_chat.html").read_text(encoding="utf-8")
+    release = server.split("def _handle_portal_agent_release(self):", 1)[1].split(
+        "def _handle_portal_chat_delete", 1
+    )[0]
+    assert "portal exit browser sign-out" in release
+    assert "_get_cookie_name('DASHBOARD')" in release
+    assert "identity_api.revoke_session(raw_session_id, reason)" in release
+    assert "dashboard_session_id_" in chat
+    assert "cxDashboardCsrf" in chat
+
+
+def test_control_plane_static_assets_are_not_reused_after_a_security_fix():
+    app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    static_route = app.split('def static_file(file_path: str)', 1)[1].split(
+        'class RegistrationBody', 1
+    )[0]
+    assert 'headers={"Cache-Control": "no-store"}' in static_route
 
 
 def test_dashboard_and_portal_use_the_mfa_dashboard_entry():
@@ -355,6 +376,50 @@ def test_portal_exit_waits_for_agent_release_before_redirect():
     assert "if(!response.ok||!result.success)" in release
     assert "session_id_'+window.location.port" in release
     assert release.index("await portalFetch") < release.index("window.location.href")
+
+
+def test_portal_exit_clears_browser_admission_even_when_agent_release_fails():
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    chat = (TEMPLATES_DIR / "portal_chat.html").read_text(encoding="utf-8")
+    release = server.split("def _handle_portal_agent_release(self):", 1)[1].split(
+        "def _handle_portal_chat_delete", 1
+    )[0]
+    browser_exit = chat.split("async function releaseAgent(){", 1)[1].split("\n}", 1)[0]
+    assert "agent_release_pending" in release
+    assert "for scope in ('PORTAL', 'DASHBOARD')" in release
+    assert "finally{" in browser_exit
+    assert "window.location.href='/portal/login'" in browser_exit
+
+
+def test_portal_exit_is_not_overwritten_by_session_renewal_middleware():
+    app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    middleware = app.split("async def clear_agent_database_context", 1)[1].split(
+        "def _local_node_id", 1
+    )[0]
+    route = app.split("async def legacy_compatibility", 1)[1]
+    assert '"/portal/api/agent/release"' in middleware
+    assert 'if normalized == "/portal/api/agent/release":' in route
+    assert 'response.delete_cookie(_cookie_name("PORTAL"), path="/")' in route
+    assert 'response.delete_cookie(_cookie_name("DASHBOARD"), path="/")' in route
+
+
+def test_portal_session_recovery_restores_the_latest_conversation_workspace():
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    resolver = server.split("def _get_session(request_handler):", 1)[1].split(
+        "def _authenticate_local", 1
+    )[0]
+    assert "WORKSPACE_TYPE = 'CONVERSATION'" in resolver
+    assert "ORDER BY UPDATED_AT DESC" in resolver
+    assert "Unable to restore Portal conversation workspace" in resolver
+
+
+def test_legacy_portal_requests_resolve_the_portal_scoped_session_cookie():
+    app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
+    gate = app.split("def _legacy_gate(request: Request, path: str)", 1)[1].split(
+        '@app.get("/static/', 1
+    )[0]
+    assert 'entry = "PORTAL" if path.startswith("/portal/api/") else "APP"' in gate
+    assert 'request, "PORTAL" if entry == "PORTAL" else "DASHBOARD"' in gate
 
 
 def test_monitor_metrics_use_pg_session_columns_and_show_sample_state():
@@ -880,7 +945,8 @@ def test_entry_access_is_enforced_by_dashboard_and_portal_backends():
     web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
     server = SERVER_PATH.read_text(encoding="utf-8")
     assert 'entry_allowed(str(user["principal_id"]), "APP")' in web_app
-    assert 'entry_allowed(str(session["principal_id"]), "APP")' in web_app
+    assert 'entry = "PORTAL" if scope == "PORTAL" else "APP"' in web_app
+    assert 'entry_allowed(str(session["principal_id"]), entry)' in web_app
     assert 'entry = "PORTAL" if path.startswith("/portal/api/") else "APP"' in web_app
     assert "identity_api.entry_allowed(principal_id, 'PORTAL')" in server
     assert "identity_api.entry_allowed(" in server and "'PORTAL'" in server

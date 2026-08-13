@@ -25,6 +25,7 @@ def delegated_scope(monkeypatch):
         monkeypatch.setattr(module.identity_api, "effective_access", lambda *_args: {"decision": "DENY"})
         monkeypatch.setattr(module.identity_api, "_agent_visibility_clause", lambda *_args: "SCOPE_CLAUSE(:principal_id)")
         monkeypatch.setattr(module, "execute_query", lambda sql, params, captured=captured: captured.append((sql, params)) or [])
+        monkeypatch.setattr(module, "execute_query_one", lambda *_args: {"cnt": 0})
     return captured
 
 

@@ -183,6 +183,38 @@ def test_session_ttl_is_capped_and_expiry_is_enforced(monkeypatch):
     assert identity_api.resolve_session(session["session_id"]) is None
 
 
+def test_dashboard_and_portal_sessions_are_server_side_isolated(monkeypatch):
+    db = _SessionConnection()
+    monkeypatch.setattr(identity_api, "connection", db)
+
+    dashboard = identity_api.create_session(
+        "human-1", "user-1", "node-1", session_scope="DASHBOARD",
+    )
+    assert identity_api.resolve_session(
+        dashboard["session_id"], expected_scope="DASHBOARD",
+    ) is not None
+    assert identity_api.resolve_session(
+        dashboard["session_id"], expected_scope="PORTAL",
+    ) is None
+
+    portal = identity_api.create_session(
+        "human-1", "user-1", "node-1", session_scope="PORTAL",
+    )
+    assert identity_api.resolve_session(
+        portal["session_id"], expected_scope="PORTAL",
+    ) is not None
+    assert identity_api.resolve_session(
+        portal["session_id"], expected_scope="DASHBOARD",
+    ) is None
+
+    federated = identity_api.create_session(
+        "human-1", "user-1", "node-1", auth_method="OIDC", session_scope="DASHBOARD",
+    )
+    assert identity_api.resolve_session(
+        federated["session_id"], expected_scope="DASHBOARD",
+    ) is not None
+
+
 def test_password_reset_token_has_one_winner_and_shared_transaction(monkeypatch):
     db = _PasswordConnection()
     monkeypatch.setattr(security_lifecycle, "connection", db)

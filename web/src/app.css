@@ -576,26 +576,25 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 12px;
   flex-wrap: nowrap;
   white-space: nowrap;
-  min-height: 32px;
+  min-height: 28px;
   overflow: visible;
 }
 .cursor-pager > * {
   flex: 0 0 auto;
 }
-.cursor-pager .pager-size-control { display: inline-flex; flex: 0 0 auto; flex-flow: row nowrap; align-items: center; gap: 5px; width: max-content; min-width: max-content; height: 32px; margin: 0; padding: 0; white-space: nowrap; line-height: 1; }
+.cursor-pager .pager-size-control { display: inline-flex; flex: 0 0 auto; flex-flow: row nowrap; align-items: center; gap: 4px; width: max-content; min-width: max-content; height: 28px; margin: 0; padding: 0; white-space: nowrap; line-height: 1; }
 .cursor-pager .pager-size-control, .cursor-pager .pager-size-control * { box-sizing: border-box; }
-.cursor-pager .pager-size-control > span { display: inline-flex; align-items: center; flex: 0 0 auto; height: 30px; white-space: nowrap; word-break: keep-all; line-height: 1; }
-.cursor-pager .pager-size-control select { display: inline-flex; align-items: center; flex: 0 0 auto; height: 30px; }
-.cursor-pager .pager-size-control .pager-unit { color: var(--muted); font-size: 11px; }
-.cursor-pager .pager-page-status { min-width: 104px; text-align: center; }
-.cursor-pager label select { display: inline-block; width: auto; min-width: 54px; flex: 0 0 auto; }
-.cursor-pager select { min-height: 30px; padding: 3px 6px; }
+.cursor-pager .pager-size-control > span { display: inline-flex; align-items: center; flex: 0 0 auto; height: 28px; white-space: nowrap; word-break: keep-all; line-height: 1; }
+.cursor-pager .pager-size-control select { display: inline-flex; align-items: center; flex: 0 0 auto; width: 54px; min-width: 54px; height: 28px; min-height: 28px; padding: 2px 4px; font-size: 12px; line-height: 1; color: var(--ink); background: var(--surface-strong); }
+.cursor-pager .pager-page-status { display: inline-flex; align-items: center; justify-content: center; min-width: 68px; height: 28px; text-align: center; white-space: nowrap; line-height: 1; }
+.cursor-pager label select { display: inline-block; width: 54px; min-width: 54px; flex: 0 0 auto; }
+.cursor-pager select { min-height: 28px; padding: 2px 4px; color: var(--ink); background: var(--surface-strong); }
 .cursor-pager button { white-space: nowrap; }
 .operation-feedback { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 4px; color: var(--ink); background: var(--surface-soft); font-size: 12px; line-height: 1.45; }
 .automation-boundary {
@@ -1399,12 +1398,6 @@ tbody tr:hover {
   gap: 5px;
   margin: 8px 0;
   font-size: 10px;
-}
-.channel-list .cursor-pager .pager-size-control > span,
-.channel-list .cursor-pager .pager-unit { display: none; }
-.channel-list .cursor-pager .pager-page-status { min-width: 70px; }
-.channel-list .cursor-pager .pager-size-control select {
-  min-width: 46px;
 }
 .channel-list .cursor-pager button {
   min-width: 0;

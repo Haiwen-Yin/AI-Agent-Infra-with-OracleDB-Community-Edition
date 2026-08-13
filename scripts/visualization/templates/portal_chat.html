@@ -72,7 +72,7 @@ function portalFetch(url,options){
   var headers={};
   Object.keys(options.headers||{}).forEach(function(key){headers[key]=options.headers[key]});
   var method=String(options.method||'GET').toUpperCase();
-  var csrf=localStorage.getItem('cxCsrf');
+  var csrf=localStorage.getItem('cxPortalCsrf');
   if(csrf&&method!=='GET'&&method!=='HEAD')headers['X-CSRF-Token']=csrf;
   options.headers=headers;
   options.credentials='same-origin';
@@ -285,11 +285,16 @@ async function releaseAgent(){
     var response=await portalFetch('/portal/api/agent/release',{method:'POST'});
     var result=await response.json();
     if(!response.ok||!result.success)throw new Error(result.error||'Agent release failed');
-    document.cookie='session_id_'+window.location.port+'=;Path=/;Max-Age=0;SameSite=Lax';
-    localStorage.removeItem('cxCsrf');
-    window.location.href='/portal/login';
   }catch(error){
-    alert((document.documentElement.getAttribute('data-lang')==='zh'?'退出失败：':'Exit failed: ')+error.message);
+    // Exit must always remove this browser's admission. The server also
+    // revokes the database session even if Agent hibernation is unavailable.
+    console.warn('Portal Agent release needs reconciliation:',error);
+  }finally{
+    document.cookie='portal_session_id_'+window.location.port+'=;Path=/;Max-Age=0;SameSite=Lax';
+    document.cookie='dashboard_session_id_'+window.location.port+'=;Path=/;Max-Age=0;SameSite=Lax';
+    localStorage.removeItem('cxPortalCsrf');
+    localStorage.removeItem('cxDashboardCsrf');
+    window.location.href='/portal/login';
   }
 }
 

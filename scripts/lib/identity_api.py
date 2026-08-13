@@ -1339,7 +1339,14 @@ def authenticate_local(username: str, password: str) -> Optional[Dict[str, Any]]
 
 
 def create_session(principal_id: str, user_id: str, node_id: str, auth_method: str = "LOCAL",
-                   mfa_level: str = "NONE", ttl_seconds: int = 300) -> Dict[str, str]:
+                   mfa_level: str = "NONE", ttl_seconds: int = 300,
+                   session_scope: str = "DASHBOARD") -> Dict[str, str]:
+    scope = str(session_scope or "").upper()
+    if scope not in {"DASHBOARD", "PORTAL"}:
+        raise IdentityError("session scope is invalid")
+    method = str(auth_method or "LOCAL").split(":", 1)[0].upper()
+    if not method or len(method) > 20:
+        raise IdentityError("session authentication method is invalid")
     raw_id = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(24)
     digest = hashlib.sha256(raw_id.encode("ascii")).hexdigest()
@@ -1360,7 +1367,7 @@ def create_session(principal_id: str, user_id: str, node_id: str, auth_method: s
     connection.execute(
         "INSERT INTO CX_WEB_SESSIONS(SESSION_DIGEST, PRINCIPAL_ID, USER_ID, AUTH_METHOD, MFA_LEVEL, NODE_ID, CLIENT_SUMMARY, PERMISSION_VERSION, CSRF_DIGEST, CREATED_AT, EXPIRES_AT) "
         "VALUES (:digest, :principal_id, :user_id, :auth_method, :mfa_level, :node_id, :client_summary, :permission_version, :csrf_digest, :created_at, :expires_at)",
-        {"digest": digest, "principal_id": principal_id, "user_id": user_id, "auth_method": auth_method,
+        {"digest": digest, "principal_id": principal_id, "user_id": user_id, "auth_method": f"{method}:{scope}",
          "mfa_level": mfa_level, "node_id": node_id, "client_summary": "", "permission_version": permission_version,
          "csrf_digest": csrf_digest, "created_at": created, "expires_at": expires},
     )
@@ -1368,7 +1375,8 @@ def create_session(principal_id: str, user_id: str, node_id: str, auth_method: s
 
 
 def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 300,
-                    absolute_ttl_seconds: int = SESSION_MAX_SECONDS) -> Optional[Dict[str, Any]]:
+                    absolute_ttl_seconds: int = SESSION_MAX_SECONDS,
+                    expected_scope: str = "") -> Optional[Dict[str, Any]]:
     if not raw_session_id:
         return None
     digest = hashlib.sha256(raw_session_id.encode("utf-8")).hexdigest()
@@ -1377,6 +1385,11 @@ def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 
         "FROM CX_WEB_SESSIONS WHERE SESSION_DIGEST = :digest", {"digest": digest}
     ))
     if not row or row.get("revoked_at") is not None:
+        return None
+    scope = str(expected_scope or "").upper()
+    if scope and scope not in {"DASHBOARD", "PORTAL"}:
+        raise IdentityError("session scope is invalid")
+    if scope and str(row.get("auth_method") or "").upper().rsplit(":", 1)[-1] != scope:
         return None
     now = _now()
     try:

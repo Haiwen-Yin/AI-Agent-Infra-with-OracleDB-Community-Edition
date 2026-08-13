@@ -313,7 +313,21 @@ def current_memories_cursor(
         " ORDER BY f.FAMILY_ID FETCH FIRST :lim ROWS ONLY", params,
     )
     values = [_version_row(row) for row in rows]
-    return cursor_pagination.page(values, context, lambda item: {"family_id": str(item["family_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"family_id": str(item["family_id"])})
+    count_conditions = [condition for condition in conditions if condition != "f.FAMILY_ID > :after"]
+    count_params = {key: value for key, value in params.items() if key not in {"lim", "after"}}
+    try:
+        total = execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM CX_MEMORY_FAMILIES f "
+            "JOIN CX_MEMORY_VERSIONS v ON v.VERSION_ID=f.CURRENT_VERSION_ID WHERE " +
+            " AND ".join(count_conditions),
+            count_params,
+        )
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        # Do not fail a usable inventory page solely because a count query fails.
+        pass
+    return result
 
 
 def get_family(family_id: str, *, include_history: bool = False) -> Optional[dict[str, Any]]:

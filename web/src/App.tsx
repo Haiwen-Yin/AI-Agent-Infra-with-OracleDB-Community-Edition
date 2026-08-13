@@ -161,7 +161,7 @@ async function api<T = Row>(
     !headers.has("Content-Type")
   )
     headers.set("Content-Type", "application/json");
-  const csrf = localStorage.getItem("cxCsrf");
+  const csrf = localStorage.getItem("cxDashboardCsrf");
   if (csrf && options.method && options.method !== "GET")
     headers.set("X-CSRF-Token", csrf);
   requestActivity(1);
@@ -314,7 +314,7 @@ function App() {
         onModeChange={setAuthMode}
         onLogin={(value) => {
           if (value.csrf_token)
-            localStorage.setItem("cxCsrf", value.csrf_token);
+            localStorage.setItem("cxDashboardCsrf", value.csrf_token);
           setAuthSetup(null);
           setMe(value);
           api<Row>("/api/capabilities")
@@ -345,7 +345,7 @@ function App() {
           try {
             await api("/api/auth/logout", { method: "POST" });
           } finally {
-            localStorage.removeItem("cxCsrf");
+            localStorage.removeItem("cxDashboardCsrf");
             setMe(null);
           }
         }}
@@ -593,7 +593,7 @@ function AuthScreen({
         });
         if (value.mfa_setup_required) {
           if (value.csrf_token)
-            localStorage.setItem("cxCsrf", value.csrf_token);
+            localStorage.setItem("cxDashboardCsrf", value.csrf_token);
           setSetup(value);
           return;
         }
@@ -1596,7 +1596,7 @@ function NativeAgentsPage({
       <div className="metric-grid native-summary-grid">
         <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{bootstrapStatusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("初始化只创建和校验平台管理智能体，不调用模型。智能体是否可执行由下方“状态”和“模型配置”决定。", "Bootstrap only creates and verifies platform management Agents; it makes no model call. Execution readiness is determined by each Agent's status and model profile below.")}</p>{bootstrapFeedback && <p className="operation-feedback" role="status">{bootstrapFeedback}</p>}{canManage && <button type="button" className="primary-button" disabled={busy} onClick={async () => { setBusy(true); setBootstrapFeedback(text("正在检查并初始化平台原生智能体...", "Checking and initializing platform-native Agents...")); try { const result = await api<Row>("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); const completed = ["READY", "COMPLETED"].includes(String(result.status || "").toUpperCase()); const message = completed ? text("平台原生智能体初始化已完成；当前状态已刷新。", "Platform-native Agent initialization is complete and the current status was refreshed.") : text(`初始化已处理，当前状态：${bootstrapStatusLabel(result.status)}。`, `Initialization was processed. Current status: ${bootstrapStatusLabel(result.status)}.`); setBootstrapFeedback(message); onNotice(message); } catch (error) { const message = (error as Error).message; setBootstrapFeedback(message); onNotice(message); } finally { setBusy(false); } }}><Bot className={busy ? "spin" : ""} size={15} />{busy ? text("处理中", "Working") : text("初始化或刷新状态", "Initialize or refresh status")}</button>}</InfoPanel>
       </div>
-        <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button type="button" className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button type="button" className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <><button type="button" className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)} title={!profiles.length ? text("请先创建 LLM 服务商配置", "Create an LLM Provider Profile first") : text("激活智能体", "Activate Agent")}>{text("激活", "Activate")}</button>{!profiles.length && <small className="button-hint">{text("请先配置模型", "Configure a model first")}</small>}</>} </span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
+        <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button type="button" className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button type="button" className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <><button type="button" className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)} title={!profiles.length ? text("请先创建 LLM 服务商配置", "Create an LLM Provider Profile first") : text("激活智能体", "Activate Agent")}>{text("激活", "Activate")}</button>{!profiles.length && <small className="button-hint">{text("请先配置模型", "Configure a model first")}</small>}</>} </span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /><CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /></InfoPanel>
       <InfoPanel title={text("受管 Skill / Tool 清单", "Managed Skill / Tool manifests")} text={text}><p className="cx-form-hint">{text("内置清单按版本和摘要固定，普通读取不暴露私钥；业务 Agent 只能继承已审批清单。", "Built-in manifests are pinned by version and digest; ordinary reads never expose private keys, and business Agents may inherit only approved manifests.")}</p><DataTable headers={[text("清单", "Manifest"), text("类型", "Kind"), text("版本", "Version"), text("校验", "Verification"), text("状态", "Status")]} rows={manifests.map((item) => [item.manifest_key, displayRowValue(lang, item.manifest_kind), item.version, statusLabel(item.signature_status), statusLabel(item.status)])} empty={text("暂无受管清单", "No managed manifests")} text={text} /></InfoPanel>
       <div className="two-column-panels">
       <InfoPanel title={text("LLM 服务商配置", "LLM Provider Profiles")} text={text}><p className="cx-form-hint">{text("模型服务只提供推理能力，不构成授权边界。先测试当前填写内容，再允许保存。API Key 如填写，将以加密密文保存；探测和审计均不会记录或回显密钥。", "The model service provides reasoning only and never defines authorization. Test the current input before saving. When provided, the API key is stored as ciphertext; neither the probe nor audit records it or returns it.")}</p>{profileFeedback && <p className="operation-feedback" role="status">{profileFeedback}</p>}<form ref={profileFormRef} className="configuration-form native-profile-form" onChange={() => { setProfileDraftVersion((value) => value + 1); setTestedProfileDraftVersion(null); setProfileFeedback(""); }} onSubmit={submitProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("服务地址", "Provider URL")} hint={text("使用受控的 OpenAI 兼容服务根地址；测试使用 /chat/completions。", "Use an approved OpenAI-compatible service root; testing uses /chat/completions.")}><input name="provider_url" type="url" required /></ConfigField><ConfigField label={text("模型 ID", "Model ID")} hint={text("服务端实际发布的模型标识。", "Model identifier exposed by the provider.")}><input name="model_id" required /></ConfigField><ConfigField label={text("API Key", "API key")} hint={text("如填写，仅保存密文且不会回显；留空即按无 API Key 测试和保存。", "When provided, stored as ciphertext and never returned; leave empty to test and save without an API key.")}><input name="api_key" type="password" autoComplete="new-password" /></ConfigField><ConfigField label={text("保存原因", "Save reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("测试", "Test")} hint={testedProfileDraftVersion === profileDraftVersion ? text("当前填写内容已验证，可以保存。", "The current input is verified and can be saved.") : text("测试不会保存配置或密钥。", "Testing does not save the profile or API key.")} action><button type="button" className="small-button" disabled={busy || testingProfile} onClick={() => void testProfile()}><Activity className={testingProfile ? "spin" : ""} size={15} />{testingProfile ? text("测试中", "Testing") : text("测试服务", "Test service")}</button></ConfigField><ConfigField label={text("操作", "Action")} hint={text("仅当前填写内容测试通过后可以保存。", "Saving is available only after the current input passes testing.")} action><button className="primary-button" disabled={busy || testedProfileDraftVersion !== profileDraftVersion}><Plus size={15} />{busy ? text("保存中", "Saving") : text("保存配置", "Save profile")}</button></ConfigField></form><DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health")]} rows={profiles.map((item) => [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), statusLabel(item.health_state)])} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} /></InfoPanel>
@@ -1631,6 +1631,11 @@ function MemoryLifecyclePage({
   const [chainData, setChainData] = useState<Row>({ nodes: [], relations: [] });
   const [loading, setLoading] = useState(true);
   const [libraryMode, setLibraryMode] = useState<"list" | "graph">("list");
+  const [libraryItems, setLibraryItems] = useState<Row[]>([]);
+  const [libraryPageSize, setLibraryPageSize] = useState(20);
+  const [libraryCursorHistory, setLibraryCursorHistory] = useState<string[]>([""]);
+  const [libraryNextCursor, setLibraryNextCursor] = useState("");
+  const [libraryTotalItems, setLibraryTotalItems] = useState<number | undefined>(undefined);
   const load = async () => {
     setLoading(true);
     try {
@@ -1649,6 +1654,35 @@ function MemoryLifecyclePage({
     }
   };
   useEffect(() => { void load(); }, []);
+  const loadLibrary = async (cursor = libraryCursorHistory[libraryCursorHistory.length - 1] || "", size = libraryPageSize) => {
+    setLoading(true);
+    try {
+      const value = await api<Row>(`/api/memory/inventory?page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      setLibraryItems(listPayload(value, ["memories", "items"]));
+      setLibraryNextCursor(String(value.next_cursor || ""));
+      setLibraryTotalItems(typeof value.total_items === "number" ? value.total_items : undefined);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("加载记忆库失败", "Memory Library loading failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (view === "library" && libraryMode === "list") void loadLibrary();
+  }, [view, libraryMode]);
+  const changeLibraryPageSize = (size: number) => {
+    setLibraryPageSize(size); setLibraryCursorHistory([""]); setLibraryNextCursor(""); void loadLibrary("", size);
+  };
+  const nextLibraryPage = () => {
+    if (!libraryNextCursor) return;
+    const history = [...libraryCursorHistory, libraryNextCursor];
+    setLibraryCursorHistory(history); void loadLibrary(libraryNextCursor);
+  };
+  const previousLibraryPage = () => {
+    if (libraryCursorHistory.length <= 1) return;
+    const history = libraryCursorHistory.slice(0, -1);
+    setLibraryCursorHistory(history); void loadLibrary(history[history.length - 1]);
+  };
   const openChain = async (item: Row) => {
     setSelected(item);
     setView("chain");
@@ -1699,9 +1733,9 @@ function MemoryLifecyclePage({
       <InfoPanel title={text("待复核候选", "Candidates awaiting review")} text={text}><strong className="metric-value">{candidates.filter((item) => item.status === "PENDING").length}</strong><p>{text("语义合并、替换、冲突与范围扩展需要受控复核。", "Semantic merge, replacement, conflict, and scope expansion remain governed.")}</p></InfoPanel>
       <InfoPanel title={text("整理作业", "Consolidation jobs")} text={text}><strong className="metric-value">{jobs.length}</strong><p>{text("先预览影响，再执行受策略约束的整理。", "Preview impact before policy-governed organization work.")}</p></InfoPanel>
     </div>}
-    {!loading && view === "library" && <>
+    {view === "library" && <>
       <ViewToggle value={libraryMode} options={[["list", text("列表", "List"), List], ["graph", text("关系图", "Graph"), Network]]} onChange={(value) => setLibraryMode(value as "list" | "graph")} />
-      {libraryMode === "graph" ? <NetworkGraph nodes={nodes} edges={payload.edges || []} lang={lang} title={text("记忆关系图", "Memory relationship graph")} loading={false} text={text} onSelect={openChain} showFilters /> : <InfoPanel title={text("当前记忆库", "Current Memory library")} text={text}><p className="cx-form-hint">{text("点击条目查看可授权的版本链与关系；历史内容不会在此预加载。", "Click an item to inspect its authorized version chain and relationships; historical bodies are not preloaded here.")}</p><DataTable headers={[text("标题", "Title"), text("类型", "Type"), text("范围", "Scope"), text("状态", "State"), text("版本", "Version")]} rows={nodes.map((item: Row) => [<button className="text-button" onClick={() => void openChain(item)}>{displayRowValue(lang, item.label || item.title)}</button>, displayRowValue(lang, item.category || item.memory_type), displayRowValue(lang, item.memory_scope), displayRowValue(lang, item.lifecycle_state), item.version_number || "-"])} empty={text("当前权限范围内没有可用记忆", "No usable Memory is visible in the current authorization scope")} text={text} /></InfoPanel>}
+      {libraryMode === "graph" ? <NetworkGraph nodes={nodes} edges={payload.edges || []} lang={lang} title={text("记忆关系图", "Memory relationship graph")} loading={loading} text={text} onSelect={openChain} showFilters /> : <InfoPanel title={text("当前记忆库", "Current Memory library")} text={text}><p className="cx-form-hint">{text("点击条目查看可授权的版本链与关系；历史内容不会在此预加载。", "Click an item to inspect its authorized version chain and relationships; historical bodies are not preloaded here.")}</p>{!loading && <CursorPager pageSize={libraryPageSize} page={libraryCursorHistory.length} totalItems={libraryTotalItems} hasMore={Boolean(libraryNextCursor)} loading={loading} onPageSize={changeLibraryPageSize} onPrevious={previousLibraryPage} onNext={nextLibraryPage} text={text} />}{loading ? <PageLoading text={text} /> : <DataTable headers={[text("标题", "Title"), text("类型", "Type"), text("范围", "Scope"), text("状态", "State"), text("版本", "Version")]} rows={libraryItems.map((item: Row) => [<button className="text-button" onClick={() => void openChain(item)}>{displayRowValue(lang, item.title || item.label)}</button>, displayRowValue(lang, item.memory_type || item.category), displayRowValue(lang, item.memory_scope), displayRowValue(lang, item.lifecycle_state), item.version_number || "-"])} empty={text("当前权限范围内没有可用记忆", "No usable Memory is visible in the current authorization scope")} text={text} />}{!loading && <CursorPager pageSize={libraryPageSize} page={libraryCursorHistory.length} totalItems={libraryTotalItems} hasMore={Boolean(libraryNextCursor)} loading={loading} onPageSize={changeLibraryPageSize} onPrevious={previousLibraryPage} onNext={nextLibraryPage} text={text} />}</InfoPanel>}
     </>}
     {!loading && view === "chain" && <>
       <InfoPanel title={text("记忆链", "Memory chain")} text={text}><p className="cx-form-hint">{text("链路使用有界关系遍历。推断关系是证据，不构成授权或事实权威。", "Chains use bounded traversal. Inferred relations are evidence, not authority or authorization.")}</p></InfoPanel>
@@ -2237,8 +2271,8 @@ function CursorPager({
 }) {
   const totalPages = totalItems === undefined ? null : Math.max(1, Math.ceil(totalItems / pageSize));
   return <div className="cursor-pager">
-    <div className="pager-size-control"><span>{text("每页", "Per page")}</span><select aria-label={text("每页数量", "Items per page")} value={pageSize} disabled={loading} onChange={(event) => onPageSize(Number(event.target.value))}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select><span className="pager-unit">{text("条", "items")}</span></div>
-    <span className="pager-page-status" aria-live="polite">{totalPages === null ? (hasMore ? text(`第 ${page} 页 · 还有下一页`, `Page ${page} · more pages`) : text(`第 ${page} 页 · 已到末页`, `Page ${page} · last page`)) : text(`第 ${page} / ${totalPages} 页`, `Page ${page} / ${totalPages}`)}</span>
+    <label className="pager-size-control"><span>{text("每页", "Per page")}</span><select aria-label={text("每页数量", "Items per page")} value={pageSize} disabled={loading} onChange={(event) => onPageSize(Number(event.target.value))}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+    <span className="pager-page-status" aria-live="polite">{totalPages === null ? text(`${page} / ${page} 页`, `${page} / ${page}`) : text(`${page} / ${totalPages} 页`, `${page} / ${totalPages}`)}</span>
     <button className="small-button" disabled={loading || page <= 1} onClick={onPrevious}>{text("上一页", "Previous")}</button>
     <button className="small-button" disabled={loading || !hasMore} onClick={onNext}>{text("下一页", "Next")}</button>
   </div>;
@@ -2461,15 +2495,18 @@ function DataPage({
           {loading ? (
             <PageLoading text={text} />
           ) : (
-            <DataTable
-              headers={config.labels.map((label) => text(label[0], label[1]))}
-              rows={rows}
-              empty={text(
-                "当前权限范围内没有数据",
-                "No data is visible within the current authorization scope",
-              )}
-              text={text}
-            />
+            <>
+              <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />
+              <DataTable
+                headers={config.labels.map((label) => text(label[0], label[1]))}
+                rows={rows}
+                empty={text(
+                  "当前权限范围内没有数据",
+                  "No data is visible within the current authorization scope",
+                )}
+                text={text}
+              />
+            </>
           )}
           {!loading && <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
         </InfoPanel>
@@ -4243,6 +4280,7 @@ function ApprovalsPage({
           empty={text(emptyByState[filter][0], emptyByState[filter][1])}
           text={text}
         />
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
       </InfoPanel>
       <DetailDrawer
         open={Boolean(detail)}
@@ -4371,6 +4409,7 @@ function AuditPage({
           )}
           text={text}
         />
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
       </InfoPanel>
       <InfoPanel
         title={text("留存与证据", "Retention and evidence")}
@@ -4745,6 +4784,7 @@ function CompliancePage({
     {tab === "findings" && <InfoPanel title={text("发现", "Findings")} text={text}>
       <p className="cx-form-hint">{text("仅确定性规则和已验证证据可以标记为不合规；缺少活动或边界证据不会自动定性为违规。点击条目查看详情。", "Only deterministic rules with verified evidence may mark an Agent non-compliant. Missing activity or boundary evidence is not a violation by itself. Select a row for details.")}</p>
       <DataTable headers={[text("严重性", "Severity"), text("智能体", "Agent"), text("规则", "Rule"), text("状态", "Status"), text("最近观察", "Last observed"), text("", "")]} rows={findings.map((item) => [displayRowValue(lang, item.severity), String(item.agent_id || "-"), String(item.rule_code || "-"), displayRowValue(lang, item.status), String(item.last_observed_at || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "finding" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规发现", "No compliance findings")} />
+      <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={busy} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />
     </InfoPanel>}
     {tab === "profiles" && <>
       <InfoPanel title={text("合规控制模板", "Compliance control templates")} text={text}>
@@ -5051,6 +5091,7 @@ function AgentsPage({
             )}
             text={text}
           />
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
       </InfoPanel>
       <InfoPanel
         title={text("Enrollment 历史", "Enrollment history")}
@@ -5074,6 +5115,7 @@ function AgentsPage({
           empty={text("暂无记录", "No records")}
           text={text}
         />
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
       </InfoPanel>
     </section>
   );
@@ -5354,12 +5396,18 @@ function Channels({
   useEffect(() => {
     const stream = messageStreamRef.current;
     if (!stream) return;
-    const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 72;
-    if (followLatestRef.current || nearBottom) {
+    if (followLatestRef.current) {
       window.requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
     }
     if (!messages.some((item) => String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING")) followLatestRef.current = false;
   }, [messages]);
+  const handleMessageScroll = () => {
+    const stream = messageStreamRef.current;
+    if (!stream) return;
+    // Background streaming refreshes may update the message data, but the
+    // reader controls whether those updates follow the newest message.
+    followLatestRef.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 72;
+  };
   const refresh = async () => {
     await load();
     if (selected) await loadSelected(selected);
@@ -5800,6 +5848,7 @@ function Channels({
                 </span>
               </button>
             ))}
+            <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={channelTotal} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
           </aside>
           <div className="channel-main">
             <div className="channel-title">
@@ -5815,7 +5864,7 @@ function Channels({
                 <ShieldCheck size={18} />
               </div>
             </div>
-            <div className="message-stream" ref={messageStreamRef}>
+            <div className="message-stream" ref={messageStreamRef} onScroll={handleMessageScroll}>
               {messages.map((item) => (
                 <article className="message" key={item.message_id}>
                   <button className="message-avatar" type="button" onClick={() => setSelectedMessagePrincipal(members.find((member) => String(member.principal_id) === String(item.principal_id)) || { principal_id: item.principal_id, display_name: item.sender_display_name, principal_type: item.sender_principal_type, principal_status: item.sender_status })} title={text("查看主体信息", "View principal details")}>
@@ -7013,6 +7062,7 @@ function UsersPage({
               <p className="empty-text">{text("暂无用户", "No users")}</p>
             )}
           </div>
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
         </InfoPanel>
       </div>
       {selected && (
@@ -7533,6 +7583,7 @@ function MonitorDetails({
             text={text}
           />
         )}
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
       </InfoPanel>
     </section>
   );

@@ -261,7 +261,20 @@ def list_specs_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "
         " ORDER BY e.ENTITY_ID FETCH FIRST :lim ROWS ONLY", params,
     )
     values = [sanitize_row(row) for row in rows]
-    return cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
+    count_conditions = [condition for condition in conditions if condition != "e.ENTITY_ID>:after"]
+    count_params = {key: value for key, value in params.items() if key not in {"lim", "after"}}
+    try:
+        total = execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM ENTITIES e JOIN SPEC_META sm "
+            "ON sm.ENTITY_ID=e.ENTITY_ID AND sm.ENTITY_TYPE=e.ENTITY_TYPE WHERE " +
+            " AND ".join(count_conditions),
+            count_params,
+        )
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def create_plan_from_spec(spec_id: str, agent_id: str) -> str:

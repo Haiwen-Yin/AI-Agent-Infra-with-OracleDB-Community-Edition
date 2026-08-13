@@ -259,7 +259,20 @@ def search_knowledge_cursor(
         "WHERE " + " AND ".join(conditions) + " ORDER BY e.ENTITY_ID FETCH FIRST :lim ROWS ONLY", params,
     )
     values = [_row_to_dict(row) for row in rows]
-    return cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"entity_id": str(item["entity_id"])})
+    count_conditions = [condition for condition in conditions if condition != "e.ENTITY_ID > :after"]
+    count_params = {key: value for key, value in params.items() if key not in {"lim", "after"}}
+    try:
+        total = execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM ENTITIES e JOIN KNOWLEDGE_META km "
+            "ON km.ENTITY_ID=e.ENTITY_ID AND km.ENTITY_TYPE='KNOWLEDGE' WHERE " +
+            " AND ".join(count_conditions),
+            count_params,
+        )
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def get_due_reviews(limit: int = 50) -> List[Dict[str, Any]]:

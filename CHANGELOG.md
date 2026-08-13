@@ -2,6 +2,9 @@
 
 ## v4.4.3 - 2026-08-13
 
+- Unified Dashboard inventory paging above and below each cursor-backed list.
+  Authorized totals are returned for task, Memory, Skill, Knowledge, and Spec
+  inventories so the page indicator does not show an unknown total.
 - Added governed Security Domain inventory, accountable ownership, explicit
   Human/Agent membership, lifecycle records, and audited bindings for Channels
   and legacy collaboration groups.
