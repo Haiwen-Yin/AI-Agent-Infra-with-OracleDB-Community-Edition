@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.1 - Community Edition - Knowledge API
+"""AI Agent Infra v4.4.3 - Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.
@@ -139,6 +139,7 @@ def search_knowledge(
     isolation_mode: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    principal_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     conditions = ["e.ENTITY_TYPE = 'KNOWLEDGE'"]
     params: Dict[str, Any] = {"lim": limit, "off": offset}
@@ -163,13 +164,21 @@ def search_knowledge(
     elif workspace_id:
         conditions.append("e.WORKSPACE_ID = :wsid")
         params["wsid"] = workspace_id
-    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+    # REST, MCP, and unified search pass the authenticated principal.  Keep
+    # the legacy library call usable for migration tests, but never invent a
+    # principal or apply a broken visibility predicate when none is supplied.
+    if principal_id and identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        visibility = identity_api._agent_visibility_clause(principal_id)
         conditions.append(
             "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
             "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
-            identity_api._agent_visibility_clause(principal_id) + "))"
+            visibility + "))"
         )
-        params["principal_id"] = principal_id
+        # Oracle-compatible drivers reject names that do not appear in the
+        # statement.  An ALL scope compiles to a constant visibility clause,
+        # while delegated scopes retain :principal_id.
+        if ":principal_id" in visibility:
+            params["principal_id"] = principal_id
 
     where = " AND ".join(conditions)
     sql = f"""
@@ -230,12 +239,14 @@ def search_knowledge_cursor(
         conditions.append("e.WORKSPACE_ID = :wsid")
         params["wsid"] = workspace_id
     if identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+        visibility = identity_api._agent_visibility_clause(principal_id)
         conditions.append(
             "(e.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
             "WHERE p.PRINCIPAL_ID=e.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND " +
-            identity_api._agent_visibility_clause(principal_id) + "))"
+            visibility + "))"
         )
-        params["principal_id"] = principal_id
+        if ":principal_id" in visibility:
+            params["principal_id"] = principal_id
     after = str(context["position"].get("entity_id") or "")
     if after:
         conditions.append("e.ENTITY_ID > :after")

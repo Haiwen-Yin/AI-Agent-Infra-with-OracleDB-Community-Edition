@@ -1157,8 +1157,10 @@ def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Di
 def list_changes(actor_principal_id: str, limit: int = 100, *, status: str = "") -> List[Dict[str, Any]]:
     _access(actor_principal_id, CHANGE_ACTION)
     access = identity_api.effective_access(actor_principal_id, "organizations.changes.read.all")
-    params: Dict[str, Any] = {"actor": actor_principal_id, "limit": _bounded(limit)}
+    params: Dict[str, Any] = {"limit": _bounded(limit)}
     clauses = [] if access.get("decision") == "ALLOW" else ["AUTHOR_PRINCIPAL_ID = :actor"]
+    if clauses:
+        params["actor"] = actor_principal_id
     if status:
         normalized = str(status).upper()
         if normalized not in CHANGE_STATUSES:

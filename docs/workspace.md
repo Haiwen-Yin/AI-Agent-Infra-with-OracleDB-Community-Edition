@@ -1,4 +1,4 @@
-# Workspace & Context Continuity - AI Agent Infra with DB v4.4.1
+# Workspace & Context Continuity - AI Agent Infra with DB v4.4.3
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project

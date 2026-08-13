@@ -1,5 +1,23 @@
 # Changelog
 
+## v4.4.3 - 2026-08-13
+
+- Added governed Security Domain inventory, accountable ownership, explicit
+  Human/Agent membership, lifecycle records, and audited bindings for Channels
+  and legacy collaboration groups.
+- Added reviewed conversion drafts: legacy collaboration-group Agents remain
+  candidates until individually confirmed; no sharing policy or historic group
+  membership is converted into authorization.
+- Revalidated active Domain membership for Channel discovery, reads, writes,
+  threads and Gateway membership admission. Revoked or expired access fails
+  closed while retained evidence remains governed.
+
+## v4.4.2 - 2026-08-13
+
+- Added verified Embedding test-and-activate with automatic dimension discovery and database-authoritative Contract, default Space, Binding, and migration maintenance.
+- Enforced encrypted API-key storage, platform normalization, Graph Production Profile capability gates, and authenticated Knowledge inventory visibility.
+- Corrected configuration forms, empty business inputs, single-line cursor pagination, and bilingual protected configuration views.
+
 ## v4.4.1 - 2026-08-12
 
 - Added the protected Platform Administration Channel, separate Admin Agent

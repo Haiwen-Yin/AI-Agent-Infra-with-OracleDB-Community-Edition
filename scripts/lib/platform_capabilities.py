@@ -50,6 +50,7 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
     "compliance": {"zh": "合规", "en": "Compliance", "mandatory": False, "page": "compliance", "edition": "compliance"},
     "audit_view": {"zh": "审计查看", "en": "Audit view", "mandatory": False, "page": "audit", "edition": "audit"},
     "organization": {"zh": "组织架构", "en": "Organization", "mandatory": False, "page": "organization"},
+    "security_domains": {"zh": "安全域", "en": "Security Domains", "mandatory": True, "page": "security-domains"},
     "admin_channel_ha": {"zh": "平台管理频道与高可用", "en": "Platform Administration and HA", "mandatory": True, "page": "platform"},
     "controlled_upgrade": {"zh": "受控升级", "en": "Controlled upgrade", "mandatory": True, "page": "platform"},
     "agent_containment": {"zh": "智能体阻断", "en": "Agent containment", "mandatory": True, "page": "platform"},
@@ -71,6 +72,7 @@ DEPENDENCIES = {
     "compliance": ("agents", "audit_write"),
     "audit_view": ("audit_write",),
     "organization": ("users", "agents"),
+    "security_domains": ("identity", "authorization", "audit_write", "channels"),
     "admin_channel_ha": ("agents", "audit_write"),
     "controlled_upgrade": ("admin_channel_ha", "audit_write"),
     "agent_containment": ("admin_channel_ha", "audit_write"),
@@ -177,7 +179,7 @@ def list_capabilities(limit: int = 100) -> Dict[str, Any]:
             "effective_enabled": configured and available,
             "dependencies": dep_map.get(key, []),
         })
-    return {"items": items, "history": history, "schema_version": "4.3.7"}
+    return {"items": items, "history": history, "schema_version": "4.4.3"}
 
 
 def set_enabled(actor: str, key: str, enabled: bool, reason: str, expected_version: int) -> Dict[str, Any]:

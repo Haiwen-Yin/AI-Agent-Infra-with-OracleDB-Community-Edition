@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.1 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.3 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -34,6 +34,7 @@ from lib import edition_features
 from lib import agent_registration
 from lib import identity_api
 from lib import governed_contracts, security_lifecycle
+from lib import graph_production_profile
 if getattr(edition_features, 'GRAPH_ENGINEERING_ENABLED', False):
     from lib import graph_definition_api, graph_compiler, graph_runtime, graph_worker, graph_event_api, graph_adapter, graph_compat, graph_executor
     from lib import graph_assurance, graph_dynamic, a2a_gateway, graph_telemetry
@@ -51,7 +52,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.1"
+VERSION = "4.4.3"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -149,6 +150,49 @@ def _route_feature_available(path):
         if any(path == prefix or path.startswith(prefix + '/') for prefix in prefixes):
             return edition_features.has_feature(feature)
     return True
+
+
+def _graph_operation_capability(path):
+    """Apply the database-authoritative Graph profile to legacy HTTP routes."""
+    normalized = '/' + str(path or '').lstrip('/')
+    if normalized.startswith('/api/a2a'):
+        return 'a2a_gateway'
+    if normalized.startswith('/api/telemetry'):
+        return 'otel_export'
+    if normalized.startswith('/api/graph-dynamic') or normalized.endswith('/migrate'):
+        return 'graph_dynamic_migration'
+    if normalized.endswith('/replay') or (normalized.startswith('/api/graph/events/inbox/') and normalized.endswith('/replay')):
+        return 'graph_replay'
+    if normalized.endswith('/fork'):
+        return 'graph_checkpoint_fork'
+    if normalized.startswith('/api/graph-assurance'):
+        return 'graph_slo_readonly'
+    if normalized.startswith('/api/graph-manifest') or normalized.startswith('/api/graph-compat'):
+        return 'graph_manifest_draft_import'
+    if normalized.startswith(('/api/graphs', '/api/graph-', '/api/graph/')):
+        return 'graph_runtime_core'
+    return None
+
+
+def _enforce_graph_profile(path, handler=None):
+    capability = _graph_operation_capability(path)
+    if not capability:
+        return True
+    try:
+        current = graph_production_profile.state(capability)
+        if current == 'CONTROLLED':
+            if handler is None or handler._require_admin() is None:
+                return False
+            graph_production_profile.require(capability, controlled=True)
+        else:
+            graph_production_profile.require(capability)
+        return True
+    except graph_production_profile.ProfileConflict as exc:
+        # This helper is called from the request handler, which owns the
+        # response writer; callers translate the exception into a JSON error.
+        raise PermissionError('GRAPH_CAPABILITY_BLOCKED: ' + str(exc)) from exc
+    except graph_production_profile.ProfileUnavailable as exc:
+        raise RuntimeError('GRAPH_CAPABILITY_UNAVAILABLE: ' + str(exc)) from exc
 
 
 def _is_public_api(path):
@@ -587,8 +631,8 @@ def _get_tags_for_entities(entity_ids):
     return tags_map
 
 
-def _knowledge_to_vis():
-    items = knowledge_api.search_knowledge(limit=500)
+def _knowledge_to_vis(principal_id=None):
+    items = knowledge_api.search_knowledge(limit=500, principal_id=principal_id)
     edges = connection.execute_query(
         "SELECT source_id, source_type, target_id, edge_type, strength, confidence FROM entity_edges "
         "WHERE source_type = 'KNOWLEDGE' OR target_id IN (%s)" % ','.join(["'%s'" % i['entity_id'] for i in items]) if items else "FALSE",
@@ -862,6 +906,15 @@ class VisHandler(BaseHTTPRequestHandler):
     def _authorize_request(self, path):
         if not _route_feature_available(path):
             self._send_error(404, 'Not found')
+            return False
+        try:
+            if not _enforce_graph_profile(path, self):
+                return False
+        except PermissionError as exc:
+            self._send_error(409, str(exc))
+            return False
+        except RuntimeError as exc:
+            self._send_error(503, str(exc))
             return False
         is_api = path.startswith('/api/') or path.startswith('/portal/api/') or path.startswith('/ap/')
         if not is_api or _is_public_api(path) or _uses_token_auth(path):
@@ -2115,7 +2168,8 @@ class VisHandler(BaseHTTPRequestHandler):
                     return
                 self._send_json(item)
             elif path == '/api/knowledge':
-                self._send_json(_knowledge_to_vis())
+                principal = self._authenticated_principal()
+                self._send_json(_knowledge_to_vis(principal.get('actor_id') if principal else None))
             elif path == '/api/memory':
                 self._send_json(_memory_to_vis())
             elif path == '/api/memory/jobs':
@@ -4576,8 +4630,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.1', VERSION)
-            html = html.replace('2026-08-12', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.3', VERSION)
+            html = html.replace('2026-08-13', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

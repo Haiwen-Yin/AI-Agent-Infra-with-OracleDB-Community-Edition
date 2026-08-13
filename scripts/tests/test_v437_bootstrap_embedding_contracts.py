@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import pytest
@@ -107,6 +108,58 @@ def test_draft_embedding_probe_never_persists_or_returns_api_key(monkeypatch):
     assert not tx.executed
 
 
+def test_platform_embedding_activation_only_binds_parameters_used_by_sql(monkeypatch):
+    """Oracle rejects surplus named binds, so activation statements must be exact."""
+    tx = _Tx()
+    monkeypatch.setattr(embedding_governance.connection, "execute_transaction_callback", lambda work: work(tx))
+    monkeypatch.setattr(embedding_governance.identity_api, "_audit_tx", lambda *args: None)
+    monkeypatch.setattr(
+        embedding_governance,
+        "probe_draft",
+        lambda *_args, **_kwargs: {
+            "status": "VERIFIED",
+            "result": {
+                "observed_dimension": 3,
+                "observed_model": "embedding-v1",
+                "response_digest": "a" * 64,
+            },
+        },
+    )
+
+    result = embedding_governance.activate_platform_embedding(
+        "admin", profile_key="platform-default", provider_url="https://embedding.example/v1",
+        model_id="embedding-v1", execution_mode="PLATFORM_MANAGED", dimension=3,
+        reason="activate verified platform embedding",
+    )
+
+    assert result["validation_state"] == "VERIFIED"
+    profile_sql, profile_params = next(item for item in tx.executed if "INSERT INTO CX_EMBEDDING_PROFILES" in item[0])
+    placeholders = set(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", profile_sql))
+    assert set(profile_params) == placeholders
+    assert "normalize_value" not in profile_params
+
+    contract_sql, contract_params = next(item for item in tx.executed if "INSERT INTO CX_EMBEDDING_CONTRACTS" in item[0])
+    contract_placeholders = set(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", contract_sql))
+    assert set(contract_params) == contract_placeholders
+    # Oracle reserves MODE in bind contexts (ORA-01745). Keep the portable
+    # SQL explicit about the semantic field rather than using a short alias.
+    assert ":mode" not in contract_sql
+    assert ":execution_mode" in contract_sql
+
+
+def test_shared_runtime_sql_does_not_use_known_oracle_reserved_binds():
+    root = Path(__file__).resolve().parents[1]
+    for name, reserved in (
+        ("embedding_api.py", ("mode", "desc")),
+        ("embedding_governance.py", ("mode",)),
+        ("identity_api.py", ("mode",)),
+        ("deployment_orchestrator.py", ("mode", "order")),
+    ):
+        source = (root / "lib" / name).read_text(encoding="utf-8")
+        for bind in reserved:
+            assert not re.search(rf":{bind}\b", source)
+
+
 def test_dashboard_uses_draft_probe_before_enabling_embedding_profile_creation():
     root = Path(__file__).resolve().parents[1]
     ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
@@ -114,6 +167,31 @@ def test_dashboard_uses_draft_probe_before_enabling_embedding_profile_creation()
     assert "/api/embedding/profiles/probe-draft" in ui
     assert "testedDraftVersion !== draftVersion" in ui
     assert '@app.post("/api/embedding/profiles/probe-draft")' in app
+
+
+def test_embedding_readiness_returns_display_key_and_dashboard_wraps_internal_ids():
+    root = Path(__file__).resolve().parents[1]
+    governance = (root / "lib" / "embedding_governance.py").read_text(encoding="utf-8")
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")
+    assert "SELECT SPACE_ID,SPACE_KEY,CONTRACT_ID" in governance
+    assert '"space_key": default.get("space_key")' in governance
+    assert 'className="metric-value metric-identifier"' in ui
+    assert 'className="cx-form-hint metric-metadata"' in ui
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in css
+    assert ".metric-metadata code" in css
+
+
+def test_deployed_platform_embedding_is_runtime_immutable_and_dashboard_is_read_only():
+    root = Path(__file__).resolve().parents[1]
+    governance = (root / "lib" / "embedding_governance.py").read_text(encoding="utf-8")
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "Platform Embedding is already deployed; redeploy the platform" in governance
+    assert '"platform_deployed": deployed' in governance
+    assert "const embeddingDeployed = Boolean(readiness.platform_deployed);" in ui
+    assert "canManage && !embeddingDeployed" in ui
+    assert "统一 Embedding 已完成配置" in ui
+    assert "通过重新部署完成变更" in ui
 
 
 def test_all_adapters_declare_fingerprint_and_space_isolation():

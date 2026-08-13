@@ -141,6 +141,15 @@ def test_portal_session_resolution_uses_schema_owner_context():
     assert "persisted = _resolve_session_as_schema_owner(session_id)" in content
 
 
+def test_graph_profile_gate_uses_request_handler_and_stops_denied_requests():
+    content = SERVER_PATH.read_text(encoding="utf-8")
+    gate = content.split("def _enforce_graph_profile", 1)[1].split("def _is_public_api", 1)[0]
+    authorize = content.split("def _authorize_request", 1)[1].split("def ", 1)[0]
+    assert "def _enforce_graph_profile(path, handler=None):" in content
+    assert "handler._require_admin()" in gate
+    assert "if not _enforce_graph_profile(path, self):" in authorize
+
+
 def test_portal_user_type_control_has_visible_down_arrow():
     template = (TEMPLATES_DIR / "portal_login.html").read_text(encoding="utf-8")
     css = (TEMPLATES_DIR.parent / "static" / "pages" / "portal_login.css").read_text(encoding="utf-8")
@@ -192,9 +201,9 @@ def test_react_dashboard_keeps_navigation_and_session_controls_mounted():
     assert "cx-context" not in ui
     assert "可观测、可调度、可运维" in ui
     assert "cx-session-clock" in ui
-    assert "cx-request-progress" in ui
+    assert "cx-sync-indicator" in ui
     assert "position: sticky" in css or "position:sticky" in css
-    assert ("@keyframes cx-progress" in css) if is_source else ("cx-progress" in css)
+    assert ".cx-sync-indicator.active" in css
 
 
 def test_react_dashboard_restores_database_graph_visualization():
@@ -428,7 +437,9 @@ def test_react_dashboard_owns_theme_profile_metrics_and_collaboration_gate_label
             "function AgentsPage(", 1
         )[0]
         assert "<MonitorDetails" not in monitor_route
-        assert 'view === "overview"' in monitor_page
+        # Experimental profile changes belong to Function Configuration; the
+        # Monitor page is intentionally an observation-only surface.
+        assert 'view === "experiments"' not in monitor_page
         assert "<MonitorDetails" in monitor_page
         assert 'className="cx-brand-pillars"' in app
         assert 'className="cx-loader spinner"' in app
@@ -437,9 +448,8 @@ def test_react_dashboard_owns_theme_profile_metrics_and_collaboration_gate_label
         "Total Agents",
         "Active Sessions",
         "Running Task Plans",
-        "Experimental features",
-        "Check impact",
-        "Activate profile",
+        "Graph Engineering Production baseline",
+        "Production baseline",
         "Collaboration gates",
     ):
         assert label in app
@@ -783,7 +793,14 @@ def test_dashboard_navigation_is_centered_against_equal_header_side_columns():
     assert "grid-template-columns:minmax(240px,1fr)autominmax(240px,1fr);" in css
     assert ".cx-nav-stack{min-width:0;justify-self:center" in css
     assert "@media(max-width:1100px)" in css
-    assert "grid-template-columns:repeat(11,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
+    assert "grid-template-columns:repeat(12,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
+
+
+def test_dashboard_navigation_does_not_repeat_console_label_in_content_header():
+    source, is_source = _react_ui_source()
+    if not is_source:
+        return
+    assert 'text("川序控制台", "Chuanxu Console")' not in source
 
 
 def test_compliance_tabs_use_the_shared_segmented_control():

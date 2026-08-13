@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.1 - MCP Server
+"""AI Agent Infra v4.4.3 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
@@ -465,6 +465,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 entity_type=arguments.get("entity_type"),
                 domain=arguments.get("domain"),
                 category=arguments.get("category"),
+                principal_id=authenticated_agent,
             )
             return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
         elif name == "compliance_posture":
@@ -582,6 +583,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             results = knowledge_api.search_knowledge(
                 keyword=arguments.get("keyword", ""),
                 domain=arguments.get("domain"),
+                principal_id=authenticated_agent,
             )
             return [TextContent(type="text", text=json.dumps(results, default=str, ensure_ascii=False))]
 

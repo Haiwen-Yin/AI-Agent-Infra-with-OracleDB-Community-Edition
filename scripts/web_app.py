@@ -30,12 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api
-except ModuleNotFoundError:  # source-tree import; packaged runtime uses scripts/lib
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile
+except ModuleNotFoundError as exc:
+    # Only a missing top-level package means this is the source tree.  Do not
+    # hide missing packaged dependencies by incorrectly falling back to shared.
+    if exc.name != "lib":
+        raise
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile
 
 
-VERSION = "4.4.1"
+VERSION = "4.4.3"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -114,7 +118,7 @@ def _path_capability(path: str) -> Optional[str]:
             "collab": "collaboration", "loops": "loops", "graph": "graph",
             "channels": "channels", "barriers": "barriers", "approvals": "approvals",
             "compliance": "compliance", "audit": "audit_view", "users": "users",
-            "organization": "organization", "platform": "platform_config",
+            "organization": "organization", "security-domains": "security_domains", "platform": "platform_config",
             "native-agents": "agent_provisioning", "deployment": "deployment_governance",
         }.get(page)
     if normalized.startswith("/api/agents/") and any(part in normalized for part in ("/posture", "/activate", "/compliance-")):
@@ -140,6 +144,7 @@ def _path_capability(path: str) -> Optional[str]:
         (("/api/audit", "/api/traces", "/api/evidence", "/api/legal-holds"), "audit_view"),
         (("/api/users", "/api/registration"), "users"),
         (("/api/organization",), "organization"),
+        (("/api/security-domains",), "security_domains"),
         (("/api/embedding",), "embedding_governance"),
         (("/api/deployment-runs",), "deployment_governance"),
     )
@@ -150,6 +155,28 @@ def _path_capability(path: str) -> Optional[str]:
             for prefix in prefixes
         ):
             return capability
+    return None
+
+
+def _graph_operation_capability(path: str) -> Optional[str]:
+    """Map Graph protocol operations to the database-authoritative matrix."""
+    normalized = "/" + str(path or "").lstrip("/")
+    if normalized.startswith("/api/a2a"):
+        return "a2a_gateway"
+    if normalized.startswith("/api/telemetry"):
+        return "otel_export"
+    if normalized.startswith("/api/graph-dynamic") or normalized.endswith("/migrate"):
+        return "graph_dynamic_migration"
+    if normalized.endswith("/replay") or normalized.startswith("/api/graph/events/inbox/") and normalized.endswith("/replay"):
+        return "graph_replay"
+    if normalized.endswith("/fork"):
+        return "graph_checkpoint_fork"
+    if normalized.startswith("/api/graph-assurance"):
+        return "graph_slo_readonly"
+    if normalized.startswith("/api/graph-manifest") or normalized.startswith("/api/graph-compat"):
+        return "graph_manifest_draft_import"
+    if normalized.startswith(("/api/graphs", "/api/graph-", "/api/graph/")):
+        return "graph_runtime_core"
     return None
 
 
@@ -169,6 +196,22 @@ async def enforce_platform_capability(request: Request, call_next):
                 {"detail": {"code": "CAPABILITY_DISABLED", "capability": capability}},
                 status_code=409,
             )
+    graph_capability = _graph_operation_capability(request.url.path)
+    if graph_capability:
+        try:
+            graph_state = graph_production_profile.state(graph_capability)
+            controlled = False
+            if graph_state == "CONTROLLED":
+                session = _session_from_request(request)
+                if not session:
+                    return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_CONTROLLED", "capability": graph_capability}}, status_code=403)
+                access = identity_api.effective_access(str(session["principal_id"]), "platform.manage")
+                controlled = access.get("decision") == "ALLOW"
+            graph_production_profile.require(graph_capability, controlled=controlled)
+        except graph_production_profile.ProfileConflict as exc:
+            return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_BLOCKED", "message": str(exc)}}, status_code=409)
+        except graph_production_profile.ProfileUnavailable:
+            return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_UNAVAILABLE", "capability": graph_capability}}, status_code=503)
     return await call_next(request)
 
 
@@ -814,7 +857,9 @@ class ConnectorBody(BaseModel):
 class EnrollmentBody(BaseModel):
     enrollment_token: str = Field(default="", max_length=512)
     agent_id: str = Field(default="", max_length=128)
-    runtime: str = Field(default="generic", max_length=128)
+    # The external Agent declares its runtime during redemption.  Do not
+    # manufacture a generic runtime when a Skill-first client omits it.
+    runtime: str = Field(default="", max_length=128)
     environment: str = Field(default="development", max_length=64)
     node_id: str = Field(default="", max_length=128)
     public_key: str = Field(default="", max_length=10000)
@@ -825,11 +870,10 @@ class GrantBody(BaseModel):
     owner_principal_id: str = Field(default="", max_length=128)
     responsible_group_id: str = Field(default="", max_length=128)
     environment: str = Field(default="development", max_length=64)
-    runtime: str = Field(default="generic", max_length=128)
     security_domain_id: str = Field(default="DEFAULT", max_length=128)
-    agent_name: str = Field(default="", max_length=256)
+    agent_name: str = Field(min_length=1, max_length=256)
     risk_tier: str = Field(default="STANDARD", max_length=32)
-    ttl_seconds: int = Field(default=900, ge=60, le=3600)
+    ttl_seconds: Optional[int] = Field(default=None, ge=60, le=3600)
 
 
 class ChannelBody(BaseModel):
@@ -837,6 +881,58 @@ class ChannelBody(BaseModel):
     security_domain_id: str = Field(min_length=1, max_length=128)
     classification: str = Field(default="INTERNAL", max_length=32)
     channel_type: str = Field(default="TEAM", max_length=32)
+
+
+class SecurityDomainBody(BaseModel):
+    security_domain_id: str = Field(min_length=1, max_length=128)
+    domain_name: str = Field(min_length=1, max_length=256)
+    classification: str = Field(default="INTERNAL", max_length=32)
+    purpose: str = Field(min_length=1, max_length=1000)
+    owner_principal_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+    status: str = Field(default="ACTIVE", max_length=32)
+
+
+class SecurityDomainMemberBody(BaseModel):
+    principal_id: str = Field(min_length=1, max_length=128)
+    membership_tier: str = Field(default="MEMBER", max_length=32)
+    valid_until: str = Field(default="", max_length=64)
+    status: str = Field(default="ACTIVE", max_length=32)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class SecurityDomainStatusBody(BaseModel):
+    status: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class DomainBindingBody(BaseModel):
+    binding_type: str = Field(min_length=1, max_length=32)
+    target_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+    approval_ref: str = Field(default="", max_length=256)
+
+
+class DomainConversionDraftBody(BaseModel):
+    source_group_id: str = Field(min_length=1, max_length=128)
+    security_domain_id: str = Field(min_length=1, max_length=128)
+    domain_name: str = Field(min_length=1, max_length=256)
+    classification: str = Field(default="INTERNAL", max_length=32)
+    purpose: str = Field(min_length=1, max_length=1000)
+    owner_principal_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class DraftMemberReviewBody(BaseModel):
+    decision: str = Field(min_length=1, max_length=32)
+    membership_tier: str = Field(default="MEMBER", max_length=32)
+    valid_until: str = Field(default="", max_length=64)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class DraftApplyBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    approval_ref: str = Field(default="", max_length=256)
 
 
 class MessageBody(BaseModel):
@@ -1032,6 +1128,13 @@ class PlatformCapabilityBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class GraphCapabilityBody(BaseModel):
+    state: str = Field(min_length=1, max_length=16)
+    expected_version: int = Field(ge=1)
+    evidence_ref: str = Field(default="", max_length=256)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class LLMProviderProfileBody(BaseModel):
     profile_key: str = Field(min_length=1, max_length=128)
     provider_url: str = Field(min_length=1, max_length=512)
@@ -1039,6 +1142,14 @@ class LLMProviderProfileBody(BaseModel):
     api_key: str = Field(default="", max_length=4096)
     approved_for: list[str] = Field(default_factory=list, max_length=100)
     reason: str = Field(min_length=3, max_length=2000)
+
+
+class LLMProviderProfileProbeBody(BaseModel):
+    """Ephemeral LLM draft used only for a pre-save connectivity probe."""
+    profile_key: str = Field(min_length=1, max_length=128)
+    provider_url: str = Field(min_length=1, max_length=512)
+    model_id: str = Field(min_length=1, max_length=256)
+    api_key: str = Field(default="", max_length=4096)
 
 
 class EmbeddingProfileBody(BaseModel):
@@ -1055,6 +1166,19 @@ class EmbeddingProfileBody(BaseModel):
     secret_reference: str = Field(default="", max_length=512)
     model_fingerprint: str = Field(default="", max_length=256)
     expected_version: Optional[int] = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class EmbeddingActivationBody(BaseModel):
+    profile_key: str = Field(min_length=1, max_length=128)
+    provider_url: str = Field(default="", max_length=512)
+    model_id: str = Field(default="", max_length=256)
+    execution_mode: str = Field(min_length=1, max_length=32)
+    dimension: int = Field(ge=0, le=65536)
+    distance_metric: str = Field(default="COSINE", max_length=32)
+    api_key: str = Field(default="", max_length=4096)
+    secret_reference: str = Field(default="", max_length=512)
+    model_fingerprint: str = Field(default="", max_length=256)
     reason: str = Field(min_length=3, max_length=2000)
 
 
@@ -1140,6 +1264,13 @@ class AdminEnrollmentBody(BaseModel):
     admission_path: str = Field(min_length=1, max_length=32)
     public_key: str = Field(min_length=16, max_length=10000)
     node_id: str = Field(min_length=1, max_length=256)
+    host_reference: str = Field(default="", max_length=256)
+    ssh_port: int = Field(default=22, ge=1, le=65535)
+    os_user: str = Field(default="", max_length=128)
+    deployment_target: str = Field(default="", max_length=128)
+    ssh_trust_mode: str = Field(default="MUTUAL_TRUST", max_length=32)
+    ssh_password: str = Field(default="", max_length=2048)
+    failure_domain: str = Field(default="", max_length=128)
     reason: str = Field(min_length=3, max_length=2000)
     package_digest: str = Field(default="", max_length=128)
 
@@ -1339,6 +1470,13 @@ def require_action(action: str):
 
 def _identity_http_error(exc: Exception, detail: str, *, identity_status: int = 400) -> HTTPException:
     """Map identity failures without leaking database or governance details."""
+    # Governance conflicts are expected, auditable operator outcomes.  They
+    # must not be presented as an unavailable identity service, otherwise a
+    # rejected second binding looks like an infrastructure failure.
+    if isinstance(exc, security_domain_api.SecurityDomainConflict):
+        return HTTPException(status_code=409, detail=str(exc) or detail)
+    if isinstance(exc, security_domain_api.SecurityDomainError):
+        return HTTPException(status_code=400, detail=str(exc) or detail)
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=403, detail=detail)
     if isinstance(exc, identity_api.IdentityError):
@@ -1611,7 +1749,8 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "channels": "channels.read", "barriers": "barriers.read", "approvals": "approvals.read", "compliance": "agents.read",
         "audit": "audit.read", "users": "users.read",
         "organization": "organizations.read",
-        "platform": "platform.manage", "deployment": "platform.manage",
+        "security-domains": "domains.manage",
+        "platform": "platform.manage", "platform-operations": "platform.manage", "deployment": "platform.manage",
         "native-agents": "platform.manage",
     }
     feature_map = {
@@ -1633,6 +1772,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "organizations.history.read", "organizations.members.manage",
         "organizations.reporting.manage", "organizations.sync.manage",
         "organizations.emergency", "organizations.export",
+        "domains.manage",
         "platform.manage",
     }
     features = _edition_features()
@@ -1693,6 +1833,35 @@ def platform_capability_update(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except platform_capabilities.CapabilityServiceUnavailable as exc:
         raise HTTPException(status_code=503, detail="Platform capability service unavailable") from exc
+
+
+@app.get("/api/platform/graph-capabilities")
+def graph_capability_list(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return graph_production_profile.list_capabilities()
+    except graph_production_profile.ProfileUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Graph capability matrix is unavailable") from exc
+
+
+@app.put("/api/platform/graph-capabilities/{capability_key}")
+def graph_capability_update(
+    capability_key: str,
+    body: GraphCapabilityBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        # Runtime profile selection remains release-controlled. This endpoint
+        # changes one governed capability inside that Production baseline.
+        return graph_production_profile.set_state(
+            str(session["principal_id"]), capability_key, body.state,
+            body.reason, body.expected_version, body.evidence_ref,
+        )
+    except graph_production_profile.ProfileConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except graph_production_profile.ProfileUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Graph capability matrix is unavailable") from exc
 
 
 @app.get("/api/platform/administration")
@@ -1769,7 +1938,14 @@ def platform_admin_enrollment(
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
 ) -> Dict[str, Any]:
     try:
-        return admin_management.create_admin_enrollment(str(session["principal_id"]), body.admission_path, body.public_key, body.node_id, body.reason, body.package_digest)
+        return admin_management.create_admin_enrollment(
+            str(session["principal_id"]), body.admission_path, body.public_key,
+            body.node_id, body.reason, body.package_digest,
+            host_reference=body.host_reference, ssh_port=body.ssh_port,
+            os_user=body.os_user, deployment_target=body.deployment_target,
+            ssh_trust_mode=body.ssh_trust_mode, ssh_password=body.ssh_password,
+            failure_domain=body.failure_domain,
+        )
     except (admin_management.ManagementError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -2030,12 +2206,59 @@ def knowledge_inventory(
             domain=domain or None, topic=topic or None, keyword=keyword or None,
             difficulty=difficulty or None, workspace_id=workspace_id or None,
             isolation_mode=isolation_mode or None, limit=max(1, min(limit, 500)),
+            principal_id=str(session["principal_id"]),
         )
         return {"items": items, "knowledge": items, "count": len(items)}
     except cursor_pagination.CursorError as exc:
         raise HTTPException(status_code=422, detail="Knowledge cursor is invalid") from exc
     except Exception as exc:
         raise _identity_http_error(exc, "Knowledge inventory is unavailable") from exc
+
+
+@app.get("/api/knowledge")
+def knowledge_graph(
+    limit: int = 100,
+    domain: str = "",
+    topic: str = "",
+    keyword: str = "",
+    difficulty: str = "",
+    workspace_id: str = "",
+    isolation_mode: str = "",
+    session: Dict[str, Any] = Depends(require_action("knowledge.read")),
+) -> Dict[str, Any]:
+    """Return a principal-filtered Knowledge graph projection."""
+    actor = str(session["principal_id"])
+    amount = max(1, min(int(limit), 200))
+    try:
+        items = knowledge_api.search_knowledge(
+            domain=domain or None, topic=topic or None, keyword=keyword or None,
+            difficulty=difficulty or None, workspace_id=workspace_id or None,
+            isolation_mode=isolation_mode or None, limit=amount, principal_id=actor,
+        )
+        by_id = {str(item.get("entity_id")): item for item in items if item.get("entity_id")}
+        nodes = [{
+            "id": entity_id,
+            "label": str(item.get("title") or item.get("summary") or entity_id),
+            "title": str(item.get("title") or item.get("summary") or entity_id),
+            "entity_type": "KNOWLEDGE",
+            "status": item.get("status"),
+        } for entity_id, item in by_id.items()]
+        edges: Dict[str, Dict[str, Any]] = {}
+        for entity_id in by_id:
+            for edge in knowledge_api.get_edges(entity_id):
+                source = str(edge.get("source_id") or "")
+                target = str(edge.get("target_id") or "")
+                if source not in by_id or target not in by_id:
+                    continue
+                edge_id = str(edge.get("edge_id") or f"{source}:{target}:{edge.get('edge_type') or 'RELATED'}")
+                edges[edge_id] = {
+                    "id": edge_id, "from": source, "to": target,
+                    "label": str(edge.get("edge_type") or "RELATED"),
+                    "strength": edge.get("strength"), "confidence": edge.get("confidence"),
+                }
+        return {"nodes": nodes, "edges": list(edges.values()), "count": len(nodes)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Knowledge graph is unavailable") from exc
 
 
 @app.get("/api/memory/inventory")
@@ -2173,6 +2396,20 @@ def llm_provider_profile(
         raise _identity_http_error(exc, "LLM Provider Profile could not be saved") from exc
 
 
+@app.post("/api/llm-provider-profiles/probe-draft")
+def llm_provider_profile_probe(
+    body: LLMProviderProfileProbeBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.probe_llm_profile(
+            str(session["principal_id"]), body.profile_key, body.provider_url,
+            body.model_id, body.api_key,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "LLM Provider draft probe failed", identity_status=503) from exc
+
+
 @app.get("/api/deployment-runs")
 def deployment_runs(
     limit: int = 50,
@@ -2221,7 +2458,9 @@ def embedding_profiles(
         raise HTTPException(status_code=503, detail="Embedding Profiles are unavailable") from exc
 
 
-@app.post("/api/embedding/profiles")
+# Deliberately not mounted as a public Dashboard/API operation. The standard
+# workflow uses probe-draft followed by platform/activate; the function is
+# retained for controlled migration code that imports this module directly.
 def embedding_profile(
     body: EmbeddingProfileBody,
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -2241,6 +2480,29 @@ def embedding_profile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Embedding Profile could not be saved") from exc
+
+
+@app.post("/api/embedding/platform/activate")
+def embedding_platform_activate(
+    body: EmbeddingActivationBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.activate_platform_embedding(
+            str(session["principal_id"]), profile_key=body.profile_key,
+            provider_url=body.provider_url, model_id=body.model_id,
+            execution_mode=body.execution_mode, dimension=body.dimension,
+            distance_metric=body.distance_metric, api_key=body.api_key,
+            secret_reference=body.secret_reference, reason=body.reason,
+            model_fingerprint=body.model_fingerprint,
+        )
+    except embedding_governance.EmbeddingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Platform Embedding activation failed")
+        raise HTTPException(status_code=503, detail="Platform Embedding activation failed") from exc
 
 
 @app.post("/api/embedding/profiles/probe-draft")
@@ -2275,7 +2537,6 @@ def embedding_contracts(
         raise HTTPException(status_code=503, detail="Embedding Contracts are unavailable") from exc
 
 
-@app.post("/api/embedding/contracts")
 def embedding_contract(
     body: EmbeddingContractBody,
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -2303,7 +2564,6 @@ def embedding_spaces(
         raise HTTPException(status_code=503, detail="Embedding Spaces are unavailable") from exc
 
 
-@app.post("/api/embedding/spaces")
 def embedding_space(
     body: EmbeddingSpaceBody,
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -2331,7 +2591,6 @@ def embedding_bindings(
         raise HTTPException(status_code=503, detail="Embedding bindings are unavailable") from exc
 
 
-@app.post("/api/embedding/bindings")
 def embedding_binding(
     body: EmbeddingBindingBody,
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -2393,7 +2652,6 @@ def embedding_jobs(
         raise HTTPException(status_code=503, detail="Embedding jobs are unavailable") from exc
 
 
-@app.post("/api/embedding/jobs")
 def embedding_job(
     body: EmbeddingJobBody,
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
@@ -3330,7 +3588,11 @@ def enrollment_grants(session: Dict[str, Any] = Depends(require_action("agents.r
 @app.post("/api/enrollment/grants")
 def grant(body: GrantBody, session: Dict[str, Any] = Depends(require_action("agents.enroll"))) -> Dict[str, Any]:
     try:
-        return identity_api.create_enrollment_grant(str(session["principal_id"]), body.owner_principal_id or None, environment=body.environment, runtime=body.runtime, security_domain_id=body.security_domain_id, agent_name=body.agent_name, risk_tier=body.risk_tier, ttl_seconds=body.ttl_seconds, responsible_group_id=body.responsible_group_id)
+        ttl_seconds = body.ttl_seconds if body.ttl_seconds is not None else 900
+        # A Dashboard grant names the Agent and fixes ownership/scope only.
+        # Runtime identity is declared by the external Agent at redemption;
+        # keeping it out of this request prevents stale or generic defaults.
+        return identity_api.create_enrollment_grant(str(session["principal_id"]), body.owner_principal_id or None, environment=body.environment, runtime="", security_domain_id=body.security_domain_id, agent_name=body.agent_name, risk_tier=body.risk_tier, ttl_seconds=ttl_seconds, responsible_group_id=body.responsible_group_id)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Enrollment grant could not be created") from exc
 
@@ -3360,6 +3622,113 @@ def channel(body: ChannelBody, session: Dict[str, Any] = Depends(require_action(
         raise _identity_http_error(exc, "Channel could not be created") from exc
 
 
+@app.get("/api/security-domains")
+def security_domains(limit: int = 200, include_inactive: bool = False, session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+    try:
+        items = security_domain_api.list_domains(str(session["principal_id"]), limit=limit, include_inactive=include_inactive)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain inventory is unavailable", identity_status=503) from exc
+
+
+@app.get("/api/security-domains/candidates")
+def security_domain_candidates(limit: int = 300, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": security_domain_api.list_principal_candidates(str(session["principal_id"]), limit=limit)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain candidates are unavailable", identity_status=503) from exc
+
+
+@app.post("/api/security-domains")
+def security_domain_create(body: SecurityDomainBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.create_domain(str(session["principal_id"]), body.security_domain_id, body.domain_name, body.classification, body.purpose, body.owner_principal_id, body.reason, status=body.status)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain could not be created") from exc
+
+
+@app.get("/api/security-domains/{domain_id}/members")
+def security_domain_members(domain_id: str, session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+    try:
+        items = security_domain_api.list_members(str(session["principal_id"]), domain_id)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain members are unavailable", identity_status=503) from exc
+
+
+@app.post("/api/security-domains/{domain_id}/members")
+def security_domain_member_set(domain_id: str, body: SecurityDomainMemberBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.set_member(str(session["principal_id"]), domain_id, body.principal_id, body.membership_tier, body.reason, valid_until=body.valid_until, status=body.status)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain member could not be updated") from exc
+
+
+@app.post("/api/security-domains/{domain_id}/lifecycle")
+def security_domain_lifecycle(domain_id: str, body: SecurityDomainStatusBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.set_domain_status(str(session["principal_id"]), domain_id, body.status, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain lifecycle could not be changed") from exc
+
+
+@app.get("/api/security-domains/{domain_id}/bindings")
+def security_domain_bindings(domain_id: str, session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+    try:
+        items = security_domain_api.list_bindings(str(session["principal_id"]), domain_id)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain bindings are unavailable", identity_status=503) from exc
+
+
+@app.post("/api/security-domains/{domain_id}/bindings")
+def security_domain_binding_create(domain_id: str, body: DomainBindingBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.create_binding(str(session["principal_id"]), domain_id, body.binding_type, body.target_id, body.reason, approval_ref=body.approval_ref)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain binding could not be created") from exc
+
+
+@app.get("/api/security-domains/collaboration-groups")
+def security_domain_groups(limit: int = 200, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": security_domain_api.list_collaboration_groups(str(session["principal_id"]), limit=limit)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Collaboration group inventory is unavailable", identity_status=503) from exc
+
+
+@app.post("/api/security-domains/conversion-drafts")
+def security_domain_conversion_draft_create(body: DomainConversionDraftBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.create_conversion_draft(str(session["principal_id"]), body.source_group_id, body.security_domain_id, body.domain_name, body.classification, body.purpose, body.owner_principal_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain conversion draft could not be created") from exc
+
+
+@app.get("/api/security-domains/conversion-drafts/{draft_id}")
+def security_domain_conversion_draft(draft_id: str, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.get_conversion_draft(str(session["principal_id"]), draft_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain conversion draft is unavailable", identity_status=503) from exc
+
+
+@app.post("/api/security-domains/conversion-drafts/{draft_id}/members/{principal_id}")
+def security_domain_conversion_draft_member(draft_id: str, principal_id: str, body: DraftMemberReviewBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.review_draft_member(str(session["principal_id"]), draft_id, principal_id, body.decision, body.membership_tier, body.reason, valid_until=body.valid_until)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain conversion member could not be reviewed") from exc
+
+
+@app.post("/api/security-domains/conversion-drafts/{draft_id}/apply")
+def security_domain_conversion_draft_apply(draft_id: str, body: DraftApplyBody, session: Dict[str, Any] = Depends(require_action("domains.manage"))) -> Dict[str, Any]:
+    try:
+        return security_domain_api.apply_conversion_draft(str(session["principal_id"]), draft_id, body.reason, approval_ref=body.approval_ref)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Security Domain conversion draft could not be applied") from exc
+
+
 @app.post("/api/channels/{channel_id}/lifecycle")
 def channel_lifecycle(channel_id: str, body: LifecycleBody, session: Dict[str, Any] = Depends(require_action("channels.lifecycle"))) -> Dict[str, Any]:
     try:
@@ -3378,6 +3747,15 @@ def channel_legal_hold(channel_id: str, body: DecisionBody, session: Dict[str, A
         return identity_api.set_channel_legal_hold(str(session["principal_id"]), channel_id, enabled, body.reason)
     except Exception as exc:
         raise _identity_http_error(exc, "Channel legal hold operation was denied") from exc
+
+
+@app.post("/api/channels/{channel_id}/pin")
+def channel_pin(channel_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("channels.lifecycle"))) -> Dict[str, Any]:
+    try:
+        enabled = str(body.decision or "").upper() in {"ON", "ENABLE", "ENABLED", "SET", "TRUE"}
+        return identity_api.set_channel_pinned(str(session["principal_id"]), channel_id, enabled, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Channel pin operation was denied") from exc
 
 
 @app.get("/api/bridges")
@@ -3666,24 +4044,18 @@ def barrier_recover(barrier_id: str, body: BarrierRecoveryBody, session: Dict[st
 
 @app.post("/api/runtime/profile/preflight")
 def runtime_profile_preflight(body: ProfileBody, session: Dict[str, Any] = Depends(require_action("profile.update"))) -> Dict[str, Any]:
-    module = _optional_module("profile_api")
-    if module is None:
-        raise HTTPException(status_code=503, detail="Runtime profile service is unavailable")
-    try:
-        return module.preflight(str(session["principal_id"]), body.target_profile, body.reason)
-    except Exception as exc:
-        raise _identity_http_error(exc, "Runtime profile preflight was denied") from exc
+    raise HTTPException(
+        status_code=409,
+        detail="Experimental runtime profiles are unavailable in the Production configuration",
+    )
 
 
 @app.post("/api/runtime/profile/{change_id}/activate")
 def runtime_profile_activate(change_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("profile.update"))) -> Dict[str, Any]:
-    module = _optional_module("profile_api")
-    if module is None:
-        raise HTTPException(status_code=503, detail="Runtime profile service is unavailable")
-    try:
-        return module.activate(change_id, str(session["principal_id"]), body.reason)
-    except Exception as exc:
-        raise _identity_http_error(exc, "Runtime profile activation was denied") from exc
+    raise HTTPException(
+        status_code=409,
+        detail="Experimental runtime profiles are unavailable in the Production configuration",
+    )
 
 
 def _gateway_context(request: Request, required_scope: str = "", *, operation: str = "work",

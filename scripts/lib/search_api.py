@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.1 - Community Edition - Unified Search API
+"""AI Agent Infra v4.4.3 - Community Edition - Unified Search API
 
 Single entry point for AI agents to search across all data types and modalities.
 Agents choose search strategy based on scenario:
@@ -8,8 +8,8 @@ Agents choose search strategy based on scenario:
 - "keyword"      - SQL LIKE pattern matching (best for partial/wildcard match)
 - "graph"        - Property graph traversal (best for relationship/neighborhood queries)
 - "hybrid"       - Vector + Fulltext dual scoring (best for general semantic+lexical)
-- "unified"      - 5-signal fusion: vector+fulltext+relational+tag+graph (comprehensive)
-- "unified_sql"  - Single-SQL CTE 5-signal fusion (same as unified, low-latency single query)
+- "unified"      - multimodal data hybrid retrieval across vector, fulltext, relational, tag, and graph signals
+- "unified_sql"  - Single-SQL CTE multimodal data hybrid retrieval (same as unified, low-latency single query)
 - "relational"   - Structured metadata filter on domain/category/tags/importance
 - "multi_type"   - Cross-type vector search (MEMORY/KNOWLEDGE/SPEC in one call)
 - "auto"         - Automatically selects strategy based on query characteristics
@@ -85,7 +85,7 @@ STRATEGIES = {
         "precision": "high",
     },
     "unified": {
-        "name": "5-Signal Unified Search",
+        "name": "Multimodal Data Hybrid Retrieval",
         "description": "Full fusion: vector + fulltext + relational metadata + tag + graph proximity. Best for comprehensive multi-dimensional retrieval.",
         "signals": ["vector", "fulltext", "relational", "tag", "graph"],
         "best_for": ["comprehensive search", "multi-dimensional ranking", "domain-specific retrieval", "context-aware search", "AI agent decision making"],
@@ -95,8 +95,8 @@ STRATEGIES = {
         "precision": "very high",
     },
     "unified_sql": {
-        "name": "Single-SQL 5-Signal Unified Search",
-        "description": "Same 5-signal fusion as 'unified' but executed as a single CTE-based SQL statement. Eliminates multi-round Python-SQL round trips. Best for low-latency production scenarios.",
+        "name": "Single-SQL Multimodal Data Hybrid Retrieval",
+        "description": "The same multimodal data hybrid retrieval as 'unified' executed as a single CTE-based SQL statement. Eliminates multi-round Python-SQL round trips. Best for low-latency production scenarios.",
         "signals": ["vector", "fulltext", "relational", "tag", "graph"],
         "best_for": ["production search", "low-latency retrieval", "single-query fusion", "server-side scoring"],
         "requires_embedding": True,
@@ -283,6 +283,7 @@ def search(
     graph_weight: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
+    principal_id = kwargs.get("principal_id")
     if strategy == "auto":
         strategy = _detect_strategy(text, **kwargs)
 
@@ -308,7 +309,7 @@ def search(
         elif strategy == "keyword":
             if entity_type == "KNOWLEDGE" or (not entity_type):
                 kw_results = knowledge_api.search_knowledge(
-                    keyword=text, domain=domain, limit=top_k,
+                    keyword=text, domain=domain, limit=top_k, principal_id=principal_id,
                 )
                 result["results"].extend(kw_results)
             if entity_type == "MEMORY" or (not entity_type):

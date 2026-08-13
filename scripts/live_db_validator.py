@@ -168,6 +168,13 @@ V441_MIGRATION_SCRIPTS = V440_MIGRATION_SCRIPTS + (
     "35_v4_4_1_admin_ha_upgrade.sql",
     "36_v4_4_1_upgrade_protocol.sql",
 )
+V442_MIGRATION_SCRIPTS = V441_MIGRATION_SCRIPTS + (
+    "37_v4_4_2_embedding_graph_operations.sql",
+    "38_v4_4_2_channel_pinning.sql",
+)
+V443_MIGRATION_SCRIPTS = V442_MIGRATION_SCRIPTS + (
+    "39_v4_4_3_security_domain_binding.sql",
+)
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
     "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
@@ -253,6 +260,29 @@ V441_ADMIN_HA_REQUIRED_COLUMNS = {
     "CX_WEB_SESSION_POLICY_HISTORY": frozenset({"HISTORY_ID", "POLICY_KEY", "VERSION", "CHANGED_BY"}),
     "CX_API_CURSORS": frozenset({"CURSOR_ID", "PRINCIPAL_ID", "RESOURCE_KEY", "FILTER_DIGEST", "PAGE_SIZE"}),
     "CX_UPGRADE_APPROVALS": frozenset({"APPROVAL_ID", "UPGRADE_ID", "APPROVAL_KIND", "PRINCIPAL_ID", "DECISION", "TERM", "FENCING_TOKEN", "REASON"}),
+}
+V442_GRAPH_OPERATIONS_TABLES = (
+    "CX_GRAPH_CAPABILITY_PROFILES", "CX_GRAPH_CAPABILITY_MATRIX",
+    "CX_GRAPH_CAPABILITY_HISTORY", "CX_EMBEDDING_ACTIVATION_EVIDENCE",
+    "CX_ADMIN_NODE_TARGETS", "CX_ADMIN_DEPLOYMENT_ATTEMPTS",
+)
+V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS = {
+    "CX_CHANNELS": frozenset({"CHANNEL_ID", "PINNED", "UPDATED_AT"}),
+    "CX_GRAPH_CAPABILITY_PROFILES": frozenset({"PROFILE_KEY", "PROFILE_VERSION", "STATUS", "REASON"}),
+    "CX_GRAPH_CAPABILITY_MATRIX": frozenset({"PROFILE_KEY", "CAPABILITY_KEY", "STATE", "VERSION", "MANDATORY", "REASON"}),
+    "CX_GRAPH_CAPABILITY_HISTORY": frozenset({"HISTORY_ID", "PROFILE_KEY", "CAPABILITY_KEY", "FROM_STATE", "TO_STATE", "EXPECTED_VERSION", "REASON"}),
+    "CX_EMBEDDING_ACTIVATION_EVIDENCE": frozenset({"ACTIVATION_ID", "PROFILE_ID", "OBSERVED_DIMENSION", "RESPONSE_DIGEST", "ACTIVATION_STATUS", "MIGRATION_STATE"}),
+    "CX_ADMIN_NODE_TARGETS": frozenset({"TARGET_ID", "NODE_ID", "HOST_REFERENCE", "SSH_PORT", "OS_USER", "DEPLOYMENT_TARGET", "SSH_TRUST_MODE", "STATUS", "REASON"}),
+    "CX_ADMIN_DEPLOYMENT_ATTEMPTS": frozenset({"ATTEMPT_ID", "TARGET_ID", "ATTEMPT_DIGEST", "VERIFICATION_STATE", "REASON"}),
+}
+V443_SECURITY_DOMAIN_TABLES = (
+    "CX_DOMAIN_GOVERNANCE", "CX_DOMAIN_BINDINGS", "CX_DOMAIN_CONVERSION_DRAFTS", "CX_DOMAIN_DRAFT_MEMBERS",
+)
+V443_SECURITY_DOMAIN_REQUIRED_COLUMNS = {
+    "CX_DOMAIN_GOVERNANCE": frozenset({"SECURITY_DOMAIN_ID", "OWNER_PRINCIPAL_ID", "REASON", "UPDATED_BY"}),
+    "CX_DOMAIN_BINDINGS": frozenset({"BINDING_ID", "SECURITY_DOMAIN_ID", "BINDING_TYPE", "TARGET_ID", "STATUS", "REASON", "CREATED_BY"}),
+    "CX_DOMAIN_CONVERSION_DRAFTS": frozenset({"DRAFT_ID", "SOURCE_GROUP_ID", "PROPOSED_DOMAIN_ID", "SNAPSHOT_JSON", "STATUS", "OWNER_PRINCIPAL_ID", "REASON"}),
+    "CX_DOMAIN_DRAFT_MEMBERS": frozenset({"DRAFT_MEMBER_ID", "DRAFT_ID", "PRINCIPAL_ID", "PRINCIPAL_TYPE", "MEMBERSHIP_TIER", "DECISION"}),
 }
 
 V432_MEMORY_TABLES = (
@@ -1122,6 +1152,51 @@ def validate_v441_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v442_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate v4.4.2 additive operations and Graph profile declarations."""
+    base = validate_v441_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    sources = [
+        selected.get("37_v4_4_2_embedding_graph_operations.sql"),
+        selected.get("38_v4_4_2_channel_pinning.sql"),
+    ]
+    raw_source = "\n".join(path.read_text(encoding="utf-8") for path in sources if path and path.is_file())
+    source = _normalized_marker_text(raw_source)
+    control = {
+        "scripts_required": list(V442_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V442_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V442_GRAPH_OPERATIONS_TABLES if name not in source],
+        "states_present": all(marker in raw_source.upper() for marker in ("ENABLED", "CONTROLLED", "DISABLED", "UNAVAILABLE")),
+        "safety_markers": all(marker in raw_source.upper() for marker in ("RESPONSE_DIGEST", "ATTEMPT_DIGEST", "SSH_TRUST_MODE", "PINNED")),
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    control["passed"] = not control["scripts_missing"] and not control["tables_missing"] and control["states_present"] and control["safety_markers"] and control["no_plaintext_secret_markers"]
+    return {"database": database, "v441": base, "v442_operations": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
+def validate_v443_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate the v4.4.3 Security Domain binding boundary declarations."""
+    base = validate_v442_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("39_v4_4_3_security_domain_binding.sql")
+    raw_source = migration.read_text(encoding="utf-8") if migration and migration.is_file() else ""
+    source = _normalized_marker_text(raw_source)
+    control = {
+        "scripts_required": list(V443_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V443_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V443_SECURITY_DOMAIN_TABLES if name not in source],
+        "boundary_markers": all(marker in raw_source.upper() for marker in (
+            "LEGACY_COLLAB_GROUP", "CX_DOMAIN_BINDINGS", "CX_DOMAIN_CONVERSION_DRAFTS", "CX_DOMAIN_DRAFT_MEMBERS",
+        )),
+        "single_active_group_binding": "ACTIVE_GROUP" in raw_source.upper() or "ACTIVE_GROUP" in source,
+        "no_plaintext_secret_markers": not any(marker in source for marker in ("PRIVATE_KEY", "CLIENT_SECRET", "PASSWORD")),
+    }
+    control["passed"] = not control["scripts_missing"] and not control["tables_missing"] and control["boundary_markers"] and control["single_active_group_binding"] and control["no_plaintext_secret_markers"]
+    return {"database": database, "v442": base, "v443_security_domain_binding": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1175,6 +1250,9 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
     for table in tuple(dict.fromkeys(
         V43_REQUIRED_TABLES + V434_COMPLIANCE_TABLES + V435_PLATFORM_TABLES
         + V436_NATIVE_AGENT_TABLES + V437_BOOTSTRAP_TABLES + tuple(V437_BOOTSTRAP_REQUIRED_COLUMNS)
+        + V440_SDD_TABLES + V441_ADMIN_HA_TABLES + V442_GRAPH_OPERATIONS_TABLES + V443_SECURITY_DOMAIN_TABLES
+        + tuple(V440_SDD_REQUIRED_COLUMNS) + tuple(V441_ADMIN_HA_REQUIRED_COLUMNS)
+        + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1257,6 +1335,8 @@ class ProbeResult:
     v435_platform_contract: dict[str, Any] = field(default_factory=dict)
     v436_native_agent_contract: dict[str, Any] = field(default_factory=dict)
     v437_bootstrap_embedding_contract: dict[str, Any] = field(default_factory=dict)
+    v442_graph_operations_contract: dict[str, Any] = field(default_factory=dict)
+    v443_security_domain_binding_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1311,6 +1391,30 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     }
     result.v437_bootstrap_embedding_contract["passed"] = not any((
         result.v437_bootstrap_embedding_contract["tables_missing"], result.v437_bootstrap_embedding_contract["columns_missing"],
+    ))
+    result.v442_graph_operations_contract = {
+        "tables_missing": sorted(set(V442_GRAPH_OPERATIONS_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v442_graph_operations_contract["passed"] = not any((
+        result.v442_graph_operations_contract["tables_missing"],
+        result.v442_graph_operations_contract["columns_missing"],
+    ))
+    result.v443_security_domain_binding_contract = {
+        "tables_missing": sorted(set(V443_SECURITY_DOMAIN_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V443_SECURITY_DOMAIN_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v443_security_domain_binding_contract["passed"] = not any((
+        result.v443_security_domain_binding_contract["tables_missing"],
+        result.v443_security_domain_binding_contract["columns_missing"],
     ))
 
 
@@ -1605,11 +1709,17 @@ def main() -> int:
     requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
     requires_v437 = target_version.startswith(("4.3.7", "4.4."))
     requires_v440 = target_version.startswith("4.4.")
-    requires_v441 = target_version.startswith("4.4.1")
+    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3"))
+    requires_v442 = target_version.startswith(("4.4.2", "4.4.3"))
+    requires_v443 = target_version.startswith("4.4.3")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v441:
+            if requires_v443:
+                migration_scripts, validator = V443_MIGRATION_SCRIPTS, validate_v443_static_contract
+            elif requires_v442:
+                migration_scripts, validator = V442_MIGRATION_SCRIPTS, validate_v442_static_contract
+            elif requires_v441:
                 migration_scripts, validator = V441_MIGRATION_SCRIPTS, validate_v441_static_contract
             elif requires_v440:
                 migration_scripts, validator = V440_MIGRATION_SCRIPTS, validate_v440_static_contract
@@ -1636,16 +1746,30 @@ def main() -> int:
                 for name in migration_scripts
             ]
             static_contracts[database] = validator(database, scripts)
+    # v4.3 replaced the pre-v4.3 execution/registration/governance catalog
+    # with the CX control-plane catalog. Keep the legacy checks for older
+    # releases, but do not make a valid v4.3+ deployment fail on objects that
+    # are no longer part of its schema contract.
+    legacy_catalog_required = not requires_v43
     for database in available_databases:
         path = paths[database]
         if path is None:
             parser.error(f"--{database}-config is required for {database}")
         try:
-            results.append(PROBES[database](_load_database_config(path), enterprise=enterprise))
+            result = PROBES[database](_load_database_config(path), enterprise=enterprise)
+            if not legacy_catalog_required:
+                result.v401_tables_required = 0
+                result.v401_tables_missing = []
+                result.registration_tables_required = 0
+                result.registration_tables_missing = []
+                result.governance_tables_required = 0
+                result.governance_tables_missing = []
+                result.skill_entity_contract = True
+            results.append(result)
         except Exception as exc:
             results.append(ProbeResult(
                 database=database, connected=False, product=database,
-                governance_tables_required=len(GOVERNANCE_TABLES) if enterprise else 0,
+                governance_tables_required=(len(GOVERNANCE_TABLES) if enterprise else 0) if legacy_catalog_required else 0,
                 error_type=type(exc).__name__,
             ))
 
@@ -1663,9 +1787,9 @@ def main() -> int:
         "passed": all(
             result.connected
             and result.core_tables_present == result.core_tables_required
-            and result.v401_tables_present == result.v401_tables_required
-            and result.registration_tables_present == result.registration_tables_required
-            and result.governance_tables_present >= result.governance_tables_required
+            and (not legacy_catalog_required or result.v401_tables_present == result.v401_tables_required)
+            and (not legacy_catalog_required or result.registration_tables_present == result.registration_tables_required)
+            and (not legacy_catalog_required or result.governance_tables_present >= result.governance_tables_required)
             and (not requires_graph or (
                 result.graph_tables_present == result.graph_tables_required
                 and not result.graph_tables_missing
@@ -1676,10 +1800,12 @@ def main() -> int:
                 and (not requires_v435 or result.v435_platform_contract.get("passed") is True)
                 and (not requires_v436 or result.v436_native_agent_contract.get("passed") is True)
                 and (not requires_v437 or result.v437_bootstrap_embedding_contract.get("passed") is True)
+                and (not requires_v442 or result.v442_graph_operations_contract.get("passed") is True)
+                and (not requires_v443 or result.v443_security_domain_binding_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)
-            and result.skill_entity_contract
+            and (not legacy_catalog_required or result.skill_entity_contract)
             and (result.database != "oracle" or result.oracle_text_contract.get("passed") is True)
             and (not requires_v43 or static_contracts.get(result.database, {}).get("passed") is True)
             for result in results

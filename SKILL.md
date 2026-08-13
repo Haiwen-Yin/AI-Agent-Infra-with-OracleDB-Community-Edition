@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.4.1 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.4.3 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -108,6 +108,32 @@ the endpoint returns metadata only. Containment revokes platform access before
 asking an Agent to clear memory and stop; NFS, object storage, unified storage,
 and infrastructure process termination require customer-specific adapters.
 
+v4.4.2 adds one verified platform-wide Embedding activation workflow. Test the
+configured provider first; the platform derives the vector dimension and then
+atomically records the active Profile, Contract, writable default Space,
+`PLATFORM/DEFAULT` Binding, activation evidence, and audit records. Platform
+default normalization is mandatory. When immutable vector-space properties
+change, the old Space is archived for readable history and governed
+re-embedding, while a new Space becomes the write target. API keys are AES-GCM
+encrypted at rest and never returned in evidence or API responses.
+
+The database-authoritative Graph Production Profile is resolved before both
+FastAPI and legacy visualization requests. Graph Runtime core and authorized
+inspection are production-profile capabilities. A2A, OTLP, Dynamic Graph
+migration, replay, and framework execution adapters remain explicitly gated
+until independent production evidence is available.
+
+v4.4.3 adds governed Security Domain administration for project collaboration.
+Create a dedicated Domain with a purpose, classification, accountable Human
+owner, and reason; then confirm each Human or Agent explicitly before Channel
+admission or domain-scoped runtime use. A Channel, message, prompt, workspace,
+Skill, Tool, API, or legacy collaboration group is not an authorization grant.
+Existing collaboration groups may create a conversion draft whose Agents are
+pending candidates only. Their historical membership and `SHARING_POLICY` are
+review context, never automatic authorization. One group can have one active
+Domain binding; `DEFAULT` is reserved for bootstrap or constrained proof of
+concept work and is not an implicit production selection.
+
 ## 2. Package Contents
 
 After extracting the release zip, you have:
@@ -116,7 +142,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.1.md   # this release's notes
+├── RELEASE_NOTES_v4.4.3.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -193,7 +219,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.1.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.3.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -218,7 +244,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.4.1 archive includes the verified glibc 2.28 wheel; do not
+The current v4.4.2 archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration
@@ -329,8 +355,11 @@ The internal `15` step is part of v4.3.0 and is not a public v4.2.1 release.
 ./start_web_server.sh config    # print resolved config
 ```
 
-Access the dashboard at `http://<host>:<port>` - login: `admin / <password>`
-(the password is set in `config.json` under `security.admin_password`).
+Access the dashboard at `http://<host>:<port>`. The initial local
+administrator is configured by the controlled initialization or deployment
+workflow; Dashboard passwords are not stored in or displayed by `config.json`.
+Change the initial credential before production use and manage it through the
+protected local identity flow.
 
 ## 8. Business Agent Registration
 

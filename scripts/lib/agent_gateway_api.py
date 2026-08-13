@@ -530,7 +530,9 @@ def add_channel_member(actor_principal_id: str, channel_id: str, member_principa
         "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP)",
         {"security_domain_id": channel["security_domain_id"], "principal_id": member_principal_id},
     ))
-    if not domain_member and identity_api.effective_access(actor_principal_id, "domains.manage")["decision"] != "ALLOW":
+    # A Channel is not a way to grant Domain access. Administrators must first
+    # add a reviewed Principal to the Security Domain, then admit it here.
+    if not domain_member:
         raise GatewayError("member is outside the Channel security domain")
     revived = connection.execute(
         "UPDATE CX_CHANNEL_MEMBERS SET STATUS = 'ACTIVE', MEMBER_ROLE = :member_role, "

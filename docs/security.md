@@ -1,4 +1,30 @@
-# Security - AI Agent Infra with DB v4.4.1
+# Security - AI Agent Infra with DB v4.4.3
+
+## v4.4.3 Security Domain Boundary
+
+`CX_SECURITY_DOMAINS` and `CX_DOMAIN_MEMBERS` are the authorization facts for
+project collaboration. `CX_DOMAIN_GOVERNANCE` records the accountable Human
+owner, purpose, classification, reason, and administrative change context.
+Channels and legacy `COLLAB_GROUPS` are collaboration surfaces only. A message,
+prompt, thread, workspace, graph relation, Skill, Tool, API declaration, or
+historic group member never grants or expands Security Domain access.
+
+Production setup is ordered: create a dedicated Security Domain, record its
+purpose and classification, confirm the owner and each Human or Agent member,
+then create a Channel or bind one legacy collaboration group. `DEFAULT` is
+reserved for bootstrap and constrained proof-of-concept use; it is never the
+implicit selection for a production project. A legacy group conversion creates
+a review draft only. Its active Agents are candidates, `SHARING_POLICY` remains
+non-authoritative review context, and only individually confirmed candidates
+are inserted atomically when the draft is applied.
+
+Current Domain membership is rechecked at Channel listing, history reads,
+message and thread access, Gateway admission, and guarded work operations.
+Expired, suspended, or revoked membership fails closed without deleting
+historical evidence. One legacy collaboration group has at most one active
+Security Domain binding in this initial production contract, so an operator
+must use a governed rebinding/migration rather than rely on ambiguous union or
+intersection semantics.
 
 ## v4.4.1 Platform Administration Boundary
 

@@ -1,4 +1,23 @@
-# API Reference - AI Agent Infra with DB v4.4.1
+# API Reference - AI Agent Infra with DB v4.4.3
+
+## v4.4.3 Security Domain Governance API
+
+All mutations require the authenticated protected Human session, CSRF,
+`domains.manage`, a reason, and an atomic audit record. A Domain binding is
+traceability metadata only; it never grants membership.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/security-domains` | GET/POST | List accessible Domains or create a governed Domain with owner, purpose, classification, and reason. |
+| `/api/security-domains/candidates` | GET | List eligible Human/Agent candidates for explicit membership review. |
+| `/api/security-domains/{id}/members` | GET/POST | Inspect or explicitly set a Domain membership, tier, validity, status, and reason. |
+| `/api/security-domains/{id}/lifecycle` | POST | Activate, suspend, or revoke a Domain with a reason. |
+| `/api/security-domains/{id}/bindings` | GET/POST | Inspect or create an auditable Channel/legacy-group binding. |
+| `/api/security-domains/collaboration-groups` | GET | List active legacy groups and their binding state. |
+| `/api/security-domains/conversion-drafts` | POST | Create a candidate-only conversion draft from one unbound legacy group. |
+| `/api/security-domains/conversion-drafts/{id}` | GET | Read the authorized draft and candidate decisions. |
+| `/api/security-domains/conversion-drafts/{id}/members/{principal}` | POST | Confirm or reject one candidate with a tier, validity, and reason. |
+| `/api/security-domains/conversion-drafts/{id}/apply` | POST | Atomically create the Domain, confirmed memberships, and one active group binding. |
 
 ## v4.4.1 Platform Administration API
 
@@ -62,13 +81,13 @@ atomic audit writes.
 |---|---|---|
 | `/api/platform/deployment/status` | GET | Read sanitized Bootstrap deployment, readiness, and handoff state. |
 | `/api/platform/deployment/verify` | POST | Run postflight verification only; it cannot execute arbitrary SQL. |
-| `/api/embedding/profiles` | GET/POST | Read redacted Profiles or create a governed Profile. |
-| `/api/embedding/contracts` | GET/POST | Read immutable Contract versions or publish a validated successor. |
-| `/api/embedding/spaces` | GET/POST | Inspect or create a logical vector Space. |
-| `/api/embedding/bindings` | GET/POST | Inspect or create an auditable effective binding. |
+| `/api/embedding/profiles` | GET | Read redacted Profiles. Profile writes are internal to verified platform activation. |
+| `/api/embedding/contracts` | GET | Read immutable Contract versions. Contract writes are internal to verified platform activation. |
+| `/api/embedding/spaces` | GET | Inspect logical vector Spaces. Space writes are internal to verified platform activation. |
+| `/api/embedding/bindings` | GET | Inspect effective bindings. Binding writes are internal to verified platform activation. |
 | `/api/embedding/profiles/{profile_id}/probe` | POST | Run a bounded platform-side compatibility probe. |
 | `/api/gateway/embedding/profiles/{profile_id}/probe` | POST | Accept an authenticated Agent-side direct-mode probe. |
-| `/api/embedding/jobs` | GET/POST | Inspect or enqueue bounded ingestion or re-embedding work. |
+| `/api/embedding/jobs` | GET | Inspect automated ingestion or re-embedding work. Job creation is internal to verified activation and migration orchestration. |
 | `/api/embedding/jobs/{job_id}` | GET | Read authorized queued, claimed, retry, or terminal job state. |
 
 The local `scripts/embedding_worker.py` claims jobs by database lease and

@@ -23,7 +23,7 @@ def delegated_scope(monkeypatch):
     monkeypatch.setattr(cursor_pagination, "page", lambda rows, *_args: {"items": rows})
     for module in (knowledge_api, memory_lifecycle, skill_api, spec_api, task_plan_api):
         monkeypatch.setattr(module.identity_api, "effective_access", lambda *_args: {"decision": "DENY"})
-        monkeypatch.setattr(module.identity_api, "_agent_visibility_clause", lambda *_args: "SCOPE_CLAUSE")
+        monkeypatch.setattr(module.identity_api, "_agent_visibility_clause", lambda *_args: "SCOPE_CLAUSE(:principal_id)")
         monkeypatch.setattr(module, "execute_query", lambda sql, params, captured=captured: captured.append((sql, params)) or [])
     return captured
 

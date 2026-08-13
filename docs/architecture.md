@@ -1,4 +1,21 @@
-# Architecture - AI Agent Infra with DB v4.4.1
+# Architecture - AI Agent Infra with DB v4.4.3
+
+## v4.4.3 Governed Collaboration Boundary
+
+The collaboration hierarchy is **Security Domain -> Channel -> collaboration
+group**. The Security Domain is the durable zero-trust authorization and data
+boundary. Channels provide attributable Human/Agent conversation within that
+boundary. Legacy collaboration groups remain task-coordination records for
+Agents, branches, SDD, and workspaces. Their relationship to a Security Domain
+is an explicit, auditable binding, never an authorization shortcut.
+
+A conversion draft snapshots an existing group's review context and lists its
+active Agents as pending candidates. It does not change `CX_DOMAIN_MEMBERS`.
+Applying a reviewed draft validates its accountable Human owner, creates the
+new Domain, writes only confirmed members, and creates one active group binding
+in one transaction. Runtime authorization continues to resolve current Domain
+membership, so a later suspension or revocation closes future Channel and
+Gateway access without rewriting retained collaboration history.
 
 ## v4.4.1 Platform Administration And Availability Plane
 

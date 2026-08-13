@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.1 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.3 Unified Repository Guide
 
-> **v4.4.1** - The unified single-source repository that generates all 6 release
+> **v4.4.3** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -8,6 +8,23 @@
 > name; database-specific package names identify the adapter and edition.
 
 ## 1. Repository Layout
+
+## v4.4.3 Governed Security Domains
+
+The durable collaboration order is **Security Domain -> Channel -> legacy
+collaboration group**. `CX_SECURITY_DOMAINS` and `CX_DOMAIN_MEMBERS` are the
+only authorization records. `CX_DOMAIN_GOVERNANCE` adds accountable ownership,
+purpose, classification, and reason, while `CX_DOMAIN_BINDINGS` records
+traceable Channel and group relationships without granting access.
+
+When adapting an existing collaboration group, create a conversion draft. Its
+active Agents remain pending candidates and its `SHARING_POLICY` is review
+context only. An authorized operator must confirm each candidate, verify the
+accountable Human owner, and apply the draft before the transaction creates
+the Domain, confirmed memberships, and one active group binding. Do not infer
+authorization from old group membership, messages, workspace sharing, Skills,
+or prompts. `DEFAULT` is for bootstrap or constrained PoC use and must not be
+selected implicitly for a production project.
 
 ## v4.3.6 Native Agent Lifecycle
 
@@ -342,7 +359,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.1`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.3`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

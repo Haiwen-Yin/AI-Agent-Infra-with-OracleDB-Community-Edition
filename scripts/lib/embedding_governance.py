@@ -464,7 +464,13 @@ def probe_draft(actor: str, *, profile_key: str, provider_url: str, model_id: st
         raise EmbeddingGovernanceError("Embedding model is required")
     if mode in {"PLATFORM_MANAGED", "ENTERPRISE_DIRECT", "ENTERPRISE_PROXY"} and not _text(provider_url, 512) and not _text(secret_reference, 512):
         raise EmbeddingGovernanceError("provider URL or secret reference is required")
-    configured_dimension = _validated_dimension(dimension, mode)
+    # A zero draft dimension means "discover it from the provider".  Persisted
+    # Profiles still require a positive dimension for every vector mode.
+    configured_dimension = int(dimension or 0)
+    if mode == "NONE":
+        configured_dimension = 0
+    elif configured_dimension < 0 or configured_dimension > 65536:
+        raise EmbeddingGovernanceError("Embedding dimension is invalid")
     metric = _text(distance_metric or "COSINE", 32).upper()
     if metric not in {"COSINE", "EUCLIDEAN", "DOT_PRODUCT"}:
         raise EmbeddingGovernanceError("unsupported distance metric")
@@ -505,7 +511,7 @@ def probe_draft(actor: str, *, profile_key: str, provider_url: str, model_id: st
                 "observed_model": _text(payload.get("model") or model_id, 256),
                 "physical_dimension": physical,
             })
-            if observed_dimension != configured_dimension:
+            if configured_dimension and observed_dimension != configured_dimension:
                 raise EmbeddingGovernanceError("Embedding response dimension differs from the Profile")
             if physical and physical != observed_dimension:
                 raise EmbeddingGovernanceError("Embedding dimension is incompatible with deployed vector storage")
@@ -514,11 +520,222 @@ def probe_draft(actor: str, *, profile_key: str, provider_url: str, model_id: st
     except (EmbeddingGovernanceError, urllib.error.URLError, TimeoutError, ValueError) as exc:
         result["error"] = _text(str(exc), 256)
 
+    result["response_digest"] = _digest({
+        "model": result.get("observed_model") or model_id,
+        "dimension": result.get("observed_dimension") or configured_dimension,
+        "status": status,
+    })
+
     def work(tx: Any) -> Dict[str, Any]:
         _audit(tx, actor, "EMBEDDING_PROFILE_DRAFT_PROBE", "EMBEDDING_PROFILE_DRAFT", key,
                outcome, f"Draft probe: {status}")
         return {"status": status, "result": result}
     return connection.execute_transaction_callback(work)
+
+
+def activate_platform_embedding(actor: str, *, profile_key: str, provider_url: str,
+                                model_id: str, execution_mode: str, dimension: int,
+                                distance_metric: str = "COSINE", api_key: str = "",
+                                secret_reference: str = "", reason: str = "",
+                                model_fingerprint: str = "") -> Dict[str, Any]:
+    """Probe and activate the one platform-wide Embedding contract.
+
+    The provider probe is performed before persistence. Once a platform
+    Contract has been deployed, its vector identity is immutable at runtime:
+    replacement is a redeployment operation, never an in-place edit.
+    """
+    if len(_text(reason, 2000)) < 3:
+        raise EmbeddingGovernanceError("profile key and reason are required")
+    normalized_mode = _validated_mode(execution_mode)
+    if normalized_mode != "NONE":
+        # Platform default normalization is a contract invariant, not a UI
+        # preference.  Callers cannot disable it through this endpoint.
+        normalize_vectors = True
+    else:
+        normalize_vectors = True
+    probe = probe_draft(
+        actor, profile_key=profile_key, provider_url=provider_url,
+        model_id=model_id, execution_mode=normalized_mode, dimension=dimension,
+        distance_metric=distance_metric, normalize_vectors=normalize_vectors,
+        api_key=api_key, secret_reference=secret_reference, reason=reason,
+    )
+    if str(probe.get("status") or "").upper() != "VERIFIED":
+        raise EmbeddingGovernanceError("Embedding provider verification failed")
+    probe_result = dict(probe.get("result") or {})
+    observed_dimension = int(probe_result.get("observed_dimension") or dimension or 0)
+    if normalized_mode != "NONE" and observed_dimension <= 0:
+        raise EmbeddingGovernanceError("Embedding provider dimension was not observed")
+    activation_id = _id("EA")
+    response_digest = str(probe_result.get("response_digest") or _digest(probe_result))
+
+    def work(tx: Any) -> Dict[str, Any]:
+        deployed_binding = _row(tx.query_one(
+            "SELECT BINDING_ID,PROFILE_ID,SPACE_ID,STATUS,VERSION FROM CX_EMBEDDING_BINDINGS "
+            "WHERE BINDING_SCOPE='PLATFORM' AND BINDING_SUBJECT_ID='DEFAULT' FOR UPDATE", {},
+        ))
+        if deployed_binding and str(deployed_binding.get("status") or "").upper() == "ACTIVE":
+            raise EmbeddingConflict(
+                "Platform Embedding is already deployed; redeploy the platform to change the unified Embedding model"
+            )
+        key = _text(profile_key, 128)
+        profile_id = "EMB_" + key.replace("-", "_").upper()
+        existing_profile = _row(tx.query_one(
+            "SELECT PROFILE_ID,PROFILE_KEY,VERSION FROM CX_EMBEDDING_PROFILES WHERE PROFILE_KEY=:key FOR UPDATE",
+            {"key": key},
+        ))
+        profile_id = str((existing_profile or {}).get("profile_id") or profile_id)
+        profile_version = int((existing_profile or {}).get("version") or 0) + 1
+        from .connection_crypto import encrypt_section
+        api_cipher = encrypt_section({"api_key": api_key}) if api_key else None
+        profile_params = {
+            "profile_id": profile_id, "profile_key": key,
+            "provider_url": _text(provider_url, 512).rstrip("/") or None,
+            "model_id": _text(model_id, 256) or "NONE",
+            "model_fingerprint": _text(model_fingerprint, 256) or None,
+            "api_cipher": api_cipher, "secret_ref": _text(secret_reference, 512) or None,
+            "execution_mode": normalized_mode, "dimension": observed_dimension,
+            "metric": _text(distance_metric or "COSINE", 32).upper(),
+            "preprocessing": _json({}),
+            "modalities": _json(["TEXT"]), "version": profile_version,
+            "actor": actor, "reason": _text(reason, 2000),
+        }
+        if existing_profile:
+            tx.execute(
+                "UPDATE CX_EMBEDDING_PROFILES SET PROVIDER_URL=:provider_url,MODEL_ID=:model_id,"
+                "MODEL_FINGERPRINT=:model_fingerprint,API_KEY_CIPHER=:api_cipher,SECRET_REFERENCE=:secret_ref,"
+                "EXECUTION_MODE=:execution_mode,DIMENSION=:dimension,DISTANCE_METRIC=:metric,"
+                "NORMALIZE_VECTORS='Y',PREPROCESSING_JSON=:preprocessing,MODALITIES_JSON=:modalities,"
+                "STATUS='ACTIVE',HEALTH_STATE='VERIFIED',VERSION=:version,UPDATED_BY=:actor,"
+                "UPDATE_REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:profile_id",
+                profile_params,
+            )
+        else:
+            tx.execute(
+                "INSERT INTO CX_EMBEDDING_PROFILES(PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,"
+                "MODEL_FINGERPRINT,API_KEY_CIPHER,SECRET_REFERENCE,EXECUTION_MODE,DIMENSION,DISTANCE_METRIC,"
+                "NORMALIZE_VECTORS,PREPROCESSING_JSON,MODALITIES_JSON,STATUS,HEALTH_STATE,VERSION,UPDATED_BY,UPDATE_REASON) "
+                "VALUES (:profile_id,:profile_key,:provider_url,:model_id,:model_fingerprint,:api_cipher,"
+                ":secret_ref,:execution_mode,:dimension,:metric,'Y',:preprocessing,:modalities,'ACTIVE','VERIFIED',"
+                ":version,:actor,:reason)", profile_params,
+            )
+        _audit(tx, actor, "EMBEDDING_PROFILE_UPSERT", "EMBEDDING_PROFILE", profile_id, "ALLOW", reason)
+
+        effective_model_fingerprint = _text(model_fingerprint, 256) or _digest({"model_id": _text(model_id, 256)})
+        payload = {
+            "provider_identity": profile_params["provider_url"] or "",
+            "model_fingerprint": effective_model_fingerprint,
+            "model_id": _text(model_id, 256),
+            "dimension": observed_dimension, "distance_metric": profile_params["metric"],
+            "normalize_vectors": "Y", "preprocessing": {}, "modalities": ["TEXT"],
+            "execution_mode": normalized_mode,
+        }
+        digest = _digest(payload)
+        latest = _row(tx.query_one(
+            "SELECT CONTRACT_ID,CONTRACT_VERSION,CONTRACT_DIGEST FROM CX_EMBEDDING_CONTRACTS "
+            "WHERE PROFILE_ID=:profile_id ORDER BY CONTRACT_VERSION DESC FOR UPDATE",
+            {"profile_id": profile_id},
+        ))
+        contract_id = str((latest or {}).get("contract_id") or "")
+        contract_version = int((latest or {}).get("contract_version") or 0)
+        contract_idempotent = bool(latest and str(latest.get("contract_digest") or "") == digest)
+        if not contract_idempotent:
+            contract_version += 1
+            contract_id = _id("EC")
+            tx.execute(
+                "INSERT INTO CX_EMBEDDING_CONTRACTS(CONTRACT_ID,PROFILE_ID,CONTRACT_VERSION,PROVIDER_IDENTITY,"
+                "MODEL_FINGERPRINT,DIMENSION,DISTANCE_METRIC,NORMALIZE_VECTORS,PREPROCESSING_JSON,MODALITIES_JSON,"
+                "EXECUTION_MODE,STATUS,CONTRACT_DIGEST,CREATED_BY) VALUES (:id,:profile_id,:version,:provider,"
+                ":fingerprint,:dimension,:metric,'Y',:preprocessing,:modalities,:execution_mode,'ACTIVE',:digest,:actor)",
+                {"id": contract_id, "profile_id": profile_id, "version": contract_version,
+                 "provider": payload["provider_identity"] or None, "fingerprint": payload["model_fingerprint"] or None,
+                 "dimension": observed_dimension, "metric": payload["distance_metric"],
+                 "preprocessing": _json({}), "modalities": _json(["TEXT"]), "execution_mode": normalized_mode,
+                 "digest": digest, "actor": actor},
+            )
+            _audit(tx, actor, "EMBEDDING_CONTRACT_CREATE", "EMBEDDING_CONTRACT", contract_id, "ALLOW", reason)
+
+        current_space = _row(tx.query_one(
+            "SELECT SPACE_ID,SPACE_KEY,CONTRACT_ID FROM CX_EMBEDDING_SPACES "
+            "WHERE IS_DEFAULT='Y' FOR UPDATE", {},
+        ))
+        if contract_idempotent:
+            space = _row(tx.query_one(
+                "SELECT SPACE_ID,SPACE_KEY FROM CX_EMBEDDING_SPACES WHERE CONTRACT_ID=:contract_id "
+                "AND IS_DEFAULT='Y' FOR UPDATE", {"contract_id": contract_id},
+            ))
+        else:
+            space = None
+        migration_state = "NONE" if contract_idempotent else "MIGRATION_REQUIRED"
+        if not space:
+            if current_space and str(current_space.get("contract_id") or "") != contract_id:
+                tx.execute(
+                    "UPDATE CX_EMBEDDING_SPACES SET IS_DEFAULT='N',WRITE_ENABLED='N',STATUS='ARCHIVED',"
+                    "UPDATED_AT=CURRENT_TIMESTAMP WHERE SPACE_ID=:space_id",
+                    {"space_id": current_space["space_id"]},
+                )
+            space_id = _id("ES")
+            space_key = f"PLATFORM_DEFAULT_V{contract_version}"
+            tx.execute(
+                "INSERT INTO CX_EMBEDDING_SPACES(SPACE_ID,SPACE_KEY,CONTRACT_ID,STATUS,IS_DEFAULT,WRITE_ENABLED,"
+                "VALIDATION_STATE,PHYSICAL_REF,CREATED_BY,REASON) VALUES (:id,:key,:contract_id,'ACTIVE','Y',:writable,"
+                "'VERIFIED',NULL,:actor,:reason)",
+                {"id": space_id, "key": space_key, "contract_id": contract_id,
+                 "writable": "Y" if normalized_mode != "NONE" else "N", "actor": actor, "reason": reason},
+            )
+            _audit(tx, actor, "EMBEDDING_SPACE_CREATE", "EMBEDDING_SPACE", space_id, "ALLOW", reason)
+            space = {"space_id": space_id, "space_key": space_key, "idempotent": False}
+        else:
+            space_id = str(space["space_id"])
+            tx.execute(
+                "UPDATE CX_EMBEDDING_SPACES SET STATUS='ACTIVE',IS_DEFAULT='Y',WRITE_ENABLED=:writable,"
+                "VALIDATION_STATE='VERIFIED',UPDATED_AT=CURRENT_TIMESTAMP WHERE SPACE_ID=:space_id",
+                {"space_id": space_id, "writable": "Y" if normalized_mode != "NONE" else "N"},
+            )
+            space["idempotent"] = True
+
+        binding_row = deployed_binding
+        binding_id = str((binding_row or {}).get("binding_id") or _id("EB"))
+        binding_version = int((binding_row or {}).get("version") or 0) + 1
+        binding_params = {"id": binding_id, "profile_id": profile_id, "space_id": space_id,
+                          "version": binding_version, "actor": actor, "reason": _text(reason, 2000)}
+        if binding_row:
+            tx.execute(
+                "UPDATE CX_EMBEDDING_BINDINGS SET PROFILE_ID=:profile_id,SPACE_ID=:space_id,STATUS='ACTIVE',"
+                "VERSION=:version,APPROVED_BY=:actor,REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE BINDING_ID=:id",
+                binding_params,
+            )
+        else:
+            tx.execute(
+                "INSERT INTO CX_EMBEDDING_BINDINGS(BINDING_ID,BINDING_SCOPE,BINDING_SUBJECT_ID,PROFILE_ID,SPACE_ID,"
+                "STATUS,VERSION,APPROVED_BY,REASON) VALUES (:id,'PLATFORM','DEFAULT',:profile_id,:space_id,'ACTIVE',"
+                ":version,:actor,:reason)", binding_params,
+            )
+        _audit(tx, actor, "EMBEDDING_BINDING_UPSERT", "EMBEDDING_BINDING", binding_id, "ALLOW", reason)
+        tx.execute(
+            "INSERT INTO CX_EMBEDDING_ACTIVATION_EVIDENCE(ACTIVATION_ID,PROFILE_ID,PROFILE_VERSION,OBSERVED_DIMENSION,"
+            "OBSERVED_MODEL,RESPONSE_DIGEST,PROBE_STATUS,ACTIVATION_STATUS,CONTRACT_ID,SPACE_ID,BINDING_ID,MIGRATION_STATE,REASON,ACTOR) "
+            "VALUES (:id,:profile,:profile_version,:dimension,:model,:digest,'VERIFIED','ACTIVE',:contract,:space,:binding,:migration,:reason,:actor)",
+            {"id": activation_id, "profile": profile_id, "profile_version": profile_version,
+             "dimension": observed_dimension, "model": probe_result.get("observed_model") or model_id,
+             "digest": response_digest, "contract": contract_id, "space": space_id,
+             "binding": binding_id, "migration": migration_state,
+             "reason": _text(reason, 2000), "actor": actor},
+        )
+        _audit(tx, actor, "EMBEDDING_PLATFORM_ACTIVATE", "EMBEDDING_PROFILE", profile_id, "ALLOW", reason)
+        return {"activation_id": activation_id, "profile_id": profile_id, "profile_version": profile_version,
+                "contract_id": contract_id, "contract_version": contract_version, "space_id": space_id,
+                "space_key": space["space_key"], "binding_id": binding_id,
+                "binding_version": binding_version, "migration_state": migration_state,
+                "contract_idempotent": contract_idempotent}
+
+    evidence = connection.execute_transaction_callback(work)
+    return {**evidence, "normalize_vectors": True, "validation_state": "VERIFIED",
+            "profile": {"profile_id": evidence["profile_id"], "profile_key": _text(profile_key, 128),
+                        "version": evidence["profile_version"], "status": "ACTIVE"},
+            "contract": {"contract_id": evidence["contract_id"], "contract_version": evidence["contract_version"],
+                         "idempotent": evidence["contract_idempotent"]},
+            "space": {"space_id": evidence["space_id"], "space_key": evidence["space_key"]},
+            "binding": {"binding_id": evidence["binding_id"], "version": evidence.get("binding_version", 1)}}
 
 
 def record_agent_probe(actor: str, profile_id: str, *, observed_dimension: int,
@@ -776,7 +993,7 @@ def _managed_write(profile: Dict[str, Any], space: Dict[str, Any], contract: Dic
         "space_id": str(space["space_id"]), "profile_id": str(profile["profile_id"]),
         "contract_id": str(contract["contract_id"]), "model": str(profile.get("model_id") or ""),
         "dimension": len(vector), "digest": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-        "mode": str(profile.get("execution_mode") or ""), "vec": json.dumps(vector),
+        "source_mode": str(profile.get("execution_mode") or ""), "vec": json.dumps(vector),
     }
     exists = connection.execute_query_one(
         "SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID=:entity_id AND ENTITY_TYPE=:entity_type "
@@ -788,14 +1005,14 @@ def _managed_write(profile: Dict[str, Any], space: Dict[str, Any], contract: Dic
         connection.execute(
             "UPDATE ENTITY_EMBEDDINGS SET EMBEDDING=" + expression + ",EMBEDDING_MODEL=:model,EMBEDDING_DIM=:dimension,"
             "EMBEDDING_PROFILE_ID=:profile_id,EMBEDDING_CONTRACT_ID=:contract_id,CONTENT_DIGEST=:digest,"
-            "SOURCE_MODE=:mode,VALIDATION_STATUS='VERIFIED' WHERE ENTITY_ID=:entity_id AND ENTITY_TYPE=:entity_type "
+            "SOURCE_MODE=:source_mode,VALIDATION_STATUS='VERIFIED' WHERE ENTITY_ID=:entity_id AND ENTITY_TYPE=:entity_type "
             "AND EMBEDDING_SPACE_ID=:space_id", params,
         )
         return
     connection.execute(
         "INSERT INTO ENTITY_EMBEDDINGS(ENTITY_ID,ENTITY_TYPE,EMBEDDING_SPACE_ID,EMBEDDING_PROFILE_ID,"
         "EMBEDDING_CONTRACT_ID,CONTENT_DIGEST,SOURCE_MODE,VALIDATION_STATUS,EMBEDDING,EMBEDDING_MODEL,EMBEDDING_DIM,CREATED_AT) "
-        "VALUES (:entity_id,:entity_type,:space_id,:profile_id,:contract_id,:digest,:mode,'VERIFIED'," + expression + ",:model,:dimension,CURRENT_TIMESTAMP)",
+        "VALUES (:entity_id,:entity_type,:space_id,:profile_id,:contract_id,:digest,:source_mode,'VERIFIED'," + expression + ",:model,:dimension,CURRENT_TIMESTAMP)",
         params,
     )
 
@@ -895,15 +1112,29 @@ def _safe_result(result: Optional[Dict[str, Any]], error: str) -> Dict[str, Any]
 
 def readiness() -> Dict[str, Any]:
     default = _row(connection.execute_query_one(
-        "SELECT SPACE_ID,CONTRACT_ID,STATUS,WRITE_ENABLED,VALIDATION_STATE FROM CX_EMBEDDING_SPACES WHERE IS_DEFAULT='Y'", {},
+        "SELECT SPACE_ID,SPACE_KEY,CONTRACT_ID,STATUS,WRITE_ENABLED,VALIDATION_STATE FROM CX_EMBEDDING_SPACES WHERE IS_DEFAULT='Y'", {},
     ))
     if not default:
-        return {"state": "UNCONFIGURED", "vector_ready": False, "reason": "No default Embedding Space"}
+        return {"state": "UNCONFIGURED", "vector_ready": False, "platform_deployed": False,
+                "reason": "No default Embedding Space"}
     contract = _contract_row(str(default.get("contract_id") or "")) if default.get("contract_id") else None
+    profile = _profile_row(str((contract or {}).get("profile_id") or "")) if contract else None
+    binding = _row(connection.execute_query_one(
+        "SELECT BINDING_ID,PROFILE_ID,SPACE_ID,STATUS FROM CX_EMBEDDING_BINDINGS "
+        "WHERE BINDING_SCOPE='PLATFORM' AND BINDING_SUBJECT_ID='DEFAULT' AND STATUS='ACTIVE'", {},
+    ))
+    deployed = bool(
+        contract and binding
+        and str(binding.get("profile_id") or "") == str((contract or {}).get("profile_id") or "")
+        and str(binding.get("space_id") or "") == str(default.get("space_id") or "")
+    )
     state = str(default.get("validation_state") or "UNVERIFIED")
     ready = bool(contract and str(default.get("write_enabled") or "N") == "Y" and state in {"VERIFIED", "AGENT_VERIFIED", "GATEWAY_VERIFIED"})
-    return {"state": "READY" if ready else state, "vector_ready": ready, "space_id": default.get("space_id"),
-            "contract_id": (contract or {}).get("contract_id"), "dimension": (contract or {}).get("dimension")}
+    return {"state": "READY" if ready else state, "vector_ready": ready, "platform_deployed": deployed,
+            "space_id": default.get("space_id"), "space_key": default.get("space_key"),
+            "contract_id": (contract or {}).get("contract_id"),
+            "profile_key": (profile or {}).get("profile_key"),
+            "dimension": (contract or {}).get("dimension")}
 
 
 def queue_metrics() -> Dict[str, Any]:

@@ -74,10 +74,10 @@ def test_uploaded_upgrade_endpoint_passes_current_release_version():
 
 def test_dashboard_uses_a_single_archive_upload_workflow():
     app = (Path(__file__).resolve().parents[1] / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
-    platform = app.split("function PlatformCapabilitiesPage(", 1)[1].split("function DeploymentModelsPage(", 1)[0]
-    assert 'name="upgrade-package"' in platform
+    platform = app.split("function PlatformOperationsPage(", 1)[1].split("function DeploymentModelsPage(", 1)[0]
+    assert 'name="package" type="file"' in platform
     assert "/api/platform/upgrades/upload?reason=" in platform
-    assert "上传并自动升级" in platform
+    assert "上传并自动编排" in platform
     assert "/human-approval" not in platform
     assert "/skill-distribution" not in platform
 
@@ -165,6 +165,16 @@ def test_dashboard_agent_views_separate_registered_external_and_native_paths():
     assert '"平台原生智能体生成", "Platform-native Agent provisioning"' in app
     assert '"/api/platform/external-agent-registration"' in app
     assert "/api/native-agents?page_size=${size}" in app
+
+
+def test_external_enrollment_uses_agent_name_without_implicit_runtime_binding():
+    web_app = (Path(__file__).resolve().parents[1] / "web_app.py").read_text(encoding="utf-8")
+    identity = Path(identity_api.__file__).read_text(encoding="utf-8")
+    assert 'runtime: str = Field(default="", max_length=128)' in web_app
+    assert 'agent_name: str = Field(min_length=1, max_length=256)' in web_app
+    assert 'runtime: str = "", security_domain_id' in identity
+    assert 'if not agent_name:' in identity
+    assert 'Enrollment Agent name is required' in identity
 
 
 def test_dashboard_maps_management_failures_and_long_readiness_values():

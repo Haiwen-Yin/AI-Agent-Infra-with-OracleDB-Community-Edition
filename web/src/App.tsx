@@ -23,6 +23,7 @@ import {
   Moon,
   Network,
   PauseCircle,
+  Pin,
   PlayCircle,
   Plus,
   Redo2,
@@ -34,6 +35,7 @@ import {
   StopCircle,
   Sun,
   Upload,
+  User,
   UserPlus,
   Users,
   Undo2,
@@ -92,7 +94,9 @@ const nav = [
   ["audit", "审计", "Audit", FileKey2],
   ["users", "用户管理", "Users", Users],
   ["organization", "组织架构", "Organization", Building2],
+  ["security-domains", "安全域", "Security Domains", ShieldCheck],
   ["deployment", "部署与模型", "Deployment & models", Database],
+  ["platform-operations", "平台操作", "Platform operations", ShieldCheck],
   ["platform", "功能配置", "Capabilities", Settings2],
 ] as const;
 
@@ -101,6 +105,49 @@ const pageFromPath = () => {
   const parts = window.location.pathname.split("/").filter(Boolean);
   return parts[0] === "app" && parts[1] ? parts[1] : "monitor";
 };
+
+const validationFieldLabels: Record<string, [string, string]> = {
+  reason: ["变更原因", "change reason"],
+  profile_key: ["配置键", "profile key"],
+  provider_url: ["模型服务地址", "provider URL"],
+  model_id: ["模型 ID", "model ID"],
+  execution_mode: ["接入模式", "execution mode"],
+  dimension: ["向量维度", "vector dimension"],
+  distance_metric: ["距离度量", "distance metric"],
+  api_key: ["API Key", "API key"],
+  secret_reference: ["企业密钥引用", "enterprise secret reference"],
+  agent_id: ["智能体 ID", "Agent ID"],
+  agent_name: ["智能体名称", "Agent name"],
+  principal_id: ["平台主体", "platform principal"],
+  security_domain_id: ["安全域", "security domain"],
+  channel_name: ["频道名称", "Channel name"],
+  display_name: ["显示名称", "display name"],
+  package: ["平台新版 ZIP 压缩包", "new platform release ZIP"],
+};
+
+function validationMessage(detail: unknown, lang: Lang): string | null {
+  if (!Array.isArray(detail) || !detail.length) return null;
+  const issue = detail.find(
+    (item): item is Row => Boolean(item) && typeof item === "object",
+  );
+  if (!issue) return null;
+  const location = Array.isArray(issue.loc) ? issue.loc : [];
+  const field = String(location[location.length - 1] || "");
+  const fieldLabel = validationFieldLabels[field]?.[lang === "zh" ? 0 : 1];
+  const kind = String(issue.type || "");
+  const minimum = Number(issue.ctx?.min_length || 0);
+  if (kind === "missing")
+    return lang === "zh"
+      ? `请填写${fieldLabel || "必填项"}。`
+      : `Enter the required ${fieldLabel || "field"}.`;
+  if (kind === "string_too_short" && minimum > 0)
+    return lang === "zh"
+      ? `${fieldLabel || "填写内容"}至少需要 ${minimum} 个字符。`
+      : `${fieldLabel || "This field"} must contain at least ${minimum} characters.`;
+  return lang === "zh"
+    ? `请求内容不符合要求，请检查${fieldLabel || "填写项"}。`
+    : `Request validation failed. Check ${fieldLabel || "the submitted fields"}.`;
+}
 
 async function api<T = Row>(
   path: string,
@@ -131,12 +178,12 @@ async function api<T = Row>(
       );
     if (!response.ok) {
       let message = response.statusText;
+      const lang = (localStorage.getItem("cxLang") as Lang) || "zh";
       try {
         const detail = await response.json();
-        message =
-          typeof detail.detail === "string"
-            ? detail.detail
-            : detail.error || message;
+        message = validationMessage(detail.detail, lang)
+          || (typeof detail.detail === "string" ? detail.detail : "")
+          || (typeof detail.error === "string" ? detail.error : message);
       } catch {
         /* non-JSON error */
       }
@@ -148,9 +195,16 @@ async function api<T = Row>(
         "Native Agent bootstrap failed": ["平台原生智能体初始化失败", "Native Agent bootstrap failed"],
         "LLM Provider Profile is unavailable": ["LLM 服务商配置不可用", "LLM Provider Profile is unavailable"],
         "Platform Administration service is unavailable": ["平台管理服务暂不可用", "Platform Administration service is unavailable"],
+        "Platform Embedding activation failed": ["平台 Embedding 自动配置失败，请检查服务日志或联系平台管理员。", "Platform Embedding activation failed"],
+        "Platform Embedding is already deployed; redeploy the platform to change the unified Embedding model": ["平台统一 Embedding 已部署；如需更换模型，请通过重新部署完成变更。", "Platform Embedding is already deployed; redeploy the platform to change the unified Embedding model"],
       };
       const pair = localized[String(message)];
-      if (pair) message = pair[localStorage.getItem("cxLang") === "en" ? 1 : 0];
+      if (pair) message = pair[lang === "en" ? 1 : 0];
+      else if (lang === "zh") {
+        message = response.status === 422
+          ? "请求内容不符合要求，请检查必填项和格式。"
+          : "操作未完成，请检查填写内容、当前权限和服务状态。";
+      }
       const error = new Error(message);
       (error as Error & { status?: number }).status = response.status;
       throw error;
@@ -176,6 +230,12 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authSetup, setAuthSetup] = useState<Row | null>(null);
   const [requesting, setRequesting] = useState(false);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 4800);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -271,11 +331,6 @@ function App() {
   );
   return (
     <div className="cx-app">
-      {requesting && (
-        <div className="cx-request-progress" role="progressbar">
-          <span />
-        </div>
-      )}
       <Header
         lang={lang}
         theme={theme}
@@ -294,20 +349,21 @@ function App() {
             setMe(null);
           }
         }}
+        requesting={requesting}
         text={text}
       />
+      {notice && (
+        <div className="cx-notice" role="status" aria-live="polite">
+          <span>{notice}</span>
+          <button
+            aria-label={text("关闭", "Close")}
+            onClick={() => setNotice("")}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
       <main className="cx-main">
-        {notice && (
-          <div className="cx-notice" role="status">
-            {notice}
-            <button
-              aria-label={text("关闭", "Close")}
-              onClick={() => setNotice("")}
-            >
-              <X size={15} />
-            </button>
-          </div>
-        )}
         <PageView
           key={page}
           page={allowedPages.has(page) ? page : (nav.find((item) => allowedPages.has(item[0]))?.[0] || "agents")}
@@ -334,6 +390,7 @@ function Header({
   onLang,
   onTheme,
   onLogout,
+  requesting,
   text,
 }: {
   lang: Lang;
@@ -346,6 +403,7 @@ function Header({
   onLang: () => void;
   onTheme: () => void;
   onLogout: () => void;
+  requesting: boolean;
   text: (zh: string, en: string) => string;
 }) {
   const [deadline, setDeadline] = useState(expiresAt || "");
@@ -457,6 +515,13 @@ function Header({
         </nav>
       </div>
       <div className="cx-actions">
+        <span
+          className={`cx-sync-indicator ${requesting ? "active" : ""}`}
+          title={requesting ? text("正在同步数据", "Syncing data") : text("数据已同步", "Data synchronized")}
+          aria-label={requesting ? text("正在同步数据", "Syncing data") : text("数据已同步", "Data synchronized")}
+        >
+          <RefreshCw className={requesting ? "spin" : ""} size={15} />
+        </span>
         <button
           className="icon-button"
           onClick={onTheme}
@@ -858,6 +923,14 @@ function PageView({
         onCapabilitiesChanged={onCapabilitiesChanged}
       />
     );
+  if (page === "platform-operations")
+    return (
+      <PlatformOperationsPage
+        lang={lang}
+        text={text}
+        onNotice={onNotice}
+      />
+    );
   if (page === "deployment")
     return (
       <DeploymentModelsPage
@@ -890,6 +963,15 @@ function PageView({
   if (page === "organization")
     return (
       <OrganizationPage
+        lang={lang}
+        capabilities={capabilities}
+        text={text}
+        onNotice={onNotice}
+      />
+    );
+  if (page === "security-domains")
+    return (
+      <SecurityDomainsPage
         lang={lang}
         capabilities={capabilities}
         text={text}
@@ -977,28 +1059,46 @@ function PlatformCapabilitiesPage({
   onNotice: (value: string) => void;
   onCapabilitiesChanged: () => Promise<void>;
 }) {
+  type PlatformTab = "capabilities" | "graph" | "registration" | "session";
+  const platformTabs: Array<[PlatformTab, string, string]> = [
+    ["capabilities", "功能开关", "Feature switches"],
+    ["graph", "图工程配置", "Graph Engineering"],
+    ["registration", "外部智能体注册", "External Agent registration"],
+    ["session", "会话策略", "Session policies"],
+  ];
+  const platformTabFromLocation = (): PlatformTab => {
+    const value = new URLSearchParams(window.location.search).get("section");
+    return platformTabs.some(([key]) => key === value) ? value as PlatformTab : "capabilities";
+  };
   const [payload, setPayload] = useState<Row>({ items: [], history: [] });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Row | null>(null);
   const [reason, setReason] = useState("");
+  const [graphSelected, setGraphSelected] = useState<Row | null>(null);
+  const [graphState, setGraphState] = useState("");
+  const [graphReason, setGraphReason] = useState("");
+  const [graphEvidence, setGraphEvidence] = useState("");
   const [busy, setBusy] = useState(false);
-  const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
-  const [management, setManagement] = useState<Row>({});
   const [policies, setPolicies] = useState<Row>({});
-  const [enrollments, setEnrollments] = useState<Row[]>([]);
+  const [graphMatrix, setGraphMatrix] = useState<Row>({ items: [] });
+  const [activeTab, setActiveTab] = useState<PlatformTab>(platformTabFromLocation);
+  const selectPlatformTab = (tab: PlatformTab) => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", tab);
+    window.history.replaceState({}, "", url.pathname + url.search);
+  };
   const load = async () => {
     setLoading(true);
     try {
-      const [capabilities, managementState, sessionPolicies, enrollmentState] = await Promise.all([
+      const [capabilities, sessionPolicies, graphState] = await Promise.all([
         api<Row>("/api/platform/capabilities?limit=50"),
-        api<Row>("/api/platform/administration"),
         api<Row>("/api/platform/session-policies"),
-        api<Row>("/api/platform/admin-enrollments?limit=100"),
+        api<Row>("/api/platform/graph-capabilities"),
       ]);
       setPayload(capabilities);
-      setManagement(managementState);
       setPolicies(sessionPolicies);
-      setEnrollments(enrollmentState.items || []);
+      setGraphMatrix(graphState);
     } catch (error) {
       onNotice((error as Error).message);
     } finally {
@@ -1006,6 +1106,11 @@ function PlatformCapabilitiesPage({
     }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const onPopState = () => setActiveTab(platformTabFromLocation());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   const items = listPayload(payload, ["items"]);
   const groups: [string, Row[]][] = [
     [text("系统保护能力", "Protected system capabilities"), items.filter((item) => item.mandatory)],
@@ -1051,40 +1156,32 @@ function PlatformCapabilitiesPage({
       onNotice(text("会话策略已更新；现有会话将在下一次请求按更严格策略校验。", "Session policy updated; active sessions are checked against a stricter policy on their next request."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const uploadUpgrade = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!upgradeFile || reason.trim().length < 3) {
-      onNotice(text("请选择 ZIP 文件并填写至少 3 个字符的升级原因", "Choose a ZIP file and enter an upgrade reason of at least 3 characters"));
+  const updateGraphCapability = async () => {
+    if (!graphSelected || graphReason.trim().length < 3) {
+      onNotice(text("请输入至少 3 个字符的变更原因", "Enter a change reason of at least 3 characters"));
+      return;
+    }
+    const target = graphState.toUpperCase();
+    if (["ENABLED", "CONTROLLED"].includes(target) && graphEvidence.trim().length < 3) {
+      onNotice(text("启用或受控启用时必须填写证据引用", "An evidence reference is required when enabling or controlling a capability"));
       return;
     }
     setBusy(true);
     try {
-      const result = await api<Row>(`/api/platform/upgrades/upload?reason=${encodeURIComponent(reason.trim())}`, {
-        method: "POST",
-        headers: { "X-Upload-Filename": upgradeFile.name },
-        body: await upgradeFile.arrayBuffer(),
+      await api(`/api/platform/graph-capabilities/${encodeURIComponent(String(graphSelected.capability_key))}`, {
+        method: "PUT", body: JSON.stringify({ state: target, expected_version: Number(graphSelected.version), reason: graphReason.trim(), evidence_ref: graphEvidence.trim() }),
       });
-      setUpgradeFile(null);
-      setReason("");
-      const input = event.currentTarget.elements.namedItem("upgrade-package");
-      if (input instanceof HTMLInputElement) input.value = "";
-      await load();
-      onNotice(result.automation_state === "WAITING_FOR_TRUSTED_SIGNATURE"
-        ? text("升级包已暂存，但缺少受信任签名，尚未自动编排。", "Package staged, but automatic orchestration is waiting for a trusted signature.")
-        : text("升级包已校验并自动建立受控升级与 Skill 分发计划。运行任务将在安全点切换。", "The package was verified and controlled upgrade and Skill distribution were scheduled automatically. Running work switches at safe points."));
-    } catch (error) {
-      onNotice((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
+      setGraphSelected(null); setGraphReason(""); setGraphEvidence(""); await load();
+      onNotice(text("图工程能力状态已更新并记录审计", "Graph Engineering capability state was updated and audited"));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const adminGroup = management.admin_group || {};
-  const group = adminGroup.group || {};
-  const members = adminGroup.members || [];
   return <>
     <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />
-    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
-    {loading ? <PageLoading text={text} /> : groups.map(([title, rows]) => rows.length > 0 && <InfoPanel key={title} title={title} text={text}><div className="capability-list">{rows.map((item) => {
+    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <div className="view-toggle platform-config-tabs" role="tablist" aria-label={text("功能配置分区", "Capability configuration sections")}>
+      {platformTabs.map(([key, zh, en]) => <button type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} key={key} onClick={() => selectPlatformTab(key)}>{text(zh, en)}</button>)}
+    </div>
+    {loading ? <PageLoading text={text} /> : activeTab === "capabilities" && groups.map(([title, rows]) => rows.length > 0 && <InfoPanel key={title} title={title} text={text}><div className="capability-list">{rows.map((item) => {
       const blocked = Boolean(item.mandatory) || !item.edition_available;
       return <div className="capability-row" key={String(item.capability_key)}>
         <div><strong>{lang === "zh" ? item.display_name_zh : item.display_name_en}</strong><small>{String(item.capability_key)} · v{String(item.version)}</small></div>
@@ -1092,35 +1189,123 @@ function PlatformCapabilitiesPage({
         <button type="button" role="switch" aria-checked={Boolean(item.effective_enabled)} className={`capability-switch ${item.effective_enabled ? "active" : ""}`} disabled={blocked} onClick={() => { setSelected(item); setReason(""); }} title={blocked ? text("系统保护或当前版本不可用", "Protected by the system or unavailable in this edition") : text("变更功能状态", "Change capability state")}><span /><b>{item.effective_enabled ? text("开启", "On") : text("关闭", "Off")}</b></button>
       </div>;
     })}</div></InfoPanel>)}
-    {!loading && <>
-      <InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}>
-        <p className="cx-form-hint">{text("这是受保护的管理频道。仅管理员、平台管理智能体及经审批的 Admin Agent 可以加入；聊天内容只形成建议，变更必须转为结构化操作并保留审批与审计证据。", "This is a protected management Channel. Only administrators, platform management Agents, and approved Admin Agents may join. Conversation produces advice only; changes require structured actions, approval, and audit evidence.")}</p>
-        <div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong><p className="cx-form-hint">{displayRowValue(lang, management.channel?.classification || "RESTRICTED")}</p></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, adminGroup.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong><p className="cx-form-hint">{text("生产建议至少 3 个健康 Admin Agent。", "Production recommends at least three healthy Admin Agents.")}</p></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong><p className="cx-form-hint">{text("旧任期或旧 fencing token 的写入会被拒绝。", "Writes with an old term or fencing token are rejected.")}</p></InfoPanel></div>
-        <DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} />
-      </InfoPanel>
-      <InfoPanel title={text("Admin Agent 接入与运行控制", "Admin Agent admission and runtime controls")} text={text}>
-        <div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); api("/api/platform/admin-enrollments", { method: "POST", body: JSON.stringify({ admission_path: String(data.get("admission_path")), public_key: String(data.get("public_key")), node_id: String(data.get("node_id")), reason: String(data.get("reason")) }) }).then(() => load()).then(() => onNotice(text("Admin Agent 候选已登记，仍需验证、观察和审批后才能加入投票组。", "Admin Agent candidate recorded; verification, observation, and approval are still required before voting admission."))).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); }}><select name="admission_path" defaultValue="PLATFORM_DEPLOYED"><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select><input name="node_id" required placeholder={text("目标节点 ID", "Target node ID")} /><input name="public_key" required placeholder={text("公钥", "Public key")} /><input name="reason" required placeholder={text("接入原因", "Admission reason")} /><button className="small-button" disabled={busy}><UserPlus size={14} />{text("登记候选", "Register candidate")}</button></form><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); api("/api/platform/containment", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id")), instance_id: String(data.get("instance_id")), requested_state: String(data.get("requested_state")), reason: String(data.get("reason")) }) }).then(() => load()).then(() => onNotice(text("平台侧权限已优先隔离；远程进程终止仍需 Agent 或基础设施适配器确认。", "Platform-side authority was isolated first; remote process termination still requires Agent or infrastructure adapter confirmation."))).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); }}><input name="agent_id" required placeholder={text("智能体 ID", "Agent ID")} /><input name="instance_id" required placeholder={text("实例 ID", "Instance ID")} /><select name="requested_state" defaultValue="DRAIN"><option value="DRAIN">Drain</option><option value="QUARANTINE">Quarantine</option><option value="TERMINATE">Terminate</option><option value="INFRA_TERMINATE">Infrastructure terminate</option></select><input name="reason" required placeholder={text("阻断原因", "Containment reason")} /><button className="small-button danger" disabled={busy}><StopCircle size={14} />{text("提交阻断", "Issue containment")}</button></form></div>
-        <DataTable headers={[text("候选", "Candidate"), text("接入路径", "Path"), text("节点", "Node"), text("状态", "State"), text("操作", "Actions")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status), <span className="row-actions">{item.status === "CANDIDATE" && <button className="small-button" disabled={busy} onClick={() => { const agentId = window.prompt(text("输入已完成身份验证的 Agent ID", "Enter verified Agent ID")); const reason = askReason(text, text("候选观察", "Candidate observation")); if (agentId && reason) { setBusy(true); api(`/api/platform/admin-enrollments/${encodeURIComponent(String(item.enrollment_id))}/observe`, { method: "POST", body: JSON.stringify({ agent_id: agentId, reason }) }).then(load).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); } }}>{text("开始观察", "Observe")}</button>}{item.status === "OBSERVATION" && <button className="small-button" disabled={busy} onClick={() => { const weight = Number(window.prompt(text("输入互不相同的正整数权重", "Enter a distinct positive integer weight"), "4")); const reason = askReason(text, text("人工批准 Admin Agent", "Human approval of Admin Agent")); if (weight > 0 && reason) { const member = members.find((value: Row) => String(value.agent_id) === String(item.agent_id)); if (!member) { onNotice(text("未找到观察成员，请刷新页面", "Observed member was not found; refresh the page")); return; } setBusy(true); api(`/api/platform/admin-members/${encodeURIComponent(String(member.member_id))}/approve`, { method: "POST", body: JSON.stringify({ weight, reason }) }).then(load).catch((error) => onNotice(error.message)).finally(() => setBusy(false)); } }}>{text("批准加入", "Approve")}</button>}</span>])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} />
-      </InfoPanel>
-      <InfoPanel title={text("会话策略", "Session policies")} text={text}><p className="cx-form-hint">{text("Dashboard 与 Portal 分别配置。空闲超时默认 5 分钟；绝对会话时长限制单次登录的最长存续时间。", "Dashboard and Portal are configured independently. Idle timeout defaults to five minutes; absolute lifetime caps one login session.")}</p><div className="two-column-panels">{(["dashboard", "portal"] as const).map((kind) => <form key={kind} className="compact-form" onSubmit={(event) => { event.preventDefault(); void updatePolicy(kind, event.currentTarget); }}><strong>{kind === "dashboard" ? "Dashboard" : "Portal"}</strong><label>{text("空闲秒数", "Idle seconds")}<input name="idle_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.idle_timeout_seconds || 300)} /></label><label>{text("绝对秒数", "Absolute seconds")}<input name="absolute_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.absolute_timeout_seconds || 28800)} /></label><label>{text("变更原因", "Change reason")}<input name="reason" required /></label><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></form>)}</div></InfoPanel>
-      <InfoPanel title={text("受控升级与 Skill 分发", "Controlled upgrade and Skill distribution")} text={text}>
-        <p className="cx-form-hint">{text("上传由发布流程生成的 ZIP 包即可。平台服务端会校验包内 manifest、文件摘要、签名、数据库类型、版本和企业版兼容性，然后自动建立本地节点维护计划，并向所有受控平台智能体和已登记智能体发送新版 Skill 通知。平台不执行 ZIP 内任意脚本；正在运行的任务保持旧版本，完成安全点回执后自动切换。", "Upload the ZIP produced by the release pipeline. The server validates its manifest, file digests, signature, database, version, and Enterprise compatibility, then automatically creates the local node maintenance plan and sends the new Skill notice to all governed platform and registered Agents. The platform never executes arbitrary ZIP scripts; running work keeps its old version and switches automatically after a safe-point acknowledgement.")}</p>
-        <form className="upgrade-upload-form" onSubmit={uploadUpgrade}>
-          <label className="file-picker upgrade-file-picker"><span>{upgradeFile?.name || text("选择新版 ZIP 压缩包", "Choose new release ZIP")}</span><input id="upgrade-package" name="upgrade-package" className="visually-hidden-file" type="file" accept=".zip,application/zip" onChange={(event) => setUpgradeFile(event.currentTarget.files?.[0] || null)} /><button type="button" className="small-button" onClick={() => document.getElementById("upgrade-package")?.click()}><Upload size={15} />{text("选择文件", "Choose file")}</button></label>
-          <label className="upgrade-reason-field"><span>{text("升级原因", "Upgrade reason")}</span><input value={reason} onChange={(event) => setReason(event.target.value)} required placeholder={text("例如：发布新版平台并同步受控智能体", "For example: release the new platform version and sync governed Agents")} /></label>
-          <button type="submit" className="primary-button" disabled={busy || !upgradeFile}><Upload size={15} />{busy ? text("校验并编排中", "Validating and scheduling") : text("上传并自动升级", "Upload and auto-schedule")}</button>
-        </form>
-        <p className="cx-form-hint">{text("上传人即本次发布授权人；受信任签名仍不可绕过。上传完成后不再需要手工填写升级 ID、节点或 Agent 列表。", "The uploader authorizes this release; trusted signature verification remains mandatory. No upgrade ID, node list, or Agent list is entered manually after upload.")}</p>
-        <DataTable headers={[text("升级 ID", "Upgrade ID"), text("版本", "Version"), text("签名", "Signature"), text("预检", "Preflight"), text("审批", "Approval"), text("发布", "Rollout"), text("状态", "Status")]} rows={(management.upgrades || []).map((item: Row) => [item.upgrade_id, item.package_version, displayRowValue(lang, item.signature_state), displayRowValue(lang, item.preflight_state), displayRowValue(lang, item.approval_state), displayRowValue(lang, item.rollout_state), displayRowValue(lang, item.status)])} empty={text("暂无暂存升级包", "No staged upgrade package")} text={text} />
-        <DataTable headers={[text("节点", "Node"), text("阶段", "Stage"), text("活动工作", "Active work"), text("健康", "Health"), text("Skill", "Skill")]} rows={(management.upgrade_nodes || []).map((item: Row) => [item.node_id, displayRowValue(lang, item.state), String(item.active_work_count), displayRowValue(lang, item.health_state), displayRowValue(lang, item.skill_state)])} empty={text("尚未建立节点维护计划", "No node maintenance plan")} text={text} />
-        <DataTable headers={[text("智能体", "Agent"), text("Skill 版本", "Skill version"), text("通知", "Message"), text("确认", "Acknowledgement"), text("激活", "Activation"), text("漂移", "Drift")]} rows={(management.skill_distributions || []).map((item: Row) => [item.agent_id, item.skill_version, displayRowValue(lang, item.message_state), displayRowValue(lang, item.acknowledgement_state), displayRowValue(lang, item.activation_state), displayRowValue(lang, item.drift_state)])} empty={text("尚无 Skill 分发记录", "No Skill distribution records")} text={text} />
-      </InfoPanel>
-    </>}
-    <InfoPanel title={text("最近变更", "Recent changes")} text={text}><DataTable headers={[text("功能", "Capability"), text("变更", "Change"), text("操作人", "Actor"), text("原因", "Reason"), text("时间", "Time")]} rows={listPayload(payload, ["history"]).map((item) => [item.capability_key, `${item.from_enabled} -> ${item.to_enabled}`, item.changed_by, item.reason, displayRowValue(lang, item.created_at)])} empty={text("暂无功能状态变更", "No capability changes yet")} text={text} /></InfoPanel>
+    {!loading && activeTab === "graph" && <InfoPanel title={text("图工程生产基线", "Graph Engineering Production baseline")} text={text} protectedView>
+      <div className="profile-status"><div><span>{text("当前运行档案", "Current runtime profile")}</span><strong>{text("生产", "Production")}</strong></div><span className="tag">Production</span></div>
+      <p className="cx-form-hint">{text("运行档案固定为 Production，不提供实验档案切换。以下能力可在生产治理边界内受控调整：变更必须填写原因；启用或受控启用时必须提供证据引用；核心能力和依赖由数据库服务端强制校验。", "The runtime profile is fixed to Production and has no experimental-profile switch. The capabilities below can be adjusted inside governed Production boundaries: every change requires a reason, enablement or controlled enablement requires evidence, and the database enforces core and dependency checks.")}</p>
+      <DataTable headers={[text("能力", "Capability"), text("状态", "State"), text("版本", "Version"), text("原因", "Reason"), text("操作", "Action")]} rows={listPayload(graphMatrix, ["items"]).map((item) => { const mandatory = String(item.mandatory || "N").toUpperCase() === "Y"; return [lang === "zh" ? item.display_name_zh : item.display_name_en, displayRowValue(lang, item.state), item.version, item.reason || "-", <button type="button" className="small-button" disabled={busy || mandatory} onClick={() => { setGraphSelected(item); setGraphState(String(item.state || "CONTROLLED").toUpperCase()); setGraphReason(""); setGraphEvidence(""); }}>{mandatory ? text("核心能力", "Core capability") : text("调整", "Adjust")}</button>]; })} empty={text("Graph Production Profile 不可用", "Graph Production Profile unavailable")} text={text} />
+    </InfoPanel>}
+    {!loading && activeTab === "registration" && <ExternalRegistrationPolicyPanel lang={lang} text={text} onNotice={onNotice} />}
+    {!loading && activeTab === "session" && <InfoPanel title={text("会话策略", "Session policies")} text={text}><p className="cx-form-hint">{text("Dashboard 与 Portal 分别配置。空闲超时默认 5 分钟；绝对会话时长限制单次登录的最长存续时间。", "Dashboard and Portal are configured independently. Idle timeout defaults to five minutes; absolute lifetime caps one login session.")}</p><div className="two-column-panels">{(["dashboard", "portal"] as const).map((kind) => <form key={kind} className="compact-form" onSubmit={(event) => { event.preventDefault(); void updatePolicy(kind, event.currentTarget); }}><strong>{kind === "dashboard" ? "Dashboard" : "Portal"}</strong><label>{text("空闲秒数", "Idle seconds")}<input name="idle_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.idle_timeout_seconds || 300)} /></label><label>{text("绝对秒数", "Absolute seconds")}<input name="absolute_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.absolute_timeout_seconds || 28800)} /></label><label>{text("变更原因", "Change reason")}<input name="reason" required /></label><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></form>)}</div></InfoPanel>}
+    {activeTab === "capabilities" && <><InfoPanel title={text("最近变更", "Recent changes")} text={text}><DataTable headers={[text("功能", "Capability"), text("变更", "Change"), text("操作人", "Actor"), text("原因", "Reason"), text("时间", "Time")]} rows={listPayload(payload, ["history"]).map((item) => [item.capability_key, `${item.from_enabled} -> ${item.to_enabled}`, item.changed_by, item.reason, displayRowValue(lang, item.created_at)])} empty={text("暂无功能状态变更", "No capability changes yet")} text={text} /></InfoPanel>
     <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
       {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
+    </DetailDrawer></>}
+    <DetailDrawer open={Boolean(graphSelected)} title={text("调整图工程能力", "Adjust Graph Engineering capability")} onClose={() => { if (!busy) setGraphSelected(null); }} text={text}>
+      {graphSelected && <div className="capability-confirm"><p>{text("能力", "Capability")}: <strong>{lang === "zh" ? graphSelected.display_name_zh : graphSelected.display_name_en}</strong></p><p className="cx-form-hint">{text("当前状态", "Current state")}: {displayRowValue(lang, graphSelected.state)} · {text("版本", "Version")}: {graphSelected.version}</p><label>{text("目标状态", "Target state")}<select value={graphState} onChange={(event) => setGraphState(event.target.value)}><option value="ENABLED">{text("启用", "Enabled")}</option><option value="CONTROLLED">{text("受控启用", "Controlled")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option><option value="UNAVAILABLE">{text("不可用", "Unavailable")}</option></select></label><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={graphReason} maxLength={2000} onChange={(event) => setGraphReason(event.target.value)} /></label>{["ENABLED", "CONTROLLED"].includes(graphState.toUpperCase()) && <label>{text("证据引用（必填）", "Evidence reference (required)")}<input value={graphEvidence} maxLength={256} onChange={(event) => setGraphEvidence(event.target.value)} /></label>}<button className="primary-button" disabled={busy || graphReason.trim().length < 3 || (["ENABLED", "CONTROLLED"].includes(graphState.toUpperCase()) && graphEvidence.trim().length < 3)} onClick={() => void updateGraphCapability()}><Check size={15} />{text("确认受控变更", "Confirm governed change")}</button></div>}
     </DetailDrawer>
   </>;
+}
+
+function ExternalRegistrationPolicyPanel({
+  lang, text, onNotice,
+}: {
+  lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void;
+}) {
+  const [policy, setPolicy] = useState<Row>({});
+  const [state, setState] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const value = await api<Row>("/api/platform/external-agent-registration");
+      setPolicy(value);
+      setState(String(value.state || "DISABLED").toUpperCase());
+      setLoaded(true);
+    }
+    catch (error) { onNotice((error as Error).message); }
+  };
+  useEffect(() => { void load(); }, []);
+  return <InfoPanel title={text("外部智能体注册", "External Agent registration")} text={text}>
+    <p className="cx-form-hint">{text("此处控制是否允许新的外部 Skill-first 智能体注册。该策略只影响新注册；既有智能体不会被删除，变更原因会进入审计。", "This controls whether new external Skill-first Agents may register. It affects new registrations only; existing Agents are retained and the reason is audited.")}</p>
+    <form className="configuration-form compact-configuration-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await api("/api/platform/external-agent-registration", { method: "PUT", body: JSON.stringify({ state: String(form.get("state") || "DISABLED"), expected_version: Number(policy.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("外部智能体注册策略已更新并记录审计。", "External Agent registration policy was updated and audited.")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}>
+      <ConfigField label={text("注册策略", "Registration policy")} hint={text("关闭后拒绝新的外部注册令牌兑换。读取完成后才显示当前状态。", "Disabled rejects new external enrollment-token redemption. The current state is shown only after loading completes.")}><select name="state" value={state} disabled={!loaded} onChange={(event) => setState(event.target.value)}><option value="" disabled>{text("读取中", "Loading")}</option><option value="ENABLED">{text("允许", "Enabled")}</option><option value="APPROVAL_ONLY">{text("仅审批", "Approval only")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option></select></ConfigField>
+      <ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField>
+      <ConfigField label={text("操作", "Action")} hint={text("保存后立即用于新的注册请求。", "Applies immediately to new registration requests.")} action><button type="submit" className="small-button" disabled={busy}><Check size={15} />{text("保存策略", "Save policy")}</button></ConfigField>
+    </form>
+  </InfoPanel>;
+}
+
+function PlatformOperationsPage({
+  lang, text, onNotice,
+}: {
+  lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void;
+}) {
+  const [payload, setPayload] = useState<Row>({});
+  const [enrollments, setEnrollments] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"overview" | "admission" | "upgrade" | "containment">("overview");
+  const [path, setPath] = useState("PLATFORM_DEPLOYED");
+  const [trustMode, setTrustMode] = useState("MUTUAL_TRUST");
+  const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [management, enrollmentState] = await Promise.all([
+        api<Row>("/api/platform/administration"), api<Row>("/api/platform/admin-enrollments?limit=100"),
+      ]);
+      setPayload(management); setEnrollments(enrollmentState.items || []);
+    } catch (error) { onNotice((error as Error).message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+  const management = payload || {};
+  const group = management.admin_group?.group || {};
+  const members = management.admin_group?.members || [];
+  const submitEnrollment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true);
+    try {
+      await api("/api/platform/admin-enrollments", { method: "POST", body: JSON.stringify({
+        admission_path: path, node_id: String(data.get("node_id") || ""), public_key: String(data.get("public_key") || ""),
+        host_reference: path === "PLATFORM_DEPLOYED" ? String(data.get("host_reference") || "") : "",
+        ssh_port: Number(data.get("ssh_port") || 22), os_user: path === "PLATFORM_DEPLOYED" ? String(data.get("os_user") || "") : "",
+        deployment_target: path === "PLATFORM_DEPLOYED" ? String(data.get("deployment_target") || "") : "",
+        ssh_trust_mode: trustMode, ssh_password: path === "PLATFORM_DEPLOYED" && trustMode === "ONE_USE_PASSWORD" ? String(data.get("ssh_password") || "") : "",
+        failure_domain: path === "PLATFORM_DEPLOYED" ? String(data.get("failure_domain") || "") : "",
+        reason: String(data.get("reason") || ""),
+      }) });
+      event.currentTarget.reset(); setPath("PLATFORM_DEPLOYED"); setTrustMode("MUTUAL_TRUST"); await load();
+      onNotice(text("Admin Agent 候选已登记，等待受认证适配器完成 SSH 验证。密码仅在本次请求中使用，未写入数据库或审计。", "Admin Agent candidate recorded; an authenticated adapter must complete SSH verification. The password was used only for this request and was not persisted or audited."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const submitContainment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget);
+    if (String(data.get("confirmation") || "") !== "CONTAIN") { onNotice(text("请输入 CONTAIN 确认此受保护操作。", "Enter CONTAIN to confirm this protected operation.")); return; }
+    setBusy(true); try {
+      await api("/api/platform/containment", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id") || ""), instance_id: String(data.get("instance_id") || ""), requested_state: String(data.get("requested_state") || "DRAIN"), reason: String(data.get("reason") || "") }) });
+      event.currentTarget.reset(); onNotice(text("平台侧权限已优先隔离；远程终止仍需受认证运行时或基础设施适配器确认。", "Platform authority was isolated first; remote termination still requires a trusted runtime or infrastructure adapter."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const uploadUpgrade = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget);
+    if (!upgradeFile || String(data.get("reason") || "").trim().length < 3) { onNotice(text("请选择 ZIP 文件并填写至少 3 个字符的升级原因。", "Choose a ZIP file and enter an upgrade reason of at least three characters.")); return; }
+    setBusy(true); try {
+      const result = await api<Row>(`/api/platform/upgrades/upload?reason=${encodeURIComponent(String(data.get("reason")).trim())}`, { method: "POST", headers: { "X-Upload-Filename": upgradeFile.name }, body: await upgradeFile.arrayBuffer() });
+      setUpgradeFile(null); event.currentTarget.reset(); await load();
+      onNotice(result.automation_state === "WAITING_FOR_TRUSTED_SIGNATURE" ? text("升级包已暂存，正等待受信任签名。", "Package staged and waiting for a trusted signature.") : text("升级包已校验，受控升级与 Skill 分发已自动编排。", "Package verified; controlled upgrade and Skill distribution were scheduled automatically."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const tabs: Array<[typeof tab, string, string]> = [["overview", "管理概览", "Management overview"], ["admission", "Admin Agent 接入", "Admin Agent admission"], ["upgrade", "升级与 Skill 分发", "Upgrade & Skill distribution"], ["containment", "紧急阻断", "Emergency containment"]];
+  return <section className="page-stack"><SectionHeading title={text("平台操作", "Platform operations")} subtitle={text("高权限管理操作独立于功能配置。所有接入、升级和阻断均为受保护操作，并保留数据库审计证据。", "Privileged operations are separate from Function Configuration. Admissions, upgrades, and containment are protected operations with database audit evidence.")} text={text} />
+    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <ViewToggle value={tab} onChange={(value) => setTab(value as typeof tab)} options={tabs.map(([key, zh, en]) => [key, text(zh, en)])} />
+    {loading ? <PageLoading text={text} /> : <>
+      {tab === "overview" && <><InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}><p className="cx-form-hint">{text("仅管理员、平台管理智能体及经审批的 Admin Agent 可加入。聊天仅形成建议；变更必须转换为结构化操作并审计。", "Only administrators, platform management Agents, and approved Admin Agents may join. Chat produces advice only; changes must become structured audited operations.")}</p><div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, management.admin_group?.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong></InfoPanel></div><DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} /></InfoPanel></>}
+      {tab === "admission" && <><InfoPanel title={text("登记 Admin Agent 候选", "Register an Admin Agent candidate")} text={text}><p className="cx-form-hint">{text("平台部署会校验目标节点元数据。外部 Admin 使用独立的密钥/接入包路径，不接收基础设施凭证。", "Platform deployment verifies target metadata. External Admin uses a separate key/package path and never receives infrastructure credentials.")}</p><form className="configuration-form admin-admission-form" onSubmit={submitEnrollment}><ConfigField label={text("接入路径", "Admission path")} hint={text("选择后展示对应的安全字段。", "Shows the appropriate secure fields for the selected path.")}><select value={path} onChange={(event) => setPath(event.target.value)}><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select></ConfigField><ConfigField label={text("节点名称或 ID", "Node name or ID")} hint={text("用于成员、故障域和审计关联。", "Used for membership, failure-domain, and audit correlation.")}><input name="node_id" required /></ConfigField><ConfigField label={text("Admin 公钥", "Admin public key")} hint={text("只保存摘要，用于候选身份验证。", "Only a digest is stored for candidate identity verification.")}><textarea name="public_key" required /></ConfigField>{path === "PLATFORM_DEPLOYED" && <><ConfigField label={text("主机或 IP", "Host or IP")} hint={text("目标节点的可达地址。", "Reachable address of the target node.")}><input name="host_reference" required /></ConfigField><ConfigField label={text("SSH 端口", "SSH port")} hint={text("填写目标节点的 SSH 端口；留空时服务端按 22 处理。", "Enter the target SSH port; the server uses 22 when omitted.")}><input name="ssh_port" type="number" min="1" max="65535" /></ConfigField><ConfigField label={text("系统用户", "Operating-system user")} hint={text("用于部署与节点验证。", "Used for deployment and node verification.")}><input name="os_user" required /></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("受管运行时、虚拟机或客户适配器目标。", "Managed runtime, virtual machine, or customer-adapter target.")}><input name="deployment_target" required /></ConfigField><ConfigField label={text("SSH 验证方式", "SSH verification mode")} hint={text("互信不传密码；一次性密码只用于当前验证。", "Mutual trust sends no password; a one-use password is used only for this verification.")}><select value={trustMode} onChange={(event) => setTrustMode(event.target.value)}><option value="MUTUAL_TRUST">{text("已配置 SSH 互信", "SSH mutual trust configured")}</option><option value="ONE_USE_PASSWORD">{text("一次性 SSH 密码", "One-use SSH password")}</option></select></ConfigField>{trustMode === "ONE_USE_PASSWORD" && <ConfigField label={text("一次性 SSH 密码", "One-use SSH password")} hint={text("仅用于本次验证，提交后立即丢弃且永不存储。", "Used only for this verification, discarded after submission, and never stored.")}><input name="ssh_password" type="password" autoComplete="new-password" required /></ConfigField>}<ConfigField label={text("故障域", "Failure domain")} hint={text("用于避免高可用成员集中在同一故障域。", "Prevents high-availability members from concentrating in one failure domain.")}><input name="failure_domain" required /></ConfigField></>}<ConfigField label={text("接入原因", "Admission reason")} hint={text("必须说明新增管理节点的原因。", "Explain why this management node is being added.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("候选需经过身份验证、观察和批准后才加入投票组。", "The candidate must be verified, observed, and approved before joining the voting group.")} action><button className="primary-button" disabled={busy}><UserPlus size={15} />{text("登记候选", "Register candidate")}</button></ConfigField></form></InfoPanel><InfoPanel title={text("候选状态", "Candidate status")} text={text}><DataTable headers={[text("候选", "Candidate"), text("路径", "Path"), text("节点", "Node"), text("状态", "State")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status)])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} /></InfoPanel></>}
+      {tab === "upgrade" && <InfoPanel title={text("平台升级与 Skill 自动分发", "Platform upgrade and automatic Skill distribution")} text={text}><p className="cx-form-hint">{text("上传发布流程生成的平台版本 ZIP 包。服务端验证 manifest、摘要、签名、目标数据库、版本和企业版兼容性；通过后自动建立平台维护计划，并向受控智能体分发新版 Skill 通知。运行中的任务只会在安全点切换，不需要逐个智能体人工升级。", "Upload a platform release ZIP produced by the release pipeline. The service validates the manifest, digests, signature, target database, version, and Enterprise compatibility; it then automatically creates the platform maintenance plan and distributes new Skill notices to governed Agents. Running work switches only at a safe point, without per-Agent manual upgrades.")}</p><form className="configuration-form" onSubmit={uploadUpgrade}><ConfigField label={text("平台新版 ZIP 压缩包", "New platform release ZIP")} hint={text("只接受发布流程生成的平台安装包。", "Only accepts a platform installation package generated by the release pipeline.")}><input name="package" type="file" accept=".zip,application/zip" onChange={(event) => setUpgradeFile(event.currentTarget.files?.[0] || null)} required /></ConfigField><ConfigField label={text("升级原因", "Upgrade reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("平台不会执行 ZIP 中的任意脚本。", "The platform never executes arbitrary scripts from the ZIP.")} action><button className="primary-button" disabled={busy || !upgradeFile}><Upload size={15} />{text("上传并自动编排平台包", "Upload and schedule platform package")}</button></ConfigField></form><DataTable headers={[text("升级 ID", "Upgrade ID"), text("版本", "Version"), text("状态", "Status")]} rows={(management.upgrades || []).map((item: Row) => [item.upgrade_id, item.package_version, displayRowValue(lang, item.status)])} empty={text("暂无暂存升级包", "No staged upgrade package")} text={text} /></InfoPanel>}
+      {tab === "containment" && <InfoPanel title={text("紧急阻断", "Emergency containment")} text={text}><p className="cx-form-hint">{text("先撤销平台授权和任务接收能力，再由受认证运行时或基础设施适配器确认进程级终止。该操作只影响指定实例，不扩大到其他节点。", "Platform authority and work acceptance are removed first. A trusted runtime or infrastructure adapter then confirms process termination. This affects only the specified instance and does not expand to other nodes.")}</p><form className="configuration-form containment-form" onSubmit={submitContainment}><ConfigField label={text("智能体 ID", "Agent ID")} hint={text("要隔离的生产智能体。", "Production Agent to isolate.")}><input name="agent_id" required /></ConfigField><ConfigField label={text("实例 ID", "Instance ID")} hint={text("仅影响指定运行实例。", "Limits containment to the specified runtime instance.")}><input name="instance_id" required /></ConfigField><ConfigField label={text("阻断动作", "Containment action")} hint={text("按风险选择排空、隔离或请求终止。", "Choose drain, quarantine, or termination based on risk.")}><select name="requested_state" defaultValue="DRAIN"><option value="DRAIN">{text("排空新任务", "Drain new work")}</option><option value="QUARANTINE">{text("隔离", "Quarantine")}</option><option value="TERMINATE">{text("请求终止", "Request termination")}</option><option value="INFRA_TERMINATE">{text("请求基础设施终止", "Request infrastructure termination")}</option></select></ConfigField><ConfigField label={text("阻断原因", "Containment reason")} hint={text("必须填写影响判断依据。", "Required impact rationale.")}><input name="reason" required /></ConfigField><ConfigField label={text("确认文本", "Confirmation text")} hint={text("输入 CONTAIN 以确认此受保护操作。", "Enter CONTAIN to confirm this protected operation.")}><input name="confirmation" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("操作和影响范围均写入审计。", "The operation and impact scope are written to audit.")} action><button className="small-button danger" disabled={busy}><StopCircle size={15} />{text("提交阻断", "Issue containment")}</button></ConfigField></form></InfoPanel>}
+    </>}
+  </section>;
 }
 
 function DeploymentModelsPage({
@@ -1138,6 +1323,7 @@ function DeploymentModelsPage({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [observedDimension, setObservedDimension] = useState<number | null>(null);
   const [draftVersion, setDraftVersion] = useState(0);
   const [testedDraftVersion, setTestedDraftVersion] = useState<number | null>(null);
   const profileFormRef = useRef<HTMLFormElement>(null);
@@ -1159,18 +1345,6 @@ function DeploymentModelsPage({
     }
   };
   useEffect(() => { void load(); }, []);
-  const submit = async (path: string, body: Row) => {
-    setBusy(true);
-    try {
-      await api(path, { method: "POST", body: JSON.stringify(body) });
-      await load();
-      onNotice(text("已写入数据库并记录审计", "Committed to the database and audited"));
-    } catch (error) {
-      onNotice((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
   const profileBody = (form: FormData): Row => ({
     profile_key: String(form.get("profile_key") || ""),
     provider_url: String(form.get("provider_url") || ""),
@@ -1178,7 +1352,7 @@ function DeploymentModelsPage({
     execution_mode: String(form.get("execution_mode") || "PLATFORM_MANAGED"),
     dimension: Number(form.get("dimension") || 0),
     distance_metric: String(form.get("distance_metric") || "COSINE"),
-    normalize_vectors: form.get("normalize_vectors") === "on",
+    normalize_vectors: true,
     api_key: String(form.get("api_key") || ""),
     secret_reference: String(form.get("secret_reference") || ""),
     reason: String(form.get("reason") || ""),
@@ -1187,17 +1361,36 @@ function DeploymentModelsPage({
     if (!profileFormRef.current) return;
     setTesting(true);
     try {
+      const draft = profileBody(new FormData(profileFormRef.current));
+      if (!String(draft.reason || "").trim())
+        throw new Error(text("请填写变更原因。", "Enter a change reason."));
+      if (String(draft.reason || "").trim().length < 3)
+        throw new Error(text("变更原因至少需要 3 个字符。", "The change reason must contain at least 3 characters."));
       const result = await api<Row>("/api/embedding/profiles/probe-draft", {
-        method: "POST", body: JSON.stringify(profileBody(new FormData(profileFormRef.current))),
+        method: "POST", body: JSON.stringify(draft),
       });
       if (String(result.status || "").toUpperCase() !== "VERIFIED")
         throw new Error(text("Embedding 测试未通过，请检查模型地址、模型 ID 和向量维度。", "Embedding test did not pass. Check the URL, model ID, and vector dimension."));
+      const detectedDimension = Number(result.result?.observed_dimension || draft.dimension || 0);
+      if (detectedDimension > 0) {
+        setObservedDimension(detectedDimension);
+        draft.dimension = detectedDimension;
+      }
+      // A successful probe is bound to the current form revision. A stale
+      // result must never activate a changed Embedding profile.
+      if (testedDraftVersion !== draftVersion && testedDraftVersion !== null) {
+        throw new Error(text("配置已发生变化，请重新测试。", "The configuration changed; run the probe again."));
+      }
       setTestedDraftVersion(draftVersion);
-      onNotice(text("Embedding 测试通过，可以创建配置。", "Embedding test passed. The profile can now be created."));
+      setBusy(true);
+      await api("/api/embedding/platform/activate", { method: "POST", body: JSON.stringify(draft) });
+      await load();
+      onNotice(text("Embedding 测试通过，平台已自动完成统一配置、契约、默认空间和绑定。", "Embedding test passed; the platform automatically completed the unified profile, Contract, default Space, and binding."));
     } catch (error) {
       setTestedDraftVersion(null);
       onNotice((error as Error).message);
     } finally {
+      setBusy(false);
       setTesting(false);
     }
   };
@@ -1208,36 +1401,39 @@ function DeploymentModelsPage({
   const jobs = listPayload(payload.jobs, ["items"]);
   const runs = listPayload(payload.runs, ["items"]);
   const readiness = payload.readiness?.readiness || {};
+  const embeddingDeployed = Boolean(readiness.platform_deployed);
   return <>
     <SectionHeading title={text("部署与模型", "Deployment & models")} subtitle={text("Bootstrap Deployment Agent 仅在本地执行受校验安装；此处管理部署证据、LLM/Embedding 契约与重嵌入队列。", "The Bootstrap Deployment Agent runs verified installation locally; this view governs deployment evidence, LLM/Embedding Contracts, and re-embedding jobs.")} text={text} />
-    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     {loading ? <PageLoading text={text} /> : <>
       <div className="metric-grid">
         <InfoPanel title={text("向量就绪状态", "Embedding readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, readiness.state || "UNCONFIGURED")}</strong><p className="cx-form-hint">{text("只有已验证且可写的空间可以写入和参与向量检索。", "Only verified writable spaces can accept vectors or participate in vector retrieval.")}</p></InfoPanel>
-        <InfoPanel title={text("默认空间", "Default space")} text={text}><strong className="metric-value">{String(readiness.space_id || "-")}</strong><p className="cx-form-hint">{text("契约", "Contract")}: {String(readiness.contract_id || "-")} · {text("维度", "Dimension")}: {String(readiness.dimension || "-")}</p></InfoPanel>
+        <InfoPanel title={text("默认空间", "Default space")} text={text}><strong className="metric-value metric-identifier">{String(readiness.space_key || "-")}</strong><p className="cx-form-hint metric-metadata">{text("配置", "Profile")}: {String(readiness.profile_key || "-")} · {text("维度", "Dimension")}: {String(readiness.dimension || "-")}<br />{text("空间 ID", "Space ID")}: <code>{String(readiness.space_id || "-")}</code><br />{text("契约 ID", "Contract ID")}: <code>{String(readiness.contract_id || "-")}</code></p></InfoPanel>
         <InfoPanel title={text("队列", "Queue")} text={text}><strong className="metric-value">{String(payload.readiness?.queue?.pending || 0)}</strong><p className="cx-form-hint">{text("待处理或已租约的重嵌入任务。", "Pending or leased re-embedding jobs.")}</p></InfoPanel>
       </div>
-      {canManage && <InfoPanel title={text("创建 Embedding 配置", "Create Embedding Profile")} text={text}>
-        <p className="cx-form-hint">{text("距离度量决定检索相似度的计算方式。除非模型服务明确要求其他度量，否则使用余弦距离并启用归一化；配置一经用于契约，不应随意变更。", "Distance metric defines similarity calculation. Use cosine distance with normalization unless the model service requires another metric; do not change it after a Contract is in use.")}</p>
-        <form ref={profileFormRef} className="configuration-form compact-configuration-form" onChange={() => { setDraftVersion((value) => value + 1); setTestedDraftVersion(null); }} onSubmit={(event) => { event.preventDefault(); void submit("/api/embedding/profiles", profileBody(new FormData(event.currentTarget))); }}>
-          <ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required placeholder="embedding-default" /></ConfigField>
+      {canManage && !embeddingDeployed && <InfoPanel title={text("配置统一 Embedding", "Configure platform Embedding")} text={text}>
+        <div className="automation-boundary" role="status"><ShieldCheck size={14} />{text("标准流程：测试成功后自动识别维度并完成配置；不存在后续手工创建契约、空间、绑定或迁移任务的步骤。", "Standard flow: a successful test discovers the dimension and completes activation automatically; there is no later manual Contract, Space, Binding, or migration step.")}</div>
+        <p className="cx-form-hint">{text("距离度量决定检索相似度的计算方式。除非模型服务明确要求其他度量，否则使用余弦距离；归一化为平台统一契约的强制规则。测试成功后平台自动维护配置、契约、默认空间、绑定和必要迁移任务。", "Distance metric defines similarity calculation. Use cosine unless the model service requires another metric; normalization is mandatory for the platform-wide Contract. After a successful test, the platform automatically maintains the Profile, Contract, default Space, binding, and required migration jobs.")}</p>
+        <form ref={profileFormRef} className="configuration-form compact-configuration-form" onChange={() => { setDraftVersion((value) => value + 1); setTestedDraftVersion(null); setObservedDimension(null); }} onSubmit={(event) => event.preventDefault()}>
+          <ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required /></ConfigField>
           <ConfigField label={text("接入模式", "Execution mode")} hint={text("决定由谁调用模型服务。", "Determines who calls the model service.")}><select name="execution_mode" defaultValue="PLATFORM_MANAGED"><option value="PLATFORM_MANAGED">{text("平台托管", "Platform managed")}</option><option value="ENTERPRISE_DIRECT">{text("企业直连", "Enterprise direct")}</option><option value="ENTERPRISE_PROXY">{text("企业代理", "Enterprise proxy")}</option><option value="PRECOMPUTED_IMPORT">{text("预计算导入", "Precomputed import")}</option><option value="NONE">{text("不使用向量", "No vectors")}</option></select></ConfigField>
-          <ConfigField label={text("模型服务地址", "Provider URL")} hint={text("填写服务根地址；探测时会使用 /embeddings。", "Enter the service root; probing uses /embeddings.")}><input name="provider_url" placeholder="https://embedding.example/v1" /></ConfigField>
-          <ConfigField label={text("模型 ID", "Model ID")} hint={text("必须与所有写入该空间的智能体一致。", "Must match every Agent writing this space.")}><input name="model_id" placeholder="text-embedding-3-large" /></ConfigField>
-          <ConfigField label={text("向量维度", "Vector dimension")} hint={text("填写模型实际输出的向量长度。", "Actual vector length returned by the model.")}><input name="dimension" type="number" min="0" placeholder="1024" /></ConfigField>
+          <ConfigField label={text("模型服务地址", "Provider URL")} hint={text("填写服务根地址；探测时会使用 /embeddings。", "Enter the service root; probing uses /embeddings.")}><input name="provider_url" /></ConfigField>
+          <ConfigField label={text("模型 ID", "Model ID")} hint={text("必须与所有写入该空间的智能体一致。", "Must match every Agent writing this space.")}><input name="model_id" /></ConfigField>
+          <ConfigField label={text("向量维度", "Vector dimension")} hint={observedDimension ? text("已由模型测试自动识别；不可手工修改。", "Discovered by the provider test; cannot be edited manually.") : text("点击测试后由模型服务自动识别；不可手工填写。", "Discovered automatically by the provider test; do not enter it manually.")}><output className="derived-value" aria-live="polite">{observedDimension || text("待测试", "Pending test")}</output></ConfigField>
           <ConfigField label={text("距离度量", "Distance metric")} hint={text("推荐余弦距离；仅在服务要求时选择其他项。", "Cosine is recommended; choose another only when required.")}><select name="distance_metric" defaultValue="COSINE"><option value="COSINE">{text("余弦距离（推荐）", "Cosine (recommended)")}</option><option value="EUCLIDEAN">{text("欧氏距离", "Euclidean")}</option><option value="DOT_PRODUCT">{text("点积", "Dot product")}</option></select></ConfigField>
-          <ConfigField label={text("向量归一化", "Normalize vectors")} hint={text("归一化会将每条向量缩放到单位长度，不会让不同智能体产生相同向量。绑定同一空间的智能体必须一致遵循本设置；余弦距离通常开启。", "Normalization scales each vector to unit length; it does not make Agents produce identical vectors. Agents bound to the same Space must follow this setting; it is normally enabled for cosine distance.")}><label className="checkbox-control"><input name="normalize_vectors" type="checkbox" defaultChecked />{text("启用归一化", "Enable normalization")}</label></ConfigField>
+          <ConfigField label={text("向量归一化", "Normalize vectors")} hint={text("平台统一契约强制启用，所有写入同一空间的智能体使用一致规则；这不代表不同智能体会产生相同向量。", "The platform Contract enforces one rule for every Agent writing to the Space; this does not make Agents produce identical vectors.")}><output className="derived-value enforced-value">{text("平台强制启用", "Enforced by platform")}</output></ConfigField>
           <ConfigField label={text("API Key", "API key")} hint={text("如填写，仅以加密密文保存且不会回显；留空即按无 API Key 测试和保存。", "When provided, stored only as ciphertext and never returned; leave empty to test and save without an API key.")}><input name="api_key" type="password" autoComplete="new-password" /></ConfigField>
-          <ConfigField label={text("企业密钥引用", "Enterprise secret reference")} hint={text("可替代直接保存密钥的企业密管引用。", "Enterprise secret-manager reference instead of a direct key.")}><input name="secret_reference" placeholder="vault://..." /></ConfigField>
+          <ConfigField label={text("企业密钥引用", "Enterprise secret reference")} hint={text("可替代直接保存密钥的企业密管引用。", "Enterprise secret-manager reference instead of a direct key.")}><input name="secret_reference" /></ConfigField>
           <ConfigField label={text("变更原因", "Change reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField>
-          <ConfigField label={text("测试与创建", "Test and create")} hint={testedDraftVersion === draftVersion ? text("测试已通过，可以创建。", "Test passed. You can create the profile.") : text("先测试模型服务可用性；修改任意配置后需重新测试。", "Test service availability first; retest after changing any setting.")} action><span className="action-button-row"><button type="button" className="small-button" disabled={busy || testing} onClick={() => void testProfile()}><Activity className={testing ? "spin" : ""} size={15} />{testing ? text("测试中", "Testing") : text("测试", "Test")}</button><button className="primary-button" disabled={busy || testing || testedDraftVersion !== draftVersion}><Plus size={15} />{text("创建配置", "Create profile")}</button></span></ConfigField>
+          <ConfigField label={text("自动测试并配置", "Test and configure automatically")} hint={testedDraftVersion === draftVersion ? text("已完成测试并自动维护统一契约、默认空间和平台绑定。", "The test passed and the unified Contract, default Space, and platform binding were maintained automatically.") : text("点击后先测试模型服务；成功后自动识别维度并完成平台配置。", "The provider is tested first; on success the dimension is discovered and platform configuration is completed automatically.")} action><button type="button" className="primary-button" disabled={busy || testing} onClick={() => void testProfile()}><Activity className={testing ? "spin" : ""} size={15} />{testing ? text("测试并配置中", "Testing and configuring") : text("测试并自动配置", "Test and configure")}</button></ConfigField>
         </form>
       </InfoPanel>}
-      <InfoPanel title={text("Embedding 配置", "Embedding Profiles")} text={text}><DataTable headers={[text("配置", "Profile"), text("模式", "Mode"), text("模型", "Model"), text("维度", "Dimension"), text("密钥", "Secret"), text("状态", "State"), text("操作", "Actions")]} rows={profiles.map((item) => [item.profile_key, displayRowValue(lang, item.execution_mode), item.model_id || "-", item.dimension, item.secret_present ? text("已加密", "Encrypted") : "-", displayRowValue(lang, item.health_state), canManage ? <button className="small-button" disabled={busy} onClick={() => void submit(`/api/embedding/profiles/${encodeURIComponent(String(item.profile_id))}/probe`, { scope: "PLATFORM", timeout: 30 })}>{text("探测", "Probe")}</button> : "-"])} empty={text("尚未配置 Embedding 配置", "No Embedding Profile configured")} text={text} /></InfoPanel>
-      {canManage && profiles.length > 0 && <InfoPanel title={text("创建契约与空间", "Create Contract & Space")} text={text}><div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/contracts", { profile_id: String(form.get("profile_id") || ""), model_fingerprint: String(form.get("model_fingerprint") || ""), reason: String(form.get("reason") || "") }); }}><select name="profile_id">{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select><input name="model_fingerprint" placeholder={text("模型指纹（可选）", "Model fingerprint (optional)")} /><input name="reason" required placeholder={text("创建原因", "Creation reason")} /><button className="small-button" disabled={busy}>{text("创建契约", "Create Contract")}</button></form>{contracts.length > 0 && <form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/spaces", { space_key: String(form.get("space_key") || ""), contract_id: String(form.get("contract_id") || ""), default: form.get("default") === "on", writable: form.get("writable") === "on", physical_ref: String(form.get("physical_ref") || ""), reason: String(form.get("reason") || "") }); }}><input name="space_key" required placeholder={text("空间键", "Space key")} /><select name="contract_id">{contracts.map((item) => <option key={String(item.contract_id)} value={String(item.contract_id)}>{String(item.profile_key || item.contract_id)} · v{String(item.contract_version)}</option>)}</select><label className="checkbox-label"><input name="default" type="checkbox" />{text("默认", "Default")}</label><label className="checkbox-label"><input name="writable" type="checkbox" />{text("可写", "Writable")}</label><input name="physical_ref" placeholder={text("物理引用", "Physical reference")} /><input name="reason" required placeholder={text("创建原因", "Creation reason")} /><button className="small-button" disabled={busy}>{text("创建空间", "Create Space")}</button></form>}</div></InfoPanel>}
-      <InfoPanel title={text("Embedding 契约与空间", "Contracts & spaces")} text={text}><DataTable headers={[text("契约", "Contract"), text("模型", "Model"), text("维度", "Dimension"), text("模式", "Mode"), text("状态", "State")]} rows={contracts.map((item) => [item.contract_id, item.model_id || "-", item.dimension, displayRowValue(lang, item.execution_mode), displayRowValue(lang, item.status)])} empty={text("尚未创建契约", "No Contract created")} text={text} /><DataTable headers={[text("空间", "Space"), text("契约", "Contract"), text("验证", "Validation"), text("默认", "Default"), text("可写", "Writable")]} rows={spaces.map((item) => [item.space_key, item.contract_id || "-", displayRowValue(lang, item.validation_state), item.is_default, item.write_enabled])} empty={text("尚未创建空间", "No Space created")} text={text} /></InfoPanel>
-      {canManage && profiles.length > 0 && spaces.length > 0 && <InfoPanel title={text("绑定与任务", "Bindings & jobs")} text={text}><div className="compact-form-stack"><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/bindings", { binding_scope: String(form.get("binding_scope") || "PLATFORM"), binding_subject_id: String(form.get("binding_subject_id") || "DEFAULT"), profile_id: String(form.get("profile_id") || ""), space_id: String(form.get("space_id") || ""), reason: String(form.get("reason") || "") }); }}><select name="binding_scope" defaultValue="PLATFORM"><option value="PLATFORM">{text("平台", "Platform")}</option><option value="TEMPLATE">{text("模板", "Template")}</option><option value="AGENT">{text("智能体", "Agent")}</option></select><input name="binding_subject_id" required defaultValue="DEFAULT" placeholder={text("绑定主体", "Binding subject")} /><select name="profile_id">{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select><select name="space_id">{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><input name="reason" required placeholder={text("绑定原因", "Binding reason")} /><button className="small-button" disabled={busy}>{text("保存绑定", "Save binding")}</button></form><form className="inline-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("/api/embedding/jobs", { job_kind: String(form.get("job_kind") || "REEMBED"), target_space_id: String(form.get("target_space_id") || ""), source_space_id: String(form.get("source_space_id") || ""), input_data: { entity_type: String(form.get("entity_type") || "MEMORY"), limit: Number(form.get("limit") || 100) }, reason: String(form.get("reason") || "") }); }}><select name="job_kind" defaultValue="REEMBED"><option value="REEMBED">{text("重嵌入", "Re-embed")}</option><option value="INGEST">{text("写入", "Ingest")}</option><option value="VERIFY">{text("验证", "Verify")}</option></select><select name="target_space_id">{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><select name="source_space_id"><option value="">{text("无来源空间", "No source space")}</option>{spaces.map((item) => <option key={String(item.space_id)} value={String(item.space_id)}>{String(item.space_key)}</option>)}</select><input name="entity_type" defaultValue="MEMORY" placeholder={text("对象类型", "Entity type")} /><input name="limit" type="number" min="1" max="500" defaultValue="100" placeholder={text("最多 500", "Maximum 500")} /><input name="reason" required placeholder={text("任务原因", "Job reason")} /><button className="small-button" disabled={busy}>{text("加入队列", "Queue job")}</button></form></div><p className="cx-form-hint">{text("任务只会由单独启动的、受租约保护的受管 Worker 执行；页面操作不会直接触发批量向量化。", "Jobs run only in a separately started, lease-protected managed Worker; this page never runs bulk vectorization directly.")}</p></InfoPanel>}
-      <InfoPanel title={text("绑定与重嵌入任务", "Bindings & re-embedding jobs")} text={text}><DataTable headers={[text("范围", "Scope"), text("主体", "Subject"), text("配置", "Profile"), text("空间", "Space"), text("版本", "Version")]} rows={bindings.map((item) => [displayRowValue(lang, item.binding_scope), item.binding_subject_id, item.profile_key || item.profile_id, item.space_key || item.space_id, item.version])} empty={text("平台默认绑定尚未建立", "No platform default binding") } text={text} /><DataTable headers={[text("任务", "Job"), text("类型", "Kind"), text("状态", "State"), text("目标空间", "Target space"), text("时间", "Time")]} rows={jobs.map((item) => [item.job_id, displayRowValue(lang, item.job_kind), displayRowValue(lang, item.status), item.target_space_id, displayRowValue(lang, item.created_at)])} empty={text("没有重嵌入任务", "No re-embedding jobs")} text={text} /></InfoPanel>
+      {canManage && embeddingDeployed && <InfoPanel title={text("统一 Embedding 已完成配置", "Platform Embedding configured")} text={text}>
+        <div className="automation-boundary" role="status"><ShieldCheck size={14} />{text("统一 Embedding 契约已部署并绑定到平台默认空间。为保证所有智能体写入的向量一致，运行期不提供修改入口。", "The unified Embedding Contract is deployed and bound to the platform default Space. Runtime edits are unavailable to keep vector writes consistent for every Agent.")}</div>
+        <p className="cx-form-hint">{text("如需更换模型、接入模式、距离度量或密钥引用，请使用新版平台包重新部署。重新部署会按受控流程建立新的契约、空间和绑定，不会在运行期改写当前统一契约。", "To change the model, execution mode, distance metric, or secret reference, redeploy with a new platform package. Redeployment creates a new governed Contract, Space, and binding instead of changing the active unified Contract at runtime.")}</p>
+      </InfoPanel>}
+      <InfoPanel title={text("自动化结果", "Automated results")} text={text}><p className="cx-form-hint">{text("配置、契约、默认空间、平台绑定和迁移任务均由上方的自动化流程维护。以下为只读状态，不提供手工创建、修改或补偿入口。", "The configuration, Contract, default Space, platform binding, and migration jobs are maintained by the automated workflow above. These are read-only results; no manual create, update, or compensation path is available here.")}</p><DataTable headers={[text("配置", "Profile"), text("模式", "Mode"), text("模型", "Model"), text("维度", "Dimension"), text("密钥", "Secret"), text("状态", "State")]} rows={profiles.map((item) => [item.profile_key, displayRowValue(lang, item.execution_mode), item.model_id || "-", item.dimension, item.secret_present ? text("已加密", "Encrypted") : "-", displayRowValue(lang, item.health_state)])} empty={text("尚未配置 Embedding", "No Embedding configured")} text={text} /><DataTable headers={[text("契约", "Contract"), text("模型", "Model"), text("维度", "Dimension"), text("模式", "Mode"), text("状态", "State")]} rows={contracts.map((item) => [item.contract_id, item.model_id || "-", item.dimension, displayRowValue(lang, item.execution_mode), displayRowValue(lang, item.status)])} empty={text("尚未创建契约", "No Contract created")} text={text} /><DataTable headers={[text("空间", "Space"), text("契约", "Contract"), text("验证", "Validation"), text("默认", "Default"), text("可写", "Writable")]} rows={spaces.map((item) => [item.space_key, item.contract_id || "-", displayRowValue(lang, item.validation_state), item.is_default, item.write_enabled])} empty={text("尚未创建空间", "No Space created")} text={text} />
+      <DataTable headers={[text("范围", "Scope"), text("主体", "Subject"), text("配置", "Profile"), text("空间", "Space"), text("版本", "Version")]} rows={bindings.map((item) => [displayRowValue(lang, item.binding_scope), item.binding_subject_id, item.profile_key || item.profile_id, item.space_key || item.space_id, item.version])} empty={text("平台默认绑定尚未建立", "No platform default binding")} text={text} /><DataTable headers={[text("任务", "Job"), text("类型", "Kind"), text("状态", "State"), text("目标空间", "Target space"), text("时间", "Time")]} rows={jobs.map((item) => [item.job_id, displayRowValue(lang, item.job_kind), displayRowValue(lang, item.status), item.target_space_id, displayRowValue(lang, item.created_at)])} empty={text("没有自动迁移任务", "No automated migration jobs")} text={text} /></InfoPanel>
       <InfoPanel title={text("部署证据", "Deployment evidence")} text={text}><DataTable headers={[text("运行", "Run"), text("数据库", "Database"), text("版本", "Version"), text("状态", "State"), text("当前步骤", "Current step"), text("时间", "Time")]} rows={runs.map((item) => [item.run_id, item.database_dialect, item.package_version, displayRowValue(lang, item.status), item.current_step || "-", displayRowValue(lang, item.updated_at)])} empty={text("当前数据库没有部署证据", "No deployment evidence in this database")} text={text} /></InfoPanel>
     </>}
   </>;
@@ -1258,22 +1454,29 @@ function NativeAgentsPage({
   onNotice: (value: string) => void;
   embedded?: boolean;
 }) {
-  const [data, setData] = useState<Row>({ agents: [], templates: [], manifests: [], profiles: [], requests: [], targets: [], policy: null, bootstrap: null });
+  const [data, setData] = useState<Row>({ agents: [], templates: [], manifests: [], profiles: [], requests: [], targets: [], bootstrap: null });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");
+  const [profileDraftVersion, setProfileDraftVersion] = useState(0);
+  const [testedProfileDraftVersion, setTestedProfileDraftVersion] = useState<number | null>(null);
+  const [testingProfile, setTestingProfile] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState("");
+  const [bootstrapFeedback, setBootstrapFeedback] = useState("");
+  const profileFormRef = useRef<HTMLFormElement>(null);
   const [selected, setSelected] = useState<Row | null>(null);
   const [configuringAgent, setConfiguringAgent] = useState<Row | null>(null);
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const canManage = canAction(capabilities, "platform.manage") || canAction(capabilities, "agents.manage");
   const canEnroll = canAction(capabilities, "agents.enroll");
   const canDecide = canAction(capabilities, "agents.manage");
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", size = pageSize) => {
     setLoading(true);
     try {
-      const [bootstrap, agents, templates, manifests, profiles, requests, targets, policy] = await Promise.all([
+      const [bootstrap, agents, templates, manifests, profiles, requests, targets] = await Promise.all([
         api<Row>("/api/platform/native-bootstrap"),
         api<Row>(`/api/native-agents?page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
         api<Row>("/api/agent-templates?limit=100"),
@@ -1281,12 +1484,10 @@ function NativeAgentsPage({
         api<Row>("/api/llm-provider-profiles?limit=100"),
         api<Row>("/api/agent-provision-requests?limit=100"),
         api<Row>("/api/deployment-targets?limit=100"),
-        canAction(capabilities, "platform.manage")
-          ? api<Row>("/api/platform/external-agent-registration")
-          : Promise.resolve<Row>({}),
       ]);
-      setData({ bootstrap, agents, templates, manifests, profiles, requests, targets, policy });
+      setData({ bootstrap, agents, templates, manifests, profiles, requests, targets });
       setNextCursor(String(agents.next_cursor || ""));
+      setTotalItems(typeof agents.total_items === "number" ? agents.total_items : undefined);
     } catch (error) {
       onNotice((error as Error).message);
     } finally {
@@ -1316,6 +1517,10 @@ function NativeAgentsPage({
   const referenceAdapters = listPayload(data.targets, ["reference_adapters"]);
   const submitProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (testedProfileDraftVersion !== profileDraftVersion) {
+      onNotice(text("请先测试当前 LLM 配置；修改任一字段后需要重新测试。", "Test the current LLM configuration first; retest after changing any field."));
+      return;
+    }
     const form = new FormData(event.currentTarget);
     setBusy(true);
     try {
@@ -1324,8 +1529,25 @@ function NativeAgentsPage({
         model_id: String(form.get("model_id") || ""), api_key: String(form.get("api_key") || ""),
         approved_for: [], reason: String(form.get("reason") || ""),
       }) });
-      event.currentTarget.reset(); await load(); onNotice(text("LLM 配置已加密保存", "LLM profile was encrypted and saved"));
-    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+      event.currentTarget.reset(); setProfileDraftVersion((value) => value + 1); setTestedProfileDraftVersion(null); await load();
+      const message = text("LLM 配置已加密保存，并已加入下方配置清单。", "LLM profile was encrypted, saved, and added to the inventory below.");
+      setProfileFeedback(message); onNotice(message);
+    } catch (error) { const message = (error as Error).message; setProfileFeedback(message); onNotice(message); } finally { setBusy(false); }
+  };
+  const testProfile = async () => {
+    if (!profileFormRef.current) return;
+    const form = new FormData(profileFormRef.current);
+    setTestingProfile(true);
+    try {
+      const result = await api<Row>("/api/llm-provider-profiles/probe-draft", { method: "POST", body: JSON.stringify({
+        profile_key: String(form.get("profile_key") || ""), provider_url: String(form.get("provider_url") || ""),
+        model_id: String(form.get("model_id") || ""), api_key: String(form.get("api_key") || ""),
+      }) });
+      if (String(result.status || "").toUpperCase() !== "VERIFIED") throw new Error(text("LLM 服务测试未通过，请检查地址、模型 ID 和 API Key。", "LLM test did not pass. Check the URL, model ID, and API key."));
+      setTestedProfileDraftVersion(profileDraftVersion);
+      const message = text(`LLM 服务测试通过，延迟 ${result.latency_ms ?? "-"} ms。现在可以保存。`, `LLM service test passed in ${result.latency_ms ?? "-"} ms. You can now save it.`);
+      setProfileFeedback(message); onNotice(message);
+    } catch (error) { setTestedProfileDraftVersion(null); const message = (error as Error).message; setProfileFeedback(message); onNotice(message); } finally { setTestingProfile(false); }
   };
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1360,27 +1582,31 @@ function NativeAgentsPage({
       await load(); onNotice(text("智能体已激活", "Agent activated"));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const policy = data.policy || {};
   const statusLabel = (value: unknown) => displayRowValue(lang, value || "-");
+  const bootstrapStatusLabel = (value: unknown) => {
+    const state = String(value || "").toUpperCase();
+    if (state === "READY") return text("初始化已就绪", "Bootstrap ready");
+    if (state === "MIGRATION_PENDING") return text("等待数据库迁移", "Waiting for database migration");
+    return statusLabel(state || "-");
+  };
   return <>
     {!embedded && <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} />}
-    <div className="page-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     {loading ? <PageLoading text={text} /> : <>
       <div className="metric-grid native-summary-grid">
-        <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{statusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("启动初始化不调用模型；无 LLM 时仅保持待激活。", "Bootstrap makes no model call; without an LLM the Agent remains pending activation.")}</p>{canManage && <button type="button" className="primary-button" disabled={busy} onClick={async () => { setBusy(true); try { const result = await api<Row>("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); onNotice(result.status === "READY" ? text("平台原生智能体初始化已完成，当前无需重复操作。", "Platform-native Agent initialization is complete; no further action is required.") : text("平台原生智能体初始化状态已刷新。", "Platform-native Agent bootstrap status refreshed.")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><Bot size={15} />{text("初始化或刷新状态", "Initialize or refresh status")}</button>}</InfoPanel>
-        <InfoPanel title={text("外部 Skill-first 注册", "External Skill-first registration")} text={text}><span className={`compact-status ${String(policy.state || "").toLowerCase()}`}>{statusLabel(policy.state)}</span><p className="cx-form-hint">{text("配置位置：智能体 → 外部智能体注册。关闭只影响新注册，既有外部智能体不被删除；策略变更及原因会进入审计。", "Configuration: Agents → External Agent registration. Disabling affects new registrations only; existing external Agents remain. The decision and reason are audited.")}</p></InfoPanel>
+        <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{bootstrapStatusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("初始化只创建和校验平台管理智能体，不调用模型。智能体是否可执行由下方“状态”和“模型配置”决定。", "Bootstrap only creates and verifies platform management Agents; it makes no model call. Execution readiness is determined by each Agent's status and model profile below.")}</p>{bootstrapFeedback && <p className="operation-feedback" role="status">{bootstrapFeedback}</p>}{canManage && <button type="button" className="primary-button" disabled={busy} onClick={async () => { setBusy(true); setBootstrapFeedback(text("正在检查并初始化平台原生智能体...", "Checking and initializing platform-native Agents...")); try { const result = await api<Row>("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); const completed = ["READY", "COMPLETED"].includes(String(result.status || "").toUpperCase()); const message = completed ? text("平台原生智能体初始化已完成；当前状态已刷新。", "Platform-native Agent initialization is complete and the current status was refreshed.") : text(`初始化已处理，当前状态：${bootstrapStatusLabel(result.status)}。`, `Initialization was processed. Current status: ${bootstrapStatusLabel(result.status)}.`); setBootstrapFeedback(message); onNotice(message); } catch (error) { const message = (error as Error).message; setBootstrapFeedback(message); onNotice(message); } finally { setBusy(false); } }}><Bot className={busy ? "spin" : ""} size={15} />{busy ? text("处理中", "Working") : text("初始化或刷新状态", "Initialize or refresh status")}</button>}</InfoPanel>
       </div>
-        <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button type="button" className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button type="button" className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <><button type="button" className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)} title={!profiles.length ? text("请先创建 LLM 服务商配置", "Create an LLM Provider Profile first") : text("激活智能体", "Activate Agent")}>{text("激活", "Activate")}</button>{!profiles.length && <small className="button-hint">{text("请先配置模型", "Configure a model first")}</small>}</>} </span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
+        <InfoPanel title={text("平台内置管理智能体", "Built-in management Agents")} text={text}><p className="cx-form-hint">{text("内置管理智能体必须先绑定已批准的 LLM 服务商配置，配置和激活均写入审计。", "Built-in management Agents require an approved LLM Provider Profile; configuration and activation are audited.")}</p><CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} /><DataTable headers={[text("智能体", "Agent"), text("来源", "Source"), text("状态", "Status"), text("模型配置", "LLM profile"), text("操作", "Action")]} rows={agents.map((item) => [<button type="button" className="table-link" onClick={() => setSelected(item)}>{String(item.agent_id)}</button>, statusLabel(item.source), statusLabel(item.status), String(item.llm_profile_id || text("未配置", "Not configured")), canManage ? <span className="actions-row"><button type="button" className="small-button" disabled={busy} onClick={() => setConfiguringAgent(item)}>{text("配置模型", "Configure model")}</button>{String(item.status).toUpperCase() !== "ACTIVE" && <><button type="button" className="small-button" disabled={busy || !profiles.length} onClick={() => void activate(item)} title={!profiles.length ? text("请先创建 LLM 服务商配置", "Create an LLM Provider Profile first") : text("激活智能体", "Activate Agent")}>{text("激活", "Activate")}</button>{!profiles.length && <small className="button-hint">{text("请先配置模型", "Configure a model first")}</small>}</>} </span> : statusLabel(item.activation_state)])} empty={text("暂无可见原生智能体", "No visible native Agents")} text={text} /></InfoPanel>
       <InfoPanel title={text("受管 Skill / Tool 清单", "Managed Skill / Tool manifests")} text={text}><p className="cx-form-hint">{text("内置清单按版本和摘要固定，普通读取不暴露私钥；业务 Agent 只能继承已审批清单。", "Built-in manifests are pinned by version and digest; ordinary reads never expose private keys, and business Agents may inherit only approved manifests.")}</p><DataTable headers={[text("清单", "Manifest"), text("类型", "Kind"), text("版本", "Version"), text("校验", "Verification"), text("状态", "Status")]} rows={manifests.map((item) => [item.manifest_key, displayRowValue(lang, item.manifest_kind), item.version, statusLabel(item.signature_status), statusLabel(item.status)])} empty={text("暂无受管清单", "No managed manifests")} text={text} /></InfoPanel>
       <div className="two-column-panels">
-        <InfoPanel title={text("LLM 服务商配置", "LLM Provider Profiles")} text={text}><p className="cx-form-hint">{text("模型服务只提供推理能力，不构成授权边界。API Key 如填写，将以加密密文保存；留空即按无 API Key 保存。", "The model service provides reasoning only and never defines authorization. When provided, the API key is stored as ciphertext; leave it empty to save without a key.")}</p><form className="configuration-form native-profile-form" onSubmit={submitProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required placeholder="platform-llm" /></ConfigField><ConfigField label={text("服务地址", "Provider URL")} hint={text("使用受控的 OpenAI 兼容服务根地址。", "Use an approved OpenAI-compatible service root.")}><input name="provider_url" type="url" required placeholder="https://llm.example/v1" /></ConfigField><ConfigField label={text("模型 ID", "Model ID")} hint={text("服务端实际发布的模型标识。", "Model identifier exposed by the provider.")}><input name="model_id" required /></ConfigField><ConfigField label={text("API Key", "API key")} hint={text("如填写，仅保存密文且不会回显；留空即按无 API Key 保存。", "When provided, stored as ciphertext and never returned; leave empty to save without a key.")}><input name="api_key" type="password" autoComplete="new-password" /></ConfigField><ConfigField label={text("保存原因", "Save reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后可在上方为内置智能体选择该配置。", "After saving, choose this profile for a built-in Agent above.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("保存配置", "Save profile")}</button></ConfigField></form><DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health")]} rows={profiles.map((item) => [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), statusLabel(item.health_state)])} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} /></InfoPanel>
-        <InfoPanel title={text("业务智能体申请", "Business Agent request")} text={text}><p className="cx-form-hint">{text("申请不会直接创建运行中的智能体；需要经过职责分离审批，随后按目标环境部署和激活。", "A request does not create a running Agent directly. It requires separated approval, then deployment and activation in the target environment.")}</p><form className="configuration-form native-request-form" onSubmit={submitRequest}><ConfigField label={text("智能体名称", "Agent name")} hint={text("面向业务的可读名称。", "Readable business-facing name.")}><input name="agent_name" required /></ConfigField><ConfigField label={text("受管模板", "Managed template")} hint={text("模板限定预置 Skill、Tool 和安全基线。", "Constrains approved Skills, Tools, and security baseline.")}><select name="template_key" required defaultValue="general-restricted">{templates.filter((item) => String(item.template_kind).toUpperCase() === "BUSINESS").map((item) => <option key={item.template_key} value={item.template_key}>{item.display_name}</option>)}</select></ConfigField><ConfigField label={text("负责人账户", "Owner account")} hint={text("默认当前申请人；填写已存在的用户账号 ID。", "Defaults to the requester; enter an existing user account ID.")}><input name="owner_principal_id" defaultValue={String(me.principal_id || "")} required /></ConfigField><ConfigField label={text("LLM 配置", "LLM profile")} hint={text("可延后配置，但激活前必须绑定已批准配置。", "May be set later, but is mandatory before activation.")}><select name="provider_profile_id" defaultValue=""><option value="">{text("稍后配置", "Configure later")}</option>{profiles.map((item) => <option key={item.profile_id} value={item.profile_id}>{item.profile_key}</option>)}</select></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("选择受管运行时或已接入的目标。", "Choose a managed runtime or connected target.")}><select name="deployment_target_id" defaultValue="DT_LOCAL_MANAGED">{targets.map((item) => <option key={item.target_id} value={item.target_id}>{item.target_key} · {item.target_type}</option>)}</select></ConfigField><ConfigField label={text("隔离级别", "Isolation level")} hint={text("隔离范围由部署适配器和数据库授权共同执行。", "Enforced by the deployment adapter and database authorization.")}><select name="isolation_level" defaultValue="DOMAIN_ISOLATED"><option value="DOMAIN_ISOLATED">{text("域隔离", "Domain isolated")}</option><option value="DEDICATED_CONTAINER">{text("专用容器", "Dedicated container")}</option><option value="DEDICATED_RUNTIME">{text("专用运行时", "Dedicated runtime")}</option></select></ConfigField><ConfigField label={text("数据分类", "Data classification")} hint={text("用于审批和后续治理策略。", "Used for approval and downstream governance.")}><select name="classification" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("业务目的", "Business purpose")} hint={text("说明预期工作及获准访问范围。", "Describe intended work and approved access scope.")} multiline><textarea name="purpose" required /></ConfigField><ConfigField label={text("申请原因", "Request reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("提交后进入职责分离审批队列。", "Submits the request to separated approval.")} action><button className="primary-button" disabled={busy || !canEnroll}><Plus size={15} />{text("提交申请", "Submit request")}</button></ConfigField></form></InfoPanel>
+      <InfoPanel title={text("LLM 服务商配置", "LLM Provider Profiles")} text={text}><p className="cx-form-hint">{text("模型服务只提供推理能力，不构成授权边界。先测试当前填写内容，再允许保存。API Key 如填写，将以加密密文保存；探测和审计均不会记录或回显密钥。", "The model service provides reasoning only and never defines authorization. Test the current input before saving. When provided, the API key is stored as ciphertext; neither the probe nor audit records it or returns it.")}</p>{profileFeedback && <p className="operation-feedback" role="status">{profileFeedback}</p>}<form ref={profileFormRef} className="configuration-form native-profile-form" onChange={() => { setProfileDraftVersion((value) => value + 1); setTestedProfileDraftVersion(null); setProfileFeedback(""); }} onSubmit={submitProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一、可读的标识。", "Unique, readable platform identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("服务地址", "Provider URL")} hint={text("使用受控的 OpenAI 兼容服务根地址；测试使用 /chat/completions。", "Use an approved OpenAI-compatible service root; testing uses /chat/completions.")}><input name="provider_url" type="url" required /></ConfigField><ConfigField label={text("模型 ID", "Model ID")} hint={text("服务端实际发布的模型标识。", "Model identifier exposed by the provider.")}><input name="model_id" required /></ConfigField><ConfigField label={text("API Key", "API key")} hint={text("如填写，仅保存密文且不会回显；留空即按无 API Key 测试和保存。", "When provided, stored as ciphertext and never returned; leave empty to test and save without an API key.")}><input name="api_key" type="password" autoComplete="new-password" /></ConfigField><ConfigField label={text("保存原因", "Save reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("测试", "Test")} hint={testedProfileDraftVersion === profileDraftVersion ? text("当前填写内容已验证，可以保存。", "The current input is verified and can be saved.") : text("测试不会保存配置或密钥。", "Testing does not save the profile or API key.")} action><button type="button" className="small-button" disabled={busy || testingProfile} onClick={() => void testProfile()}><Activity className={testingProfile ? "spin" : ""} size={15} />{testingProfile ? text("测试中", "Testing") : text("测试服务", "Test service")}</button></ConfigField><ConfigField label={text("操作", "Action")} hint={text("仅当前填写内容测试通过后可以保存。", "Saving is available only after the current input passes testing.")} action><button className="primary-button" disabled={busy || testedProfileDraftVersion !== profileDraftVersion}><Plus size={15} />{busy ? text("保存中", "Saving") : text("保存配置", "Save profile")}</button></ConfigField></form><DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health")]} rows={profiles.map((item) => [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), statusLabel(item.health_state)])} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} /></InfoPanel>
+        <InfoPanel title={text("业务智能体申请", "Business Agent request")} text={text}><p className="cx-form-hint">{text("申请不会直接创建运行中的智能体；需要经过职责分离审批，随后按目标环境部署和激活。", "A request does not create a running Agent directly. It requires separated approval, then deployment and activation in the target environment.")}</p><form className="configuration-form native-request-form" onSubmit={submitRequest}><ConfigField label={text("智能体名称", "Agent name")} hint={text("面向业务的可读名称。", "Readable business-facing name.")}><input name="agent_name" required /></ConfigField><ConfigField label={text("受管模板", "Managed template")} hint={text("模板限定预置 Skill、Tool 和安全基线。", "Constrains approved Skills, Tools, and security baseline.")}><select name="template_key" required>{templates.filter((item) => String(item.template_kind).toUpperCase() === "BUSINESS").map((item) => <option key={item.template_key} value={item.template_key}>{item.display_name}</option>)}</select></ConfigField><ConfigField label={text("负责人账户", "Owner account")} hint={text("默认当前申请人；填写已存在的用户账号 ID。", "Defaults to the requester; enter an existing user account ID.")}><input name="owner_principal_id" required /></ConfigField><ConfigField label={text("LLM 配置", "LLM profile")} hint={text("可延后配置，但激活前必须绑定已批准配置。", "May be set later, but is mandatory before activation.")}><select name="provider_profile_id" defaultValue=""><option value="">{text("稍后配置", "Configure later")}</option>{profiles.map((item) => <option key={item.profile_id} value={item.profile_id}>{item.profile_key}</option>)}</select></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("选择受管运行时或已接入的目标。", "Choose a managed runtime or connected target.")}><select name="deployment_target_id" defaultValue="DT_LOCAL_MANAGED">{targets.map((item) => <option key={item.target_id} value={item.target_id}>{item.target_key} · {item.target_type}</option>)}</select></ConfigField><ConfigField label={text("隔离级别", "Isolation level")} hint={text("隔离范围由部署适配器和数据库授权共同执行。", "Enforced by the deployment adapter and database authorization.")}><select name="isolation_level" defaultValue="DOMAIN_ISOLATED"><option value="DOMAIN_ISOLATED">{text("域隔离", "Domain isolated")}</option><option value="DEDICATED_CONTAINER">{text("专用容器", "Dedicated container")}</option><option value="DEDICATED_RUNTIME">{text("专用运行时", "Dedicated runtime")}</option></select></ConfigField><ConfigField label={text("数据分类", "Data classification")} hint={text("用于审批和后续治理策略。", "Used for approval and downstream governance.")}><select name="classification" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("业务目的", "Business purpose")} hint={text("说明预期工作及获准访问范围。", "Describe intended work and approved access scope.")} multiline><textarea name="purpose" required /></ConfigField><ConfigField label={text("申请原因", "Request reason")} hint={text("写入审计记录，至少三个字符。", "Written to audit; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("提交后进入职责分离审批队列。", "Submits the request to separated approval.")} action><button className="primary-button" disabled={busy || !canEnroll}><Plus size={15} />{text("提交申请", "Submit request")}</button></ConfigField></form></InfoPanel>
       </div>
       <InfoPanel title={text("申请与审批", "Requests and approvals")} text={text}><DataTable headers={[text("名称", "Name"), text("模板", "Template"), text("隔离", "Isolation"), text("状态", "Status"), text("操作", "Action")]} rows={requests.map((item) => [String(item.agent_name), String(item.template_key), displayRowValue(lang, item.isolation_level), statusLabel(item.status), String(item.status).toUpperCase() === "APPROVAL_PENDING" && canDecide ? <span className="actions-row"><button className="small-button" disabled={busy} onClick={() => void decide(item, "APPROVE")}>{text("批准", "Approve")}</button><button className="small-button" disabled={busy} onClick={() => void decide(item, "REJECT")}>{text("拒绝", "Reject")}</button></span> : statusLabel(item.decided_by || item.applicant_principal_id)])} empty={text("暂无可见申请", "No visible requests")} text={text} /></InfoPanel>
       <InfoPanel title={text("部署适配器契约", "Deployment adapter contract")} text={text}><p className="cx-form-hint">{text("以下是平台提供的参考生命周期，不代表已经内置客户专属虚拟化、SaaS、MaaS 或 Agent 平台连接器。连接器必须保留数据库授权、隔离、回调校验和审计边界。", "These are reference lifecycle contracts, not built-in customer-specific virtualization, SaaS, MaaS, or Agent connectors. Every connector must preserve database authorization, isolation, callback validation, and audit boundaries.")}</p><DataTable headers={[text("类型", "Type"), text("生命周期", "Lifecycle"), text("网络调用", "Network calls"), text("说明", "Note")]} rows={referenceAdapters.map((item) => [item.target_type, (item.lifecycle || []).join(" · "), item.network_calls ? text("允许", "Allowed") : text("不执行", "None"), item.security_note])} empty={text("暂无适配器契约", "No adapter contracts")} text={text} /></InfoPanel>
     </>}
     <DetailDrawer open={Boolean(configuringAgent)} title={text("配置内置智能体模型", "Configure built-in Agent model")} onClose={() => setConfiguringAgent(null)} text={text}>
-      {configuringAgent && <form className="cx-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const profileId = String(form.get("llm_profile_id") || ""); const why = String(form.get("reason") || "").trim(); if (!profileId || why.length < 3) return; setBusy(true); try { await api(`/api/native-agents/${encodeURIComponent(String(configuringAgent.agent_id))}/activate`, { method: "POST", body: JSON.stringify({ llm_profile_id: profileId, reason: why }) }); await load(); setConfiguringAgent(null); onNotice(text("模型配置已绑定，智能体已激活", "Model profile was bound and the Agent activated")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><p className="cx-form-hint">{text("选择已批准的 LLM 服务商配置。提交会绑定该配置并激活此内置管理智能体；操作可审计。", "Select an approved LLM Provider Profile. Submitting binds it and activates this built-in management Agent; the action is audited.")}</p><label>{text("LLM 服务商配置", "LLM Provider Profile")}<select name="llm_profile_id" required defaultValue={String(configuringAgent.llm_profile_id || "")}><option value="" disabled>{text("请选择", "Select a profile")}</option>{profiles.map((item) => <option key={item.profile_id} value={item.profile_id}>{item.profile_key} · {item.model_id}</option>)}</select></label><label>{text("配置原因", "Configuration reason")}<textarea name="reason" required /></label><button className="primary-button" disabled={busy || !profiles.length}><Check size={15} />{text("配置并激活", "Configure and activate")}</button>{!profiles.length && <p className="cx-form-hint">{text("请先在本页下方创建 LLM 服务商配置。", "Create an LLM Provider Profile below first.")}</p>}</form>}
+      {configuringAgent && <form className="cx-form native-agent-activation-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const profileId = String(form.get("llm_profile_id") || ""); const why = String(form.get("reason") || "").trim(); if (!profileId || why.length < 3) return; setBusy(true); try { await api(`/api/native-agents/${encodeURIComponent(String(configuringAgent.agent_id))}/activate`, { method: "POST", body: JSON.stringify({ llm_profile_id: profileId, reason: why }) }); await load(); setConfiguringAgent(null); onNotice(text("模型配置已绑定，智能体已激活", "Model profile was bound and the Agent activated")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}><p className="cx-form-hint">{text("选择已批准的 LLM 服务商配置。提交会绑定该配置并激活此内置管理智能体；操作可审计。", "Select an approved LLM Provider Profile. Submitting binds it and activates this built-in management Agent; the action is audited.")}</p><ConfigField label={text("LLM 服务商配置", "LLM Provider Profile")} hint={text("只能选择已批准且可用的模型配置。", "Only an approved and available model profile may be selected.")}><select name="llm_profile_id" required defaultValue={String(configuringAgent.llm_profile_id || "")}><option value="" disabled>{text("请选择", "Select a profile")}</option>{profiles.map((item) => <option key={item.profile_id} value={item.profile_id}>{item.profile_key} · {item.model_id}</option>)}</select></ConfigField><ConfigField label={text("配置原因", "Configuration reason")} hint={text("至少三个字符，并写入审计记录。", "At least three characters and written to the audit record.")} multiline><textarea name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("绑定配置后才会激活智能体。", "The Agent is activated only after the profile is bound.")} action><button className="primary-button" disabled={busy || !profiles.length}><Check size={15} />{text("配置并激活", "Configure and activate")}</button></ConfigField>{!profiles.length && <p className="cx-form-hint">{text("请先在本页下方创建 LLM 服务商配置。", "Create an LLM Provider Profile below first.")}</p>}</form>}
     </DetailDrawer>
     <DetailDrawer open={Boolean(selected)} title={text("原生智能体详情", "Native Agent details")} onClose={() => setSelected(null)} text={text}><pre className="decision-box">{selected ? JSON.stringify(selected, null, 2) : ""}</pre></DetailDrawer>
   </>;
@@ -1466,7 +1692,7 @@ function MemoryLifecyclePage({
   return <section>
     <SectionHeading title={text("记忆", "Memory")} subtitle={text("版本化记忆将内容、使用事件和动态效果分离；默认只向运行提供当前且获授权的版本。", "Versioned Memory separates content, usage events, and dynamic effectiveness; only current authorized versions are returned to runtime by default.")} text={text} />
     <ViewToggle value={view} options={tabs.map(([key, zh, en, Icon]) => [key, text(zh, en), Icon])} onChange={(value) => setView(value as MemoryView)} />
-    <div className="page-toolbar cx-memory-toolbar"><span className="secure-badge"><ShieldCheck size={14} />{text("受保护视图", "Protected view")}</span><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <div className="page-toolbar cx-memory-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     {loading && <PageLoading text={text} />}
     {!loading && view === "overview" && <div className="cx-metric-grid">
       <InfoPanel title={text("当前可用版本", "Current usable versions")} text={text}><strong className="metric-value">{nodes.length}</strong><p>{text("不包含已归档、隔离和逻辑不可用版本。", "Archived, quarantined, and logically unavailable versions are excluded.")}</p></InfoPanel>
@@ -1487,8 +1713,8 @@ function MemoryLifecyclePage({
         <form className="workbench-form" onSubmit={propose}>
           <label className="workbench-field"><span>{text("候选类型", "Candidate type")}</span><select name="candidate_type" defaultValue="REPLACE"><option value="REPLACE">{text("替换", "Replace")}</option><option value="MERGE">{text("合并", "Merge")}</option><option value="CONFLICT">{text("冲突", "Conflict")}</option><option value="SCOPE_CHANGE">{text("范围调整", "Scope change")}</option></select><small>{text("指定需要复核的变更方式。", "Select the change that requires review.")}</small></label>
           <label className="workbench-field"><span>{text("置信度", "Confidence")}</span><input name="confidence" type="number" min="0" max="1" step="0.01" defaultValue="0.8" title={text("候选与当前记忆的匹配程度，0 最低、1 最高；仅用于复核排序。", "Candidate match level: 0 is lowest and 1 is highest; it is used only for review priority.")} /><small>{text("数值越高，复核排序越靠前。", "Higher values are reviewed earlier.")}</small></label>
-          <label className="workbench-field"><span>{text("候选说明", "Candidate note")}</span><input name="note" placeholder={text("候选说明", "Candidate note")} /><small>{text("记录建议内容，不会覆盖原始记忆。", "Records the proposal without overwriting source Memory.")}</small></label>
-          <label className="workbench-field"><span>{text("提交原因", "Submission reason")}</span><input name="reason" required placeholder={text("提交原因", "Submission reason")} /><small>{text("写入审计记录，说明为何提出变更。", "Written to audit records to explain the request.")}</small></label>
+          <label className="workbench-field"><span>{text("候选说明", "Candidate note")}</span><input name="note" /><small>{text("记录建议内容，不会覆盖原始记忆。", "Records the proposal without overwriting source Memory.")}</small></label>
+          <label className="workbench-field"><span>{text("提交原因", "Submission reason")}</span><input name="reason" required /><small>{text("写入审计记录，说明为何提出变更。", "Written to audit records to explain the request.")}</small></label>
           <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button"><GitCompareArrows size={15} />{text("提交候选", "Submit candidate")}</button><small>{text("仅创建待复核候选。", "Creates a review-pending candidate only.")}</small></div>
         </form>
       </InfoPanel>
@@ -1498,7 +1724,7 @@ function MemoryLifecyclePage({
           <label className="workbench-field"><span>{text("作业类型", "Job type")}</span><select name="job_type" defaultValue="CONSOLIDATE"><option value="CONSOLIDATE">{text("整理", "Consolidate")}</option><option value="ARCHIVE_REVIEW">{text("归档复核", "Archive review")}</option><option value="REPRESENT">{text("生成表示层", "Build representations")}</option><option value="DISCOVER_RELATIONS">{text("发现关系", "Discover relations")}</option></select><small>{text("定义队列项的处理目的。", "Defines the purpose for queued items.")}</small></label>
           <label className="workbench-field"><span>{text("记忆范围", "Memory scope")}</span><select name="memory_scope"><option value="">{text("全部范围", "All scopes")}</option><option value="AGENT_MEMORY">{text("智能体记忆", "Agent memory")}</option><option value="WORKSPACE_MEMORY">{text("工作区记忆", "Workspace memory")}</option></select><small>{text("限制入队对象；服务端仍会校验权限。", "Limits queued subjects; the server still checks authorization.")}</small></label>
           <label className="workbench-field"><span>{text("运行模式", "Run mode")}</span><select name="dry_run" defaultValue="true"><option value="true">{text("仅预览作业", "Preview-only job")}</option><option value="false">{text("创建执行作业", "Queue execution job")}</option></select><small>{text("预览不修改记忆；执行由 Worker 后续处理。", "Preview does not modify Memory; a Worker handles execution later.")}</small></label>
-          <label className="workbench-field"><span>{text("作业原因", "Job reason")}</span><input name="reason" required placeholder={text("作业原因", "Job reason")} /><small>{text("写入审计记录，说明作业目的。", "Written to audit records to explain the job purpose.")}</small></label>
+          <label className="workbench-field"><span>{text("作业原因", "Job reason")}</span><input name="reason" required /><small>{text("写入审计记录，说明作业目的。", "Written to audit records to explain the job purpose.")}</small></label>
           <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button"><PlayCircle size={15} />{text("创建作业", "Create job")}</button><small>{text("提交后进入队列，不会立即执行。", "Queues the job; it does not execute immediately.")}</small></div>
         </form>
       </InfoPanel>
@@ -1918,6 +2144,45 @@ function displayRowValue(lang: Lang, value: any): string {
     : String(value);
 }
 
+function renderChannelInline(value: string, keyPrefix: string): React.ReactNode[] {
+  const parts = value.split(/(`[^`]*`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\((?:https?:\/\/)[^)\s]+\))/g);
+  return parts.filter(Boolean).map((part, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+    if (link) return <a key={key} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>;
+    return <React.Fragment key={key}>{part}</React.Fragment>;
+  });
+}
+
+function ChannelMarkdown({ value, streaming, text }: { value: any; streaming: boolean; text: (zh: string, en: string) => string }) {
+  const raw = String(value || "");
+  const lines = (streaming && raw === "[streaming]" ? "" : raw).replace(/\r/g, "").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let code: string[] | null = null;
+  const flushCode = () => {
+    if (code !== null) blocks.push(<pre key={`code-${blocks.length}`}><code>{code.join("\n")}</code></pre>);
+    code = null;
+  };
+  lines.forEach((line, index) => {
+    if (line.trimStart().startsWith("```")) { if (code === null) code = []; else flushCode(); return; }
+    if (code !== null) { code.push(line); return; }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    const list = line.match(/^\s*[-*+]\s+(.+)$/);
+    const quote = line.match(/^>\s?(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      blocks.push(level === 1 ? <h1 key={`h-${index}`}>{renderChannelInline(heading[2], `h-${index}`)}</h1> : level === 2 ? <h2 key={`h-${index}`}>{renderChannelInline(heading[2], `h-${index}`)}</h2> : <h3 key={`h-${index}`}>{renderChannelInline(heading[2], `h-${index}`)}</h3>);
+    } else if (list) blocks.push(<ul key={`ul-${index}`}><li>{renderChannelInline(list[1], `li-${index}`)}</li></ul>);
+    else if (quote) blocks.push(<blockquote key={`q-${index}`}>{renderChannelInline(quote[1], `q-${index}`)}</blockquote>);
+    else if (line.trim()) blocks.push(<p key={`p-${index}`}>{renderChannelInline(line, `p-${index}`)}</p>);
+  });
+  flushCode();
+  return <div className={`channel-markdown ${streaming ? "is-streaming" : ""}`}>{blocks.length ? blocks : <p className="streaming-placeholder">{text("管理智能体正在生成回复...", "Management Agent is generating a reply...")}</p>}{streaming && <span className="streaming-caret" aria-label={text("正在生成", "Generating")} />}</div>;
+}
+
 function jsonArray(value: any): any[] {
   if (Array.isArray(value)) return value;
   if (typeof value !== "string") return [];
@@ -1948,6 +2213,10 @@ function canAction(capabilities: Row | null, action: string): boolean {
   return capabilities?.actions?.[action]?.decision === "ALLOW";
 }
 
+function enabledFlag(value: unknown): boolean {
+  return value === true || ["Y", "YES", "TRUE", "1", "T"].includes(String(value || "").trim().toUpperCase());
+}
+
 function askReason(
   text: (zh: string, en: string) => string,
   defaultValue: string,
@@ -1960,15 +2229,16 @@ function askReason(
 }
 
 function CursorPager({
-  pageSize, page, hasMore, loading, onPageSize, onPrevious, onNext, text,
+  pageSize, page, totalItems, hasMore, loading, onPageSize, onPrevious, onNext, text,
 }: {
-  pageSize: number; page: number; hasMore: boolean; loading: boolean;
+  pageSize: number; page: number; totalItems?: number; hasMore: boolean; loading: boolean;
   onPageSize: (value: number) => void; onPrevious: () => void; onNext: () => void;
   text: (zh: string, en: string) => string;
 }) {
+  const totalPages = totalItems === undefined ? null : Math.max(1, Math.ceil(totalItems / pageSize));
   return <div className="cursor-pager">
-    <label>{text("每页", "Per page")}<select value={pageSize} disabled={loading} onChange={(event) => onPageSize(Number(event.target.value))}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
-    <span>{text("第", "Page ")}{page}{text("页", "")}</span>
+    <div className="pager-size-control"><span>{text("每页", "Per page")}</span><select aria-label={text("每页数量", "Items per page")} value={pageSize} disabled={loading} onChange={(event) => onPageSize(Number(event.target.value))}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select><span className="pager-unit">{text("条", "items")}</span></div>
+    <span className="pager-page-status" aria-live="polite">{totalPages === null ? (hasMore ? text(`第 ${page} 页 · 还有下一页`, `Page ${page} · more pages`) : text(`第 ${page} 页 · 已到末页`, `Page ${page} · last page`)) : text(`第 ${page} / ${totalPages} 页`, `Page ${page} / ${totalPages}`)}</span>
     <button className="small-button" disabled={loading || page <= 1} onClick={onPrevious}>{text("上一页", "Previous")}</button>
     <button className="small-button" disabled={loading || !hasMore} onClick={onNext}>{text("下一页", "Next")}</button>
   </div>;
@@ -2087,6 +2357,7 @@ function DataPage({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", size = pageSize) => {
     setLoading(true);
     try {
@@ -2094,8 +2365,9 @@ function DataPage({
       const value = await api<Row>(`${config.endpoint}${separator}page_size=${size}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
       setItems(listPayload(value, [...(config.payloadKeys || []), "nodes"]));
       setNextCursor(String(value.next_cursor || ""));
+      setTotalItems(typeof value.total_items === "number" ? value.total_items : undefined);
       if (visual) {
-        const graph = await api<Row>(page === "knowledge" ? "/api/knowledge" : "/api/memory");
+        const graph = await api<Row>(page === "knowledge" ? "/api/knowledge?limit=200" : "/api/memory");
         setGraphData({ nodes: graph.nodes || [], edges: graph.edges || [] });
       } else {
         setGraphData({ nodes: value.nodes || [], edges: value.edges || [] });
@@ -2199,7 +2471,7 @@ function DataPage({
               text={text}
             />
           )}
-          {!loading && <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
+          {!loading && <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
         </InfoPanel>
       )}
       <DetailDrawer
@@ -2524,11 +2796,7 @@ function NetworkGraph({
     <InfoPanel title={title} text={text}>
       {showFilters && (
         <div className="graph-toolbar">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={text("搜索节点", "Search nodes")}
-          />
+          <label className="inline-field graph-search-field"><span>{text("搜索节点", "Search nodes")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <div className="graph-filter-groups">
             <label>
               <span>{text("节点类型", "Node type")}</span>
@@ -2859,8 +3127,8 @@ function GraphPage({
       >
         <p className="cx-form-hint">
           {text(
-            "当前配置不会把实验能力自动用于生产。",
-            "Experimental capability is not automatically used in production.",
+            "当前页面只展示数据库授权且符合 Production 基线的图数据。",
+            "This view shows only database-authorized graph data permitted by the Production baseline.",
           )}
         </p>
         <pre>{JSON.stringify(detail, null, 2)}</pre>
@@ -3680,7 +3948,7 @@ function OrganizationPage({
                   </span>
                 </button>
               );
-            })}
+    })}
             {!treeNodes.length && !loading && <p className="empty-text">{text("当前范围内没有组织", "No organizations in the current scope")}</p>}
           </div>
         </aside>
@@ -3834,6 +4102,7 @@ function ApprovalsPage({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "", status = filter) => {
     setLoading(true);
@@ -3842,6 +4111,7 @@ function ApprovalsPage({
       const value = await api<Row>(query);
       setItems(listPayload(value, ["approvals"]));
       setNextCursor(String(value.next_cursor || ""));
+      setTotalItems(typeof value.total_items === "number" ? value.total_items : undefined);
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -3925,7 +4195,7 @@ function ApprovalsPage({
         </div>
       </InfoPanel>
       <InfoPanel title={text("审批请求", "Approval requests")} text={text}>
-        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <DataTable
           headers={[
             "ID",
@@ -4008,6 +4278,7 @@ function AuditPage({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
@@ -4015,6 +4286,7 @@ function AuditPage({
       const value = await api<Row>(`/api/audit?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
       setItems(listPayload(value, ["events", "audit"]));
       setNextCursor(String(value.next_cursor || ""));
+      setTotalItems(typeof value.total_items === "number" ? value.total_items : undefined);
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -4062,7 +4334,7 @@ function AuditPage({
         text={text}
       />
       <InfoPanel title={text("审计事件", "Audit events")} text={text}>
-        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <DataTable
           headers={[
             "ID",
@@ -4164,11 +4436,9 @@ function MonitorPage({
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
 }) {
-  const [view, setView] = useState("overview");
   const [data, setData] = useState<Row>({});
   const [profile, setProfile] = useState<Row>({});
   const [notifications, setNotifications] = useState<Row[]>([]);
-  const [profileResult, setProfileResult] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
   const load = async () => {
     setLoading(true);
@@ -4195,57 +4465,6 @@ function MonitorPage({
   useEffect(() => {
     void load();
   }, []);
-  const preflight = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = Object.fromEntries(
-      new FormData(event.currentTarget).entries(),
-    );
-    try {
-      setProfileResult(
-        await api<Row>("/api/runtime/profile/preflight", {
-          method: "POST",
-          body: JSON.stringify(data),
-        }),
-      );
-    } catch (error) {
-      onNotice(
-        error instanceof Error
-          ? error.message
-          : text("预检失败", "Preflight failed"),
-      );
-    }
-  };
-  const activate = async () => {
-    if (!profileResult?.change_id) return;
-    const reason = askReason(
-      text,
-      text("完成运行配置复核", "Runtime profile reviewed"),
-    );
-    if (!reason) return;
-    try {
-      setProfileResult(
-        await api<Row>(
-          `/api/runtime/profile/${profileResult.change_id}/activate`,
-          {
-            method: "POST",
-            body: JSON.stringify({ decision: "ACTIVATE", reason }),
-          },
-        ),
-      );
-      onNotice(
-        text(
-          "运行配置已记录；请受控重启当前节点后使其生效。",
-          "The runtime profile was recorded; restart this node under change control to apply it.",
-        ),
-      );
-    } catch (error) {
-      onNotice(
-        error instanceof Error
-          ? error.message
-          : text("激活失败", "Activation failed"),
-      );
-    }
-  };
   const acknowledge = async (item: Row) => {
     try {
       await api(
@@ -4290,26 +4509,14 @@ function MonitorPage({
       <SectionHeading
         title={text("运行概览", "Runtime overview")}
         subtitle={text(
-          "统一观察身份、运行状态和数据库持久化边界。生产配置承载稳定能力，图预览等实验能力按受控配置启用。",
-          "Observe identity, runtime state, and database persistence boundaries. The production profile carries stable capabilities; Graph Preview and other experimental capabilities remain explicitly controlled.",
+          "统一观察身份、运行状态和数据库持久化边界。当前实例固定使用 Production 基线，稳定能力由版本发布与数据库服务端门禁共同控制。",
+          "Observe identity, runtime state, and database persistence boundaries. This installation is fixed to the Production baseline; stable capabilities are jointly controlled by the release and database-side gates.",
         )}
         text={text}
       />
-      <ViewToggle
-        value={view}
-        options={[
-          ["overview", text("运行概览", "Runtime overview"), Activity],
-          [
-            "experiments",
-            text("实验功能", "Experimental features"),
-            CircleHelp,
-          ],
-        ]}
-        onChange={setView}
-      />
       {loading ? (
         <PageLoading text={text} />
-      ) : view === "overview" ? (
+      ) : (
         <>
           <div className="metric-grid">
             {metrics.map(([label, value]) => (
@@ -4344,82 +4551,8 @@ function MonitorPage({
             </InfoPanel>
           </div>
         </>
-      ) : (
-        <InfoPanel
-          title={text("实验功能配置", "Experimental feature configuration")}
-          text={text}
-        >
-          <div className="profile-status">
-            <div>
-              <span>{text("当前配置", "Current profile")}</span>
-              <strong>{profileLabel(profileName)}</strong>
-            </div>
-            <span
-              className={`tag ${profile.capabilities?.graph_preview ? "warning" : ""}`}
-            >
-              {profile.capabilities?.graph_preview
-                ? text("实验功能已开启", "Experiments enabled")
-                : text("实验功能未开启", "Experiments disabled")}
-            </span>
-          </div>
-          <p className="cx-form-hint">
-            {text(
-              "生产配置仅启用稳定能力；图工程预览用于受控验证；开发配置还会启用诊断与实验连接器。配置变化必须先检查依赖、活动任务和重启影响，再由授权人员激活。",
-              "Production enables stable capabilities only. Graph Engineering preview supports controlled evaluation. Development also enables diagnostics and experimental connectors. Every change requires dependency, active-work, and restart-impact checks before authorized activation.",
-            )}
-          </p>
-          <form className="inline-form" onSubmit={preflight}>
-            <select name="target_profile" defaultValue="graph-preview">
-              <option value="production">
-                {text("生产（关闭实验功能）", "Production (experiments off)")}
-              </option>
-              <option value="graph-preview">
-                {text("图工程预览", "Graph Engineering preview")}
-              </option>
-              <option value="development">
-                {text("开发实验功能", "Development experiments")}
-              </option>
-            </select>
-            <input
-              name="reason"
-              required
-              placeholder={text("预检原因", "Preflight reason")}
-            />
-            <button
-              className="primary-button"
-              disabled={!canAction(capabilities, "profile.update")}
-            >
-              <PlayCircle size={15} />
-              {text("检查影响", "Check impact")}
-            </button>
-          </form>
-          {profileResult && (
-            <div className="decision-box">
-              <p className="cx-form-hint">
-                {profileResult.safe_to_activate
-                  ? text(
-                      "影响检查已通过。激活后需要受控重启当前节点；其他节点不会被自动变更。",
-                      "Impact checks passed. Activation requires a controlled restart of this node; other nodes are not changed automatically.",
-                    )
-                  : text(
-                      "影响检查未通过，请先处理活动任务或依赖问题。",
-                      "Impact checks did not pass. Resolve active work or dependency blockers first.",
-                    )}
-              </p>
-              <pre>{JSON.stringify(profileResult, null, 2)}</pre>
-              {profileResult.safe_to_activate && (
-                <button
-                  className="small-button"
-                  onClick={() => void activate()}
-                >
-                  {text("激活配置", "Activate profile")}
-                </button>
-              )}
-            </div>
-          )}
-        </InfoPanel>
       )}
-      {!loading && view === "overview" && (
+      {!loading && (
         <>
           <InfoPanel
             title={text("通知与待办", "Notifications and work items")}
@@ -4482,6 +4615,7 @@ function CompliancePage({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const endpointFor = (value: typeof tab) => ({
     findings: "/api/compliance/findings", profiles: "/api/compliance/profiles",
     remediation: "/api/compliance/remediations", exceptions: "/api/compliance/exceptions",
@@ -4495,6 +4629,7 @@ function CompliancePage({
       ]);
       setSummary(nextSummary);
       setNextCursor(String(page.next_cursor || ""));
+      setTotalItems(typeof page.total_items === "number" ? page.total_items : undefined);
       if (currentTab === "findings") setFindings(page.items || []);
       if (currentTab === "profiles") setProfiles(page.items || []);
       if (currentTab === "remediation") setRemediations(page.items || []);
@@ -4538,13 +4673,24 @@ function CompliancePage({
     setBusy(true);
     try {
       await api("/api/compliance/profiles", { method: "POST", body: JSON.stringify({
-        profile_key: data.profile_key, display_name: data.display_name, reason: data.reason,
-        content: { locked_fields: ["database", "secrets"], controls: { database: "gateway_only", secrets: "broker_only" } },
+        profile_key: data.profile_key, display_name: data.display_name, parent_version_id: data.parent_version_id || "", reason: data.reason,
+        content: {
+          locked_fields: String(data.locked_fields || "").split(",").map((value) => value.trim()).filter(Boolean),
+          controls: {
+            allowed_skills: String(data.allowed_skills || "").split(",").map((value) => value.trim()).filter(Boolean),
+            allowed_tools: String(data.allowed_tools || "").split(",").map((value) => value.trim()).filter(Boolean),
+            classification_ceiling: data.classification_ceiling,
+            database_access: data.database_access,
+            network_egress: data.network_egress,
+            approval_policy: data.approval_policy,
+            audit_retention: data.audit_retention,
+          },
+        },
       }) });
       event.currentTarget.reset(); await load();
-      onNotice(text("受管配置草稿已创建，发布前仍可复核。", "Governed Profile draft created; review it before publication."));
+    onNotice(text("合规控制模板草稿已创建，发布前仍可复核。", "Compliance control-template draft created; review it before publication."));
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : text("创建受管配置失败", "Profile creation failed"));
+    onNotice(error instanceof Error ? error.message : text("创建合规控制模板失败", "Compliance control-template creation failed"));
     } finally { setBusy(false); }
   };
   const createException = async (event: FormEvent<HTMLFormElement>) => {
@@ -4564,11 +4710,11 @@ function CompliancePage({
     } finally { setBusy(false); }
   };
   const tabs: Array<[typeof tab, string, string]> = [
-    ["overview", "概览", "Overview"], ["findings", "发现", "Findings"], ["profiles", "受管配置", "Governed profiles"],
+    ["overview", "概览", "Overview"], ["findings", "发现", "Findings"], ["profiles", "合规控制模板", "Compliance control templates"],
     ["remediation", "整改", "Remediation"], ["exceptions", "例外", "Exceptions"], ["controller", "控制器", "Controller"],
   ];
   return <section className="page-stack">
-    <SectionHeading title={text("合规", "Compliance")} subtitle={text("基于已验证证据的智能体姿态、发现和受管配置。", "Evidence-based Agent posture, findings, and governed configurations.")} text={text} />
+    <SectionHeading title={text("合规", "Compliance")} subtitle={text("基于已验证证据的智能体姿态、发现和合规控制模板。", "Evidence-based Agent posture, findings, and compliance control templates.")} text={text} />
     <div className="view-toggle compliance-tabs" role="tablist" aria-label={text("合规视图", "Compliance views")}>
       {tabs.map(([key, zh, en]) => (
         <button
@@ -4595,17 +4741,17 @@ function CompliancePage({
         <InfoPanel title={text("控制器", "Controller")} text={text}><div className="empty-state">{text("状态：", "Status: ")}{displayRowValue(lang, summary.controller || "UNKNOWN")}{summary.scope_limited ? text("。仅显示当前授权范围，不显示全局队列。", ". Only the authorized scope is shown; global queues are hidden.") : ""}</div></InfoPanel>
       </div>
     </>}
-    {["findings", "profiles", "remediation", "exceptions"].includes(tab) && <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={busy} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
+    {["findings", "profiles", "remediation", "exceptions"].includes(tab) && <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={busy} onPageSize={changePageSize} onPrevious={previousPage} onNext={nextPage} text={text} />}
     {tab === "findings" && <InfoPanel title={text("发现", "Findings")} text={text}>
       <p className="cx-form-hint">{text("仅确定性规则和已验证证据可以标记为不合规；缺少活动或边界证据不会自动定性为违规。点击条目查看详情。", "Only deterministic rules with verified evidence may mark an Agent non-compliant. Missing activity or boundary evidence is not a violation by itself. Select a row for details.")}</p>
       <DataTable headers={[text("严重性", "Severity"), text("智能体", "Agent"), text("规则", "Rule"), text("状态", "Status"), text("最近观察", "Last observed"), text("", "")]} rows={findings.map((item) => [displayRowValue(lang, item.severity), String(item.agent_id || "-"), String(item.rule_code || "-"), displayRowValue(lang, item.status), String(item.last_observed_at || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "finding" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规发现", "No compliance findings")} />
     </InfoPanel>}
     {tab === "profiles" && <>
-      <InfoPanel title={text("受管配置", "Governed profiles")} text={text}>
+      <InfoPanel title={text("合规控制模板", "Compliance control templates")} text={text}>
         <p className="cx-form-hint">{text("配置限定已有权限，不会授予身份、数据、工具或数据库访问权。发布后的版本不可修改。", "Profiles constrain existing authority; they never grant identity, data, Tool, or database access. Published versions are immutable.")}</p>
-        <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16)])} text={text} empty={text("暂无受管配置", "No governed profiles")} />
+        <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16)])} text={text} empty={text("暂无合规控制模板", "No compliance control templates")} />
       </InfoPanel>
-      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("创建草稿", "Create draft")} text={text}><form className="inline-form" onSubmit={createProfile}><input name="profile_key" required placeholder={text("配置键", "Profile key")} /><input name="display_name" required placeholder={text("显示名称", "Display name")} /><input name="reason" required placeholder={text("创建原因", "Reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></form></InfoPanel>}
+      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("创建合规控制模板草稿", "Create Compliance control-template draft")} text={text}><p className="cx-form-hint">{text("控制模板限制既有权限，不能单独授予数据库、网络、技能或工具访问权。逗号分隔的技能、工具与锁定字段将作为结构化策略保存。", "A control template constrains existing authority and cannot independently grant database, network, Skill, or Tool access. Comma-separated Skills, Tools, and locked fields are stored as structured policy.")}</p><form className="configuration-form compliance-template-form" onSubmit={createProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一且可读的模板标识。", "A unique, readable template identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("显示名称", "Display name")} hint={text("用于审批、分配与审计显示。", "Shown in approval, assignment, and audit.")}><input name="display_name" required /></ConfigField><ConfigField label={text("父版本 ID", "Parent version ID")} hint={text("可选；父版本必须已发布。", "Optional; the parent version must be published.")}><input name="parent_version_id" /></ConfigField><ConfigField label={text("允许的技能", "Allowed Skills")} hint={text("用逗号分隔；留空表示不在此模板中额外限定。", "Comma separated; blank means this template adds no Skill restriction.")}><input name="allowed_skills" /></ConfigField><ConfigField label={text("允许的工具", "Allowed Tools")} hint={text("用逗号分隔；实际授权仍由身份策略决定。", "Comma separated; effective grants are still decided by identity policy.")}><input name="allowed_tools" /></ConfigField><ConfigField label={text("数据分类上限", "Data classification ceiling")} hint={text("限制此模板可处理的最高数据分类。", "Caps the highest data classification this template can handle.")}><select name="classification_ceiling" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("数据库访问方式", "Database access mode")} hint={text("数据库授权仍由账号、Schema 与网关执行。", "Database grants are still enforced by accounts, schemas, and the gateway.")}><select name="database_access" defaultValue="GATEWAY_ONLY"><option value="GATEWAY_ONLY">{text("仅网关", "Gateway only")}</option><option value="READ_SCOPED">{text("范围内只读", "Scoped read")}</option><option value="LEAST_PRIVILEGE">{text("最小权限", "Least privilege")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("网络出口策略", "Network egress policy")} hint={text("网络访问还需满足运行时与基础设施控制。", "Network access also remains subject to runtime and infrastructure controls.")}><select name="network_egress" defaultValue="ALLOWLIST"><option value="ALLOWLIST">{text("白名单", "Allowlist")}</option><option value="ISOLATED">{text("隔离", "Isolated")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("审批策略", "Approval policy")} hint={text("定义高风险操作的审批要求。", "Defines approval requirements for high-risk actions.")}><select name="approval_policy" defaultValue="REQUIRED"><option value="REQUIRED">{text("必须审批", "Required")}</option><option value="RISK_BASED">{text("按风险审批", "Risk based")}</option><option value="NONE">{text("无需审批", "None")}</option></select></ConfigField><ConfigField label={text("审计与留存策略", "Audit and retention policy")} hint={text("定义审计证据的最低留存要求。", "Defines the minimum retention requirement for audit evidence.")}><select name="audit_retention" defaultValue="EVIDENCE_REQUIRED"><option value="EVIDENCE_REQUIRED">{text("必须保留证据", "Evidence required")}</option><option value="STANDARD">{text("标准留存", "Standard")}</option><option value="EXTENDED">{text("延长留存", "Extended")}</option></select></ConfigField><ConfigField label={text("锁定字段", "Locked fields")} hint={text("用逗号分隔；子模板不可改写父模板同名锁定内容。", "Comma separated; child templates cannot override same-named locked parent content.")}><input name="locked_fields" /></ConfigField><ConfigField label={text("创建原因", "Creation reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("创建后为草稿，发布前仍可复核。", "Created as a draft and remains reviewable before publication.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></ConfigField></form></InfoPanel>}
     </>}
     {tab === "remediation" && <InfoPanel title={text("整改", "Remediation")} text={text}>
       <p className="cx-form-hint">{text("整改必须通过受认证网关提交结构化证据；普通频道聊天不会关闭整改。", "Remediation requires structured evidence through the authenticated Gateway; ordinary Channel chat never closes a case.")}</p>
@@ -4616,7 +4762,7 @@ function CompliancePage({
         <p className="cx-form-hint">{text("例外必须包含补偿控制、原因和失效时间；申请人不能审批自己的请求，到期后控制器会重新评估。", "Exceptions require compensating controls, a reason, and an expiry. Requesters cannot approve their own request; the Controller reevaluates expiry.")}</p>
         <DataTable headers={[text("策略", "Policy"), text("智能体", "Agent"), text("状态", "Status"), text("失效时间", "Expiry"), text("申请人", "Requester"), text("", "")]} rows={exceptions.map((item) => [String(item.policy_key || "-"), String(item.agent_id || "-") , displayRowValue(lang, item.status), String(item.expires_at || "-"), String(item.requested_by || "-"), <button className="small-button" onClick={() => setSelected({ ...item, kind: "exception" })}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规例外", "No compliance exceptions")} />
       </InfoPanel>
-      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("请求例外", "Request exception")} text={text}><form className="inline-form" onSubmit={createException}><input name="policy_key" required placeholder={text("策略或字段", "Policy or field")} /><input name="agent_id" placeholder={text("智能体 ID（可选）", "Agent ID (optional)")} /><input name="environment" placeholder={text("环境", "Environment")} /><input name="expires_at" type="datetime-local" required /><input name="reason" required placeholder={text("业务原因", "Business reason")} /><button className="primary-button" disabled={busy}><Plus size={15} />{text("提交请求", "Submit request")}</button></form></InfoPanel>}
+      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("请求例外", "Request exception")} text={text}><form className="configuration-form compact-configuration-form" onSubmit={createException}><ConfigField label={text("策略或字段", "Policy or field")} hint={text("要请求临时例外的策略键或字段。", "Policy key or field for the temporary exception.")}><input name="policy_key" required /></ConfigField><ConfigField label={text("智能体 ID", "Agent ID")} hint={text("可选；留空表示不绑定特定智能体。", "Optional; leave blank when not bound to one Agent.")}><input name="agent_id" /></ConfigField><ConfigField label={text("环境", "Environment")} hint={text("例外生效的目标环境。", "Target environment where the exception applies.")}><input name="environment" /></ConfigField><ConfigField label={text("失效时间", "Expiry")} hint={text("到期后控制器会重新评估。", "The controller reevaluates after expiry.")}><input name="expires_at" type="datetime-local" required /></ConfigField><ConfigField label={text("业务原因", "Business reason")} hint={text("必须说明为何需要该例外。", "Explain why this exception is needed.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("申请人与审批人必须分离。", "Requester and approver must be separate.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("提交请求", "Submit request")}</button></ConfigField></form></InfoPanel>}
     </>}
     {tab === "controller" && <InfoPanel title={text("控制器诊断", "Controller diagnostics")} text={text}>
       <DataTable headers={[text("状态", "Status"), text("数量", "Count")]} rows={(summary.jobs || []).map((item: Row) => [displayRowValue(lang, item.status), String(item.count || 0)])} text={text} empty={text("当前账户无权查看全局控制器队列，或暂无控制器任务。", "This account cannot view the global Controller queue, or no Controller jobs exist.")} />
@@ -4648,11 +4794,10 @@ function AgentsPage({
   const [grants, setGrants] = useState<Row[]>([]);
   const [externalPolicy, setExternalPolicy] = useState<Row>({});
   const [token, setToken] = useState<Row | null>(null);
-  const [policyEditorOpen, setPolicyEditorOpen] = useState(false);
-  const [policyBusy, setPolicyBusy] = useState(false);
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
@@ -4681,6 +4826,7 @@ function AgentsPage({
       setGrants(grantData.items || []);
       setExternalPolicy(policyData);
       setNextCursor(String(registered.next_cursor || ""));
+      setTotalItems(typeof registered.total_items === "number" ? registered.total_items : undefined);
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -4705,7 +4851,9 @@ function AgentsPage({
         method: "POST",
         body: JSON.stringify({
           ...body,
-          ttl_seconds: Number(body.ttl_seconds || 900),
+          ...(String(body.ttl_seconds || "").trim()
+            ? { ttl_seconds: Number(body.ttl_seconds) }
+            : {}),
         }),
       });
       setToken(value);
@@ -4716,28 +4864,6 @@ function AgentsPage({
           ? error.message
           : text("生成失败", "Creation failed"),
       );
-    }
-  };
-  const updateExternalPolicy = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setPolicyBusy(true);
-    try {
-      await api("/api/platform/external-agent-registration", {
-        method: "PUT",
-        body: JSON.stringify({
-          state: String(form.get("state") || "DISABLED"),
-          expected_version: Number(externalPolicy.version || 1),
-          reason: String(form.get("reason") || ""),
-        }),
-      });
-      setPolicyEditorOpen(false);
-      await load();
-      onNotice(text("外部智能体注册策略已更新并记录审计。", "External Agent registration policy was updated and audited."));
-    } catch (error) {
-      onNotice((error as Error).message);
-    } finally {
-      setPolicyBusy(false);
     }
   };
   const status = async (item: Row, value: string) => {
@@ -4868,26 +4994,25 @@ function AgentsPage({
     ["native", text("平台原生智能体生成", "Platform-native Agent provisioning"), Bot],
   ];
   const externalRegistration = <>
-    <InfoPanel title={text("外部注册状态", "External registration status")} text={text}>
-      <div className="external-registration-status"><span className={`compact-status ${String(externalPolicy.state || "").toLowerCase()}`}>{displayRowValue(lang, externalPolicy.state || "DISABLED")}</span><p className="cx-form-hint">{text("此状态仅影响新的外部智能体注册；既有智能体不会被删除。", "This state affects new external Agent registrations only; existing Agents are not deleted.")}</p>{canAction(capabilities, "agents.manage") && <button type="button" className="small-button" onClick={() => setPolicyEditorOpen((value) => !value)}>{policyEditorOpen ? text("收起配置", "Hide settings") : text("配置", "Configure")}</button>}</div>
-      {policyEditorOpen && <form className="policy-form external-policy-form" onSubmit={updateExternalPolicy}><label><span>{text("注册策略", "Registration policy")}</span><select name="state" defaultValue={String(externalPolicy.state || "ENABLED")}><option value="ENABLED">{text("允许", "Enabled")}</option><option value="APPROVAL_ONLY">{text("仅审批", "Approval only")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option></select></label><label><span>{text("变更原因", "Change reason")}</span><input name="reason" required /></label><button type="submit" className="small-button" disabled={policyBusy}><Check size={15} />{text("保存策略", "Save policy")}</button></form>}
+    <InfoPanel title={text("外部注册策略", "External registration policy")} text={text}>
+      <div className="external-registration-status"><span className="cx-form-hint">{text("注册策略", "Registration policy")}</span><span className={`compact-status ${String(externalPolicy.state || "").toLowerCase()}`}>{externalPolicy.state ? displayRowValue(lang, externalPolicy.state) : text("读取中", "Loading")}</span><p className="cx-form-hint">{text("这里只显示新外部智能体的注册策略，不显示或预填运行时。创建令牌时必须填写 Agent 名称；既有智能体不会被删除。配置位置：功能配置 → 外部智能体注册。", "This shows only the registration policy for new external Agents; runtime is neither shown nor prefilled. An Agent name is required when creating a Token; existing Agents are not deleted. Configure it in Capability configuration → External Agent registration.")}</p></div>
     </InfoPanel>
     <InfoPanel title={text("生成注册令牌", "Create Enrollment Token")} text={text}>
       <p className="cx-form-hint">{text("外部智能体必须携带一次性令牌通过 Skill-first 注册。令牌只显示一次，并确定智能体归属、环境和风险范围。", "An external Agent must present a one-time Token for Skill-first registration. The Token is shown once and fixes ownership, environment, and risk scope.")}</p>
       <form className="external-registration-form" onSubmit={createGrant}>
-        <label>{text("运行时", "Runtime")}<input name="runtime" defaultValue="OpenClaw / Hermes" /></label>
+        <label>{text("智能体名称", "Agent name")}<input name="agent_name" autoComplete="off" required /></label>
         <label>{text("环境", "Environment")}<select name="environment"><option value="development">{text("开发", "Development")}</option><option value="production">{text("生产", "Production")}</option></select></label>
         <label>{text("风险等级", "Risk tier")}<select name="risk_tier"><option value="LOW">{text("低", "Low")}</option><option value="STANDARD">{text("标准", "Standard")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></label>
-        <label>{text("有效秒数", "TTL seconds")}<input name="ttl_seconds" type="number" min="60" max="3600" defaultValue="900" /></label>
+        <label>{text("有效秒数", "TTL seconds")}<input name="ttl_seconds" type="number" min="60" max="3600" /></label>
         <button className="primary-button" type="submit"><Plus size={16} />{text("生成并仅显示一次", "Create and show once")}</button>
       </form>
       {token && <div className="one-time-token"><b>{text("请立即保存令牌", "Save this Token now")}</b><code>{token.token}</code><small>{text("平台只保存摘要，不会再次显示明文。", "Only a digest is stored; plaintext will not be shown again.")}</small></div>}
     </InfoPanel>
-    <InfoPanel title={text("外部注册边界", "External registration boundary")} text={text}>
+      <InfoPanel title={text("外部注册边界", "External registration boundary")} text={text}>
       <p>{text("外部注册不会直接获得平台管理权限。注册后仍需经过身份、归属、安全域、Skill、Tool 和审批策略检查。管理员可以在功能配置中关闭新的外部注册。", "External registration never grants platform-management authority. Identity, ownership, Security Domain, Skill, Tool, and approval policies are still checked after registration. Administrators can disable new external registration in Capability configuration.")}</p>
     </InfoPanel>
     <InfoPanel title={text("注册历史", "Enrollment history")} text={text}>
-      <DataTable headers={[text("令牌记录", "Grant"), text("运行时", "Runtime"), text("环境", "Environment"), text("使用次数", "Usage"), text("状态", "Status")]} rows={grants.map((item) => [item.grant_id, item.runtime, displayRowValue(lang, item.environment), `${item.used_count || 0}/${item.max_uses || 1}`, displayRowValue(lang, item.status)])} empty={text("暂无外部注册记录", "No external registration records")} text={text} />
+      <DataTable headers={[text("令牌记录", "Grant"), text("智能体名称", "Agent name"), text("环境", "Environment"), text("使用次数", "Usage"), text("状态", "Status")]} rows={grants.map((item) => [item.grant_id, item.agent_name || "-", displayRowValue(lang, item.environment), `${item.used_count || 0}/${item.max_uses || 1}`, displayRowValue(lang, item.status)])} empty={text("暂无外部注册记录", "No external registration records")} text={text} />
     </InfoPanel>
   </>;
   if (view === "native") {
@@ -4911,7 +5036,7 @@ function AgentsPage({
           title={text("已注册智能体", "Registered Agents")}
           text={text}
         >
-          <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
           <DataTable
             headers={[
               text("智能体 ID", "Agent ID"),
@@ -4934,14 +5059,14 @@ function AgentsPage({
         <DataTable
           headers={[
             text("Grant", "Grant"),
-            text("运行时", "Runtime"),
+            text("智能体名称", "Agent name"),
             text("环境", "Environment"),
             text("使用", "Usage"),
             text("状态", "Status"),
           ]}
           rows={grants.map((item) => [
             item.grant_id,
-            item.runtime,
+            item.agent_name || "-",
             displayRowValue(lang, item.environment),
             `${item.used_count || 0}/${item.max_uses || 1}`,
             displayRowValue(lang, item.status),
@@ -4952,6 +5077,172 @@ function AgentsPage({
       </InfoPanel>
     </section>
   );
+}
+
+function SecurityDomainsPage({
+  lang,
+  capabilities,
+  text,
+  onNotice,
+}: {
+  lang: Lang;
+  capabilities: Row | null;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+}) {
+  const [domains, setDomains] = useState<Row[]>([]);
+  const [principals, setPrincipals] = useState<Row[]>([]);
+  const [groups, setGroups] = useState<Row[]>([]);
+  const [selected, setSelected] = useState<Row | null>(null);
+  const [members, setMembers] = useState<Row[]>([]);
+  const [bindings, setBindings] = useState<Row[]>([]);
+  const [draft, setDraft] = useState<Row | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const loadSelected = async (domain: Row) => {
+    const id = encodeURIComponent(String(domain.security_domain_id));
+    const [memberValue, bindingValue] = await Promise.all([
+      api<Row>(`/api/security-domains/${id}/members`),
+      api<Row>(`/api/security-domains/${id}/bindings`),
+    ]);
+    setMembers(memberValue.items || []);
+    setBindings(bindingValue.items || []);
+  };
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [domainValue, candidateValue, groupValue] = await Promise.all([
+        api<Row>("/api/security-domains?limit=300&include_inactive=true"),
+        api<Row>("/api/security-domains/candidates?limit=300"),
+        api<Row>("/api/security-domains/collaboration-groups?limit=300"),
+      ]);
+      const next = domainValue.items || [];
+      setDomains(next); setPrincipals(candidateValue.items || []); setGroups(groupValue.items || []);
+      if (!selected && next[0]) setSelected(next[0]);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("安全域数据加载失败", "Security Domain data could not be loaded"));
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+  useEffect(() => { if (selected) void loadSelected(selected); }, [selected]);
+  const refresh = async () => { await load(); if (selected) await loadSelected(selected); };
+  const createDomain = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setBusy(true);
+    const form = event.currentTarget;
+    try {
+      const created = await api<Row>("/api/security-domains", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) });
+      form.reset(); await load(); setSelected(created);
+      onNotice(text("安全域已创建。请先确认成员，再创建频道或绑定协作组。", "Security Domain created. Confirm members before creating Channels or binding a collaboration group."));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("安全域创建失败", "Security Domain creation failed")); }
+    finally { setBusy(false); }
+  };
+  const updateMember = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!selected) return; setBusy(true);
+    try {
+      await api(`/api/security-domains/${encodeURIComponent(String(selected.security_domain_id))}/members`, { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) });
+      await loadSelected(selected); onNotice(text("安全域成员已更新，后续频道准入将重新校验。", "Security Domain member updated; Channel admission will revalidate it."));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("成员更新失败", "Member update failed")); }
+    finally { setBusy(false); }
+  };
+  const bindGroup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!selected) return; setBusy(true);
+    try {
+      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+      await api(`/api/security-domains/${encodeURIComponent(String(selected.security_domain_id))}/bindings`, { method: "POST", body: JSON.stringify({ ...data, binding_type: "LEGACY_COLLAB_GROUP" }) });
+      await loadSelected(selected); await load(); onNotice(text("协作组已完成受控绑定，历史成员和共享策略未被转换为权限。", "Collaboration group bound under governance; historic members and sharing policy were not converted into authority."));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("协作组绑定失败", "Collaboration group binding failed")); }
+    finally { setBusy(false); }
+  };
+  const createDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setBusy(true);
+    try {
+      const created = await api<Row>("/api/security-domains/conversion-drafts", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) });
+      const value = await api<Row>(`/api/security-domains/conversion-drafts/${encodeURIComponent(String(created.draft_id))}`);
+      setDraft(value); onNotice(text("转换草稿已创建。请逐项确认候选成员，未确认成员不会入域。", "Conversion draft created. Confirm candidates individually; unconfirmed candidates never enter the Domain."));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("转换草稿创建失败", "Conversion draft creation failed")); }
+    finally { setBusy(false); }
+  };
+  const reviewDraftMember = async (item: Row, decision: "CONFIRMED" | "REJECTED") => {
+    if (!draft) return;
+    const reason = askReason(text, text("复核安全域候选成员", "Review Security Domain candidate"));
+    if (!reason) return;
+    setBusy(true);
+    try {
+      await api(`/api/security-domains/conversion-drafts/${encodeURIComponent(String(draft.draft_id))}/members/${encodeURIComponent(String(item.principal_id))}`, { method: "POST", body: JSON.stringify({ decision, membership_tier: item.membership_tier || "MEMBER", reason }) });
+      setDraft(await api<Row>(`/api/security-domains/conversion-drafts/${encodeURIComponent(String(draft.draft_id))}`));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("候选成员复核失败", "Candidate review failed")); }
+    finally { setBusy(false); }
+  };
+  const applyDraft = async () => {
+    if (!draft) return;
+    const reason = askReason(text, text("应用安全域转换草稿", "Apply Security Domain conversion draft"));
+    if (!reason) return;
+    setBusy(true);
+    try {
+      const result = await api<Row>(`/api/security-domains/conversion-drafts/${encodeURIComponent(String(draft.draft_id))}/apply`, { method: "POST", body: JSON.stringify({ reason }) });
+      await load(); setDraft(await api<Row>(`/api/security-domains/conversion-drafts/${encodeURIComponent(String(draft.draft_id))}`));
+      onNotice(text(`转换已应用，已确认 ${result.confirmed_members || 0} 位主体。`, `Conversion applied with ${result.confirmed_members || 0} confirmed Principal(s).`));
+    } catch (error) { onNotice(error instanceof Error ? error.message : text("转换草稿应用失败", "Conversion draft could not be applied")); }
+    finally { setBusy(false); }
+  };
+  if (loading) return <section><SectionHeading title={text("安全域", "Security Domains")} subtitle={text("定义人、智能体、频道与协作组的零信任边界。", "Define zero-trust boundaries for Humans, Agents, Channels, and collaboration groups.")} text={text} /><PageLoading text={text} /></section>;
+  return <section>
+    <SectionHeading title={text("安全域", "Security Domains")} subtitle={text("安全域是授权边界；频道与协作组只在该边界内协作，不能由消息、提示词或历史成员关系扩大权限。", "A Security Domain is the authorization boundary. Channels and collaboration groups work inside it; messages, prompts, and historical membership never expand authority.")} text={text} />
+    <div className="domain-page-grid">
+      <InfoPanel title={text("安全域清单", "Security Domain inventory")} text={text}>
+        <div className="domain-list">{domains.map((item) => <button key={item.security_domain_id} className={`list-row ${selected?.security_domain_id === item.security_domain_id ? "active" : ""}`} onClick={() => setSelected(item)}><span><b>{item.domain_name}</b><small>{item.security_domain_id} · {displayRowValue(lang, item.classification)} · {displayRowValue(lang, item.status)}</small></span><span className="tag">{item.member_count ?? 0}</span></button>)}</div>
+      </InfoPanel>
+      <InfoPanel title={text("创建项目安全域", "Create project Security Domain")} text={text}>
+        <p className="cx-form-hint">{text("先定义项目用途、数据分级和责任人。创建时仅将责任人加入安全域；其他人员和智能体需单独确认。", "Define purpose, classification, and accountable owner first. Creation adds only the owner; all other Humans and Agents require explicit confirmation.")}</p>
+        <form className="domain-form" onSubmit={createDomain}>
+          <label className="inline-field"><span>{text("安全域 ID", "Security Domain ID")}</span><input name="security_domain_id" required /><small>{text("建议使用项目型标识，例如 SD_CODING_PROJECT_A。", "Use a project identifier, for example SD_CODING_PROJECT_A.")}</small></label>
+          <label className="inline-field"><span>{text("名称", "Name")}</span><input name="domain_name" required /></label>
+          <label className="inline-field"><span>{text("数据分级", "Classification")}</span><select name="classification" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></label>
+          <label className="inline-field"><span>{text("责任人", "Accountable owner")}</span><select name="owner_principal_id" required defaultValue=""><option value="" disabled>{text("请选择平台用户", "Select a platform user")}</option>{principals.filter((item) => String(item.principal_type) === "HUMAN").map((item) => <option key={item.principal_id} value={item.principal_id}>{item.display_name} · {item.principal_id}</option>)}</select></label>
+          <label className="inline-field full"><span>{text("业务用途", "Purpose")}</span><textarea name="purpose" required /></label>
+          <label className="inline-field full"><span>{text("创建原因", "Reason")}</span><textarea name="reason" required /></label>
+          <button className="primary-button" disabled={busy || !canAction(capabilities, "domains.manage")}><Plus size={15} />{text("创建安全域", "Create Security Domain")}</button>
+        </form>
+      </InfoPanel>
+    </div>
+    {selected && <div className="domain-detail-grid">
+      <InfoPanel title={`${text("成员与有效期", "Members and validity")} · ${selected.domain_name}`} text={text}>
+        <p className="cx-form-hint">{text("主体必须先成为安全域成员，才能被加入频道或以该安全域运行。暂停或撤销会在下一次受保护操作时阻断访问。", "A Principal must enter the Security Domain before Channel admission or runtime use. Suspension or revocation blocks access at the next guarded operation.")}</p>
+        <div className="member-list">{members.map((item) => <div className="member-row" key={item.membership_id}><span><b>{item.display_name || item.principal_id}</b><small>{displayRowValue(lang, item.principal_type)} · {displayRowValue(lang, item.membership_tier)} · {displayRowValue(lang, item.status)}</small></span><span className="tag">{item.valid_until ? String(item.valid_until) : text("长期", "No expiry")}</span></div>)}</div>
+        <form className="domain-inline-form domain-member-form" onSubmit={updateMember}>
+          <label className="inline-field"><span>{text("平台主体", "Platform Principal")}</span><select name="principal_id" required defaultValue=""><option value="" disabled>{text("选择人员或智能体", "Select a Human or Agent")}</option>{principals.map((item) => <option key={item.principal_id} value={item.principal_id}>{item.display_name} · {displayRowValue(lang, item.principal_type)}</option>)}</select></label>
+          <label className="inline-field"><span>{text("成员级别", "Membership tier")}</span><select name="membership_tier" defaultValue="MEMBER"><option value="MEMBER">{text("成员", "Member")}</option><option value="ADMIN">{text("管理员", "Admin")}</option><option value="VIEWER">{text("查看者", "Viewer")}</option></select></label>
+          <label className="inline-field"><span>{text("有效期", "Valid until")}</span><input name="valid_until" type="datetime-local" /><small>{text("留空表示不设置到期时间。", "Leave blank for no expiry.")}</small></label>
+          <label className="inline-field"><span>{text("更新原因", "Reason")}</span><input name="reason" required /></label>
+          <button className="small-button" disabled={busy}><UserPlus size={14} />{text("确认成员", "Confirm member")}</button>
+        </form>
+      </InfoPanel>
+      <InfoPanel title={text("频道与协作组绑定", "Channel and collaboration bindings")} text={text}>
+        <p className="cx-form-hint">{text("绑定仅建立可追溯关系，不会将协作组的历史成员、共享工作区或共享策略转换为安全域权限。一个协作组初版只能有一个活动安全域绑定。", "A binding is traceability only. It never converts historic group members, shared workspaces, or sharing policy into Domain authority. One group initially has only one active Domain binding.")}</p>
+        <div className="mini-list">{bindings.map((item) => <div className="governance-row" key={item.binding_id}><span><b>{displayRowValue(lang, item.binding_type)}</b><small>{item.target_id} · {displayRowValue(lang, item.status)}</small></span></div>)}{!bindings.length && <p className="empty-text">{text("暂无绑定", "No bindings")}</p>}</div>
+        <form className="domain-inline-form domain-binding-form" onSubmit={bindGroup}>
+          <label className="inline-field"><span>{text("协作组", "Collaboration group")}</span><select name="target_id" required defaultValue=""><option value="" disabled>{text("选择未绑定协作组", "Select an unbound collaboration group")}</option>{groups.filter((item) => !item.bound_security_domain_id).map((item) => <option key={item.group_id} value={item.group_id}>{item.group_name} · {item.member_count || 0} {text("个智能体", "Agents")}</option>)}</select></label>
+          <label className="inline-field"><span>{text("绑定原因", "Binding reason")}</span><input name="reason" required /></label>
+          <button className="small-button" disabled={busy}><ShieldCheck size={14} />{text("受控绑定", "Governed bind")}</button>
+        </form>
+      </InfoPanel>
+    </div>}
+    <InfoPanel title={text("从旧协作组创建转换草稿", "Create conversion draft from legacy collaboration group")} text={text}>
+      <p className="cx-form-hint">{text("适用于已有协作组。系统仅带入智能体候选清单，不会自动加入任何智能体或人员；选择责任人并逐项确认后才能应用。", "For existing groups, the system imports only Agent candidates. It never automatically admits an Agent or Human; select an owner and review each candidate before applying.")}</p>
+      <form className="domain-form domain-draft-form" onSubmit={createDraft}>
+        <label className="inline-field"><span>{text("来源协作组", "Source collaboration group")}</span><select name="source_group_id" required defaultValue=""><option value="" disabled>{text("选择未绑定协作组", "Select an unbound collaboration group")}</option>{groups.filter((item) => !item.bound_security_domain_id).map((item) => <option key={item.group_id} value={item.group_id}>{item.group_name}</option>)}</select></label>
+        <label className="inline-field"><span>{text("新安全域 ID", "New Security Domain ID")}</span><input name="security_domain_id" required /></label>
+        <label className="inline-field"><span>{text("安全域名称", "Security Domain name")}</span><input name="domain_name" required /></label>
+        <label className="inline-field"><span>{text("数据分级", "Classification")}</span><select name="classification" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></label>
+        <label className="inline-field"><span>{text("责任人", "Accountable owner")}</span><select name="owner_principal_id" required defaultValue=""><option value="" disabled>{text("选择平台用户", "Select a platform user")}</option>{principals.filter((item) => String(item.principal_type) === "HUMAN").map((item) => <option key={item.principal_id} value={item.principal_id}>{item.display_name}</option>)}</select></label>
+        <label className="inline-field full"><span>{text("业务用途", "Purpose")}</span><textarea name="purpose" required /></label>
+        <label className="inline-field full"><span>{text("创建原因", "Reason")}</span><textarea name="reason" required /></label>
+        <button className="small-button" disabled={busy}><Plus size={14} />{text("创建转换草稿", "Create conversion draft")}</button>
+      </form>
+      {draft && <div className="conversion-draft"><div className="subhead"><b>{text("当前转换草稿", "Current conversion draft")}</b><span className="tag">{displayRowValue(lang, draft.status)}</span></div><p className="cx-form-hint">{draft.proposed_domain_id} · {draft.domain_name} · {text("只有“已确认”成员会被写入安全域。", "Only confirmed members are written to the Security Domain.")}</p><div className="member-list">{(draft.members || []).map((item: Row) => <div className="member-row" key={item.draft_member_id}><span><b>{item.display_name || item.principal_id}</b><small>{displayRowValue(lang, item.principal_type)} · {displayRowValue(lang, item.membership_tier)} · {displayRowValue(lang, item.decision)}</small></span>{String(item.decision) === "PENDING" ? <div className="row-actions"><button className="small-button" disabled={busy} onClick={() => void reviewDraftMember(item, "CONFIRMED")}>{text("确认", "Confirm")}</button><button className="small-button danger" disabled={busy} onClick={() => void reviewDraftMember(item, "REJECTED")}>{text("拒绝", "Reject")}</button></div> : null}</div>)}</div><button className="primary-button" disabled={busy || !["DRAFT", "REVIEW", "APPROVED"].includes(String(draft.status))} onClick={() => void applyDraft()}><Check size={15} />{text("应用已复核草稿", "Apply reviewed draft")}</button></div>}
+    </InfoPanel>
+  </section>;
 }
 
 function Channels({
@@ -4966,6 +5257,8 @@ function Channels({
   onNotice: (value: string) => void;
 }) {
   const [channels, setChannels] = useState<Row[]>([]);
+  const [securityDomains, setSecurityDomains] = useState<Row[]>([]);
+  const [channelTotal, setChannelTotal] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Row | null>(null);
   const [messages, setMessages] = useState<Row[]>([]);
   const [members, setMembers] = useState<Row[]>([]);
@@ -4975,19 +5268,30 @@ function Channels({
   const [candidates, setCandidates] = useState<Row[]>([]);
   const [bridges, setBridges] = useState<Row[]>([]);
   const [body, setBody] = useState("");
+  const [selectedMessagePrincipal, setSelectedMessagePrincipal] = useState<Row | null>(null);
   const [threadId, setThreadId] = useState("");
   const [view, setView] = useState("chat");
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [messageFeedback, setMessageFeedback] = useState("");
+  const messageStreamRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(false);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
     try {
-      const value = await api<Row>(`/api/channels?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      const [value, domainValue] = await Promise.all([
+        api<Row>(`/api/channels?page_size=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`),
+        api<Row>("/api/security-domains?limit=200"),
+      ]);
       const list = value.items || [];
       setChannels(list);
       setNextCursor(String(value.next_cursor || ""));
+      setChannelTotal(typeof value.total_items === "number" ? value.total_items : undefined);
+      setSecurityDomains(domainValue.items || []);
       if (!selected && list[0]) setSelected(list[0]);
     } catch (error) {
       onNotice(
@@ -5035,9 +5339,27 @@ function Channels({
   useEffect(() => {
     if (selected) {
       setThreadId("");
+      // Opening a Channel is an inbox action: show its most recent activity,
+      // while later manual scrolling is still respected by the normal stream
+      // follow logic.
+      followLatestRef.current = true;
       void loadSelected(selected);
     }
   }, [selected]);
+  useEffect(() => {
+    if (!selected || !messages.some((item) => String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING")) return;
+    const timer = window.setInterval(() => { void loadSelected(selected); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [selected, messages]);
+  useEffect(() => {
+    const stream = messageStreamRef.current;
+    if (!stream) return;
+    const nearBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 72;
+    if (followLatestRef.current || nearBottom) {
+      window.requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
+    }
+    if (!messages.some((item) => String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING")) followLatestRef.current = false;
+  }, [messages]);
   const refresh = async () => {
     await load();
     if (selected) await loadSelected(selected);
@@ -5071,11 +5393,18 @@ function Channels({
       );
     }
   };
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
+  const send = async (event?: FormEvent) => {
+    event?.preventDefault();
     if (!selected || !body.trim()) return;
+    followLatestRef.current = true;
+    const mentions = members.flatMap((member) => {
+      const displayName = String(member.display_name || "").trim();
+      return displayName && body.includes(`@${displayName}`) ? [String(member.principal_id)] : [];
+    });
+    setSending(true);
+    setMessageFeedback(text("正在发送频道消息...", "Sending Channel message..."));
     try {
-      await api(
+      const result = await api<Row>(
         `/api/channels/${encodeURIComponent(selected.channel_id)}/messages`,
         {
           method: "POST",
@@ -5086,18 +5415,35 @@ function Channels({
                   ?.thread_type || "CHANNEL"
               : "CHANNEL",
             thread_id: threadId,
+            references: mentions.length ? { mentions } : {},
           }),
         },
       );
       setBody("");
       await loadSelected(selected);
+      const dispatches = Array.isArray(result.agent_dispatches) ? result.agent_dispatches : [];
+      const dispatchErrors = Array.isArray(result.agent_dispatch_errors) ? result.agent_dispatch_errors : [];
+      const message = dispatches.length
+        ? text(`消息已发送，已派发给 ${dispatches.length} 个管理智能体，正在等待回复。`, `Message sent and dispatched to ${dispatches.length} management Agent(s); awaiting responses.`)
+        : dispatchErrors.length
+        ? text(`消息已写入审计，但管理智能体暂未派发：${String(dispatchErrors[0]?.reason || "未就绪")}`, `Message was recorded, but management Agent dispatch is unavailable: ${String(dispatchErrors[0]?.reason || "not ready")}`)
+        : mentions.length
+        ? text(`消息已发送，已提及 ${mentions.length} 位频道成员。`, `Message sent; mentioned ${mentions.length} Channel member(s).`)
+        : text("消息已发送并已写入审计。", "Message sent and recorded in audit.");
+      setMessageFeedback(message);
+      onNotice(message);
+      if (dispatches.length) {
+        // A model invocation can legitimately outlive a single HTTP refresh.
+        // Bounded polling keeps the Channel current without creating a stream
+        // or polling indefinitely when an upstream model is unavailable.
+        [3000, 6000, 10000, 15000, 21000, 28000, 36000].forEach((delay) => {
+          window.setTimeout(() => { void loadSelected(selected); }, delay);
+        });
+      }
     } catch (error) {
-      onNotice(
-        error instanceof Error
-          ? error.message
-          : text("发送失败", "Send failed"),
-      );
-    }
+      const message = error instanceof Error ? error.message : text("发送失败", "Send failed");
+      setMessageFeedback(message); onNotice(message);
+    } finally { setSending(false); }
   };
   const createThread = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -5232,6 +5578,31 @@ function Channels({
       );
     }
   };
+  const pinChannel = async (enabled: boolean) => {
+    if (!selected) return;
+    const reason = askReason(
+      text,
+      enabled ? text("置顶频道", "Pin Channel") : text("取消置顶频道", "Unpin Channel"),
+      enabled ? text("提高频道处理优先级", "Raise Channel handling priority") : text("恢复按最新消息排序", "Return to latest-message ordering"),
+    );
+    if (!reason) return;
+    try {
+      await api(`/api/channels/${encodeURIComponent(String(selected.channel_id))}/pin`, {
+        method: "POST",
+        body: JSON.stringify({ decision: enabled ? "ENABLE" : "DISABLE", reason }),
+      });
+      setSelected({ ...selected, pinned: enabled });
+      setChannels((items) => items.map((item) => (
+        String(item.channel_id) === String(selected.channel_id)
+          ? { ...item, pinned: enabled }
+          : item
+      )));
+      await refresh();
+      onNotice(enabled ? text("频道已置顶，并按置顶频道内最新消息排序。", "Channel pinned and ordered by newest message within pinned Channels.") : text("频道已取消置顶。", "Channel unpinned."));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("频道置顶操作失败", "Channel pin operation failed"));
+    }
+  };
   const reviewCandidate = async (item: Row, decision: string) => {
     const reason = askReason(
       text,
@@ -5296,31 +5667,27 @@ function Channels({
     <InfoPanel title={text("创建频道", "Create Channel")} text={text}>
       <p className="cx-form-hint">
         {text(
-          "频道必须绑定安全域；默认安全域为 DEFAULT。创建频道不会扩大成员对数据、API、工具或技能的权限。",
-          "A Channel must bind a Security Domain; the bootstrap domain is DEFAULT. Creating a Channel never widens member access to data, APIs, Tools, or Skills.",
+          "频道必须选择已授权的活动安全域。安全域先定义人员与智能体边界，再创建频道；频道不会扩大数据、API、工具或技能权限。",
+          "A Channel must select an authorized active Security Domain. Define Human and Agent boundaries in the Domain before creating a Channel; a Channel never widens data, API, Tool, or Skill authority.",
         )}
       </p>
-      <form className="inline-form wide-inline-form" onSubmit={createChannel}>
-        <input
-          name="channel_name"
-          required
-          placeholder={text("频道名称", "Channel name")}
-        />
-        <input
-          name="security_domain_id"
-          required
-          defaultValue="DEFAULT"
-          placeholder={text("安全域 ID", "Security Domain ID")}
-        />
-        <select name="classification" defaultValue="INTERNAL">
-          <option value="INTERNAL">{text("内部", "Internal")}</option>
-          <option value="CONFIDENTIAL">{text("机密", "Confidential")}</option>
-          <option value="RESTRICTED">{text("受限", "Restricted")}</option>
-        </select>
-        <select name="channel_type" defaultValue="TEAM">
-          <option value="TEAM">{text("团队", "Team")}</option>
-          <option value="WORKFLOW">{text("工作流", "Workflow")}</option>
-        </select>
+      <form className="channel-create-form" onSubmit={createChannel}>
+        <div className="channel-create-fields">
+          <label className="inline-field"><span>{text("频道名称", "Channel name")}</span><input name="channel_name" required /></label>
+          <label className="inline-field"><span>{text("安全域", "Security Domain")}</span><select name="security_domain_id" required defaultValue="">
+            <option value="" disabled>{text("请选择已授权的安全域", "Select an authorized Security Domain")}</option>
+            {securityDomains.map((item) => <option key={item.security_domain_id} value={item.security_domain_id}>{item.domain_name} · {item.security_domain_id} · {displayRowValue(lang, item.classification)}</option>)}
+          </select><small>{text("未列出的安全域不可用于创建频道。", "Domains not listed here cannot be used to create a Channel.")}</small></label>
+          <label className="inline-field"><span>{text("数据分级", "Classification")}</span><select name="classification" defaultValue="INTERNAL">
+            <option value="INTERNAL">{text("内部", "Internal")}</option>
+            <option value="CONFIDENTIAL">{text("机密", "Confidential")}</option>
+            <option value="RESTRICTED">{text("受限", "Restricted")}</option>
+          </select></label>
+          <label className="inline-field"><span>{text("频道类型", "Channel type")}</span><select name="channel_type" defaultValue="TEAM">
+            <option value="TEAM">{text("团队", "Team")}</option>
+            <option value="WORKFLOW">{text("工作流", "Workflow")}</option>
+          </select></label>
+        </div>
         <button
           className="primary-button"
           disabled={!canAction(capabilities, "channels.create")}
@@ -5328,9 +5695,16 @@ function Channels({
           <Plus size={15} />
           {text("创建频道", "Create Channel")}
         </button>
+        <p className="channel-create-note">
+          {securityDomains.some((item) => String(item.security_domain_id) === "DEFAULT")
+            ? text("DEFAULT 仅用于初始化或受限 PoC；生产项目应选择专属安全域。", "DEFAULT is for bootstrap or constrained PoC use; production projects should use a dedicated Security Domain.")
+            : text("请先在“安全域”页面创建项目安全域并确认成员。", "Create a project Security Domain and confirm its members in the Security Domains page first.")}
+        </p>
       </form>
     </InfoPanel>
   );
+  if (loading && !selected)
+    return <section><SectionHeading title={text("频道", "Channels")} subtitle={text("人和智能体在受安全域约束的频道中协作。", "Humans and Agents collaborate inside Security Domain-bound Channels.")} text={text} /><PageLoading text={text} /></section>;
   if (!selected)
     return (
       <section>
@@ -5364,6 +5738,20 @@ function Channels({
       {displayRowValue(lang, item.thread_type)} · {item.thread_id}
     </option>
   ));
+  const mentionMatch = body.match(/(?:^|\s)@([^\s@]*)$/);
+  const mentionQuery = mentionMatch ? mentionMatch[1].toLowerCase() : "";
+  const mentionCandidates = mentionMatch ? members.filter((item) => {
+    const name = String(item.display_name || item.principal_id || "").toLowerCase();
+    const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => mentionQuery.includes(alias))
+      && String(item.principal_type || "").toUpperCase() === "AGENT";
+    return name.includes(mentionQuery) || agentAlias;
+  }).slice(0, 8) : [];
+  const insertMention = (member: Row) => {
+    const name = String(member.display_name || member.principal_id || "").trim();
+    if (!name || !mentionMatch) return;
+    setBody((value) => value.replace(/(?:^|\s)@([^\s@]*)$/, (matched) => `${matched.startsWith(" ") ? " " : ""}@${name} `));
+    setMessageFeedback(text(`已添加对 @${name} 的提及；发送消息后将写入频道审计。`, `Mention for @${name} added; it will be recorded in Channel audit when sent.`));
+  };
   return (
     <section>
       <SectionHeading
@@ -5395,7 +5783,7 @@ function Channels({
                 <RefreshCw size={15} />
               </button>
             </div>
-            <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
+            <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={channelTotal} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
             {channels.map((item) => (
               <button
                 key={item.channel_id}
@@ -5404,7 +5792,7 @@ function Channels({
               >
                 <MessageSquare size={15} />
                 <span>
-                  <strong>{item.channel_name}</strong>
+                  <strong>{enabledFlag(item.pinned) ? <><Pin className="channel-pin" size={12} />{item.channel_name}</> : item.channel_name}</strong>
                   <small>
                     {displayRowValue(lang, item.classification)} ·{" "}
                     {displayRowValue(lang, item.member_role)}
@@ -5422,20 +5810,23 @@ function Channels({
                   {text("数据库授权频道", "Database-governed Channel")}
                 </span>
               </div>
-              <ShieldCheck size={18} />
+              <div className="channel-title-actions">
+                {enabledFlag(selected.pinned) && <span className="tag"><Pin size={12} />{text("已置顶", "Pinned")}</span>}
+                <ShieldCheck size={18} />
+              </div>
             </div>
-            <div className="message-stream">
+            <div className="message-stream" ref={messageStreamRef}>
               {messages.map((item) => (
                 <article className="message" key={item.message_id}>
-                  <div className="message-avatar">
-                    <Bot size={15} />
-                  </div>
+                  <button className="message-avatar" type="button" onClick={() => setSelectedMessagePrincipal(members.find((member) => String(member.principal_id) === String(item.principal_id)) || { principal_id: item.principal_id, display_name: item.sender_display_name, principal_type: item.sender_principal_type, principal_status: item.sender_status })} title={text("查看主体信息", "View principal details")}>
+                    {String(item.sender_principal_type || "").toUpperCase() === "HUMAN" ? <User size={15} /> : <Bot size={15} />}
+                  </button>
                   <div>
                     <div className="message-meta">
-                      <b>{item.principal_id}</b>
+                      <b>{item.sender_display_name || text("未命名主体", "Unnamed principal")}</b>
                       <span>{item.created_at || ""}</span>
                     </div>
-                    <p>{item.body_text}</p>
+                    <ChannelMarkdown value={item.body_text} streaming={String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING"} text={text} />
                     {item.thread_id && (
                       <span className="tag">
                         {displayRowValue(lang, item.thread_type)} ·{" "}
@@ -5455,14 +5846,7 @@ function Channels({
               )}
             </div>
             <form className="message-compose" onSubmit={send}>
-              <textarea
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                placeholder={text(
-                  "输入消息；命令不会直接执行。",
-                  "Write a message; commands are never executed directly.",
-                )}
-              />
+              <label className="message-input-field"><span>{text("消息内容", "Message")}</span><textarea value={body} onChange={(event) => { const value = event.target.value; setBody(value); const match = value.match(/(?:^|\s)@([^\s@]*)$/); if (match && match[1].trim() && !members.some((member) => { const name = String(member.display_name || member.principal_id || "").toLowerCase(); const query = match[1].toLowerCase(); const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => query.includes(alias)) && String(member.principal_type || "").toUpperCase() === "AGENT"; return name.includes(query) || agentAlias; })) { setMessageFeedback(text("当前频道没有匹配的可提及成员；提及不会扩大频道或数据访问范围。", "No matching mentionable member exists in this Channel; mentions never expand Channel or data access.")); } else { setMessageFeedback(""); } }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} /><small>{text("按 Enter 发送，Shift+Enter 换行。输入 @ 可提及当前频道成员；提及仅用于消息引用和审计，不会授予任何权限。", "Press Enter to send and Shift+Enter for a new line. Type @ to mention a current Channel member; mentions are only message references and audit data, never permissions.")}</small>{messageFeedback && <small className="operation-feedback" role="status">{messageFeedback}</small>}{mentionCandidates.length > 0 && <div className="mention-menu" role="listbox" aria-label={text("提及成员", "Mention member")}>{mentionCandidates.map((member) => <button type="button" role="option" key={String(member.principal_id)} onClick={() => insertMention(member)}><span>{member.display_name || text("未命名主体", "Unnamed principal")}</span><small>{displayRowValue(lang, member.principal_type)}</small></button>)}</div>}</label>
               <div className="compose-controls">
                 <select
                   value={threadId}
@@ -5473,9 +5857,9 @@ function Channels({
                   </option>
                   {threadOptions}
                 </select>
-                <button className="primary-button" disabled={!body.trim()}>
-                  <ChevronRight size={16} />
-                  {text("发送", "Send")}
+                <button className="primary-button" disabled={!body.trim() || sending}>
+                  <ChevronRight className={sending ? "spin" : ""} size={16} />
+                  {sending ? text("发送中", "Sending") : text("发送", "Send")}
                 </button>
               </div>
             </form>
@@ -5534,12 +5918,18 @@ function Channels({
           </div>
           <div className="split-grid">
             <InfoPanel
-              title={text("线程与成员", "Threads and members")}
+              title={text("讨论线程与频道成员", "Discussion Threads and Channel Members")}
               text={text}
             >
-              <form className="compact-form" onSubmit={createThread}>
-                <label>
-                  {text("线程类型", "Thread type")}
+              <p className="cx-form-hint">
+                {text(
+                  "讨论线程用于组织频道内的消息上下文；成员才是可被邀请的人、智能体或服务主体。创建线程不会增加任何成员、数据、工具或技能权限。",
+                  "Discussion threads organize message context inside a Channel. Members are the people, Agents, or service principals that can be invited. Creating a thread never adds members or grants data, Tool, or Skill authority.",
+                )}
+              </p>
+              <form className="channel-thread-form" onSubmit={createThread}>
+                <label className="inline-field">
+                  <span>{text("讨论上下文类型", "Discussion context type")}</span>
                   <select name="thread_type">
                     <option value="CHANNEL">{text("频道", "Channel")}</option>
                     <option value="TASK">{text("任务", "Task")}</option>
@@ -5548,16 +5938,16 @@ function Channels({
                     <option value="DIRECT">{text("直接", "Direct")}</option>
                   </select>
                 </label>
-                <label>
-                  {text(
+                <label className="inline-field">
+                  <span>{text(
                     "参与者主体 ID（私有/直接必填）",
                     "Participant Principal IDs (required for private/direct)",
-                  )}
-                  <input name="participants" placeholder="HP_xxx, AG_xxx" />
+                  )}</span>
+                  <input name="participants" aria-label={text("参与者主体 ID", "Participant Principal IDs")} />
                 </label>
                 <button className="small-button">
                   <Plus size={14} />
-                  {text("创建线程", "Create thread")}
+                  {text("创建讨论线程", "Create discussion thread")}
                 </button>
               </form>
               <div className="mini-list">
@@ -5584,13 +5974,16 @@ function Channels({
                 {members.map((item) => (
                   <div className="member-row" key={item.member_id}>
                     <span>
-                      <b>{item.principal_id}</b>
+                      <b>{item.display_name || item.principal_id}</b>
                       <small>
                         {displayRowValue(lang, item.principal_type)} ·{" "}
                         {displayRowValue(lang, item.member_role)}
+                        {String(selected.channel_id) === "CH_PLATFORM_ADMINISTRATION" && String(item.principal_type).toUpperCase() === "AGENT" && ` · ${text("平台受保护", "Platform protected")}`}
                       </small>
                     </span>
-                    {item.member_role !== "OWNER" &&
+                    {String(selected.channel_id) === "CH_PLATFORM_ADMINISTRATION" && String(item.principal_type).toUpperCase() === "AGENT" ? (
+                      <span className="tag"><ShieldCheck size={12} />{text("不可移除", "Non-removable")}</span>
+                    ) : item.member_role !== "OWNER" &&
                       canAction(capabilities, "channels.manage_members") && (
                         <button
                           className="small-button danger"
@@ -5602,22 +5995,14 @@ function Channels({
                   </div>
                 ))}
               </div>
-              <form className="inline-form" onSubmit={memberAdd}>
-                <input
-                  name="principal_id"
-                  required
-                  placeholder={text("成员主体 ID", "Member Principal ID")}
-                />
-                <select name="member_role">
+              <form className="channel-member-form" onSubmit={memberAdd}>
+                <label className="inline-field"><span>{text("成员主体 ID", "Member Principal ID")}</span><input name="principal_id" required /></label>
+                <label className="inline-field"><span>{text("频道角色", "Channel role")}</span><select name="member_role">
                   <option value="MEMBER">{text("成员", "Member")}</option>
                   <option value="OPERATOR">{text("操作员", "Operator")}</option>
                   <option value="REVIEWER">{text("复核者", "Reviewer")}</option>
-                </select>
-                <input
-                  name="reason"
-                  required
-                  placeholder={text("加入原因", "Addition reason")}
-                />
+                </select></label>
+                <label className="inline-field"><span>{text("加入原因", "Addition reason")}</span><input name="reason" required /></label>
                 <button
                   className="small-button"
                   disabled={!canAction(capabilities, "channels.manage_members")}
@@ -5626,6 +6011,25 @@ function Channels({
                   {text("添加", "Add")}
                 </button>
               </form>
+            </InfoPanel>
+            <InfoPanel title={text("频道优先级", "Channel priority")} text={text}>
+              <p className="cx-form-hint">
+                {text(
+                  "置顶只调整频道列表的处理优先级。多个置顶频道按最新消息活动排序；不会改变频道成员、消息、数据、工具、技能或安全域权限。",
+                  "Pinning only changes Channel list priority. Multiple pinned Channels are ordered by their newest message activity; it never changes members, messages, data, Tools, Skills, or Security Domain authority.",
+                )}
+              </p>
+              <div className="row-actions">
+                <button
+                  className="small-button"
+                  disabled={!canAction(capabilities, "channels.lifecycle")}
+                  onClick={() => void pinChannel(!enabledFlag(selected.pinned))}
+                >
+                  <Pin size={14} />
+                  {enabledFlag(selected.pinned) ? text("取消置顶", "Unpin") : text("置顶频道", "Pin Channel")}
+                </button>
+                <span className="tag">{enabledFlag(selected.pinned) ? text("当前已置顶", "Currently pinned") : text("按消息活动排序", "Ordered by message activity")}</span>
+              </div>
             </InfoPanel>
             <InfoPanel
               title={text("生命周期与保全", "Lifecycle and legal hold")}
@@ -5811,6 +6215,9 @@ function Channels({
           </InfoPanel>
         </>
       )}
+      <DetailDrawer open={Boolean(selectedMessagePrincipal)} title={text("频道消息主体", "Channel message principal")} onClose={() => setSelectedMessagePrincipal(null)} text={text}>
+        {selectedMessagePrincipal && <div className="detail-record"><p><strong>{text("显示名称", "Display name")}</strong><span>{selectedMessagePrincipal.display_name || text("未命名主体", "Unnamed principal")}</span></p><p><strong>{text("主体类型", "Principal type")}</strong><span>{displayRowValue(lang, selectedMessagePrincipal.principal_type || "-")}</span></p><p><strong>{text("状态", "Status")}</strong><span>{displayRowValue(lang, selectedMessagePrincipal.principal_status || "-")}</span></p><p><strong>{text("主体 ID", "Principal ID")}</strong><code>{selectedMessagePrincipal.principal_id}</code></p></div>}
+      </DetailDrawer>
     </section>
   );
 }
@@ -6093,6 +6500,7 @@ function UsersPage({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const userRequest = useRef(0);
 
@@ -6108,6 +6516,7 @@ function UsersPage({
         const options = organizationResponse.items || [];
         setUsers(userResponse.items || []);
         setNextCursor(String(userResponse.next_cursor || ""));
+        setTotalItems(typeof userResponse.total_items === "number" ? userResponse.total_items : undefined);
         setRequests(pending);
         setOrganizations(options);
         setApprovalOrganizations((current) => {
@@ -6576,7 +6985,7 @@ function UsersPage({
           />
         </InfoPanel>
         <InfoPanel title={text("用户清单", "Users")} text={text}>
-          <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
+          <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={pageChange} onPrevious={previousPage} onNext={nextPage} text={text} />
           <div className="user-list">
             {users.map((user) => (
               <button
@@ -6689,11 +7098,7 @@ function UsersPage({
                   {text("系统管理员", "System admin")}
                 </option>
               </select>
-              <input
-                name="reason"
-                required
-                placeholder={text("变更原因", "Change reason")}
-              />
+              <label className="inline-field"><span>{text("变更原因", "Change reason")}</span><input name="reason" required /></label>
               <button
                 className="primary-button"
                 disabled={
@@ -6790,14 +7195,7 @@ function UsersPage({
               text={text}
             >
               <form className="inline-form" onSubmit={simulate}>
-                <input
-                  name="action"
-                  defaultValue="agents.read"
-                  placeholder={text(
-                    "例如 agents.read",
-                    "For example agents.read",
-                  )}
-                />
+                <label className="inline-field"><span>{text("权限动作", "Permission action")}</span><input name="action" required /></label>
                 <span></span>
                 <button
                   className="primary-button"
@@ -6807,6 +7205,7 @@ function UsersPage({
                   {text("模拟", "Simulate")}
                 </button>
               </form>
+              <p className="inline-form-note">{text("例如 agents.read。", "For example, agents.read.")}</p>
               {access && (
                 <pre className="access-output">
                   {JSON.stringify(access, null, 2)}
@@ -6876,21 +7275,9 @@ function UsersPage({
                   <option value="OIDC">OIDC</option>
                   <option value="LDAP">LDAP</option>
                 </select>
-                <input
-                  name="provider"
-                  required
-                  placeholder={text("提供方", "Provider")}
-                />
-                <input
-                  name="subject_key"
-                  required
-                  placeholder={text("不可变主体 ID", "Immutable subject ID")}
-                />
-                <input
-                  name="reason"
-                  required
-                  placeholder={text("绑定原因", "Link reason")}
-                />
+                <label className="inline-field"><span>{text("提供方", "Provider")}</span><input name="provider" required /></label>
+                <label className="inline-field"><span>{text("不可变主体 ID", "Immutable subject ID")}</span><input name="subject_key" required /></label>
+                <label className="inline-field"><span>{text("绑定原因", "Link reason")}</span><input name="reason" required /></label>
                 <button
                   className="primary-button"
                   disabled={
@@ -6941,20 +7328,9 @@ function UsersPage({
                 className="inline-form wide-inline-form"
                 onSubmit={createDelegation}
               >
-                <input
-                  name="grantee_principal_id"
-                  required
-                  placeholder={text("受让人主体 ID", "Grantee Principal ID")}
-                />
-                <input
-                  name="permissions"
-                  required
-                  placeholder={text(
-                    "权限，逗号分隔",
-                    "Permissions, comma separated",
-                  )}
-                />
-                <select name="data_scope" defaultValue="ASSIGNED">
+                <label className="inline-field"><span>{text("受让人主体 ID", "Grantee Principal ID")}</span><input name="grantee_principal_id" required /></label>
+                <label className="inline-field"><span>{text("权限", "Permissions")}</span><input name="permissions" required /></label>
+                <label className="inline-field"><span>{text("数据范围", "Data scope")}</span><select name="data_scope" defaultValue="ASSIGNED">
                   <option value="ASSIGNED">
                     {text("分配范围", "Assigned")}
                   </option>
@@ -6962,19 +7338,9 @@ function UsersPage({
                   <option value="ORG_SUBTREE">
                     {text("组织子树", "Organization subtree")}
                   </option>
-                </select>
-                <input
-                  name="valid_until"
-                  placeholder={text(
-                    "有效期 ISO 时间（可选）",
-                    "Valid-until ISO time (optional)",
-                  )}
-                />
-                <input
-                  name="reason"
-                  required
-                  placeholder={text("委派原因", "Delegation reason")}
-                />
+                </select></label>
+                <label className="inline-field"><span>{text("有效期", "Valid until")}</span><input name="valid_until" /></label>
+                <label className="inline-field"><span>{text("委派原因", "Delegation reason")}</span><input name="reason" required /></label>
                 <button
                   className="primary-button"
                   disabled={
@@ -6985,6 +7351,7 @@ function UsersPage({
                   {text("创建委派", "Create delegation")}
                 </button>
               </form>
+              <p className="inline-form-note">{text("多个权限使用逗号分隔；有效期可选，填写 ISO 时间。", "Separate multiple permissions with commas. Valid until is optional and uses an ISO timestamp.")}</p>
             </InfoPanel>
             <InfoPanel
               title={text("安全边界", "Security boundary")}
@@ -7026,6 +7393,7 @@ function MonitorDetails({
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
+  const [totalItems, setTotalItems] = useState<number | undefined>(undefined);
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
     try {
@@ -7035,6 +7403,7 @@ function MonitorDetails({
       ]);
       setAgents(listPayload(agentData, ["agents"]));
       setNextCursor(String(agentData.next_cursor || ""));
+      setTotalItems(typeof agentData.total_items === "number" ? agentData.total_items : undefined);
       setMetrics(metricData);
     } catch (error) {
       onNotice(
@@ -7105,7 +7474,7 @@ function MonitorDetails({
         </div>
       </InfoPanel>
       <InfoPanel title={text("智能体列表", "Agent inventory")} text={text}>
-        <CursorPager pageSize={pageSize} page={cursorHistory.length} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
+        <CursorPager pageSize={pageSize} page={cursorHistory.length} totalItems={totalItems} hasMore={Boolean(nextCursor)} loading={loading} onPageSize={setPage} onPrevious={previousPage} onNext={nextPage} text={text} />
         <div className="filter-row">
           <button
             className={`filter-button ${filter === "ALL" ? "active" : ""}`}
@@ -7408,7 +7777,7 @@ function LegacyOperations({
                 {text("技能名称", "Skill name")}
                 <input
                   name="skill_name"
-                  defaultValue={target.skill_name || ""}
+                  defaultValue=""
                   required
                 />
               </label>
@@ -7416,7 +7785,7 @@ function LegacyOperations({
                 {text("版本", "Version")}
                 <input
                   name="skill_version"
-                  defaultValue={target.skill_version || "1.0.0"}
+                  defaultValue=""
                   required
                 />
               </label>
@@ -7479,13 +7848,13 @@ function LegacyOperations({
       <InfoPanel title={text("分支操作", "Branch operations")} text={text}>
         <p className="cx-form-hint">{text("创建分支只建立独立上下文与归属记录，不会合并、执行或覆盖源上下文。后续暂停、恢复和废弃均保留审计轨迹。", "Creating a Branch establishes isolated context and ownership only; it does not merge, execute, or overwrite the source context. Later pause, resume, and abandonment actions remain auditable.")}</p>
         <form className="operation-explainer-form" onSubmit={fork}>
-          <label className="workbench-field"><span>{text("工作区 ID", "Workspace ID")}</span><input name="workspace_id" required placeholder={text("工作区 ID", "Workspace ID")} /><small>{text("指定新分支所属的工作区。", "Sets the workspace that owns the new Branch.")}</small></label>
-          <label className="workbench-field"><span>{text("起始上下文 ID", "Fork context ID")}</span><input name="fork_context_id" placeholder={text("可选", "Optional")} /><small>{text("指定从哪一条上下文开始分叉。", "Identifies the context from which to fork.")}</small></label>
-          <label className="workbench-field"><span>{text("分支名称", "Branch name")}</span><input name="branch_name" required placeholder={text("分支名称", "Branch name")} /><small>{text("用于列表和审计中的可读标识。", "A readable identifier for lists and audit.")}</small></label>
+          <label className="workbench-field"><span>{text("工作区 ID", "Workspace ID")}</span><input name="workspace_id" required /><small>{text("指定新分支所属的工作区。", "Sets the workspace that owns the new Branch.")}</small></label>
+          <label className="workbench-field"><span>{text("起始上下文 ID", "Fork context ID")}</span><input name="fork_context_id" /><small>{text("可选；指定从哪一条上下文开始分叉。", "Optional; identifies the context from which to fork.")}</small></label>
+          <label className="workbench-field"><span>{text("分支名称", "Branch name")}</span><input name="branch_name" required /><small>{text("用于列表和审计中的可读标识。", "A readable identifier for lists and audit.")}</small></label>
           <label className="workbench-field"><span>{text("分支类型", "Branch type")}</span><select name="branch_type" defaultValue="EXPERIMENT"><option value="EXPERIMENT">{text("实验", "Experiment")}</option><option value="HANDOFF">{text("移交", "Handoff")}</option><option value="PARALLEL">{text("并行", "Parallel")}</option></select><small>{text("说明分支的协作意图，不授予额外权限。", "Records collaboration intent; it grants no extra authority.")}</small></label>
-          <label className="workbench-field"><span>{text("目标智能体 ID", "Target Agent ID")}</span><input name="agent_id" required placeholder={text("目标智能体 ID", "Target Agent ID")} /><small>{text("指定承载该分支的智能体。", "Sets the Agent responsible for this Branch.")}</small></label>
-          <label className="workbench-field"><span>{text("源智能体 ID", "Source Agent ID")}</span><input name="source_agent_id" placeholder={text("可选", "Optional")} /><small>{text("记录来源智能体，便于交接追溯。", "Records the source Agent for handoff traceability.")}</small></label>
-          <label className="workbench-field"><span>{text("分支目的", "Branch purpose")}</span><input name="purpose" required placeholder={text("分支目的", "Branch purpose")} /><small>{text("写入审计记录，说明为何需要该分支。", "Written to audit records to explain the Branch.")}</small></label>
+          <label className="workbench-field"><span>{text("目标智能体 ID", "Target Agent ID")}</span><input name="agent_id" required /><small>{text("指定承载该分支的智能体。", "Sets the Agent responsible for this Branch.")}</small></label>
+          <label className="workbench-field"><span>{text("源智能体 ID", "Source Agent ID")}</span><input name="source_agent_id" /><small>{text("可选；记录来源智能体，便于交接追溯。", "Optional; records the source Agent for handoff traceability.")}</small></label>
+          <label className="workbench-field"><span>{text("分支目的", "Branch purpose")}</span><input name="purpose" required /><small>{text("写入审计记录，说明为何需要该分支。", "Written to audit records to explain the Branch.")}</small></label>
           <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button" disabled={!canAction(capabilities, "branches.write")}><GitBranch size={15} />{text("创建分支", "Create Branch")}</button><small>{text("仅创建分支定义，不会启动执行。", "Creates the Branch definition only; it does not start execution.")}</small></div>
         </form>
         <div className="page-toolbar evidence-actions">
@@ -7596,9 +7965,9 @@ function LegacyOperations({
     <InfoPanel title={text("循环操作", "Loop operations")} text={text}>
       <p className="cx-form-hint">{text("创建循环只保存定义与停止条件，不会自动启动运行。请从下方选定循环后明确点击“启动运行”；暂停、恢复和停止均由运行状态机处理。", "Creating a Loop stores its definition and stop condition only; it never starts a run automatically. Select the Loop below and explicitly start it; pause, resume, and stop use the run state machine.")}</p>
       <form className="operation-explainer-form" onSubmit={createLoop}>
-        <label className="workbench-field"><span>{text("循环标题", "Loop title")}</span><input name="title" required placeholder={text("循环标题", "Loop title")} /><small>{text("用于识别该循环定义。", "Identifies this Loop definition.")}</small></label>
-        <label className="workbench-field"><span>{text("目标", "Goal")}</span><input name="goal" required placeholder={text("目标", "Goal")} /><small>{text("定义每次迭代要达成的结果。", "Defines the result each iteration works toward.")}</small></label>
-        <label className="workbench-field"><span>{text("摘要", "Summary")}</span><input name="summary" placeholder={text("可选", "Optional")} /><small>{text("为操作人员提供简短背景说明。", "Provides brief context for operators.")}</small></label>
+        <label className="workbench-field"><span>{text("循环标题", "Loop title")}</span><input name="title" required /><small>{text("用于识别该循环定义。", "Identifies this Loop definition.")}</small></label>
+        <label className="workbench-field"><span>{text("目标", "Goal")}</span><input name="goal" required /><small>{text("定义每次迭代要达成的结果。", "Defines the result each iteration works toward.")}</small></label>
+        <label className="workbench-field"><span>{text("摘要", "Summary")}</span><input name="summary" /><small>{text("可选；为操作人员提供简短背景说明。", "Optional; provides brief context for operators.")}</small></label>
         <label className="workbench-field"><span>{text("最大迭代次数", "Maximum iterations")}</span><input name="max_iterations" type="number" min="1" defaultValue="10" /><small>{text("达到上限后循环停止，防止无限运行。", "Stops the Loop at this limit to prevent unbounded runs.")}</small></label>
         <label className="workbench-field"><span>{text("可见性", "Visibility")}</span><select name="visibility" defaultValue="PRIVATE"><option value="PRIVATE">{text("私有", "Private")}</option><option value="SHARED">{text("共享", "Shared")}</option></select><small>{text("控制定义的可见范围，不替代数据授权。", "Controls definition visibility; it does not replace data authorization.")}</small></label>
         <div className="workbench-field workbench-action"><span>{text("操作", "Action")}</span><button className="primary-button" disabled={!canAction(capabilities, "loops.write")}><Plus size={15} />{text("创建循环", "Create Loop")}</button><small>{text("仅创建定义；运行需单独启动。", "Creates the definition only; start a run separately.")}</small></div>
@@ -7701,8 +8070,7 @@ function SectionHeading({
 }) {
   return (
     <div className="section-heading">
-      <div>
-        <p className="eyebrow">{text("川序控制台", "CHUANXU CONSOLE")}</p>
+      <div className="section-heading-main">
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
@@ -7730,16 +8098,18 @@ function InfoPanel({
   title,
   children,
   text,
+  protectedView = false,
 }: {
   title: string;
   children: React.ReactNode;
   text: (zh: string, en: string) => string;
+  protectedView?: boolean;
 }) {
   return (
     <section className="info-panel">
       <div className="panel-title">
         <h2>{title}</h2>
-        <span>{text("受保护视图", "Protected view")}</span>
+        {protectedView && <span>{text("受保护视图", "Protected view")}</span>}
       </div>
       {children}
     </section>

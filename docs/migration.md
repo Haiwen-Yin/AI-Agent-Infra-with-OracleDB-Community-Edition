@@ -1,4 +1,61 @@
-# Migration Guide - AI Agent Infra with DB v4.4.1
+# Migration Guide - AI Agent Infra with DB v4.4.3
+
+## v4.4.3 Security Domain Governance Migration
+
+Migration `39_v4_4_3_security_domain_binding.sql` is additive for all three
+adapters. It adds accountable Domain governance, Channel and legacy-group
+binding evidence, and reviewable conversion-draft/member records. It retains
+existing Security Domains, Channel rows, collaboration groups, workspaces,
+messages, SDD facts, and audit history unchanged.
+
+Run the journaled migration with a recoverable backup evidence manifest:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.3 \
+  --database <oracle|pg|yashandb> --edition <community|enterprise> \
+  --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+After migration, create a dedicated project Security Domain, specify its
+purpose, classification, accountable Human owner, and reason, then explicitly
+confirm every Human and Agent that requires access. Only then create a Channel
+or bind an existing collaboration group. The normal Dashboard workflow never
+uses a manually typed Domain ID for Channel creation. `DEFAULT` remains for
+bootstrap or constrained proof-of-concept work, not implicit production use.
+Do not edit an applied migration or delete journal rows to retry it.
+
+## v4.4.2 Embedding And Graph Operations
+
+Migration `37_v4_4_2_embedding_graph_operations.sql` is additive for all
+three adapters. It adds the platform Embedding activation evidence catalog,
+the Graph Production Profile matrix and history, and the non-secret Admin
+node deployment evidence tables. Existing Profile, Contract, Space, Binding,
+Graph, SDD, Agent, identity, governance, and audit records remain in place.
+
+Run the v4.4.2 migration only through the journaled runner after recording a
+recoverable backup evidence manifest:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.2 \
+  --database <oracle|pg|yashandb> --edition <community|enterprise> \
+  --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+The provider probe is performed before the database activation transaction.
+After a successful probe, Profile, Contract, default Space, platform Binding,
+activation evidence, and audit rows are committed atomically. A changed
+immutable vector-space contract archives the prior writable default Space and
+creates a new default Space; historical vectors remain readable until a
+governed re-embedding process completes.
+
+The Graph matrix is capability-level rather than an all-or-nothing switch.
+Promotion requires a reason, evidence reference, current version, and enabled
+dependencies. The stable Graph Runtime core and authorized inspection are
+available in the production profile. A2A, OTLP, replay, Dynamic Graph
+migration, and framework execution adapters remain disabled until their own
+production evidence is complete.
 
 ## v4.4.1 Platform Administration Migration
 

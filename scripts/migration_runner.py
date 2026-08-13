@@ -39,6 +39,12 @@ from live_db_validator import (
     V441_MIGRATION_SCRIPTS,
     V441_ADMIN_HA_TABLES,
     V441_ADMIN_HA_REQUIRED_COLUMNS,
+    V442_MIGRATION_SCRIPTS,
+    V442_GRAPH_OPERATIONS_TABLES,
+    V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS,
+    V443_MIGRATION_SCRIPTS,
+    V443_SECURITY_DOMAIN_TABLES,
+    V443_SECURITY_DOMAIN_REQUIRED_COLUMNS,
     _load_database_config,
     validate_v43_static_contract,
     validate_v431_static_contract,
@@ -50,6 +56,8 @@ from live_db_validator import (
     validate_v437_static_contract,
     validate_v440_static_contract,
     validate_v441_static_contract,
+    validate_v442_static_contract,
+    validate_v443_static_contract,
 )
 
 
@@ -86,8 +94,10 @@ NATIVE_AGENT_MIGRATION_VERSIONS = frozenset({"4.3.6"})
 BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS = frozenset({"4.3.7"})
 NATIVE_SDD_MIGRATION_VERSIONS = frozenset({"4.4.0"})
 ADMIN_HA_MIGRATION_VERSIONS = frozenset({"4.4.1"})
+GRAPH_OPERATIONS_MIGRATION_VERSIONS = frozenset({"4.4.2"})
+SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS = frozenset({"4.4.3"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS
 )
 
 # v4.4.1 was exercised against the retained PostgreSQL and YashanDB test
@@ -101,6 +111,21 @@ LEGACY_V441_STEP_CHECKSUMS = {
     })},
     "yashandb": {"35_v4_4_1_admin_ha_upgrade": frozenset({
         "a9ff7debaa665f838b696558bac29dd151f0c9d2542efa875c5bab843741b304",
+    })},
+}
+
+# v4.4.2 was applied to the retained Oracle and YashanDB ENT baselines before
+# the final release runner checksum was recorded.  These are the only
+# historical checksums accepted for step 37, and adoption still requires the
+# complete v4.4.2 object/column contract below.  This preserves tamper
+# detection while allowing a verified, already-complete test baseline to be
+# revalidated.
+LEGACY_V442_STEP_CHECKSUMS = {
+    "oracle": {"37_v4_4_2_embedding_graph_operations": frozenset({
+        "c1e92386326e9dbb7cd58a4e43d6f479c1ae4dd19696bd58679168ef3907c3f2",
+    })},
+    "yashandb": {"37_v4_4_2_embedding_graph_operations": frozenset({
+        "c1e92386326e9dbb7cd58a4e43d6f479c1ae4dd19696bd58679168ef3907c3f2",
     })},
 }
 
@@ -579,6 +604,18 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V440_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V440_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v440_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.1":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V441_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V441_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v441_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.2":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V442_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V442_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v442_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.3":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V443_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V443_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v443_static_contract(database, full_scripts)
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
@@ -715,6 +752,16 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS:
+        present = _schema_tables(cursor, database)
+        return set(V443_SECURITY_DOMAIN_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V443_SECURITY_DOMAIN_REQUIRED_COLUMNS, present,
+        )
+    if MIGRATION_VERSION in GRAPH_OPERATIONS_MIGRATION_VERSIONS:
+        present = _schema_tables(cursor, database)
+        return set(V442_GRAPH_OPERATIONS_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS, present,
+        )
     if MIGRATION_VERSION in NATIVE_SDD_MIGRATION_VERSIONS:
         present = _schema_tables(cursor, database)
         return set(V440_SDD_TABLES) <= present and _schema_columns_complete(
@@ -1063,6 +1110,16 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
             {"CX_UPGRADE_APPROVALS": V441_ADMIN_HA_REQUIRED_COLUMNS["CX_UPGRADE_APPROVALS"]},
             present,
         )
+    if key == "37_v4_4_2_embedding_graph_operations":
+        present = _schema_tables(cursor, database)
+        return set(V442_GRAPH_OPERATIONS_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS, present,
+        )
+    if key == "39_v4_4_3_security_domain_binding":
+        present = _schema_tables(cursor, database)
+        return set(V443_SECURITY_DOMAIN_TABLES) <= present and _schema_columns_complete(
+            cursor, database, V443_SECURITY_DOMAIN_REQUIRED_COLUMNS, present,
+        )
     return True
 
 
@@ -1070,6 +1127,15 @@ def _legacy_v441_step_compatible(cursor: Any, database: str, script: Path,
                                  checksum: str) -> bool:
     """Adopt only recorded v4.4.1 development checksums after schema proof."""
     allowed = LEGACY_V441_STEP_CHECKSUMS.get(database, {}).get(
+        _script_key(script), frozenset(),
+    )
+    return checksum in allowed and _step_objects_complete(cursor, database, script)
+
+
+def _legacy_v442_step_compatible(cursor: Any, database: str, script: Path,
+                                 checksum: str) -> bool:
+    """Adopt only the recorded pre-release v4.4.2 checksum after schema proof."""
+    allowed = LEGACY_V442_STEP_CHECKSUMS.get(database, {}).get(
         _script_key(script), frozenset(),
     )
     return checksum in allowed and _step_objects_complete(cursor, database, script)
@@ -1276,6 +1342,22 @@ def _v441_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v442_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    names = _v441_script_names(database, config_path, edition)
+    if "37_v4_4_2_embedding_graph_operations.sql" not in names:
+        names.append("37_v4_4_2_embedding_graph_operations.sql")
+    if "38_v4_4_2_channel_pinning.sql" not in names:
+        names.append("38_v4_4_2_channel_pinning.sql")
+    return names
+
+
+def _v443_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    names = _v442_script_names(database, config_path, edition)
+    if "39_v4_4_3_security_domain_binding.sql" not in names:
+        names.append("39_v4_4_3_security_domain_binding.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1450,7 +1532,11 @@ def _apply_statement_migration(
                             _script_key(script) == "35_v4_4_1_admin_ha_upgrade"
                             and not _step_objects_complete(cursor, database, script)
                         )
-                        if additive_upgrade or native_sdd_repair or admin_ha_repair:
+                        graph_operations_repair = (
+                            _script_key(script) == "37_v4_4_2_embedding_graph_operations"
+                            and not _step_objects_complete(cursor, database, script)
+                        )
+                        if additive_upgrade or native_sdd_repair or admin_ha_repair or graph_operations_repair:
                             # Continue below and replay the idempotent script. The
                             # early v4.3 draft is not accepted as complete until
                             # every fencing/claim column is present.
@@ -1463,6 +1549,16 @@ def _apply_statement_migration(
                             conn.commit()
                             result.passed = True
                             result.ledger_status = "adopted_v441_development_checksum"
+                            result.statements_executed = existing["statements_executed"]
+                            return result
+                        elif _legacy_v442_step_compatible(cursor, database, script, existing["checksum"]):
+                            _upsert_step_row(
+                                cursor, database, script, result.checksum, "APPLIED",
+                                existing["statements_executed"], existing["failed_statement"],
+                            )
+                            conn.commit()
+                            result.passed = True
+                            result.ledger_status = "adopted_v442_pre_release_checksum"
                             result.statements_executed = existing["statements_executed"]
                             return result
                         elif _legacy_graph_step_compatible(cursor, database, script, existing["checksum"]):
@@ -1596,7 +1692,11 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
                             _script_key(script) == "35_v4_4_1_admin_ha_upgrade"
                             and not _step_objects_complete(cursor, "pg", script)
                         )
-                        if additive_upgrade or native_sdd_repair or admin_ha_repair:
+                        graph_operations_repair = (
+                            _script_key(script) == "37_v4_4_2_embedding_graph_operations"
+                            and not _step_objects_complete(cursor, "pg", script)
+                        )
+                        if additive_upgrade or native_sdd_repair or admin_ha_repair or graph_operations_repair:
                             pass
                         elif _legacy_v441_step_compatible(cursor, "pg", script, existing["checksum"]):
                             _upsert_step_row(
@@ -1606,6 +1706,16 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
                             conn.commit()
                             result.passed = True
                             result.ledger_status = "adopted_v441_development_checksum"
+                            result.statements_executed = existing["statements_executed"]
+                            return result
+                        elif _legacy_v442_step_compatible(cursor, "pg", script, existing["checksum"]):
+                            _upsert_step_row(
+                                cursor, "pg", script, result.checksum, "APPLIED",
+                                existing["statements_executed"], existing["failed_statement"],
+                            )
+                            conn.commit()
+                            result.passed = True
+                            result.ledger_status = "adopted_v442_pre_release_checksum"
                             result.statements_executed = existing["statements_executed"]
                             return result
                         elif _legacy_graph_step_compatible(cursor, "pg", script, existing["checksum"]):
@@ -1689,7 +1799,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1749,6 +1859,10 @@ def main() -> int:
             script_names = _v440_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.4.1":
             script_names = _v441_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.2":
+            script_names = _v442_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.3":
+            script_names = _v443_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

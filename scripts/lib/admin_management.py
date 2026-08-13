@@ -121,9 +121,10 @@ def initialize() -> Dict[str, Any]:
                 "INSERT INTO CX_ADMIN_AGENT_GROUPS(GROUP_ID,GROUP_KEY,STATUS,PRODUCTION_POLICY,CONFIGURATION_STATE) "
                 "VALUES (:id,:key,'ACTIVE','Y','VALID')", {"id": ADMIN_GROUP_ID, "key": ADMIN_GROUP_KEY},
             )
-        principals = _admin_principals(tx) + [native_agent_api.PLATFORM_ADMIN_AGENT_ID]
+        management_agents = [native_agent_api.PLATFORM_ADMIN_AGENT_ID]
         if native_agent_api._enterprise():
-            principals.append(native_agent_api.COMPLIANCE_ADMIN_AGENT_ID)
+            management_agents.append(native_agent_api.COMPLIANCE_ADMIN_AGENT_ID)
+        principals = _admin_principals(tx) + management_agents
         created = []
         for principal_id in principals:
             principal = _row(tx.query_one("SELECT PRINCIPAL_ID,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE", {"id": principal_id}))
@@ -134,6 +135,34 @@ def initialize() -> Dict[str, Any]:
                 tx.execute("INSERT INTO CX_CHANNEL_MEMBERS(MEMBER_ID,CHANNEL_ID,PRINCIPAL_ID,MEMBER_ROLE,STATUS) VALUES (:id,:channel,:principal,:role,'ACTIVE')",
                            {"id": _id("CM"), "channel": ADMIN_CHANNEL_ID, "principal": principal_id, "role": "OWNER" if principal_id in _admin_principals(tx) else "OPERATOR"})
                 created.append(principal_id)
+        # Channel membership is deliberately not sufficient for a protected
+        # Channel.  Native management Agents must also be admitted to its
+        # DEFAULT Security Domain, otherwise their audited reply is rejected
+        # by the same zero-trust check applied to every other participant.
+        for agent_id in management_agents:
+            member = _row(tx.query_one(
+                "SELECT MEMBERSHIP_ID FROM CX_DOMAIN_MEMBERS WHERE SECURITY_DOMAIN_ID='DEFAULT' "
+                "AND PRINCIPAL_ID=:principal AND STATUS='ACTIVE' FOR UPDATE",
+                {"principal": agent_id},
+            ))
+            if not member:
+                historical = _row(tx.query_one(
+                    "SELECT MEMBERSHIP_ID FROM CX_DOMAIN_MEMBERS WHERE SECURITY_DOMAIN_ID='DEFAULT' "
+                    "AND PRINCIPAL_ID=:principal FOR UPDATE",
+                    {"principal": agent_id},
+                ))
+                if not historical:
+                    tx.execute(
+                        "INSERT INTO CX_DOMAIN_MEMBERS(MEMBERSHIP_ID,SECURITY_DOMAIN_ID,PRINCIPAL_ID,MEMBERSHIP_TIER,STATUS) "
+                        "VALUES (:id,'DEFAULT',:principal,'OPERATOR','ACTIVE')",
+                        {"id": _id("DM"), "principal": agent_id},
+                    )
+                else:
+                    tx.execute(
+                        "UPDATE CX_DOMAIN_MEMBERS SET MEMBERSHIP_TIER='OPERATOR',STATUS='ACTIVE',VALID_UNTIL=NULL "
+                        "WHERE MEMBERSHIP_ID=:id",
+                        {"id": historical["membership_id"]},
+                    )
         native = _row(tx.query_one("SELECT AGENT_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id FOR UPDATE", {"id": native_agent_api.PLATFORM_ADMIN_AGENT_ID}))
         if native:
             member = _row(tx.query_one("SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent FOR UPDATE", {"group_id": ADMIN_GROUP_ID, "agent": native_agent_api.PLATFORM_ADMIN_AGENT_ID}))
@@ -260,24 +289,62 @@ def list_admin_enrollments(actor: str, limit: int = 100) -> List[Dict[str, Any]]
     ))
 
 
-def create_admin_enrollment(actor: str, admission_path: str, public_key: str, node_id: str, reason: str, package_digest: str = "") -> Dict[str, Any]:
+def create_admin_enrollment(
+    actor: str, admission_path: str, public_key: str, node_id: str, reason: str,
+    package_digest: str = "", *, host_reference: str = "", ssh_port: int = 22,
+    os_user: str = "", deployment_target: str = "", ssh_trust_mode: str = "MUTUAL_TRUST",
+    ssh_password: str = "", failure_domain: str = "",
+) -> Dict[str, Any]:
     _require_manage(actor)
     path = str(admission_path or "").upper()
     if path not in {"PLATFORM_DEPLOYED", "EXTERNAL_ADMIN"}:
         raise ManagementError("Admin admission path is invalid")
     if not public_key or not node_id or len(str(reason or "").strip()) < 3:
         raise ManagementError("public key, node ID, and reason are required")
+    trust_mode = str(ssh_trust_mode or "").upper()
+    if trust_mode not in {"MUTUAL_TRUST", "ONE_USE_PASSWORD"}:
+        raise ManagementError("SSH trust mode is invalid")
+    if path == "PLATFORM_DEPLOYED":
+        if not host_reference or not os_user or not deployment_target or not failure_domain:
+            raise ManagementError("platform deployment requires host, operating-system user, deployment target, and failure domain")
+        if trust_mode == "ONE_USE_PASSWORD" and not ssh_password:
+            raise ManagementError("one-use SSH password is required when mutual trust is unavailable")
+    elif any((host_reference, os_user, deployment_target, ssh_password, failure_domain)):
+        raise ManagementError("external Admin admission uses its key package and must not include infrastructure credentials")
     enrollment_id = _id("AAE")
     digest = _digest(public_key)
     package = package_digest or _digest(_json({"path": path, "node": node_id, "key": digest, "reason": reason}))
-    connection.execute(
-        "INSERT INTO CX_ADMIN_ENROLLMENTS(ENROLLMENT_ID,GROUP_ID,ADMISSION_PATH,NODE_ID,PUBLIC_KEY_DIGEST,PACKAGE_DIGEST,STATUS,REASON,REQUESTED_BY,EXPIRES_AT) "
-        "VALUES (:id,:group_id,:path,:node,:key,:package,'CANDIDATE',:reason,:actor," + _expiry_sql() + ")",
-        {"id": enrollment_id, "group_id": ADMIN_GROUP_ID, "path": path, "node": node_id[:256], "key": digest,
-         "package": package[:128], "reason": reason[:2000], "actor": actor},
-    )
-    identity_api._audit(actor, "ADMIN_AGENT_ENROLLMENT_CREATE", "ADMIN_ENROLLMENT", enrollment_id, "ALLOW", reason)
-    return {"enrollment_id": enrollment_id, "admission_path": path, "status": "CANDIDATE", "public_key_digest": digest}
+    target_id = _id("ANT") if path == "PLATFORM_DEPLOYED" else ""
+
+    def work(tx: Any) -> None:
+        if target_id:
+            tx.execute(
+                "INSERT INTO CX_ADMIN_NODE_TARGETS(TARGET_ID,NODE_ID,HOST_REFERENCE,SSH_PORT,OS_USER,DEPLOYMENT_TARGET,SSH_TRUST_MODE,PUBLIC_KEY_DIGEST,FAILURE_DOMAIN,STATUS,REASON,CREATED_BY) "
+                "VALUES (:id,:node,:host,:port,:user,:target,:trust,:key,:domain,'PENDING_ADAPTER_VERIFICATION',:reason,:actor)",
+                {"id": target_id, "node": node_id[:256], "host": host_reference[:256], "port": int(ssh_port),
+                 "user": os_user[:128], "target": deployment_target[:128], "trust": trust_mode,
+                 "key": digest, "domain": failure_domain[:128], "reason": reason[:2000], "actor": actor},
+            )
+            # Password verification is deliberately one-use: retain a digest of
+            # the attempt outcome only, never the password or a reversible form.
+            tx.execute(
+                "INSERT INTO CX_ADMIN_DEPLOYMENT_ATTEMPTS(ATTEMPT_ID,TARGET_ID,ATTEMPT_DIGEST,VERIFICATION_STATE,RESULT_DIGEST,REASON,CREATED_BY) "
+                "VALUES (:id,:target,:attempt,:state,:result,:reason,:actor)",
+                {"id": _id("ADA"), "target": target_id,
+                 "attempt": _digest(_json({"node": node_id, "host": host_reference, "port": int(ssh_port), "user": os_user, "trust": trust_mode})),
+                 "state": "PENDING_ADAPTER_VERIFICATION", "result": _digest("metadata-recorded"),
+                 "reason": reason[:2000], "actor": actor},
+            )
+        tx.execute(
+            "INSERT INTO CX_ADMIN_ENROLLMENTS(ENROLLMENT_ID,GROUP_ID,ADMISSION_PATH,NODE_ID,PUBLIC_KEY_DIGEST,PACKAGE_DIGEST,STATUS,REASON,REQUESTED_BY,EXPIRES_AT) "
+            "VALUES (:id,:group_id,:path,:node,:key,:package,'CANDIDATE',:reason,:actor," + _expiry_sql() + ")",
+            {"id": enrollment_id, "group_id": ADMIN_GROUP_ID, "path": path, "node": node_id[:256], "key": digest,
+             "package": package[:128], "reason": reason[:2000], "actor": actor},
+        )
+        identity_api._audit_tx(tx, actor, "ADMIN_AGENT_ENROLLMENT_CREATE", "ADMIN_ENROLLMENT", enrollment_id, "ALLOW", reason)
+
+    connection.execute_transaction_callback(work)
+    return {"enrollment_id": enrollment_id, "target_id": target_id or None, "admission_path": path, "status": "CANDIDATE", "public_key_digest": digest, "password_persisted": False}
 
 
 def observe_admin_enrollment(actor: str, enrollment_id: str, agent_id: str, reason: str) -> Dict[str, Any]:

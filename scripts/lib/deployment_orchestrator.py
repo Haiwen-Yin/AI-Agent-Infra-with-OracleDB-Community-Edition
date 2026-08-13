@@ -376,7 +376,7 @@ def _database_record(run_id: str, mode: str, database: str, edition: str, plan_d
     def work(tx: Any) -> None:
         native_agent_api._ensure_principal(tx, agent_id)
         existing = tx.query_one("SELECT RUN_ID FROM CX_DEPLOYMENT_RUNS WHERE RUN_ID=:id FOR UPDATE", {"id": run_id})
-        params = {"id": run_id, "mode": mode, "database": database, "edition": edition.upper(), "version": BOOTSTRAP_VERSION,
+        params = {"id": run_id, "run_mode": mode, "database": database, "edition": edition.upper(), "version": BOOTSTRAP_VERSION,
                   "status": status, "readiness": json.dumps(_safe(readiness), ensure_ascii=True), "plan": plan_digest,
                   "journal": journal_digest, "agent": agent_id, "step": current_step or None}
         if existing:
@@ -385,7 +385,7 @@ def _database_record(run_id: str, mode: str, database: str, edition: str, plan_d
         else:
             tx.execute("INSERT INTO CX_DEPLOYMENT_RUNS(RUN_ID,RUN_MODE,DATABASE_DIALECT,EDITION,PACKAGE_VERSION,STATUS,"
                        "READINESS_JSON,PLAN_DIGEST,JOURNAL_DIGEST,DEPLOYMENT_AGENT_ID,CURRENT_STEP,CREATED_BY) VALUES "
-                       "(:id,:mode,:database,:edition,:version,:status,:readiness,:plan,:journal,:agent,:step,'SYSTEM_BOOTSTRAP')", params)
+                       "(:id,:run_mode,:database,:edition,:version,:status,:readiness,:plan,:journal,:agent,:step,'SYSTEM_BOOTSTRAP')", params)
         native_agent_api._audit(tx, agent_id, "BOOTSTRAP_DEPLOYMENT_STATE", "DEPLOYMENT_RUN", run_id, "ALLOW", status)
     connection.execute_transaction_callback(work)
 
@@ -401,7 +401,7 @@ def _record_step(run_id: str, step_key: str, step_order: int, action_digest: str
             {"run": run_id, "key": step_key},
         )
         params = {"id": str((existing or {}).get("step_id") or "DST_" + _digest({"run": run_id, "key": step_key})[:32]),
-                  "run": run_id, "key": step_key, "order": int(step_order), "status": status,
+                  "run": run_id, "key": step_key, "step_order": int(step_order), "status": status,
                   "digest": action_digest, "result": json.dumps(payload, ensure_ascii=True, sort_keys=True),
                   "error": _text_error(error_code), "attempts": int((existing or {}).get("attempt_count") or 0) + 1}
         if existing:
@@ -414,7 +414,7 @@ def _record_step(run_id: str, step_key: str, step_order: int, action_digest: str
         else:
             tx.execute(
                 "INSERT INTO CX_DEPLOYMENT_STEPS(STEP_ID,RUN_ID,STEP_KEY,STEP_ORDER,STATUS,ACTION_DIGEST,RESULT_JSON,ERROR_CODE,ATTEMPT_COUNT,STARTED_AT,COMPLETED_AT) "
-                "VALUES (:id,:run,:key,:order,:status,:digest,:result,:error,:attempts,CURRENT_TIMESTAMP,CASE WHEN :status IN ('COMPLETED','FAILED') THEN CURRENT_TIMESTAMP ELSE NULL END)", params,
+                "VALUES (:id,:run,:key,:step_order,:status,:digest,:result,:error,:attempts,CURRENT_TIMESTAMP,CASE WHEN :status IN ('COMPLETED','FAILED') THEN CURRENT_TIMESTAMP ELSE NULL END)", params,
             )
     connection.execute_transaction_callback(work)
 

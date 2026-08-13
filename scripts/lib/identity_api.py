@@ -565,9 +565,9 @@ def register_human(
                 "status": "ACTIVE", "role": "USER"}
     connection.execute(
         "INSERT INTO CX_REGISTRATION_REQUESTS(REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, PASSWORD_HASH, AUTH_SOURCE, REGISTRATION_MODE, STATUS) "
-        "VALUES (:request_id, :username, :display_name, :email, :password_hash, 'LOCAL', :mode, 'PENDING')",
+        "VALUES (:request_id, :username, :display_name, :email, :password_hash, 'LOCAL', :registration_mode, 'PENDING')",
         {"request_id": request_id, "username": username, "display_name": display_name,
-         "email": email or None, "password_hash": password_hash, "mode": mode},
+         "email": email or None, "password_hash": password_hash, "registration_mode": mode},
     )
     _audit(None, "HUMAN_REGISTER", "HUMAN", request_id, "PENDING", "approval registration")
     return {"request_id": request_id, "username": username, "status": "PENDING", "role": "USER"}
@@ -1087,7 +1087,19 @@ def list_users_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "
         row["portal_enabled"] = protected or str(row.get("portal_access") or "N").upper() == "Y"
         row["app_enabled"] = protected or str(row.get("app_access") or "N").upper() == "Y"
         row["protected_system_admin"] = protected
-    return cursor_pagination.page(rows, context, lambda item: {"principal_id": str(item["principal_id"])})
+    result = cursor_pagination.page(rows, context, lambda item: {"principal_id": str(item["principal_id"])})
+    count_params: Dict[str, Any] = {}
+    if ":principal_id" in visibility:
+        count_params["principal_id"] = principal_id
+    try:
+        total = _row(connection.execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_TYPE='HUMAN' AND " + visibility,
+            count_params,
+        ))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def _principal_visible_to(actor_principal_id: str, target_principal_id: str) -> bool:
@@ -1575,7 +1587,10 @@ def _require(principal_id: str, action: str) -> None:
         raise PermissionError(f"permission denied: {action}")
 
 
-def create_enrollment_grant(sponsor_principal_id: str, owner_principal_id: Optional[str] = None, *, environment: str = "development", runtime: str = "generic", security_domain_id: str = "DEFAULT", agent_name: str = "", risk_tier: str = "STANDARD", ttl_seconds: int = 900, node_constraint: str = "", public_key_constraint: str = "", responsible_group_id: str = "") -> Dict[str, Any]:
+def create_enrollment_grant(sponsor_principal_id: str, owner_principal_id: Optional[str] = None, *, environment: str = "development", runtime: str = "", security_domain_id: str = "DEFAULT", agent_name: str = "", risk_tier: str = "STANDARD", ttl_seconds: int = 900, node_constraint: str = "", public_key_constraint: str = "", responsible_group_id: str = "") -> Dict[str, Any]:
+    agent_name = str(agent_name or "").strip()
+    if not agent_name:
+        raise IdentityError("Enrollment Agent name is required")
     _require(sponsor_principal_id, "agents.enroll")
     owner = owner_principal_id or sponsor_principal_id
     if owner != sponsor_principal_id and effective_access(sponsor_principal_id, "agents.enroll.others")["decision"] != "ALLOW":
@@ -1793,7 +1808,25 @@ def list_agents_cursor(principal_id: str, *, page_size: int = 20, cursor: str = 
             after_clause + " GROUP BY p.PRINCIPAL_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT ORDER BY p.PRINCIPAL_ID " + _limit_clause()
         )
     rows = _required_query(sql, params)
-    return cursor_pagination.page(rows, context, lambda item: {"agent_id": str(item["agent_id"])})
+    result = cursor_pagination.page(rows, context, lambda item: {"agent_id": str(item["agent_id"])})
+    count_params: Dict[str, Any] = {}
+    try:
+        if effective_access(principal_id, "agents.read.all")["decision"] == "ALLOW":
+            total = _row(connection.execute_query_one(
+                "SELECT COUNT(*) AS CNT FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_TYPE='AGENT'", count_params,
+            ))
+        else:
+            visibility = _agent_visibility_clause(principal_id)
+            count_params["principal_id"] = principal_id
+            total = _row(connection.execute_query_one(
+                "SELECT COUNT(DISTINCT p.PRINCIPAL_ID) AS CNT FROM CX_PRINCIPALS p JOIN CX_AGENT_RELATIONSHIPS r "
+                "ON r.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT' AND r.STATUS='ACTIVE' AND " + visibility,
+                count_params,
+            ))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def _agent_visible_to(actor_principal_id: str, agent_id: str) -> bool:
@@ -2152,10 +2185,10 @@ def create_bridge(
     connection.execute(
         "INSERT INTO CX_BRIDGES(BRIDGE_ID, SOURCE_DOMAIN_ID, TARGET_DOMAIN_ID, TRANSFER_MODE, PURPOSE, "
         "CLASSIFICATION, RECIPIENT_SNAPSHOT, STATUS, EXPIRES_AT, CREATED_BY) "
-        "VALUES (:bridge_id, :source_domain, :target_domain, :mode, :purpose, :classification, "
+        "VALUES (:bridge_id, :source_domain, :target_domain, :transfer_mode, :purpose, :classification, "
         ":recipients, 'PENDING', :expires_at, :created_by)",
         {"bridge_id": bridge_id, "source_domain": source_domain_id, "target_domain": target_domain_id,
-         "mode": decision["transfer_mode"], "purpose": decision["purpose"],
+         "transfer_mode": decision["transfer_mode"], "purpose": decision["purpose"],
          "classification": decision["classification"], "recipients": _json(list(decision["recipients"])),
          "expires_at": expiry, "created_by": actor_principal_id},
     )
@@ -2567,10 +2600,24 @@ def create_channel(principal_id: str, name: str, security_domain_id: str, *, cla
         if not member:
             raise PermissionError("Channel domain access denied")
     channel_id = _id("CH")
-    connection.execute_transaction_result([
-        ("INSERT INTO CX_CHANNELS(CHANNEL_ID, CHANNEL_NAME, SECURITY_DOMAIN_ID, CLASSIFICATION, CHANNEL_TYPE, CREATED_BY) VALUES (:channel_id, :name, :domain, :classification, :channel_type, :created_by)", {"channel_id": channel_id, "name": name[:256], "domain": security_domain_id, "classification": classification, "channel_type": channel_type, "created_by": principal_id}),
-        ("INSERT INTO CX_CHANNEL_MEMBERS(MEMBER_ID, CHANNEL_ID, PRINCIPAL_ID, MEMBER_ROLE) VALUES (:member_id, :channel_id, :principal_id, 'OWNER')", {"member_id": _id("CM"), "channel_id": channel_id, "principal_id": principal_id}),
-    ])
+    # Keep the explicit Channel-to-Domain relationship in the v4.4.3 binding
+    # ledger.  The row is evidence and discoverability metadata; authorization
+    # remains based on current domain membership below and never on this row.
+    def _create(tx: Any) -> None:
+        tx.execute(
+            "INSERT INTO CX_CHANNELS(CHANNEL_ID, CHANNEL_NAME, SECURITY_DOMAIN_ID, CLASSIFICATION, CHANNEL_TYPE, CREATED_BY) VALUES (:channel_id, :name, :domain, :classification, :channel_type, :created_by)",
+            {"channel_id": channel_id, "name": name[:256], "domain": security_domain_id, "classification": classification, "channel_type": channel_type, "created_by": principal_id},
+        )
+        tx.execute(
+            "INSERT INTO CX_CHANNEL_MEMBERS(MEMBER_ID, CHANNEL_ID, PRINCIPAL_ID, MEMBER_ROLE) VALUES (:member_id, :channel_id, :principal_id, 'OWNER')",
+            {"member_id": _id("CM"), "channel_id": channel_id, "principal_id": principal_id},
+        )
+        tx.execute(
+            "INSERT INTO CX_DOMAIN_BINDINGS(BINDING_ID,SECURITY_DOMAIN_ID,BINDING_TYPE,TARGET_ID,STATUS,REASON,CREATED_BY) "
+            "VALUES(:binding_id,:domain,'CHANNEL',:channel_id,'ACTIVE','Channel created in selected Security Domain',:created_by)",
+            {"binding_id": _id("DB"), "domain": security_domain_id, "channel_id": channel_id, "created_by": principal_id},
+        )
+    connection.execute_transaction_callback(_create)
     _audit(principal_id, "CHANNEL_CREATE", "CHANNEL", channel_id, "ALLOW", "channel created")
     return {"channel_id": channel_id, "channel_name": name, "security_domain_id": security_domain_id, "classification": classification, "status": "ACTIVE"}
 
@@ -2580,49 +2627,126 @@ def list_channels(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     if effective_access(principal_id, "channels.read.all")["decision"] == "ALLOW":
         return _required_query(
             "SELECT c.CHANNEL_ID, c.CHANNEL_NAME, c.SECURITY_DOMAIN_ID, c.CLASSIFICATION, c.CHANNEL_TYPE, c.STATUS, "
-            "c.LEGAL_HOLD, c.RETENTION_UNTIL, c.DELETION_AFTER, c.QUARANTINED_AT, c.UPDATED_AT, "
+            "c.LEGAL_HOLD, c.PINNED, c.RETENTION_UNTIL, c.DELETION_AFTER, c.QUARANTINED_AT, c.UPDATED_AT, "
             "COALESCE(m.MEMBER_ROLE, 'SYSTEM_ADMIN') AS MEMBER_ROLE "
             "FROM CX_CHANNELS c LEFT JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID = c.CHANNEL_ID "
             "AND m.PRINCIPAL_ID = :principal_id AND m.STATUS = 'ACTIVE' "
             "AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL > CURRENT_TIMESTAMP) "
-            "WHERE c.STATUS <> 'DELETED' ORDER BY c.UPDATED_AT DESC " + _limit_clause(),
+            "WHERE c.STATUS <> 'DELETED' ORDER BY " + _channel_pin_order("c") + ", c.UPDATED_AT DESC, c.CHANNEL_ID " + _limit_clause(),
             {"principal_id": principal_id, "limit": max(1, min(int(limit), 500))},
         )
     return _required_query(
         "SELECT c.CHANNEL_ID, c.CHANNEL_NAME, c.SECURITY_DOMAIN_ID, c.CLASSIFICATION, c.CHANNEL_TYPE, c.STATUS, "
-        "c.LEGAL_HOLD, c.RETENTION_UNTIL, c.DELETION_AFTER, c.QUARANTINED_AT, c.UPDATED_AT, m.MEMBER_ROLE "
+        "c.LEGAL_HOLD, c.PINNED, c.RETENTION_UNTIL, c.DELETION_AFTER, c.QUARANTINED_AT, c.UPDATED_AT, m.MEMBER_ROLE "
         "FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID = c.CHANNEL_ID "
+        "JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=c.SECURITY_DOMAIN_ID AND dm.PRINCIPAL_ID=m.PRINCIPAL_ID "
         "WHERE m.PRINCIPAL_ID = :principal_id AND m.STATUS = 'ACTIVE' AND c.STATUS <> 'DELETED' "
         "AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL > CURRENT_TIMESTAMP) "
-        "ORDER BY c.UPDATED_AT DESC " + _limit_clause(),
+        "AND dm.STATUS='ACTIVE' AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP) "
+        "ORDER BY " + _channel_pin_order("c") + ", c.UPDATED_AT DESC, c.CHANNEL_ID " + _limit_clause(),
         {"principal_id": principal_id, "limit": max(1, min(int(limit), 500))},
     )
 
 
 def list_channels_cursor(principal_id: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
-    """Return a Channel page with the same server-side visibility contract."""
+    """Return Channels with pinned inboxes first, then latest activity."""
     _require(principal_id, "channels.read")
-    context = cursor_pagination.resolve(principal_id, "channels", {}, "channel_id:asc", page_size, cursor)
-    context.update({"principal_id": principal_id, "resource_key": "channels", "sort_key": "channel_id:asc"})
+    sort_key = "pinned:desc/activity:desc/channel_id:asc"
+    context = cursor_pagination.resolve(principal_id, "channels", {}, sort_key, page_size, cursor)
+    context.update({"principal_id": principal_id, "resource_key": "channels", "sort_key": sort_key})
     after = str(context["position"].get("channel_id") or "")
+    after_activity = str(context["position"].get("activity_key") or "")
+    after_pinned = str(context["position"].get("pinned_key") or "")
     params: Dict[str, Any] = {"principal_id": principal_id, "limit": int(context["page_size"]) + 1}
-    after_clause = " AND c.CHANNEL_ID>:after" if after else ""
-    if after:
+    if after and after_activity and after_pinned:
+        activity_expr = _channel_activity_key("c")
+        pinned_expr = _channel_pin_order("c")
+        after_clause = (
+            " AND (" + pinned_expr + "<:after_pinned OR (" + pinned_expr + "=:after_pinned AND ("
+            + activity_expr + "<:after_activity OR (" + activity_expr + "=:after_activity AND c.CHANNEL_ID>:after))))"
+        )
         params["after"] = after
-    common = "SELECT c.CHANNEL_ID,c.CHANNEL_NAME,c.SECURITY_DOMAIN_ID,c.CLASSIFICATION,c.CHANNEL_TYPE,c.STATUS,c.LEGAL_HOLD,c.UPDATED_AT,"
-    if effective_access(principal_id, "channels.read.all")["decision"] == "ALLOW":
-        sql = common + "COALESCE(m.MEMBER_ROLE,'SYSTEM_ADMIN') AS MEMBER_ROLE FROM CX_CHANNELS c LEFT JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID AND m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' WHERE c.STATUS<>'DELETED'" + after_clause + " ORDER BY c.CHANNEL_ID " + _limit_clause()
+        params["after_activity"] = after_activity
+        params["after_pinned"] = after_pinned
     else:
-        sql = common + "m.MEMBER_ROLE FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' AND c.STATUS<>'DELETED'" + after_clause + " ORDER BY c.CHANNEL_ID " + _limit_clause()
+        after_clause = ""
+    activity_expr = _channel_activity_key("c")
+    pinned_expr = _channel_pin_order("c")
+    common = "SELECT c.CHANNEL_ID,c.CHANNEL_NAME,c.SECURITY_DOMAIN_ID,c.CLASSIFICATION,c.CHANNEL_TYPE,c.STATUS,c.LEGAL_HOLD,c.PINNED,c.UPDATED_AT," + activity_expr + " AS ACTIVITY_KEY," + pinned_expr + " AS PINNED_KEY,"
+    all_access = effective_access(principal_id, "channels.read.all")["decision"] == "ALLOW"
+    if all_access:
+        sql = common + "COALESCE(m.MEMBER_ROLE,'SYSTEM_ADMIN') AS MEMBER_ROLE FROM CX_CHANNELS c LEFT JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID AND m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' WHERE c.STATUS<>'DELETED'" + after_clause + " ORDER BY " + pinned_expr + " DESC," + activity_expr + " DESC,c.CHANNEL_ID " + _limit_clause()
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_CHANNELS c WHERE c.STATUS<>'DELETED'"
+        count_params: Dict[str, Any] = {}
+    else:
+        sql = common + "m.MEMBER_ROLE FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=c.SECURITY_DOMAIN_ID AND dm.PRINCIPAL_ID=m.PRINCIPAL_ID WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' AND c.STATUS<>'DELETED' AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL>CURRENT_TIMESTAMP) AND dm.STATUS='ACTIVE' AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP)" + after_clause + " ORDER BY " + pinned_expr + " DESC," + activity_expr + " DESC,c.CHANNEL_ID " + _limit_clause()
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m ON m.CHANNEL_ID=c.CHANNEL_ID JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=c.SECURITY_DOMAIN_ID AND dm.PRINCIPAL_ID=m.PRINCIPAL_ID WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' AND c.STATUS<>'DELETED' AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL>CURRENT_TIMESTAMP) AND dm.STATUS='ACTIVE' AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP)"
+        count_params = {"principal_id": principal_id}
     rows = _required_query(sql, params)
-    return cursor_pagination.page(rows, context, lambda item: {"channel_id": str(item["channel_id"])})
+    result = cursor_pagination.page(rows, context, lambda item: {
+        "channel_id": str(item["channel_id"]),
+        "activity_key": str(item.get("activity_key") or ""),
+        "pinned_key": str(item.get("pinned_key") or "0"),
+    })
+    try:
+        total = _row(connection.execute_query_one(count_sql, count_params))
+        result["total_items"] = int(total.get("cnt") or 0) if total else 0
+    except Exception:
+        # Cursor pagination remains usable in adapter-less contract tests.
+        # The Dashboard omits a total-page indicator until the count is known.
+        pass
+    return result
+
+
+def _channel_activity_key(alias: str = "c") -> str:
+    """A portable, cursor-safe text key for recency ordering."""
+    if _dialect() in {"postgresql", "pg"}:
+        return "TO_CHAR(" + alias + ".UPDATED_AT,'YYYYMMDDHH24MISSUS')"
+    return "TO_CHAR(" + alias + ".UPDATED_AT,'YYYYMMDDHH24MISSFF6')"
+
+
+def _channel_pin_order(alias: str = "c") -> str:
+    """Return a portable numeric ordering key for globally pinned Channels."""
+    if _dialect() in {"postgresql", "pg"}:
+        return "CASE WHEN " + alias + ".PINNED THEN 1 ELSE 0 END"
+    return "CASE WHEN " + alias + ".PINNED = 'Y' THEN 1 ELSE 0 END"
+
+
+def set_channel_pinned(actor_principal_id: str, channel_id: str, enabled: bool, reason: str) -> Dict[str, Any]:
+    """Set global inbox priority without changing a Channel's activity clock."""
+    _require(actor_principal_id, "channels.lifecycle")
+    if not str(reason or "").strip():
+        raise IdentityError("Channel pinning reason is required")
+    if effective_access(actor_principal_id, "domains.manage")["decision"] != "ALLOW":
+        _assert_channel_member(actor_principal_id, channel_id, "channels.lifecycle")
+
+    def _commit(tx: Any) -> Dict[str, Any]:
+        row = _row(tx.query_one(
+            "SELECT CHANNEL_ID, PINNED FROM CX_CHANNELS WHERE CHANNEL_ID = :channel_id FOR UPDATE",
+            {"channel_id": channel_id},
+        ))
+        if not row:
+            raise IdentityError("Channel not found")
+        changed = tx.execute(
+            "UPDATE CX_CHANNELS SET PINNED = :pinned WHERE CHANNEL_ID = :channel_id",
+            {"channel_id": channel_id, "pinned": _hold_value(bool(enabled))},
+        )
+        if changed != 1:
+            raise IdentityError("Channel pinning changed concurrently")
+        _audit_tx(
+            tx, actor_principal_id, "CHANNEL_PIN_" + ("SET" if enabled else "RELEASE"),
+            "CHANNEL", channel_id, "ALLOW", reason,
+        )
+        return {"channel_id": channel_id, "pinned": bool(enabled)}
+
+    return connection.execute_transaction_callback(_commit)
 
 
 def list_channel_members(principal_id: str, channel_id: str) -> List[Dict[str, Any]]:
     _assert_channel_member(principal_id, channel_id, "channels.read")
     return _required_query(
         "SELECT m.MEMBER_ID, m.CHANNEL_ID, m.PRINCIPAL_ID, m.MEMBER_ROLE, m.JOINED_AT, "
-        "m.VALID_UNTIL, m.STATUS, p.PRINCIPAL_TYPE, p.STATUS AS PRINCIPAL_STATUS "
+        "m.VALID_UNTIL, m.STATUS, p.PRINCIPAL_TYPE, p.STATUS AS PRINCIPAL_STATUS, p.DISPLAY_NAME "
         "FROM CX_CHANNEL_MEMBERS m JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = m.PRINCIPAL_ID "
         "WHERE m.CHANNEL_ID = :channel_id AND m.STATUS = 'ACTIVE' "
         "AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL > CURRENT_TIMESTAMP) "
@@ -2798,6 +2922,18 @@ def _assert_channel_member(principal_id: str, channel_id: str, action: str = "ch
         ))
     if not row:
         raise PermissionError("Channel access denied")
+    # Channel membership is an admission record, not the authorization
+    # boundary. Recheck the Domain on every guarded operation so expired or
+    # revoked members cannot retain access through historical Channel rows.
+    if effective_access(principal_id, "domains.manage")["decision"] != "ALLOW":
+        domain_member = _row(connection.execute_query_one(
+            "SELECT MEMBERSHIP_ID FROM CX_DOMAIN_MEMBERS WHERE SECURITY_DOMAIN_ID=:domain_id "
+            "AND PRINCIPAL_ID=:principal_id AND STATUS='ACTIVE' "
+            "AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP)",
+            {"domain_id": row.get("security_domain_id"), "principal_id": principal_id},
+        ))
+        if not domain_member:
+            raise PermissionError("Channel Security Domain access denied")
     if str(row.get("status") or "").upper() != "ACTIVE" and action != "channels.read":
         raise PermissionError("Channel is not accepting this operation")
     return row
@@ -2850,6 +2986,20 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
                 raise PermissionError("Agent-to-Agent Direct threads are disabled by policy")
     elif normalized_thread_type != "CHANNEL":
         raise IdentityError("a non-Channel message requires a thread id")
+    references = references if isinstance(references, dict) else {}
+    mentions = references.get("mentions", []) if isinstance(references, dict) else []
+    if not isinstance(mentions, list) or len(mentions) > 50:
+        raise IdentityError("message mentions are invalid")
+    normalized_mentions = []
+    for mentioned in mentions:
+        subject = str(mentioned or "").strip()[:128]
+        if subject and subject not in normalized_mentions:
+            if not _channel_principal_is_member(channel_id, subject):
+                raise PermissionError("mentioned principal is outside the Channel")
+            normalized_mentions.append(subject)
+    references = {**references, "mentions": normalized_mentions} if normalized_mentions else {
+        key: value for key, value in references.items() if key != "mentions"
+    }
     message_id = _id("MSG")
     insert_sql = (
         "INSERT INTO CX_CHANNEL_MESSAGES(MESSAGE_ID, CHANNEL_ID, THREAD_TYPE, THREAD_ID, PRINCIPAL_ID, BODY_TEXT, BODY_CLASSIFICATION, MESSAGE_TYPE, REFERENCE_JSON) "
@@ -2859,7 +3009,7 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
         "message_id": message_id, "channel_id": channel_id, "thread_type": normalized_thread_type,
         "thread_id": thread_id or None, "principal_id": principal_id, "body": body,
         "body_classification": str(channel.get("classification") or "INTERNAL"),
-        "message_type": message_type, "references": _json(references or {}),
+        "message_type": message_type, "references": _json(references),
     }
     current_agent = getattr(connection, "get_current_agent_id", lambda: None)()
     if _dialect() in {"postgresql", "pg"} and current_agent == principal_id:
@@ -2870,16 +3020,125 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
             result = tx.query_one(
                 "SELECT public.cx_enqueue_channel_deliveries(:message_id, :channel_id, :body, :message_type, :references, :classification) AS INSERTED",
                 {"message_id": message_id, "channel_id": channel_id, "body": body,
-                 "message_type": message_type, "references": _json(references or {}),
+                "message_type": message_type, "references": _json(references),
                  "classification": channel.get("classification") or "INTERNAL"},
             ) or {}
             return int(result.get("inserted") or 0)
         delivered = connection.execute_transaction_callback(_agent_message_transaction)
     else:
         connection.execute(insert_sql, insert_params)
-        delivered = _enqueue_channel_deliveries(message_id, channel_id, body, message_type, references or {}, channel.get("classification") or "INTERNAL")
+        delivered = _enqueue_channel_deliveries(message_id, channel_id, body, message_type, references, channel.get("classification") or "INTERNAL")
+    # The Channel list is an activity inbox. Advancing its timestamp after a
+    # durable message commit keeps the recent-conversation ordering portable
+    # across all supported database implementations.
+    connection.execute("UPDATE CX_CHANNELS SET UPDATED_AT=CURRENT_TIMESTAMP WHERE CHANNEL_ID=:channel_id", {"channel_id": channel_id})
     _audit(principal_id, "CHANNEL_MESSAGE_CREATE", "CHANNEL", channel_id, "ALLOW", "message persisted")
-    return {"message_id": message_id, "channel_id": channel_id, "principal_id": principal_id, "body": body, "message_type": message_type, "deliveries_enqueued": int(delivered or 0)}
+    dispatches: List[Dict[str, Any]] = []
+    # Only a human administrator's explicit mention in the protected Channel
+    # reaches the native runtime. Replies are AGENT_RESPONSE messages with no
+    # mentions, so they cannot recursively invoke an Agent.
+    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and normalized_mentions:
+        from . import native_agent_api
+        dispatch_errors: List[Dict[str, str]] = []
+        for mentioned_agent_id in normalized_mentions:
+            try:
+                if mentioned_agent_id not in {
+                    native_agent_api.PLATFORM_ADMIN_AGENT_ID,
+                    native_agent_api.COMPLIANCE_ADMIN_AGENT_ID,
+                }:
+                    continue
+                dispatches.append(native_agent_api.create_channel_execution(
+                    principal_id, channel_id, message_id, body, mentioned_agent_id,
+                    normalized_thread_type, thread_id,
+                ))
+            except (native_agent_api.NativeAgentError, PermissionError) as exc:
+                # The human message is already durable and auditable. Preserve
+                # it, report the bounded dispatch failure, and never make a
+                # client retry create a duplicate request message.
+                dispatch_errors.append({"agent_id": mentioned_agent_id, "reason": str(exc)[:240]})
+                _audit(principal_id, "CHANNEL_MANAGEMENT_AGENT_DISPATCH", "CHANNEL_MESSAGE", message_id,
+                       "DENY", "explicit management Agent dispatch was not queued")
+    return {"message_id": message_id, "channel_id": channel_id, "principal_id": principal_id, "body": body,
+            "message_type": message_type, "deliveries_enqueued": int(delivered or 0), "agent_dispatches": dispatches,
+            "agent_dispatch_errors": dispatch_errors if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and normalized_mentions else []}
+
+
+def _channel_agent_response_message_id(channel_id: str, execution_id: str) -> str:
+    digest = hashlib.sha256((str(channel_id) + ":" + str(execution_id)).encode("utf-8")).hexdigest()
+    return "MSG_AR_" + digest[:56]
+
+
+def begin_channel_agent_response(agent_id: str, channel_id: str, *, execution_id: str,
+                                 thread_type: str = "CHANNEL", thread_id: str = "") -> Dict[str, Any]:
+    """Create an idempotent, visible placeholder before model streaming starts."""
+    _assert_channel_member(agent_id, channel_id, "channels.write")
+    if not execution_id:
+        raise IdentityError("managed Agent response is invalid")
+    message_id = _channel_agent_response_message_id(channel_id, execution_id)
+    references = _json({"execution_id": execution_id, "response_to": "CHANNEL_MENTION"})
+    params = {
+        "message_id": message_id, "channel_id": channel_id,
+        "thread_type": str(thread_type or "CHANNEL").upper(), "thread_id": thread_id or None,
+        # Oracle normalizes an empty string to NULL, while BODY_TEXT is
+        # required. The UI recognizes this neutral marker as a spinner and
+        # never renders it as response content.
+        "principal_id": agent_id, "body": "[streaming]", "message_type": "AGENT_RESPONSE_STREAMING", "references": references,
+    }
+    try:
+        connection.execute(
+            "INSERT INTO CX_CHANNEL_MESSAGES(MESSAGE_ID,CHANNEL_ID,THREAD_TYPE,THREAD_ID,PRINCIPAL_ID,BODY_TEXT,BODY_CLASSIFICATION,MESSAGE_TYPE,REFERENCE_JSON) "
+            "SELECT :message_id,:channel_id,:thread_type,:thread_id,:principal_id,:body,c.CLASSIFICATION,:message_type,:references "
+            "FROM CX_CHANNELS c WHERE c.CHANNEL_ID=:channel_id AND c.STATUS='ACTIVE'",
+            params,
+        )
+    except Exception:
+        existing = _row(connection.execute_query_one(
+            "SELECT MESSAGE_ID FROM CX_CHANNEL_MESSAGES WHERE MESSAGE_ID=:message_id",
+            {"message_id": message_id},
+        ))
+        if existing:
+            return {"message_id": message_id, "status": "EXISTS", "idempotent": True}
+        raise
+    _audit(agent_id, "CHANNEL_MANAGEMENT_AGENT_RESPONSE_BEGIN", "CHANNEL_MESSAGE", message_id,
+           "ALLOW", "managed Agent response streaming started")
+    connection.execute("UPDATE CX_CHANNELS SET UPDATED_AT=CURRENT_TIMESTAMP WHERE CHANNEL_ID=:channel_id", {"channel_id": channel_id})
+    return {"message_id": message_id, "status": "CREATED", "idempotent": False}
+
+
+def update_channel_agent_response(agent_id: str, channel_id: str, body: str, *, execution_id: str,
+                                  completed: bool = False) -> Dict[str, Any]:
+    """Update the single placeholder owned by a managed Agent.
+
+    Chunk updates intentionally do not create audit rows. The begin and final
+    transitions are auditable while the Channel stays readable under long
+    model responses.
+    """
+    if not execution_id or len(body) > 100000:
+        raise IdentityError("managed Agent response is invalid")
+    message_id = _channel_agent_response_message_id(channel_id, execution_id)
+    changed = connection.execute(
+        "UPDATE CX_CHANNEL_MESSAGES SET BODY_TEXT=:body,MESSAGE_TYPE=:message_type WHERE MESSAGE_ID=:message_id "
+        "AND CHANNEL_ID=:channel_id AND PRINCIPAL_ID=:agent",
+        {"body": body, "message_type": "AGENT_RESPONSE" if completed else "AGENT_RESPONSE_STREAMING",
+         "message_id": message_id, "channel_id": channel_id, "agent": agent_id},
+    )
+    if changed != 1:
+        raise IdentityError("managed Agent response is unavailable")
+    connection.execute("UPDATE CX_CHANNELS SET UPDATED_AT=CURRENT_TIMESTAMP WHERE CHANNEL_ID=:channel_id", {"channel_id": channel_id})
+    if completed:
+        _audit(agent_id, "CHANNEL_MANAGEMENT_AGENT_RESPONSE", "CHANNEL_MESSAGE", message_id,
+               "ALLOW", "managed Agent response completed")
+    return {"message_id": message_id, "status": "COMPLETED" if completed else "STREAMING"}
+
+
+def post_channel_agent_response(agent_id: str, channel_id: str, body: str, *,
+                                execution_id: str, thread_type: str = "CHANNEL",
+                                thread_id: str = "") -> Dict[str, Any]:
+    """Persist a completed response, retaining compatibility with non-streaming callers."""
+    begin_channel_agent_response(agent_id, channel_id, execution_id=execution_id,
+                                 thread_type=thread_type, thread_id=thread_id)
+    return update_channel_agent_response(agent_id, channel_id, body, execution_id=execution_id,
+                                         completed=True)
 
 
 def _enqueue_channel_deliveries(message_id: str, channel_id: str, body: str,
@@ -2976,8 +3235,11 @@ def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, 
         params["before"] = before
     return _required_query(
         "SELECT m.MESSAGE_ID, m.CHANNEL_ID, m.THREAD_TYPE, m.THREAD_ID, m.PRINCIPAL_ID, "
+        "COALESCE(p.DISPLAY_NAME, m.PRINCIPAL_ID) AS SENDER_DISPLAY_NAME, "
+        "p.PRINCIPAL_TYPE AS SENDER_PRINCIPAL_TYPE, p.STATUS AS SENDER_STATUS, "
         "m.BODY_TEXT, m.MESSAGE_TYPE, m.REFERENCE_JSON, m.CREATED_AT "
-        "FROM CX_CHANNEL_MESSAGES m WHERE m.CHANNEL_ID = :channel_id "
+        "FROM CX_CHANNEL_MESSAGES m JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=m.PRINCIPAL_ID "
+        "WHERE m.CHANNEL_ID = :channel_id "
         "AND m.REDACTED_AT IS NULL "
         "AND (m.THREAD_TYPE NOT IN ('PRIVATE','DIRECT') OR EXISTS ("
         "SELECT 1 FROM CX_CHANNEL_THREAD_MEMBERS tm WHERE tm.THREAD_ID = m.THREAD_ID "

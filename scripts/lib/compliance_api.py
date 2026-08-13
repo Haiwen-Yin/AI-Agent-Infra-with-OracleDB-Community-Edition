@@ -284,7 +284,13 @@ def list_profiles_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -
         "ON v.PROFILE_ID=p.PROFILE_ID" + clause + " ORDER BY p.PROFILE_ID,v.PROFILE_VERSION_ID" +
         _limit(int(context["page_size"]) + 1)[0], params,
     )
-    return cursor_pagination.page(_rows(rows), context, lambda item: {"profile_id": str(item["profile_id"])})
+    result = cursor_pagination.page(_rows(rows), context, lambda item: {"profile_id": str(item["profile_id"])})
+    try:
+        total = _row(connection.execute_query_one("SELECT COUNT(*) AS CNT FROM CX_AGENT_PROFILES", {}))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def ensure_seed_profiles() -> int:
@@ -697,8 +703,22 @@ def list_findings_cursor(actor: str, *, page_size: int = 20, cursor: str = "", a
         params["actor"] = actor
         query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_FINDINGS f JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=f.AGENT_ID "
                  "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY f.FINDING_ID" + _limit(int(context["page_size"]) + 1)[0])
-    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
-                                  lambda item: {"finding_id": str(item["finding_id"])})
+    result = cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                    lambda item: {"finding_id": str(item["finding_id"])})
+    count_params = {key: value for key, value in params.items() if key not in {"limit", "after"}}
+    if agent_id:
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_COMPLIANCE_FINDINGS f WHERE f.AGENT_ID=:agent_id"
+    elif identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_COMPLIANCE_FINDINGS f"
+    else:
+        count_sql = ("SELECT COUNT(DISTINCT f.FINDING_ID) AS CNT FROM CX_COMPLIANCE_FINDINGS f JOIN CX_AGENT_RELATIONSHIPS r "
+                     "ON r.AGENT_ID=f.AGENT_ID WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'")
+    try:
+        total = _row(connection.execute_query_one(count_sql, count_params))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def create_remediation(actor: str, finding_id: str, required_action: str, reason: str,
@@ -806,8 +826,20 @@ def list_remediation_cases_cursor(actor: str, *, page_size: int = 20, cursor: st
         params["actor"] = actor
         query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_REMEDIATION_CASES c JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=c.AGENT_ID "
                  "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY c.CASE_ID" + _limit(int(context["page_size"]) + 1)[0])
-    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
-                                  lambda item: {"case_id": str(item["case_id"])})
+    result = cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                    lambda item: {"case_id": str(item["case_id"])})
+    count_params = {key: value for key, value in params.items() if key not in {"limit", "after"}}
+    if identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_COMPLIANCE_REMEDIATION_CASES c"
+    else:
+        count_sql = ("SELECT COUNT(DISTINCT c.CASE_ID) AS CNT FROM CX_COMPLIANCE_REMEDIATION_CASES c JOIN CX_AGENT_RELATIONSHIPS r "
+                     "ON r.AGENT_ID=c.AGENT_ID WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'")
+    try:
+        total = _row(connection.execute_query_one(count_sql, count_params))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def create_exception(actor: str, policy_key: str, reason: str, *, agent_id: str = "", profile_version_id: str = "",
@@ -863,8 +895,20 @@ def list_exceptions_cursor(actor: str, *, page_size: int = 20, cursor: str = "")
         params["actor"] = actor
         query = ("SELECT DISTINCT " + columns + " FROM CX_COMPLIANCE_EXCEPTIONS e JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=e.AGENT_ID "
                  "WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'" + after_clause + " ORDER BY e.EXCEPTION_ID" + _limit(int(context["page_size"]) + 1)[0])
-    return cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
-                                  lambda item: {"exception_id": str(item["exception_id"])})
+    result = cursor_pagination.page(_rows(connection.execute_query(query, params)), context,
+                                    lambda item: {"exception_id": str(item["exception_id"])})
+    count_params = {key: value for key, value in params.items() if key not in {"limit", "after"}}
+    if identity_api.effective_access(actor, "agents.read.all").get("decision") == "ALLOW":
+        count_sql = "SELECT COUNT(*) AS CNT FROM CX_COMPLIANCE_EXCEPTIONS e"
+    else:
+        count_sql = ("SELECT COUNT(DISTINCT e.EXCEPTION_ID) AS CNT FROM CX_COMPLIANCE_EXCEPTIONS e JOIN CX_AGENT_RELATIONSHIPS r "
+                     "ON r.AGENT_ID=e.AGENT_ID WHERE r.PRINCIPAL_ID=:actor AND r.STATUS='ACTIVE'")
+    try:
+        total = _row(connection.execute_query_one(count_sql, count_params))
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def decide_exception(actor: str, exception_id: str, decision: str, reason: str) -> Dict[str, Any]:

@@ -1,10 +1,21 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.4.1 · Community Edition · Oracle**
+> **v4.4.3 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
 ![License](https://img.shields.io/badge/License-Apache_2.0-green)
+
+## v4.4.3 Release Highlights
+
+v4.4.3 adds governed Security Domain administration for project collaboration.
+Security Domains remain the explicit authorization boundary; Channels and legacy
+collaboration groups are traceable collaboration records, not permission grants.
+Administrators create a domain with purpose, classification, accountable owner,
+and reason, then explicitly confirm each Human or Agent before it may join a
+Channel or run in that domain. Existing collaboration groups can produce a
+reviewable conversion draft, but historic members and sharing policy never
+become authorization automatically.
 
 ---
 
@@ -126,7 +137,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.4.1. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.4.3. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -137,7 +148,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.4.1.md   # release notes for this version
+├── RELEASE_NOTES_v4.4.3.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...

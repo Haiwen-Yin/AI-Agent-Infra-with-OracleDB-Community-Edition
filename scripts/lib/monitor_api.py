@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.1 - Community Edition - Monitoring & Observability
+"""AI Agent Infra v4.4.3 - Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.
@@ -107,7 +107,16 @@ def get_agent_health_cursor(principal_id: str, *, page_size: int = 20, cursor: s
         params,
     )
     values = [get_agent_health(str(row.get("agent_id"))) for row in rows]
-    return cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
+    count_conditions = [condition for condition in conditions if condition != "a.AGENT_ID > :after"]
+    count_where = " WHERE " + " AND ".join(count_conditions) if count_conditions else ""
+    count_params = {key: value for key, value in params.items() if key not in {"row_limit", "after"}}
+    try:
+        total = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a" + count_where, count_params)
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def get_system_overview() -> Dict[str, Any]:

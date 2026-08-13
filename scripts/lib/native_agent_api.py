@@ -11,8 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 from . import connection, identity_api, cursor_pagination
 
@@ -196,6 +200,14 @@ def _ensure_manifest(tx: Any, key: str, kind: str, content: Dict[str, Any]) -> b
     return True
 
 
+def _principal_display_name(agent_id: str) -> str:
+    if agent_id == PLATFORM_ADMIN_AGENT_ID:
+        return "Platform Admin Agent"
+    if agent_id == COMPLIANCE_ADMIN_AGENT_ID:
+        return "Compliance Admin Agent"
+    return "Managed Agent"
+
+
 def _ensure_principal(tx: Any, agent_id: str) -> None:
     existing = _row(tx.query_one(
         "SELECT PRINCIPAL_ID FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE",
@@ -203,13 +215,26 @@ def _ensure_principal(tx: Any, agent_id: str) -> None:
     ))
     if not existing:
         tx.execute(
-            "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID,PRINCIPAL_TYPE,STATUS,PERMISSION_VERSION) "
-            "VALUES (:id,'AGENT','ACTIVE',1)", {"id": agent_id},
+            "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID,PRINCIPAL_TYPE,DISPLAY_NAME,STATUS,PERMISSION_VERSION) "
+            "VALUES (:id,'AGENT',:display_name,'ACTIVE',1)",
+            {"id": agent_id, "display_name": _principal_display_name(agent_id)},
+        )
+    else:
+        # Earlier bootstrap versions did not write a display name. Backfill
+        # only blank names so operator-provided names always remain intact.
+        tx.execute(
+            "UPDATE CX_PRINCIPALS SET DISPLAY_NAME=:display_name,UPDATED_AT=CURRENT_TIMESTAMP "
+            "WHERE PRINCIPAL_ID=:id AND (DISPLAY_NAME IS NULL OR TRIM(DISPLAY_NAME)='')",
+            {"id": agent_id, "display_name": _principal_display_name(agent_id)},
         )
 
 
 def _ensure_native_agent(tx: Any, agent_id: str, kind: str, template_key: str,
                          target_id: str, owner_id: str = "") -> bool:
+    # Keep the Principal display name correct even for an already-completed
+    # bootstrap. This makes the operation genuinely repeatable across release
+    # upgrades without altering an operator-supplied non-empty display name.
+    _ensure_principal(tx, agent_id)
     existing = _row(tx.query_one(
         "SELECT AGENT_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id FOR UPDATE",
         {"id": agent_id},
@@ -222,7 +247,6 @@ def _ensure_native_agent(tx: Any, agent_id: str, kind: str, template_key: str,
     ))
     if not template:
         raise NativeAgentError("native Agent template is unavailable")
-    _ensure_principal(tx, agent_id)
     tx.execute(
         "INSERT INTO CX_NATIVE_AGENTS(AGENT_ID,SOURCE,AGENT_KIND,TEMPLATE_ID,OWNER_PRINCIPAL_ID,STATUS,"
         "ACTIVATION_STATE,DEPLOYMENT_TARGET_ID,SECURITY_DOMAIN_ID,IS_PROTECTED,CREATED_BY) VALUES "
@@ -244,6 +268,11 @@ def bootstrap_native_agents() -> Dict[str, Any]:
             {},
         ))
         if marker and str(marker.get("status") or "") == "COMPLETED":
+            # Completed deployments still receive non-destructive identity
+            # repairs introduced by later releases, such as display names.
+            _ensure_principal(tx, PLATFORM_ADMIN_AGENT_ID)
+            if _enterprise():
+                _ensure_principal(tx, COMPLIANCE_ADMIN_AGENT_ID)
             return {"status": "COMPLETED", "idempotent": True,
                     "agents": [PLATFORM_ADMIN_AGENT_ID] + ([COMPLIANCE_ADMIN_AGENT_ID] if _enterprise() else [])}
         if not marker:
@@ -366,7 +395,17 @@ def list_native_agents_cursor(actor: str, *, page_size: int = 20, cursor: str = 
         "FROM CX_NATIVE_AGENTS" + where + " ORDER BY AGENT_ID" + _limit(int(context["page_size"]) + 1)[0], params,
     )
     values = _rows(rows)
-    return cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
+    result = cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
+    count_where = " WHERE " + " AND ".join(
+        [condition for condition in conditions if not condition.startswith("AGENT_ID>:after")]
+    ) if any(not condition.startswith("AGENT_ID>:after") for condition in conditions) else ""
+    count_params = {key: value for key, value in params.items() if key != "limit" and key != "after"}
+    try:
+        total = connection.execute_query_one("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS" + count_where, count_params)
+        result["total_items"] = int((total or {}).get("cnt") or 0)
+    except Exception:
+        pass
+    return result
 
 
 def list_templates(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -446,6 +485,57 @@ def upsert_llm_profile(actor: str, profile_key: str, provider_url: str, model_id
         _audit(tx, actor, "LLM_PROFILE_UPSERT", "LLM_PROFILE", params["id"], "ALLOW", reason)
         return {"profile_id": params["id"], "profile_key": profile_key, "status": "ACTIVE", "secret_present": bool(api_key)}
     return connection.execute_transaction_callback(work)
+
+
+def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id: str,
+                      api_key: str, *, timeout: int = 20) -> Dict[str, Any]:
+    """Probe an OpenAI-compatible LLM without persisting or logging its secret."""
+    key = _text(profile_key, 128)
+    url = _text(provider_url, 512).rstrip("/")
+    model = _text(model_id, 256)
+    parsed = urlsplit(url)
+    if not key or not model or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise NativeAgentError("profile key, provider URL, and model ID are required")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise NativeAgentError("LLM provider URL is invalid")
+    headers = {"Content-Type": "application/json"}
+    secret = _text(api_key, 4096)
+    if secret:
+        headers["Authorization"] = "Bearer " + secret
+    started = time.monotonic()
+    try:
+        request = urllib.request.Request(
+            url + "/chat/completions",
+            data=json.dumps({
+                "model": model,
+                "messages": [{"role": "user", "content": "health check"}],
+                "max_tokens": 1,
+                "stream": False,
+            }, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=max(1, min(int(timeout), 60))) as response:
+            payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+        if not isinstance(payload, dict) or not (payload.get("choices") or []):
+            raise NativeAgentError("LLM provider returned no completion")
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        # The audit contains only the profile identity and outcome; it never
+        # contains the URL query, prompt, response, or API Key.
+        def work(tx: Any) -> Dict[str, Any]:
+            _audit(tx, actor, "LLM_PROFILE_DRAFT_PROBE", "LLM_PROFILE_DRAFT", key,
+                   "ALLOW", "LLM draft connectivity probe verified")
+            return {"status": "VERIFIED", "profile_key": key,
+                    "observed_model": _text(payload.get("model") or model, 256),
+                    "latency_ms": elapsed_ms}
+        return connection.execute_transaction_callback(work)
+    except (NativeAgentError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+        def work(tx: Any) -> Dict[str, Any]:
+            _audit(tx, actor, "LLM_PROFILE_DRAFT_PROBE", "LLM_PROFILE_DRAFT", key,
+                   "DENY", "LLM draft connectivity probe failed")
+            return {"status": "FAILED", "profile_key": key}
+        connection.execute_transaction_callback(work)
+        raise NativeAgentError("LLM provider probe failed") from exc
 
 
 def _policy_row() -> Dict[str, Any]:
@@ -665,6 +755,154 @@ def activate_agent(actor: str, agent_id: str, llm_profile_id: str, reason: str) 
 def create_execution(actor: str, agent_id: str, messages: List[Dict[str, Any]], reason: str) -> Dict[str, Any]:
     from . import native_runtime
     return native_runtime.enqueue(actor, agent_id, messages, reason)
+
+
+def _count_status(sql: str, params: Optional[Dict[str, Any]] = None) -> int:
+    try:
+        row = _row(connection.execute_query_one(sql, params or {})) or {}
+        return int(row.get("cnt") or 0)
+    except Exception:
+        return 0
+
+
+def management_status_snapshot(actor: str, agent_id: str) -> Dict[str, Any]:
+    """Return an aggregated, credential-free control-plane status snapshot.
+
+    It intentionally returns counts and state classes only. No database DSN,
+    host, API key, prompt, channel body, human identity, or agent token can be
+    passed to a model through the management Channel.
+    """
+    from . import admin_management
+
+    if agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
+        raise NativeAgentError("management status snapshot is limited to built-in management Agents")
+    if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required for a status snapshot")
+    snapshot = {
+        "scope": "database_control_plane_only",
+        "native_agents": {
+            "active": _count_status("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS WHERE STATUS='ACTIVE'"),
+            "non_active": _count_status("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS WHERE STATUS<>'ACTIVE'"),
+        },
+        "runtime_executions": {
+            "pending": _count_status("SELECT COUNT(*) AS CNT FROM CX_RUNTIME_EXECUTIONS WHERE STATUS='PENDING'"),
+            "claimed": _count_status("SELECT COUNT(*) AS CNT FROM CX_RUNTIME_EXECUTIONS WHERE STATUS='CLAIMED'"),
+            "failed": _count_status("SELECT COUNT(*) AS CNT FROM CX_RUNTIME_EXECUTIONS WHERE STATUS='FAILED'"),
+        },
+        "llm_profiles": {
+            "active": _count_status("SELECT COUNT(*) AS CNT FROM CX_LLM_PROVIDER_PROFILES WHERE STATUS='ACTIVE'"),
+            "healthy": _count_status("SELECT COUNT(*) AS CNT FROM CX_LLM_PROVIDER_PROFILES WHERE STATUS='ACTIVE' AND HEALTH_STATE='HEALTHY'"),
+            "degraded": _count_status("SELECT COUNT(*) AS CNT FROM CX_LLM_PROVIDER_PROFILES WHERE STATUS='ACTIVE' AND HEALTH_STATE='DEGRADED'"),
+        },
+        "admin_group": {
+            "active_voting_members": _count_status("SELECT COUNT(*) AS CNT FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND STATUS='ACTIVE' AND VOTING_ENABLED='Y'", {"group_id": admin_management.ADMIN_GROUP_ID}),
+            "current_term": 0,
+            "status": "UNKNOWN",
+        },
+    }
+    try:
+        group = _row(connection.execute_query_one(
+            "SELECT STATUS,CURRENT_TERM FROM CX_ADMIN_AGENT_GROUPS WHERE GROUP_ID=:group_id",
+            {"group_id": admin_management.ADMIN_GROUP_ID},
+        )) or {}
+        snapshot["admin_group"].update({"status": str(group.get("status") or "UNKNOWN"), "current_term": int(group.get("current_term") or 0)})
+    except Exception:
+        pass
+    return snapshot
+
+
+def is_management_status_request(body: str) -> bool:
+    """Recognize read-only platform-health requests without intent expansion."""
+    value = str(body or "").lower()
+    markers = (
+        "运行状态", "平台状态", "当前状态", "系统状态", "健康状态", "检查状态",
+        "runtime status", "platform status", "system status", "health status",
+    )
+    return any(marker in value for marker in markers)
+
+
+def create_channel_execution(actor: str, channel_id: str, message_id: str, body: str,
+                             mentioned_agent_id: str, thread_type: str = "CHANNEL",
+                             thread_id: str = "") -> Dict[str, Any]:
+    """Queue one bounded management-channel response for an explicit mention.
+
+    A Channel message is not an authority grant.  This narrow bridge exists
+    only for the protected Platform Administration Channel and only for an
+    active built-in management Agent explicitly mentioned by a human member.
+    The deterministic execution ID makes a browser retry or delivery retry
+    harmless without requiring a new database table.
+    """
+    from . import admin_management
+
+    if channel_id != admin_management.ADMIN_CHANNEL_ID:
+        raise NativeAgentError("native Channel execution is limited to the Platform Administration Channel")
+    if mentioned_agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
+        raise NativeAgentError("mentioned Agent is not an approved management Agent")
+    if mentioned_agent_id == COMPLIANCE_ADMIN_AGENT_ID and not _enterprise():
+        raise NativeAgentError("Compliance Admin Agent is unavailable in this edition")
+    if not str(message_id or "").strip() or not str(body or "").strip():
+        raise NativeAgentError("Channel message context is incomplete")
+    if len(body.encode("utf-8")) > 48 * 1024:
+        raise NativeAgentError("Channel message is too large for managed Agent execution")
+    if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required for Channel Agent dispatch")
+
+    def work(tx: Any) -> Dict[str, Any]:
+        member = _row(tx.query_one(
+            "SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent "
+            "AND STATUS='ACTIVE' AND VOTING_ENABLED='Y' FOR UPDATE",
+            {"group_id": admin_management.ADMIN_GROUP_ID, "agent": mentioned_agent_id},
+        ))
+        agent = _row(tx.query_one(
+            "SELECT AGENT_ID,STATUS,ACTIVATION_STATE,DEPLOYMENT_TARGET_ID,LLM_PROFILE_ID FROM CX_NATIVE_AGENTS "
+            "WHERE AGENT_ID=:agent FOR UPDATE", {"agent": mentioned_agent_id},
+        ))
+        if not member or not agent or str(agent.get("status") or "").upper() != "ACTIVE" or not str(agent.get("llm_profile_id") or ""):
+            raise NativeAgentError("mentioned management Agent is not ready")
+        channel_member = _row(tx.query_one(
+            "SELECT MEMBER_ID FROM CX_CHANNEL_MEMBERS WHERE CHANNEL_ID=:channel AND PRINCIPAL_ID=:agent "
+            "AND STATUS='ACTIVE' AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP) FOR UPDATE",
+            {"channel": channel_id, "agent": mentioned_agent_id},
+        ))
+        if not channel_member:
+            raise NativeAgentError("mentioned management Agent is not an active Channel member")
+        digest = _digest({"channel": channel_id, "message": message_id, "agent": mentioned_agent_id})
+        execution_id = "EXE_CH_" + digest[:56]
+        existing = _row(tx.query_one(
+            "SELECT EXECUTION_ID,STATUS FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id FOR UPDATE",
+            {"id": execution_id},
+        ))
+        if existing:
+            return {"execution_id": execution_id, "agent_id": mentioned_agent_id,
+                    "status": str(existing.get("status") or "PENDING"), "idempotent": True}
+        status_request = is_management_status_request(body)
+        status_snapshot = management_status_snapshot(actor, mentioned_agent_id) if status_request else None
+        payload = {
+            "messages": [
+                {"role": "system", "content": "You are a platform management Agent in a protected administration Channel. Answer the explicitly mentioned request concisely. Do not claim that you executed a configuration, security, membership, upgrade, or containment change. For such changes, explain the governed Action Card or approval path required."},
+                {"role": "user", "content": body},
+            ],
+            "channel_dispatch": {
+                "channel_id": channel_id, "message_id": message_id,
+                "thread_type": str(thread_type or "CHANNEL").upper(), "thread_id": thread_id or "",
+                "requester_principal_id": actor,
+            },
+        }
+        if status_snapshot is not None:
+            payload["management_status_snapshot"] = status_snapshot
+        input_json = _json(payload)
+        tx.execute(
+            "INSERT INTO CX_RUNTIME_EXECUTIONS(EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,INPUT_JSON,CONTEXT_DIGEST) "
+            "VALUES (:id,:agent,:target,'DOMAIN_ISOLATED','PENDING',:input,:digest)",
+            {"id": execution_id, "agent": mentioned_agent_id, "target": agent.get("deployment_target_id"),
+             "input": input_json, "digest": digest},
+        )
+        _audit(tx, actor, "CHANNEL_MANAGEMENT_AGENT_DISPATCH", "CHANNEL_MESSAGE", message_id,
+               "ALLOW", "explicit management Agent mention queued")
+        return {"execution_id": execution_id, "agent_id": mentioned_agent_id,
+                "status": "PENDING", "idempotent": False}
+
+    return connection.execute_transaction_callback(work)
 
 
 def enforce_external_registration_allowed() -> None:
