@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.3
+# Deployment Guide - AI Agent Infra with DB v4.4.4
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -24,6 +24,149 @@ migration only through the runner so its checksum and ledger record are
 verified. Then run the application with the minimum documented privileges.
 Business Agent configuration must contain only its independent login and must
 never contain a fallback schema-owner credential.
+
+## Platform-native Full Deployment
+
+This is the recommended path when a new installation has no existing external
+Agent. It uses the package's deterministic Bootstrap Deployment Agent and then
+the platform-native Admin Agent. An external Agent, an LLM, and `SKILL.md` are
+not required to create the database schema or the initial management identity.
+LLM configuration is required only when the native management Agents need model
+reasoning after the authoritative bootstrap has completed.
+
+### 1. Prepare the target and deployment boundary
+
+The customer DBA prepares the database service, PDB or database, tablespaces,
+database account, network ACLs, backup policy, and any database-specific
+extension or privilege prerequisites. Oracle Text prerequisites, PostgreSQL
+extensions such as Apache AGE, and YashanDB client libraries are checked by the
+corresponding adapter. The platform does not silently create PDBs, tablespaces,
+high-privilege database accounts, database clusters, or customer firewall rules.
+
+Choose one target database and edition, record the target identifier, and keep
+the database owner credential separate from every Runtime or Business Agent
+credential. Confirm that the package checksum and the local Python 3.14+
+runtime are trusted before continuing.
+
+### 2. Install the package and run preflight
+
+Install the offline wheelhouse into the package-local environment, load the
+adapter configuration, and run the deployment preflight. Preflight checks the
+Python/runtime compatibility, database connectivity, edition and target
+version, required privileges, schema state, migration ledger, storage
+capacity, and database-specific prerequisites. A partial or unknown schema
+fails closed; it is not treated as an empty installation.
+
+```bash
+source scripts/python_runtime.sh
+export PYTHON_BIN="$(cx_resolve_python)"
+cx_prepare_python_environment "$PYTHON_BIN"
+"$PYTHON_BIN" scripts/migration_runner.py --preflight \
+  --version 4.4.4 --database <oracle|pg|yashandb> \
+  --edition <community|enterprise> --<adapter>-config config.json
+```
+
+The preflight result is an auditable deployment record. It contains redacted
+configuration and capability results, never plaintext passwords, API keys, or
+recovery codes.
+
+### 3. Let Bootstrap Deployment Agent create the platform
+
+After preflight, the package-local Bootstrap Deployment Agent executes the
+verified base schema and additive migrations through the adapter. It records
+each step, checksum, transaction boundary, warning, and verification result;
+supports resume and status; and retires after handing control to the platform
+management layer. It does not interpret arbitrary LLM output as SQL or
+authorization, and it does not depend on an external Agent calling a Skill.
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py \
+  --version 4.4.4 --database <oracle|pg|yashandb> \
+  --edition <community|enterprise> --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+The runner verifies the final schema, API packages, indexes, jobs, property
+graph objects where supported, identity tables, policy tables, audit tables,
+and the migration ledger before reporting success. A failed step remains
+visible for repair or rollback according to the adapter's documented boundary;
+it is never reported as a successful platform deployment.
+
+### 4. Configure the initial model contracts
+
+Use the protected Dashboard initialization page to configure the platform LLM
+profile and the Embedding profile. Test each endpoint before activation. The
+Embedding test determines the vector dimension and the platform creates the
+database-authoritative Contract, default Space, and Binding. API keys are
+encrypted at rest. Every Agent that writes or searches platform data must use a
+compatible approved Contract; changing model, dimension, metric, or
+normalization creates a new version and requires governed re-embedding rather
+than silently overwriting the old contract.
+
+If the installation has no usable LLM yet, the database bootstrap can still
+finish. Native management identities remain `ACTIVATION_PENDING` until an
+approved LLM profile passes its health test; this state does not weaken schema,
+identity, authorization, or audit controls.
+
+### 5. Activate native management identities
+
+The first platform bootstrap creates the human `admin` account and the native
+Platform Admin Agent as separate principals. Enterprise also creates the
+restricted Compliance Admin Agent when that edition is enabled. The protected
+Platform Administration Channel is created with the administrator and enabled
+management Agents only. Business Agents and ordinary users cannot join it.
+
+After the LLM profile is approved, activate the management Agents, verify their
+health and database access, and confirm that a channel request produces an
+auditable response. A model response is never itself an authorization or SQL
+execution boundary; channel commands are parsed into typed, scoped actions and
+high-impact mutations remain subject to approval.
+
+### 6. Configure the platform and add management nodes
+
+Complete the initial Dashboard configuration: session policy, capability
+switches, Security Domain, shared directory purpose, Portal Agent Pool LLM
+allowlist, and external-Agent registration policy. The existing trusted Admin
+Agent is the preferred operator for adding another Admin Agent node. It creates
+the deployment record, connects to the approved target node, installs the
+package, generates the new Agent identity material, and completes enrollment;
+the administrator does not manually copy an Admin identity public key in this
+path. External Admin enrollment remains a separate identity-proof and approval
+flow.
+
+For production management continuity, use three healthy Admin Agents with
+distinct positive weights and require both member-count and weighted
+majorities. Leader leases, terms, and fencing prevent a recovered old Leader
+from issuing stale writes. Shared files may use a local directory or mount in
+the base implementation; NFS, object storage, and unified storage require the
+corresponding customer adapter.
+
+### 7. Verify the deployment and hand over operations
+
+Run a bounded acceptance checklist: admin and ordinary-user login separation,
+Portal/Dashboard session separation, protected-channel membership, LLM and
+Embedding health, authorized Knowledge/Memory retrieval, Graph Runtime recovery,
+audit evidence, pagination, backup evidence, and one controlled Admin Agent
+node recovery. Then record the deployment topology, database endpoint policy,
+credential ownership, Security Domains, enabled capabilities, Agent templates,
+backup/restore procedure, upgrade window, and unresolved risks.
+
+Only after this checklist passes should the installation be treated as a
+production candidate. Database cluster HA, database failover, RPO/RTO,
+customer-specific infrastructure connectors, and host-level process
+termination remain customer-environment responsibilities unless separately
+implemented and verified through adapters.
+
+### 8. Add business Agents through the appropriate path
+
+Platform-created Business Agents begin with a human request containing owner,
+purpose, template, data classification, model, runtime target, isolation, and
+capability reasons. Approval and separation of duties create an independent
+Agent principal and deployment record. Existing external Agents may continue
+to register through Skill-first enrollment using a one-time enrollment token;
+the external-registration policy can be disabled, approval-only, or enabled.
+Neither path grants access beyond the Agent's explicit identity, Security
+Domain, resource grants, approved Skills, Tools, and current policy.
 
 ## v4.3.6 Native Agent Deployment
 
@@ -471,6 +614,27 @@ view, and the migration ledger after deployment. Keep database replication,
 backup, and failover configured according to the database vendor's production
 guidance and validate that topology separately from application runtime
 recovery.
+
+### v4.4.4 Agent Pool and External Endpoint Setup
+
+Register Admin, Compliance, and Agent Pool hosts as managed nodes before using
+them as runtime targets. Node validation performs only bounded DNS/TCP
+reachability checks; it does not become a remote shell or persist reusable SSH
+passwords. Local shared directories are validated for directory existence and
+read/write/execute access. NFS, object storage, and unified storage profiles
+remain adapter-managed until a corresponding storage adapter is installed.
+After a profile and node are registered, bind them from the separate Agent Pool
+configuration page by selecting the managed node, storage profile, node-local
+mount reference, and role scope (normally `ADMIN_AGENT`). The binding is
+audited and describes a runtime storage location only; it does not grant data,
+database, Skill, Tool, or Channel access. Removing a binding also requires an
+audited reason.
+
+For an externally registered Agent that must use a public database endpoint,
+create the endpoint profile with the Agent enrollment grant ID. The platform
+records the endpoint reference in the grant policy snapshot. Only the Agent
+redeemed from that active, unexpired grant can discover the profile. Agents
+without a valid binding receive the initialization endpoint instead.
 # v4.3.7 Bootstrap Deployment and Embedding Worker
 
 For a new prepared database target, use the package-local Bootstrap Deployment

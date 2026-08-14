@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.3 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.4 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -8,6 +8,8 @@ specs, collaboration groups, and graph visualization.
 import hashlib
 import base64
 import json
+import queue
+import threading
 import logging
 import os
 import re
@@ -35,6 +37,8 @@ from lib import agent_registration
 from lib import identity_api
 from lib import governed_contracts, security_lifecycle
 from lib import graph_production_profile
+from lib import platform_agent_pool
+from lib import native_runtime
 if getattr(edition_features, 'GRAPH_ENGINEERING_ENABLED', False):
     from lib import graph_definition_api, graph_compiler, graph_runtime, graph_worker, graph_event_api, graph_adapter, graph_compat, graph_executor
     from lib import graph_assurance, graph_dynamic, a2a_gateway, graph_telemetry
@@ -52,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.3"
+VERSION = "4.4.4"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -1274,6 +1278,10 @@ class VisHandler(BaseHTTPRequestHandler):
             self._handle_portal_chat_send()
             return
 
+        if path == '/portal/api/llm-profile/select':
+            self._handle_portal_llm_select()
+            return
+
         if path == '/portal/api/chat/new':
             self._handle_portal_chat_new()
             return
@@ -2202,6 +2210,12 @@ class VisHandler(BaseHTTPRequestHandler):
         try:
             if path == '/api/health':
                 self._send_json({'status': 'ok', 'version': VERSION})
+            elif path == '/api/agents/database-endpoint':
+                principal = self._authenticated_principal()
+                if principal.get('actor_type') != 'AGENT':
+                    self._send_error(403, 'Registered Agent identity required')
+                    return
+                self._send_json(platform_agent_pool.discover_agent_endpoint(str(principal.get('actor_id') or '')))
             elif path == '/api/session/heartbeat':
                 sd = _get_session(self)
                 if sd:
@@ -4069,6 +4083,37 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
 
+    def _handle_portal_llm_select(self):
+        sess_data = _get_session(self)
+        if not sess_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        try:
+            data = json.loads(self._read_body() or '{}')
+            profile_id = str(data.get('profile_id') or '').strip()
+            options = platform_agent_pool.portal_llm_options()
+            allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+            if not profile_id or profile_id not in allowed:
+                self._send_json({'success': False, 'error': 'LLM profile is not allowed for Portal'}, 403)
+                return
+            sess_data[1]['llm_profile_id'] = profile_id
+            actor = sess_data[1].get('principal_id', sess_data[1].get('user_id', ''))
+            connection.execute_transaction_callback(lambda tx: identity_api._audit_tx(tx, actor, 'PORTAL_LLM_SWITCH', 'LLM_PROFILE', profile_id, 'ALLOW', 'Portal user switched to an administrator-allowlisted LLM'))
+            self._send_json({'success': True, 'profile_id': profile_id})
+        except Exception as exc:
+            self._send_json({'success': False, 'error': str(exc)}, 400)
+
+    def _portal_selected_llm(self, sess):
+        profile_id = str(sess.get('llm_profile_id') or '')
+        options = platform_agent_pool.portal_llm_options()
+        allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+        if profile_id not in allowed:
+            profile_id = str(options.get('default_profile_id') or '')
+        if not profile_id:
+            return None
+        return {str(k).lower(): v for k, v in dict(connection.execute_query_one(
+            "SELECT PROFILE_ID,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {'id': profile_id}) or {}).items()}
+
     def _handle_portal_chat_send(self):
         try:
             sess_data = _get_session(self)
@@ -4116,11 +4161,18 @@ class VisHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+            selected_profile = self._portal_selected_llm(sess)
+            if selected_profile is None:
+                self._send_json({'success': False, 'error': 'Portal LLM policy has no usable default profile'}, 503)
+                return
             if use_stream:
-                self._handle_chat_stream(message, agent_id, user_id, workspace_id, sess, ctx_id)
+                self._handle_chat_stream(message, agent_id, user_id, workspace_id, sess, ctx_id, selected_profile)
             else:
                 _set_portal_agent_context(sess)
-                reply = _call_llm([{"role": "user", "content": message}])
+                try:
+                    reply = native_runtime._call_llm(selected_profile, [{"role": "user", "content": message}])["content"]
+                except Exception:
+                    reply = None
                 if not reply:
                     reply = _generate_sim_reply(message, agent_id, sess)
                 if workspace_id:
@@ -4140,7 +4192,7 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
-    def _handle_chat_stream(self, message, agent_id, user_id, workspace_id, sess, ctx_id):
+    def _handle_chat_stream(self, message, agent_id, user_id, workspace_id, sess, ctx_id, selected_profile=None):
         """Send chat reply as SSE stream with token-by-token output."""
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
@@ -4154,7 +4206,37 @@ class VisHandler(BaseHTTPRequestHandler):
 
         full_reply = ""
         model = _select_model_for_task("standard")
-        stream = _call_llm_stream([{"role": "user", "content": message}], model=model)
+        stream = None
+        if selected_profile:
+            try:
+                events = queue.Queue()
+                sentinel = object()
+                def run_selected_profile():
+                    try:
+                        result = native_runtime._stream_llm(
+                            selected_profile, [{"role": "user", "content": message}],
+                            lambda delta: events.put(("delta", delta)),
+                        )
+                        events.put(("done", result))
+                    except Exception as exc:
+                        events.put(("error", exc))
+                    finally:
+                        events.put(("stop", sentinel))
+                threading.Thread(target=run_selected_profile, daemon=True).start()
+                def selected_events():
+                    while True:
+                        kind, value = events.get()
+                        if kind == "delta":
+                            yield str(value)
+                        elif kind == "error":
+                            raise value
+                        elif kind == "stop":
+                            return
+                stream = selected_events()
+            except Exception:
+                stream = None
+        if stream is None:
+            stream = _call_llm_stream([{"role": "user", "content": message}], model=model)
 
         if stream is not None:
             for token in stream:
@@ -4377,6 +4459,8 @@ class VisHandler(BaseHTTPRequestHandler):
                     self._send_json(_clean_row(profile) if profile else {'error': 'User not found'})
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)
+            elif path == '/portal/api/llm-profiles':
+                self._send_json(platform_agent_pool.portal_llm_options())
             elif path == '/portal/api/agent/status':
                 session_data = _get_session(self)
                 if session_data:
@@ -4720,8 +4804,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.3', VERSION)
-            html = html.replace('2026-08-13', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.4', VERSION)
+            html = html.replace('2026-08-14', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

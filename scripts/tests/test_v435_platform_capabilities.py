@@ -118,7 +118,7 @@ def test_dashboard_exposes_bilingual_protected_configuration_page():
         ) if candidate.is_file()
     )
     source = source_path.read_text(encoding="utf-8")
-    assert '["platform", "功能配置", "Capabilities", Settings2]' in source
+    assert '["platform", "平台配置", "Platform configuration", Settings2]' in source
     assert 'role="switch"' in source
     assert "受保护视图" in source
     assert "expected_version" in source

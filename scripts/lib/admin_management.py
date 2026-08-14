@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import admin_ha, containment, connection, identity_api, native_agent_api
+from . import admin_ha, containment, connection, identity_api, native_agent_api, platform_agent_pool
 
 ADMIN_CHANNEL_NAME = "PLATFORM_ADMINISTRATION"
 ADMIN_CHANNEL_ID = "CH_PLATFORM_ADMINISTRATION"
@@ -299,8 +299,10 @@ def create_admin_enrollment(
     path = str(admission_path or "").upper()
     if path not in {"PLATFORM_DEPLOYED", "EXTERNAL_ADMIN"}:
         raise ManagementError("Admin admission path is invalid")
-    if not public_key or not node_id or len(str(reason or "").strip()) < 3:
-        raise ManagementError("public key, node ID, and reason are required")
+    if not node_id or len(str(reason or "").strip()) < 3:
+        raise ManagementError("node ID and reason are required")
+    if path == "EXTERNAL_ADMIN" and len(str(public_key or "").strip()) < 16:
+        raise ManagementError("external Admin identity public key is required")
     trust_mode = str(ssh_trust_mode or "").upper()
     if trust_mode not in {"MUTUAL_TRUST", "ONE_USE_PASSWORD"}:
         raise ManagementError("SSH trust mode is invalid")
@@ -312,7 +314,11 @@ def create_admin_enrollment(
     elif any((host_reference, os_user, deployment_target, ssh_password, failure_domain)):
         raise ManagementError("external Admin admission uses its key package and must not include infrastructure credentials")
     enrollment_id = _id("AAE")
-    digest = _digest(public_key)
+    # Platform-deployed candidates receive their identity key from the existing
+    # Admin Agent during deployment. Keep only a transient marker until the
+    # authenticated Agent credential is observed; external candidates must
+    # provide their public key before enrollment.
+    digest = _digest(public_key) if public_key else _digest(_json({"path": path, "node": node_id, "enrollment": enrollment_id}))
     package = package_digest or _digest(_json({"path": path, "node": node_id, "key": digest, "reason": reason}))
     target_id = _id("ANT") if path == "PLATFORM_DEPLOYED" else ""
 
@@ -344,7 +350,15 @@ def create_admin_enrollment(
         identity_api._audit_tx(tx, actor, "ADMIN_AGENT_ENROLLMENT_CREATE", "ADMIN_ENROLLMENT", enrollment_id, "ALLOW", reason)
 
     connection.execute_transaction_callback(work)
-    return {"enrollment_id": enrollment_id, "target_id": target_id or None, "admission_path": path, "status": "CANDIDATE", "public_key_digest": digest, "password_persisted": False}
+    discovered_node = None
+    if path == "PLATFORM_DEPLOYED":
+        discovered_node = platform_agent_pool.ensure_managed_node(
+            node_key=node_id, host_reference=host_reference, roles=["ADMIN_AGENT"],
+            actor=actor, ssh_port=ssh_port, os_user=os_user,
+            failure_domain=failure_domain,
+            reason="Admin Agent deployment metadata was collected automatically",
+        )
+    return {"enrollment_id": enrollment_id, "target_id": target_id or None, "admission_path": path, "status": "CANDIDATE", "public_key_digest": digest, "password_persisted": False, "managed_node": discovered_node}
 
 
 def observe_admin_enrollment(actor: str, enrollment_id: str, agent_id: str, reason: str) -> Dict[str, Any]:
@@ -374,12 +388,20 @@ def observe_admin_enrollment(actor: str, enrollment_id: str, agent_id: str, reas
             "SELECT PUBLIC_KEY FROM CX_AGENT_CREDENTIALS WHERE AGENT_ID=:agent AND CREDENTIAL_TYPE='ED25519' "
             "AND STATUS='ACTIVE' AND (EXPIRES_AT IS NULL OR EXPIRES_AT>CURRENT_TIMESTAMP)", {"agent": agent_id},
         ))
-        if not credential or _digest(str(credential.get("public_key") or "")) != str(enrollment.get("public_key_digest") or ""):
-            raise ManagementError("Admin candidate public-key proof does not match the enrollment")
-        if str(enrollment.get("admission_path") or "").upper() == "PLATFORM_DEPLOYED":
+        candidate_path = str(enrollment.get("admission_path") or "").upper()
+        credential_digest = _digest(str(credential.get("public_key") or "")) if credential else ""
+        if not credential:
+            raise ManagementError("Admin candidate identity credential is unavailable")
+        if candidate_path == "PLATFORM_DEPLOYED":
             native = _row(tx.query_one("SELECT AGENT_ID,AGENT_KIND,SOURCE FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:agent", {"agent": agent_id}))
             if not native or str(native.get("agent_kind") or "").upper() != "PLATFORM_ADMIN":
                 raise ManagementError("platform-deployed Admin candidate must use the Platform Admin template")
+            # The existing Admin Agent establishes the deployment identity. The
+            # credential is authoritative; the enrollment form does not require
+            # an operator to copy its public key manually.
+            tx.execute("UPDATE CX_ADMIN_ENROLLMENTS SET PUBLIC_KEY_DIGEST=:key,UPDATED_AT=CURRENT_TIMESTAMP WHERE ENROLLMENT_ID=:id", {"key": credential_digest, "id": enrollment_id})
+        elif credential_digest != str(enrollment.get("public_key_digest") or ""):
+            raise ManagementError("Admin candidate public-key proof does not match the enrollment")
         existing = _row(tx.query_one("SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent FOR UPDATE", {"group_id": ADMIN_GROUP_ID, "agent": agent_id}))
         if existing:
             raise ManagementError("Agent is already an Admin group member")

@@ -43,6 +43,7 @@ from live_db_validator import (
     V442_GRAPH_OPERATIONS_TABLES,
     V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS,
     V443_MIGRATION_SCRIPTS,
+    V444_MIGRATION_SCRIPTS,
     V443_SECURITY_DOMAIN_TABLES,
     V443_SECURITY_DOMAIN_REQUIRED_COLUMNS,
     _load_database_config,
@@ -58,6 +59,7 @@ from live_db_validator import (
     validate_v441_static_contract,
     validate_v442_static_contract,
     validate_v443_static_contract,
+    validate_v444_static_contract,
 )
 
 
@@ -96,8 +98,9 @@ NATIVE_SDD_MIGRATION_VERSIONS = frozenset({"4.4.0"})
 ADMIN_HA_MIGRATION_VERSIONS = frozenset({"4.4.1"})
 GRAPH_OPERATIONS_MIGRATION_VERSIONS = frozenset({"4.4.2"})
 SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS = frozenset({"4.4.3"})
+AGENT_POOL_CLOUD_MIGRATION_VERSIONS = frozenset({"4.4.4"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS
 )
 
 # v4.4.1 was exercised against the retained PostgreSQL and YashanDB test
@@ -616,6 +619,10 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V443_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V443_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v443_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.4":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V444_MIGRATION_SCRIPTS[0]).parent
+            full_scripts = [deploy_dir / name for name in V444_MIGRATION_SCRIPTS]
+            v43_static_contract = validate_v444_static_contract(database, full_scripts)
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
@@ -1358,6 +1365,17 @@ def _v443_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v444_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    names = _v443_script_names(database, config_path, edition)
+    if "40_v4_4_4_agent_pool_cloud.sql" not in names:
+        names.append("40_v4_4_4_agent_pool_cloud.sql")
+    if "41_v4_4_4_node_storage_binding.sql" not in names:
+        names.append("41_v4_4_4_node_storage_binding.sql")
+    if "42_v4_4_4_storage_purpose.sql" not in names:
+        names.append("42_v4_4_4_storage_purpose.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1799,7 +1817,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1863,6 +1881,8 @@ def main() -> int:
             script_names = _v442_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.4.3":
             script_names = _v443_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.4":
+            script_names = _v444_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

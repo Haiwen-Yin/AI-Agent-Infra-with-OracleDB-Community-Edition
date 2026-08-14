@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.4.4 - 2026-08-14
+
+- Added governed Portal Agent Pool LLM policy and Portal-side profile
+  switching among administrator-allowlisted healthy profiles.
+- Added typed Platform Administration commands and foundational managed-node,
+  shared-storage, external-endpoint, and native-template contracts.
+- Added additive migrations for Oracle, PostgreSQL, and YashanDB.
+- Moved Agent Pool and cloud-environment controls to a dedicated Dashboard
+  configuration page and added audited managed-node/shared-storage bindings
+  for Admin Agent runtime directories.
+
 ## v4.4.3 - 2026-08-13
 
 - Unified Dashboard inventory paging above and below each cursor-backed list.

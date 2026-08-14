@@ -30,16 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile
+    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile
+    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
 
 
-VERSION = "4.4.3"
+VERSION = "4.4.4"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -330,6 +330,18 @@ def _bootstrap_admin_management() -> None:
         logger.info("Platform Administration bootstrap is pending migration", exc_info=True)
 
 
+def _bootstrap_managed_node() -> None:
+    """Record this platform runtime as an Admin Agent node automatically."""
+    try:
+        host = os.environ.get("CX_NODE_HOST", "").strip() or agent_gateway_api.local_node_id().split(":", 1)[0]
+        platform_agent_pool.ensure_managed_node(
+            node_key=DEFAULT_NODE_ID, host_reference=host, roles=["ADMIN_AGENT"],
+            actor="SYSTEM_BOOTSTRAP", reason="Platform startup collected the local runtime node metadata",
+        )
+    except Exception:
+        logger.info("Managed node discovery is pending migration", exc_info=True)
+
+
 def _remove_enterprise_compliance_routes() -> None:
     """Keep Enterprise compliance HTTP surfaces out of Community runtimes."""
     features = _edition_features()
@@ -351,6 +363,7 @@ def on_startup() -> None:
     _NATIVE_RUNTIME_STOP.clear()
     _bootstrap_native_agents()
     _bootstrap_admin_management()
+    _bootstrap_managed_node()
     _start_compliance_controller()
     _start_native_runtime()
 
@@ -1157,6 +1170,60 @@ class LLMProviderProfileBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class PortalLLMPolicyBody(BaseModel):
+    default_profile_id: str = Field(min_length=1, max_length=128)
+    allowed_profile_ids: list[str] = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=3, max_length=2000)
+    expected_version: int = Field(default=1, ge=1)
+
+
+class PlatformAdminCommandBody(BaseModel):
+    command_type: str = Field(min_length=1, max_length=64)
+    target: Dict[str, Any] = Field(default_factory=dict)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    security_domain_id: str = Field(default="DEFAULT", max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+    expires_seconds: int = Field(default=900, ge=60, le=86400)
+
+
+class ManagedNodeBody(BaseModel):
+    node_key: str = Field(min_length=1, max_length=128)
+    host_reference: str = Field(min_length=1, max_length=256)
+    ssh_port: int = Field(default=22, ge=1, le=65535)
+    os_user: str = Field(default="", max_length=128)
+    roles: list[str] = Field(default_factory=list, max_length=8)
+    failure_domain: str = Field(default="", max_length=128)
+    trust_mode: str = Field(default="MUTUAL_TRUST", max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class SharedStorageBody(BaseModel):
+    storage_key: str = Field(min_length=1, max_length=128)
+    backend_kind: str = Field(default="LOCAL_PATH", max_length=32)
+    location_ref: str = Field(min_length=1, max_length=512)
+    storage_purpose: str = Field(default="ADMIN_RUNTIME", max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class NodeStorageBindingBody(BaseModel):
+    node_id: str = Field(min_length=1, max_length=128)
+    storage_id: str = Field(min_length=1, max_length=128)
+    mount_reference: str = Field(min_length=1, max_length=512)
+    role_scope: str = Field(default="ADMIN_AGENT", min_length=1, max_length=64)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class ExternalEndpointBody(BaseModel):
+    endpoint_key: str = Field(min_length=1, max_length=128)
+    database_dialect: str = Field(default="", max_length=32)
+    host_reference: str = Field(min_length=1, max_length=256)
+    port: int = Field(ge=1, le=65535)
+    tls_required: bool = True
+    registration_grant_id: str = Field(default="", max_length=128)
+    security_domain_id: str = Field(default="DEFAULT", max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class LLMProviderProfileProbeBody(BaseModel):
     """Ephemeral LLM draft used only for a pre-save connectivity probe."""
     profile_key: str = Field(min_length=1, max_length=128)
@@ -1275,7 +1342,7 @@ class ExternalRegistrationPolicyBody(BaseModel):
 
 class AdminEnrollmentBody(BaseModel):
     admission_path: str = Field(min_length=1, max_length=32)
-    public_key: str = Field(min_length=16, max_length=10000)
+    public_key: str = Field(default="", max_length=10000)
     node_id: str = Field(min_length=1, max_length=256)
     host_reference: str = Field(default="", max_length=256)
     ssh_port: int = Field(default=22, ge=1, le=65535)
@@ -1538,7 +1605,9 @@ def _set_session_cookie(response: Response, session: Dict[str, str], scope: str 
 def _shell() -> FileResponse:
     for path in (DIST_ROOT / "index.html", WEB_ROOT / "index.html"):
         if path.is_file():
-            return FileResponse(path)
+            # The shell contains the hashed UI bundle reference. Avoid keeping
+            # an old shell after a controlled platform upgrade.
+            return FileResponse(path, headers={"Cache-Control": "no-store"})
     raise HTTPException(status_code=503, detail="Web assets are not built")
 
 
@@ -2447,6 +2516,142 @@ def llm_provider_profile_probe(
         )
     except Exception as exc:
         raise _identity_http_error(exc, "LLM Provider draft probe failed", identity_status=503) from exc
+
+
+@app.get("/api/platform/portal-llm-policy")
+def portal_llm_policy(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.list_portal_llm_policy(str(session["principal_id"]))
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/platform/portal-llm-policy")
+def portal_llm_policy_update(body: PortalLLMPolicyBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.set_portal_llm_policy(str(session["principal_id"]), body.default_profile_id, body.allowed_profile_ids, body.reason, body.expected_version)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/admin-commands")
+def platform_admin_commands(limit: int = 50, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_commands(str(session["principal_id"]), limit)}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-commands")
+def platform_admin_command(body: PlatformAdminCommandBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.create_command(str(session["principal_id"]), body.command_type, body.target, body.parameters, body.security_domain_id, body.reason, body.expires_seconds)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-commands/{command_id}/execute")
+def platform_admin_command_execute(command_id: str, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"command_id": command_id, "status": "COMPLETED", "result": platform_agent_pool.execute_read_command(str(session["principal_id"]), command_id)}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/managed-nodes")
+def managed_nodes(limit: int = 100, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_nodes(str(session["principal_id"]), limit)}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/managed-nodes")
+def managed_node(body: ManagedNodeBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.register_node(str(session["principal_id"]), body.model_dump())
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/managed-nodes/{node_id}/validate")
+def managed_node_validate(node_id: str, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.validate_node(str(session["principal_id"]), node_id)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/shared-storage")
+def shared_storage(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_storage(str(session["principal_id"]))}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/shared-storage")
+def shared_storage_create(body: SharedStorageBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.register_storage(str(session["principal_id"]), body.model_dump())
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/shared-storage/{storage_id}/validate")
+def shared_storage_validate(storage_id: str, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.validate_storage(str(session["principal_id"]), storage_id)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/node-storage-bindings")
+def node_storage_bindings(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_node_storage_bindings(str(session["principal_id"]))}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/node-storage-bindings")
+def node_storage_binding_create(body: NodeStorageBindingBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.bind_node_storage(str(session["principal_id"]), body.model_dump())
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/node-storage-bindings/{binding_id}/remove")
+def node_storage_binding_remove(binding_id: str, body: Dict[str, Any], session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.remove_node_storage_binding(str(session["principal_id"]), binding_id, str(body.get("reason") or ""))
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/external-db-endpoints")
+def external_db_endpoints(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_endpoints(str(session["principal_id"]))}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/external-db-endpoints")
+def external_db_endpoint(body: ExternalEndpointBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.register_endpoint(str(session["principal_id"]), body.model_dump())
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/portal-enhancements")
+def portal_enhancements(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.list_enhancements(str(session["principal_id"]))
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/deployment-runs")

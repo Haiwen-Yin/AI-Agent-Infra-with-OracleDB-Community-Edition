@@ -847,6 +847,23 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
     if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
         raise PermissionError("platform management permission is required for Channel Agent dispatch")
 
+    # ordinary prose remains conversational; an explicit slash command is converted to the same typed command and
+    # Action Card used by Dashboard. Ordinary prose remains conversational and
+    # can only request a read-only status snapshot.
+    command_notice: Dict[str, Any] = {}
+    stripped = str(body or "").strip()
+    if stripped.lower().startswith("/platform "):
+        from . import platform_agent_pool
+        pieces = stripped.split(None, 2)
+        command_type = pieces[1].upper() if len(pieces) > 1 else ""
+        command_reason = pieces[2].strip() if len(pieces) > 2 else ""
+        command = platform_agent_pool.create_command(
+            actor, command_type, {}, {}, "DEFAULT", command_reason,
+        )
+        command_notice = {"command_id": command.get("command_id"), "command_type": command_type,
+                          "status": command.get("status"), "result": command.get("result") or {},
+                          "action_card": command.get("action_card") or {}}
+
     def work(tx: Any) -> Dict[str, Any]:
         member = _row(tx.query_one(
             "SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent "
@@ -888,6 +905,10 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
                 "requester_principal_id": actor,
             },
         }
+        if command_notice:
+            payload["messages"].insert(0, {"role": "system", "content":
+                "An explicit typed platform command was recorded. Present this result without claiming any additional action: "
+                + _json(command_notice)})
         if status_snapshot is not None:
             payload["management_status_snapshot"] = status_snapshot
         input_json = _json(payload)

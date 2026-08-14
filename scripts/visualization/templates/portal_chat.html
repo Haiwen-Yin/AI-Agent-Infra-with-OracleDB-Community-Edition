@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.3">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.4">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.3 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.4.4 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -16,6 +16,7 @@
     <span class="cx-chat-platform"><span data-zh>AI Agent 管理平台</span><span data-en>AI Agent Management Platform</span></span>
   </div>
   <div class="actions">
+    <label class="portal-llm-switch"><span data-zh>LLM</span><span data-en>LLM</span><select id="portalLlmSelect" onchange="switchPortalLlm(this.value)" aria-label="LLM"><option value="">--</option></select></label>
     <button class="action-btn" onclick="window.open('/portal/login','_self')"><span data-zh>切换用户</span><span data-en>Switch User</span></button>
     <button class="action-btn danger" onclick="releaseAgent()"><span data-zh>退出</span><span data-en>Exit</span></button>
   </div>
@@ -90,6 +91,19 @@ function loadUserInfo(){
       el.innerHTML='<div class="sidebar-item user-name">'+escapeHtml(d.username)+'</div><div class="sidebar-item user-type">'+typeLabel+'</div>';
     }
   }).catch(function(){});
+}
+
+function loadPortalLlmProfiles(){
+  portalFetch('/portal/api/llm-profiles').then(function(r){return r.json()}).then(function(d){
+    var select=document.getElementById('portalLlmSelect'); if(!select)return;
+    select.innerHTML='';
+    (d.items||[]).forEach(function(item){var option=document.createElement('option');option.value=item.profile_id;option.textContent=(item.profile_key||item.profile_id)+' · '+(item.model_id||'');option.selected=item.profile_id===d.default_profile_id;select.appendChild(option)});
+    if(!d.items||!d.items.length){var empty=document.createElement('option');empty.textContent=document.documentElement.getAttribute('data-lang')==='zh'?'未配置可用 LLM':'No LLM available';empty.value='';select.appendChild(empty)}
+  }).catch(function(){});
+}
+function switchPortalLlm(profileId){
+  if(!profileId)return;
+  portalFetch('/portal/api/llm-profile/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile_id:profileId})}).then(function(r){return r.json()}).then(function(d){if(!d.success){alert(d.error||'LLM switch failed')}}).catch(function(){alert('LLM switch failed')});
 }
 
 function loadSessions(){
@@ -302,6 +316,7 @@ async function releaseAgent(){
   var saved=localStorage.getItem('lang');
   if(saved)document.documentElement.setAttribute('data-lang',saved);
   loadUserInfo();
+  loadPortalLlmProfiles();
   loadHistory();
   document.getElementById('msgInput').focus();
 })();

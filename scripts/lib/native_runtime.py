@@ -128,13 +128,14 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                     raise RuntimeError("LLM provider response is too large")
                 now = time.monotonic()
                 if now - last_emit >= 0.25:
-                    on_delta(content)
+                    # Callers receive only the new delta. The complete output
+                    # remains local for persistence and integrity checks.
+                    on_delta(piece)
                     last_emit = now
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise RuntimeError("LLM provider streaming request failed") from exc
     if not content:
         raise RuntimeError("LLM provider returned no content")
-    on_delta(content)
     return {"content": content, "model": model}
 
 

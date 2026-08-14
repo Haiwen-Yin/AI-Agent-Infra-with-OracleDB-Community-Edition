@@ -377,7 +377,12 @@ def test_v442_separates_platform_operations_and_expands_admin_target_contract():
     ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
     api = (root / "web_app.py").read_text(encoding="utf-8")
     management = (root / "lib" / "admin_management.py").read_text(encoding="utf-8")
-    assert '["platform-operations", "平台操作"' in ui
+    assert 'function PlatformConfigurationPage' in ui
+    assert '"config"' in ui
+    assert '["agent-pool", "Agent Pool 配置"' in ui
+    assert '"agent-pool", "Agent Pool 配置"' not in ui.split("const nav = [", 1)[1].split("];", 1)[0]
+    assert "pool-llm-allowlist" in ui
+    assert "pool-config-stack" in ui
     assert "host_reference" in ui and "ssh_port" in ui and "os_user" in ui
     assert "ssh_trust_mode" in api and "ssh_password" in api
     assert "password_persisted" in management

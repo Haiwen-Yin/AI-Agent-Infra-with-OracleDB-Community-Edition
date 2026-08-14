@@ -96,8 +96,7 @@ const nav = [
   ["organization", "组织架构", "Organization", Building2],
   ["security-domains", "安全域", "Security Domains", ShieldCheck],
   ["deployment", "部署与模型", "Deployment & models", Database],
-  ["platform-operations", "平台操作", "Platform operations", ShieldCheck],
-  ["platform", "功能配置", "Capabilities", Settings2],
+  ["platform", "平台配置", "Platform configuration", Settings2],
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -364,16 +363,18 @@ function App() {
         </div>
       )}
       <main className="cx-main">
-        <PageView
-          key={page}
-          page={allowedPages.has(page) ? page : (nav.find((item) => allowedPages.has(item[0]))?.[0] || "agents")}
-          lang={lang}
-          me={me}
-          capabilities={capabilities}
-          text={text}
-          onNotice={setNotice}
-          onCapabilitiesChanged={refreshCapabilities}
-        />
+        <PageErrorBoundary lang={lang} text={text}>
+          <PageView
+            key={page}
+            page={allowedPages.has(page) ? page : (nav.find((item) => allowedPages.has(item[0]))?.[0] || "agents")}
+            lang={lang}
+            me={me}
+            capabilities={capabilities}
+            text={text}
+            onNotice={setNotice}
+            onCapabilitiesChanged={refreshCapabilities}
+          />
+        </PageErrorBoundary>
       </main>
     </div>
   );
@@ -897,6 +898,24 @@ function MfaSetupScreen({
   );
 }
 
+class PageErrorBoundary extends React.Component<{
+  lang: Lang;
+  text: (zh: string, en: string) => string;
+  children: React.ReactNode;
+}, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    const { text } = this.props;
+    return <div className="page-stack"><InfoPanel title={text("页面加载失败", "Page rendering failed")} text={text}><p className="cx-form-hint">{text("页面组件发生异常。请记录下面的错误信息并刷新页面。", "A page component failed while rendering. Record the error below and refresh the page.")}</p><pre className="error-detail">{this.state.error.message}</pre></InfoPanel></div>;
+  }
+}
+
 function PageView({
   page,
   lang,
@@ -914,23 +933,8 @@ function PageView({
   onNotice: (value: string) => void;
   onCapabilitiesChanged: () => Promise<void>;
 }) {
-  if (page === "platform")
-    return (
-      <PlatformCapabilitiesPage
-        lang={lang}
-        text={text}
-        onNotice={onNotice}
-        onCapabilitiesChanged={onCapabilitiesChanged}
-      />
-    );
-  if (page === "platform-operations")
-    return (
-      <PlatformOperationsPage
-        lang={lang}
-        text={text}
-        onNotice={onNotice}
-      />
-    );
+  if (page === "platform" || page === "platform-operations")
+    return <PlatformConfigurationPage lang={lang} text={text} onNotice={onNotice} onCapabilitiesChanged={onCapabilitiesChanged} initialSection={page === "platform-operations" ? "operations" : undefined} />;
   if (page === "deployment")
     return (
       <DeploymentModelsPage
@@ -1048,23 +1052,56 @@ function PageView({
   return <DataPage page={page} lang={lang} text={text} onNotice={onNotice} />;
 }
 
-function PlatformCapabilitiesPage({
-  lang,
-  text,
-  onNotice,
-  onCapabilitiesChanged,
+function PlatformConfigurationPage({
+  lang, text, onNotice, onCapabilitiesChanged, initialSection,
 }: {
   lang: Lang;
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
   onCapabilitiesChanged: () => Promise<void>;
+  initialSection?: "capabilities" | "operations";
 }) {
-  type PlatformTab = "capabilities" | "graph" | "registration" | "session";
+  const [section, setSection] = useState<"capabilities" | "operations">(() => {
+    if (initialSection) return initialSection;
+    return new URLSearchParams(window.location.search).get("config") === "operations" ? "operations" : "capabilities";
+  });
+  const selectSection = (value: "capabilities" | "operations") => {
+    setSection(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set("config", value);
+    url.searchParams.delete("section");
+    window.history.replaceState({}, "", url.pathname + url.search);
+  };
+  return <section className="page-stack platform-configuration-shell">
+    <SectionHeading title={text("平台配置", "Platform configuration")} subtitle={text("统一管理平台能力开关、运行节点、共享存储、模型策略、会话和平台管理操作。", "Manage capability switches, runtime nodes, shared storage, model policies, sessions, and platform-management operations in one configuration area.")} text={text} />
+    <div className="view-toggle platform-config-root-tabs" role="tablist" aria-label={text("平台配置分区", "Platform configuration sections")}>
+      <button type="button" role="tab" aria-selected={section === "capabilities"} className={section === "capabilities" ? "active" : ""} onClick={() => selectSection("capabilities")}>{text("能力与策略", "Capabilities & policies")}</button>
+      <button type="button" role="tab" aria-selected={section === "operations"} className={section === "operations" ? "active" : ""} onClick={() => selectSection("operations")}>{text("平台运行", "Platform operations")}</button>
+    </div>
+    {section === "capabilities" ? <PlatformCapabilitiesPage lang={lang} text={text} onNotice={onNotice} onCapabilitiesChanged={onCapabilitiesChanged} embedded /> : <PlatformOperationsPage lang={lang} text={text} onNotice={onNotice} embedded />}
+  </section>;
+}
+
+function PlatformCapabilitiesPage({
+  lang,
+  text,
+  onNotice,
+  onCapabilitiesChanged,
+  embedded,
+}: {
+  lang: Lang;
+  text: (zh: string, en: string) => string;
+  onNotice: (value: string) => void;
+  onCapabilitiesChanged: () => Promise<void>;
+  embedded?: boolean;
+}) {
+  type PlatformTab = "capabilities" | "graph" | "registration" | "session" | "agent-pool";
   const platformTabs: Array<[PlatformTab, string, string]> = [
     ["capabilities", "功能开关", "Feature switches"],
     ["graph", "图工程配置", "Graph Engineering"],
     ["registration", "外部智能体注册", "External Agent registration"],
     ["session", "会话策略", "Session policies"],
+    ["agent-pool", "Agent Pool 配置", "Agent Pool configuration"],
   ];
   const platformTabFromLocation = (): PlatformTab => {
     const value = new URLSearchParams(window.location.search).get("section");
@@ -1176,7 +1213,7 @@ function PlatformCapabilitiesPage({
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   return <>
-    <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />
+    {!embedded && <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />}
     <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     <div className="view-toggle platform-config-tabs" role="tablist" aria-label={text("功能配置分区", "Capability configuration sections")}>
       {platformTabs.map(([key, zh, en]) => <button type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} key={key} onClick={() => selectPlatformTab(key)}>{text(zh, en)}</button>)}
@@ -1196,6 +1233,7 @@ function PlatformCapabilitiesPage({
     </InfoPanel>}
     {!loading && activeTab === "registration" && <ExternalRegistrationPolicyPanel lang={lang} text={text} onNotice={onNotice} />}
     {!loading && activeTab === "session" && <InfoPanel title={text("会话策略", "Session policies")} text={text}><p className="cx-form-hint">{text("Dashboard 与 Portal 分别配置。空闲超时默认 5 分钟；绝对会话时长限制单次登录的最长存续时间。", "Dashboard and Portal are configured independently. Idle timeout defaults to five minutes; absolute lifetime caps one login session.")}</p><div className="two-column-panels">{(["dashboard", "portal"] as const).map((kind) => <form key={kind} className="compact-form" onSubmit={(event) => { event.preventDefault(); void updatePolicy(kind, event.currentTarget); }}><strong>{kind === "dashboard" ? "Dashboard" : "Portal"}</strong><label>{text("空闲秒数", "Idle seconds")}<input name="idle_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.idle_timeout_seconds || 300)} /></label><label>{text("绝对秒数", "Absolute seconds")}<input name="absolute_timeout_seconds" type="number" min="60" max="86400" defaultValue={String(policies[kind]?.absolute_timeout_seconds || 28800)} /></label><label>{text("变更原因", "Change reason")}<input name="reason" required /></label><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></form>)}</div></InfoPanel>}
+    {!loading && activeTab === "agent-pool" && <PlatformPoolGovernancePanel lang={lang} text={text} onNotice={onNotice} />}
     {activeTab === "capabilities" && <><InfoPanel title={text("最近变更", "Recent changes")} text={text}><DataTable headers={[text("功能", "Capability"), text("变更", "Change"), text("操作人", "Actor"), text("原因", "Reason"), text("时间", "Time")]} rows={listPayload(payload, ["history"]).map((item) => [item.capability_key, `${item.from_enabled} -> ${item.to_enabled}`, item.changed_by, item.reason, displayRowValue(lang, item.created_at)])} empty={text("暂无功能状态变更", "No capability changes yet")} text={text} /></InfoPanel>
     <DetailDrawer open={Boolean(selected)} title={text("确认功能状态变更", "Confirm capability change")} onClose={() => { if (!busy) setSelected(null); }} text={text}>
       {selected && <div className="capability-confirm"><p>{text("目标功能", "Capability")}: <strong>{lang === "zh" ? selected.display_name_zh : selected.display_name_en}</strong></p><p>{text("目标状态", "Target state")}: <strong>{selected.effective_enabled ? text("关闭", "Off") : text("开启", "On")}</strong></p><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} /></label><button className="primary-button" disabled={busy || reason.trim().length < 3} onClick={() => void submit()}><Check size={15} />{text("确认变更", "Confirm change")}</button></div>}
@@ -1204,6 +1242,132 @@ function PlatformCapabilitiesPage({
       {graphSelected && <div className="capability-confirm"><p>{text("能力", "Capability")}: <strong>{lang === "zh" ? graphSelected.display_name_zh : graphSelected.display_name_en}</strong></p><p className="cx-form-hint">{text("当前状态", "Current state")}: {displayRowValue(lang, graphSelected.state)} · {text("版本", "Version")}: {graphSelected.version}</p><label>{text("目标状态", "Target state")}<select value={graphState} onChange={(event) => setGraphState(event.target.value)}><option value="ENABLED">{text("启用", "Enabled")}</option><option value="CONTROLLED">{text("受控启用", "Controlled")}</option><option value="DISABLED">{text("关闭", "Disabled")}</option><option value="UNAVAILABLE">{text("不可用", "Unavailable")}</option></select></label><label>{text("变更原因（必填）", "Change reason (required)")}<textarea value={graphReason} maxLength={2000} onChange={(event) => setGraphReason(event.target.value)} /></label>{["ENABLED", "CONTROLLED"].includes(graphState.toUpperCase()) && <label>{text("证据引用（必填）", "Evidence reference (required)")}<input value={graphEvidence} maxLength={256} onChange={(event) => setGraphEvidence(event.target.value)} /></label>}<button className="primary-button" disabled={busy || graphReason.trim().length < 3 || (["ENABLED", "CONTROLLED"].includes(graphState.toUpperCase()) && graphEvidence.trim().length < 3)} onClick={() => void updateGraphCapability()}><Check size={15} />{text("确认受控变更", "Confirm governed change")}</button></div>}
     </DetailDrawer>
   </>;
+}
+
+function PlatformPoolGovernancePanelLegacy({
+  lang, text, onNotice,
+}: { lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void }) {
+  const [data, setData] = useState<Row>({ policy: {}, allowed_profile_ids: [], profiles: [], nodes: [], storage: [], bindings: [], endpoints: [], enhancements: [] });
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  const load = async () => {
+    try {
+      const [policy, nodes, storage, bindings, endpoints, enhancements] = await Promise.all([
+        api<Row>("/api/platform/portal-llm-policy"), api<Row>("/api/platform/managed-nodes"),
+        api<Row>("/api/platform/shared-storage"), api<Row>("/api/platform/node-storage-bindings"), api<Row>("/api/platform/external-db-endpoints"),
+        api<Row>("/api/platform/portal-enhancements"),
+      ]);
+      setData({ policy, nodes: listPayload(nodes, ["items"]), storage: listPayload(storage, ["items"]), bindings: listPayload(bindings, ["items"]), endpoints: listPayload(endpoints, ["items"]), enhancements: listPayload(enhancements, ["items"]) });
+    } catch (error) { onNotice((error as Error).message); }
+  };
+  useEffect(() => { void load(); }, []);
+  const policy = data.policy || {};
+  const profiles: Row[] = policy.profiles || [];
+  const allowed = new Set<string>(policy.allowed_profile_ids || []);
+  const rolesOf = (item: Row): string[] => {
+    if (Array.isArray(item.role_json)) return item.role_json.map(String).map((value) => value.toUpperCase());
+    try { return JSON.parse(String(item.role_json || "[]")).map((value: unknown) => String(value).toUpperCase()); } catch { return []; }
+  };
+  const nodesFor = (role: string) => (data.nodes || []).filter((item: Row) => rolesOf(item).includes(role));
+  const storageFor = (purpose: string) => (data.storage || []).filter((item: Row) => String(item.storage_purpose || "ADMIN_RUNTIME").toUpperCase() === purpose);
+  const savePolicy = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const selected = profiles.filter((item) => form.get(`profile_${item.profile_id}`) === "on").map((item) => String(item.profile_id));
+    const defaultId = String(form.get("default_profile_id") || "");
+    setBusy(true);
+    try { await api("/api/platform/portal-llm-policy", { method: "PUT", body: JSON.stringify({ default_profile_id: defaultId, allowed_profile_ids: selected, expected_version: Number(policy.policy?.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("Portal Agent Pool LLM 策略已保存", "Portal Agent Pool LLM policy saved")); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const post = async (url: string, form: HTMLFormElement, message: string) => { const values: Row = Object.fromEntries(new FormData(form).entries()); if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean); if ("tls_required" in values) values.tls_required = values.tls_required === "on"; setBusy(true); try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(message); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const validateResource = async (kind: "node" | "storage", id: string) => { setBusy(true); try { const result = await api<Row>(`/api/platform/${kind === "node" ? "managed-nodes" : "shared-storage"}/${encodeURIComponent(id)}/validate`, { method: "POST", body: "{}" }); await load(); onNotice(`${text("验证结果", "Validation result")}: ${displayRowValue(lang, result.validation_state)} · ${result.detail || ""}`); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  return <div className="agent-pool-page"><InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
+    <p className="cx-form-hint">{text("统一管理 Portal 可用模型、Admin/合规/Pool 节点、共享目录和外部注册 Agent 的数据库地址。这里不保存可复用 SSH 密码，也不向 Agent 返回数据库密钥。", "Govern Portal models, Admin/Compliance/Pool nodes, shared storage, and database endpoints for external Agents. Reusable SSH passwords and database keys are never stored or returned to Agents.")}</p>
+    <form className="pool-config-block pool-llm-policy-form" onSubmit={(event) => void savePolicy(event)}><strong>{text("Portal Agent Pool LLM 允许列表", "Portal Agent Pool LLM allowlist")}</strong><p className="cx-form-hint">{text("Portal 用户只能在下方勾选的健康配置中切换。默认配置必须包含在允许列表中。", "Portal users can switch only among checked healthy profiles. The default must be allowlisted.")}</p><div className="pool-llm-allowlist">{profiles.length ? profiles.map((item) => <label className="checkbox-field" key={String(item.profile_id)}><input type="checkbox" name={`profile_${item.profile_id}`} defaultChecked={allowed.has(String(item.profile_id))} />{String(item.profile_key)} · {String(item.model_id)} · {String(item.health_state || "UNKNOWN")}</label>) : <p className="cx-form-hint">{text("请先在部署与模型中配置并测试 LLM。", "Configure and test an LLM in Deployment & models first.")}</p>}</div><div className="pool-policy-fields"><ConfigField label={text("默认 LLM", "Default LLM")} hint={text("只能选择已允许且健康的配置。", "Choose an allowlisted healthy profile.")}><select name="default_profile_id" defaultValue={String(policy.policy?.default_profile_id || "")} required><option value="">{text("请选择", "Select")}</option>{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select></ConfigField><ConfigField label={text("变更原因", "Change reason")} hint={text("写入审计，至少三个字符。", "Audited; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后立即应用到 Portal Agent Pool。", "Applied to the Portal Agent Pool after saving.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("保存 Portal 模型策略", "Save Portal model policy")}</button></ConfigField></div></form>
+    <div className="pool-config-stack"><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("受管节点已登记", "Managed node registered")); }}><strong>{text("受管节点", "Managed node")}</strong><p className="cx-form-hint">{text("登记用于运行 Admin Agent、合规 Agent 或 Agent Pool 的操作系统节点。", "Register an operating-system node for Admin Agent, Compliance Agent, or Agent Pool workloads.")}</p><input name="node_key" placeholder={text("节点名称", "Node name")} required /><input name="host_reference" placeholder={text("主机或 IP", "Host or IP")} required /><input name="os_user" placeholder={text("操作系统用户", "OS user")} /><select name="trust_mode" defaultValue="MUTUAL_TRUST"><option value="MUTUAL_TRUST">{text("SSH 互信", "SSH mutual trust")}</option><option value="ONE_USE_PASSWORD">{text("一次性密码验证", "One-use password")}</option></select><input name="failure_domain" placeholder={text("故障域", "Failure domain")} /><input name="roles" placeholder="ADMIN_AGENT,AGENT_POOL" /><input name="reason" placeholder={text("登记原因", "Registration reason")} required /><button className="small-button" disabled={busy}>{text("登记节点", "Register node")}</button></form><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/shared-storage", event.currentTarget, text("共享存储配置已登记", "Shared storage profile registered")); }}><strong>{text("共享存储", "Shared storage")}</strong><p className="cx-form-hint">{text("登记目录、挂载点、NFS、对象存储或统一存储的基础位置。", "Register a base location for a directory, mount point, NFS, object storage, or unified storage.")}</p><input name="storage_key" placeholder={text("配置名称", "Profile name")} required /><select name="backend_kind" defaultValue="LOCAL_PATH"><option value="LOCAL_PATH">{text("目录或挂载点", "Directory or mount point")}</option><option value="NFS">NFS</option><option value="OBJECT_STORAGE">{text("对象存储", "Object storage")}</option><option value="UNIFIED_STORAGE">{text("统一存储", "Unified storage")}</option></select><input name="location_ref" placeholder={text("路径或位置", "Path or location")} required /><input name="reason" placeholder={text("配置原因", "Configuration reason")} required /><button className="small-button" disabled={busy}>{text("登记存储", "Register storage")}</button></form></div>
+    <div className="pool-config-stack"><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/external-db-endpoints", event.currentTarget, text("外部数据库地址已登记", "External database endpoint registered")); }}><strong>{text("外部 Agent 数据库地址", "External Agent database endpoint")}</strong><p className="cx-form-hint">{text("填写注册授权后，只有该授权兑换出的 Agent 才能获得此地址；未绑定授权的 Agent 回退到初始化地址。", "With an enrollment grant, only the Agent redeemed from that grant can receive this endpoint; unbound Agents use the bootstrap endpoint.")}</p><input name="endpoint_key" placeholder={text("地址配置名称", "Endpoint name")} required /><input name="host_reference" placeholder={text("外网主机或 IP", "External host or IP")} required /><input name="port" type="number" placeholder={text("端口", "Port")} required /><input name="database_dialect" placeholder={text("数据库类型", "Database type")} /><input name="registration_grant_id" placeholder={text("注册授权 ID（可选）", "Registration grant ID (optional)")} /><label className="checkbox-field"><input name="tls_required" type="checkbox" defaultChecked />{text("要求 TLS", "TLS required")}</label><input name="reason" placeholder={text("配置原因", "Configuration reason")} required /><button className="small-button" disabled={busy}>{text("登记地址", "Register endpoint")}</button></form><div className="pool-config-block"><strong>{text("Portal 增强组件与模板", "Portal enhancements and templates")}</strong><DataTable headers={[text("模板", "Template"), text("类型", "Kind"), text("状态", "State")]} rows={(data.enhancements || []).map((item: Row) => [item.display_name || item.template_key, item.template_kind, item.status])} empty={text("暂无模板", "No templates")} text={text} /></div></div>
+    <InfoPanel title={text("Admin Agent 运行节点共享目录绑定", "Admin Agent runtime shared-directory binding")} text={text}><p className="cx-form-hint">{text("先登记并验证节点、共享存储，再将二者绑定。共享存储登记的是统一位置，节点实际挂载路径是该节点上可访问的目录；绑定不会扩大数据库、Skill 或频道授权。生产环境可将存储配置替换为 NFS、对象存储或统一存储适配器。", "Register and validate a node and a storage profile before binding them. The storage profile is the shared logical location and the node mount path is the directory visible on that node; binding never expands database, Skill, or Channel authorization. Production deployments may replace the basic profile with NFS, object-storage, or unified-storage adapters.")}</p><form className="configuration-form compact-configuration-form node-storage-binding-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/node-storage-bindings", event.currentTarget, text("共享目录已绑定到运行节点", "Shared directory bound to runtime node")); }}><ConfigField label={text("运行节点", "Runtime node")} hint={text("选择已登记的 Admin Agent 或平台节点。", "Choose a registered Admin Agent or platform node.")}><select name="node_id" required><option value="">{text("请选择节点", "Select node")}</option>{(data.nodes || []).map((item: Row) => <option key={String(item.node_id)} value={String(item.node_id)}>{String(item.node_key)} · {String(item.host_reference)}</option>)}</select></ConfigField><ConfigField label={text("共享存储配置", "Shared storage profile")} hint={text("选择已登记的目录、NFS 或存储配置。", "Choose a registered directory, NFS, or storage profile.")}><select name="storage_id" required><option value="">{text("请选择存储", "Select storage")}</option>{(data.storage || []).map((item: Row) => <option key={String(item.storage_id)} value={String(item.storage_id)}>{String(item.storage_key)} · {displayRowValue(lang, item.backend_kind)}</option>)}</select></ConfigField><ConfigField label={text("节点实际挂载路径", "Node mount path")} hint={text("填写该运行节点上实际可访问的目录或挂载点。共享存储登记的是统一位置，不同节点的本地路径可能不同；平台不会自动执行挂载。", "Enter the directory or mount point visible on this runtime node. The storage profile is the shared logical location; each node may expose a different local path. The platform does not mount it automatically.")}><input name="mount_reference" required /></ConfigField><ConfigField label={text("角色范围", "Role scope")} hint={text("仅决定哪些平台运行角色使用该位置，不改变数据授权。", "Determines which platform runtime role uses the location; it does not change data authorization.")}><select name="role_scope" defaultValue="ADMIN_AGENT"><option value="ADMIN_AGENT">Admin Agent</option><option value="COMPLIANCE_AGENT">{text("合规 Agent", "Compliance Agent")}</option><option value="AGENT_POOL">Agent Pool</option><option value="ALL_PLATFORM_AGENTS">{text("所有平台管理 Agent", "All platform management Agents")}</option></select></ConfigField><ConfigField label={text("绑定原因", "Binding reason")} hint={text("必填并写入审计。", "Required and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("绑定后仍需由受管节点运行时执行实际挂载。", "The managed runtime must still perform the actual mount.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("绑定目录", "Bind directory")}</button></ConfigField></form><DataTable headers={[text("节点", "Node"), text("存储", "Storage"), text("节点实际挂载路径", "Node mount path"), text("角色", "Role"), text("状态", "Status"), text("原因", "Reason")]} rows={(data.bindings || []).map((item: Row) => [item.node_key, item.storage_key, item.mount_reference, item.role_scope, displayRowValue(lang, item.status), item.reason || "-"])} empty={text("暂无节点共享目录绑定", "No node shared-directory bindings")} text={text} /></InfoPanel>
+    <div className="data-summary"><strong>{text("当前登记", "Registered")}</strong> · {text("节点", "Nodes")} {data.nodes?.length || 0} · {text("存储", "Storage")} {data.storage?.length || 0} · {text("绑定", "Bindings")} {data.bindings?.length || 0} · {text("外部地址", "External endpoints")} {data.endpoints?.length || 0}</div>
+    <DataTable headers={[text("节点", "Node"), text("主机", "Host"), text("角色", "Roles"), text("验证", "Validation"), text("操作", "Action")]} rows={(data.nodes || []).map((item: Row) => [item.node_key, item.host_reference, Array.isArray(item.role_json) ? item.role_json.join(", ") : String(item.role_json || "-"), displayRowValue(lang, item.validation_state), <button className="small-button" disabled={busy} onClick={() => void validateResource("node", String(item.node_id))}>{text("验证可达性", "Validate reachability")}</button>])} empty={text("暂无受管节点", "No managed nodes")} text={text} />
+    <DataTable headers={[text("存储", "Storage"), text("类型", "Backend"), text("位置", "Location"), text("验证", "Validation"), text("操作", "Action")]} rows={(data.storage || []).map((item: Row) => [item.storage_key, displayRowValue(lang, item.backend_kind), item.location_ref, displayRowValue(lang, item.validation_state), <button className="small-button" disabled={busy} onClick={() => void validateResource("storage", String(item.storage_id))}>{text("验证可用性", "Validate availability")}</button>])} empty={text("暂无共享存储", "No shared storage")} text={text} />
+  </InfoPanel></div>;
+}
+
+function PlatformPoolGovernancePanel({
+  lang, text, onNotice,
+}: { lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void }) {
+  const [data, setData] = useState<Row>({ policy: {}, profiles: [], nodes: [], storage: [], bindings: [], endpoints: [], enhancements: [] });
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const [policy, nodes, storage, bindings, endpoints, enhancements] = await Promise.all([
+        api<Row>("/api/platform/portal-llm-policy"), api<Row>("/api/platform/managed-nodes"),
+        api<Row>("/api/platform/shared-storage"), api<Row>("/api/platform/node-storage-bindings"),
+        api<Row>("/api/platform/external-db-endpoints"), api<Row>("/api/platform/portal-enhancements"),
+      ]);
+      setData({ policy, profiles: policy.profiles || [], nodes: listPayload(nodes, ["items"]), storage: listPayload(storage, ["items"]), bindings: listPayload(bindings, ["items"]), endpoints: listPayload(endpoints, ["items"]), enhancements: listPayload(enhancements, ["items"]) });
+    } catch (error) { onNotice((error as Error).message); }
+  };
+  useEffect(() => { void load(); }, []);
+  const post = async (url: string, form: HTMLFormElement, message: string) => {
+    const values: Row = Object.fromEntries(new FormData(form).entries());
+    if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean);
+    setBusy(true);
+    try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(message); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const savePolicy = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const selected = (data.profiles || []).filter((item: Row) => form.get(`profile_${item.profile_id}`) === "on").map((item: Row) => String(item.profile_id));
+    setBusy(true);
+    try { await api("/api/platform/portal-llm-policy", { method: "PUT", body: JSON.stringify({ default_profile_id: String(form.get("default_profile_id") || ""), allowed_profile_ids: selected, expected_version: Number(data.policy?.policy?.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("Portal Agent Pool LLM 策略已保存", "Portal Agent Pool LLM policy saved")); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const rolesOf = (item: Row): string[] => {
+    if (Array.isArray(item.role_json)) return item.role_json.map(String).map((value) => value.toUpperCase());
+    try { return JSON.parse(String(item.role_json || "[]")).map((value: unknown) => String(value).toUpperCase()); } catch { return []; }
+  };
+  const nodesFor = (role: string) => (data.nodes || []).filter((item: Row) => rolesOf(item).includes(role));
+  const storageFor = (purpose: "AGENT_POOL_RUNTIME") => (data.storage || []).filter((item: Row) => String(item.storage_purpose || "").toUpperCase() === purpose);
+  const storageRegistration = () => {
+    return <form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/shared-storage", event.currentTarget, text("Agent Pool 共享存储已登记", "Agent Pool shared storage profile registered")); }}>
+      <strong>{text("Agent Pool 运行时共享目录", "Agent Pool runtime shared directory")}</strong>
+      <p className="cx-form-hint">{text("跨 Agent Pool 节点共享空闲 Agent 与运行时状态，避免不同时段访问到不同节点造成状态不一致。此目录不承载 Admin Agent 平台运行信息。", "Shares idle Agents and runtime state across Pool nodes so time-window changes do not create inconsistent instances. It does not store Admin Agent platform runtime information.")}</p>
+      <input type="hidden" name="storage_purpose" value="AGENT_POOL_RUNTIME" />
+      <input name="storage_key" placeholder={text("配置名称", "Profile name")} required />
+      <select name="backend_kind" defaultValue="LOCAL_PATH"><option value="LOCAL_PATH">{text("目录或挂载点", "Directory or mount point")}</option><option value="NFS">NFS</option><option value="OBJECT_STORAGE">{text("对象存储", "Object storage")}</option><option value="UNIFIED_STORAGE">{text("统一存储", "Unified storage")}</option></select>
+      <input name="location_ref" placeholder={text("路径或位置", "Path or location")} required />
+      <input name="reason" placeholder={text("配置原因", "Configuration reason")} required />
+      <button className="small-button" disabled={busy}><Check size={14} />{text("登记共享目录", "Register shared directory")}</button>
+    </form>;
+  };
+  const bindingPanel = () => {
+    const role = "AGENT_POOL";
+    const nodes = nodesFor(role);
+    const storage = storageFor("AGENT_POOL_RUNTIME");
+    return <InfoPanel title={text("Agent Pool 运行时目录绑定", "Agent Pool runtime directory binding")} text={text}>
+      <p className="cx-form-hint">{text("将 Agent Pool 节点绑定到专用运行时共享目录，用于跨节点复用和一致性控制。该目录不承载 Admin Agent 平台运行信息。", "Bind Agent Pool nodes to their dedicated runtime shared directory for cross-node reuse and consistency. This directory does not store Admin Agent platform runtime information.")}</p>
+      <form className="configuration-form compact-configuration-form node-storage-binding-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/node-storage-bindings", event.currentTarget, text("共享目录绑定已保存", "Shared-directory binding saved")); }}>
+        <ConfigField label={text("运行节点", "Runtime node")} hint={nodes.length ? text("只显示已登记为对应角色的节点。", "Only nodes registered for this role are shown.") : text("暂无可选节点，请先登记并在节点角色中包含对应角色。", "No selectable node. Register a node with this role first.")}><select name="node_id" required><option value="">{text("请选择节点", "Select node")}</option>{nodes.map((item: Row) => <option key={String(item.node_id)} value={String(item.node_id)}>{String(item.node_key)} · {String(item.host_reference)}</option>)}</select></ConfigField>
+        <ConfigField label={text("专用共享存储", "Dedicated shared storage")} hint={storage.length ? text("只显示本能力登记的共享存储。", "Only storage registered for this capability is shown.") : text("暂无可选存储，请先登记本能力的共享目录。", "No selectable storage. Register a directory for this capability first.")}><select name="storage_id" required><option value="">{text("请选择存储", "Select storage")}</option>{storage.map((item: Row) => <option key={String(item.storage_id)} value={String(item.storage_id)}>{String(item.storage_key)} · {displayRowValue(lang, item.backend_kind)}</option>)}</select></ConfigField>
+<ConfigField label={text("节点实际挂载路径", "Node mount path")} hint={text("填写该运行节点上实际可访问的目录或挂载点。共享存储登记的是统一位置，不同节点的本地路径可能不同；平台不会自动执行挂载。", "Enter the directory or mount point visible on this runtime node. The storage profile is the shared logical location; each node may expose a different local path. The platform does not mount it automatically.")}><input name="mount_reference" required /></ConfigField>
+        <input type="hidden" name="role_scope" value={role} />
+        <ConfigField label={text("绑定原因", "Binding reason")} hint={text("必填并写入审计。", "Required and audited.")}><input name="reason" required /></ConfigField>
+        <ConfigField label={text("操作", "Action")} hint={text("绑定只记录运行节点和存储关系，不扩大数据授权。", "Binding records a runtime-node/storage relation; it does not expand data authorization.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("绑定目录", "Bind directory")}</button></ConfigField>
+      </form>
+      <DataTable headers={[text("节点", "Node"), text("存储", "Storage"), text("挂载引用", "Mount reference"), text("状态", "Status")]} rows={(data.bindings || []).filter((item: Row) => String(item.role_scope || "").toUpperCase() === role).map((item: Row) => [item.node_key, item.storage_key, item.mount_reference, displayRowValue(lang, item.status)])} empty={text("暂无绑定", "No bindings")} text={text} />
+    </InfoPanel>;
+  };
+  const allowed = new Set<string>(data.policy?.allowed_profile_ids || []);
+  return <div className="agent-pool-page"><InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
+    <p className="cx-form-hint">{text("此页面只配置 Agent Pool 的模型、节点、运行时共享目录、外部 Agent 地址和增强模板。Agent Pool 节点由受管运行时部署后自动采集；Admin Agent 的平台运行信息共享目录位于平台配置页面。", "This view configures only Agent Pool models, nodes, runtime shared storage, external Agent endpoints, and enhancements. Agent Pool nodes are collected automatically after managed-runtime deployment; Admin Agent platform runtime-information storage is configured under Platform configuration.")}</p>
+    <form className="pool-config-block pool-llm-policy-form" onSubmit={savePolicy}><strong>{text("Portal Agent Pool LLM 允许列表", "Portal Agent Pool LLM allowlist")}</strong><p className="cx-form-hint">{text("Portal 只能切换到下方允许的 LLM。默认配置必须在允许列表中。", "Portal can switch only to LLMs allowed below. The default must be allowlisted.")}</p><div className="pool-llm-allowlist">{(data.profiles || []).length ? (data.profiles || []).map((item: Row) => <label className="checkbox-field" key={String(item.profile_id)}><input type="checkbox" name={`profile_${item.profile_id}`} defaultChecked={allowed.has(String(item.profile_id))} />{String(item.profile_key)} · {String(item.model_id)} · {String(item.health_state || "UNKNOWN")}</label>) : <p className="cx-form-hint">{text("请先在部署与模型中配置并测试 LLM。", "Configure and test an LLM in Deployment & models first.")}</p>}</div><div className="pool-policy-fields"><ConfigField label={text("默认 LLM", "Default LLM")} hint={text("只能选择已允许的配置。", "Choose an allowlisted profile.")}><select name="default_profile_id" defaultValue={String(data.policy?.policy?.default_profile_id || "")} required><option value="">{text("请选择", "Select")}</option>{(data.profiles || []).map((item: Row) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select></ConfigField><ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后立即应用。", "Applied after saving.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></ConfigField></div></form>
+    <form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("Agent Pool 节点已登记", "Agent Pool node registered")); }}><strong>{text("Agent Pool 受管节点登记", "Agent Pool managed node registration")}</strong><p className="cx-form-hint">{text("这里只登记 Agent Pool 节点；Admin Agent 节点和目录在平台配置页面管理。", "Only Agent Pool nodes are registered here; Admin Agent nodes and storage are managed under Platform configuration.")}</p><input name="node_key" placeholder={text("节点名称", "Node name")} required /><input name="host_reference" placeholder={text("主机或 IP", "Host or IP")} required /><input name="os_user" placeholder={text("操作系统用户", "OS user")} /><input type="hidden" name="roles" value="AGENT_POOL" /><select name="trust_mode" defaultValue="MUTUAL_TRUST"><option value="MUTUAL_TRUST">{text("SSH 互信", "SSH mutual trust")}</option><option value="ONE_USE_PASSWORD">{text("一次性密码验证", "One-use password")}</option></select><input name="failure_domain" placeholder={text("故障域", "Failure domain")} /><input name="reason" placeholder={text("登记原因", "Registration reason")} required /><button className="small-button" disabled={busy}>{text("登记 Pool 节点", "Register Pool node")}</button></form>
+    <div className="pool-config-stack"><InfoPanel title={text("Agent Pool 共享存储登记", "Agent Pool shared storage registration")} text={text}><div className="pool-config-stack">{storageRegistration()}</div></InfoPanel></div>
+    {bindingPanel()}
+    <div className="data-summary"><strong>{text("当前登记", "Registered")}</strong> · {text("Pool 节点", "Pool nodes")} {nodesFor("AGENT_POOL").length} · {text("Agent Pool 存储", "Agent Pool storage")} {storageFor("AGENT_POOL_RUNTIME").length} · {text("绑定", "Bindings")} {data.bindings?.filter((item: Row) => String(item.role_scope || "").toUpperCase() === "AGENT_POOL").length || 0}</div>
+  </InfoPanel></div>;
 }
 
 function ExternalRegistrationPolicyPanel({
@@ -1235,16 +1399,48 @@ function ExternalRegistrationPolicyPanel({
   </InfoPanel>;
 }
 
-function PlatformOperationsPage({
+function AdminAgentStoragePanel({
   lang, text, onNotice,
+}: { lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void }) {
+  const [nodes, setNodes] = useState<Row[]>([]);
+  const [storage, setStorage] = useState<Row[]>([]);
+  const [bindings, setBindings] = useState<Row[]>([]);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const [nodeResult, storageResult, bindingResult] = await Promise.all([api<Row>("/api/platform/managed-nodes"), api<Row>("/api/platform/shared-storage"), api<Row>("/api/platform/node-storage-bindings")]);
+      setNodes(listPayload(nodeResult, ["items"])); setStorage(listPayload(storageResult, ["items"])); setBindings(listPayload(bindingResult, ["items"]));
+    } catch (error) { onNotice((error as Error).message); }
+  };
+  useEffect(() => { void load(); }, []);
+  const post = async (url: string, form: HTMLFormElement, message: string) => {
+    const values: Row = Object.fromEntries(new FormData(form).entries());
+    if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean);
+    setBusy(true);
+    try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(message); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const adminNodes = nodes.filter((item) => String(item.role_json || "").toUpperCase().includes("ADMIN_AGENT"));
+  const adminStorage = storage.filter((item) => String(item.storage_purpose || "ADMIN_RUNTIME").toUpperCase() === "ADMIN_RUNTIME");
+  return <InfoPanel title={text("Admin Agent 平台运行信息共享目录", "Admin Agent platform runtime-information shared directory")} text={text}>
+    <p className="cx-form-hint">{text("这是平台管理能力的共享存储配置，不属于 Agent Pool。用于保存 Admin Agent 的运行状态、协作信息和恢复所需文件。运行节点由平台启动或 Admin Agent 部署自动采集，不需要手工登记。它不授予数据库、Skill、Tool、频道或业务数据权限。", "This shared storage belongs to platform management, not Agent Pool. It stores Admin Agent runtime state, coordination information, and recovery files. Runtime nodes are collected automatically at platform startup or Admin Agent deployment; manual registration is not required. It grants no database, Skill, Tool, Channel, or business-data permission.")}</p>
+    <div className="pool-config-stack"><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("Admin Agent 受管节点已登记", "Admin Agent managed node registered")); }}><strong>{text("Admin Agent 运行节点登记", "Admin Agent runtime node registration")}</strong><p className="cx-form-hint">{text("只登记用于运行平台管理 Agent 的节点。", "Register only nodes used by platform-management Agents.")}</p><input name="node_key" placeholder={text("节点名称", "Node name")} required /><input name="host_reference" placeholder={text("主机或 IP", "Host or IP")} required /><input name="os_user" placeholder={text("操作系统用户", "OS user")} /><input type="hidden" name="roles" value="ADMIN_AGENT" /><select name="trust_mode" defaultValue="MUTUAL_TRUST"><option value="MUTUAL_TRUST">{text("SSH 互信", "SSH mutual trust")}</option><option value="ONE_USE_PASSWORD">{text("一次性密码验证", "One-use password")}</option></select><input name="failure_domain" placeholder={text("故障域", "Failure domain")} /><input name="reason" placeholder={text("登记原因", "Registration reason")} required /><button className="small-button" disabled={busy}>{text("登记 Admin Agent 节点", "Register Admin Agent node")}</button></form><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/shared-storage", event.currentTarget, text("Admin Agent 共享目录已登记", "Admin Agent shared directory registered")); }}><strong>{text("Admin Agent 运行信息共享目录登记", "Register Admin Agent runtime-information directory")}</strong><p className="cx-form-hint">{text("可使用本地目录、挂载点、NFS、对象存储或统一存储适配器。", "Supports a local directory, mount point, NFS, object storage, or unified-storage adapter.")}</p><input type="hidden" name="storage_purpose" value="ADMIN_RUNTIME" /><input name="storage_key" placeholder={text("配置名称", "Profile name")} required /><select name="backend_kind" defaultValue="LOCAL_PATH"><option value="LOCAL_PATH">{text("目录或挂载点", "Directory or mount point")}</option><option value="NFS">NFS</option><option value="OBJECT_STORAGE">{text("对象存储", "Object storage")}</option><option value="UNIFIED_STORAGE">{text("统一存储", "Unified storage")}</option></select><input name="location_ref" placeholder={text("路径或位置", "Path or location")} required /><input name="reason" placeholder={text("配置原因", "Configuration reason")} required /><button className="small-button" disabled={busy}>{text("登记共享目录", "Register shared directory")}</button></form></div>
+    <form className="configuration-form compact-configuration-form node-storage-binding-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/node-storage-bindings", event.currentTarget, text("Admin Agent 运行信息目录绑定已保存", "Admin Agent runtime-information binding saved")); }}><ConfigField label={text("Admin Agent 运行节点", "Admin Agent runtime node")} hint={adminNodes.length ? text("只显示 Admin Agent 节点。", "Only Admin Agent nodes are shown.") : text("暂无节点，请先登记 Admin Agent 运行节点。", "No node available; register an Admin Agent runtime node first.")}><select name="node_id" required><option value="">{text("请选择节点", "Select node")}</option>{adminNodes.map((item) => <option key={String(item.node_id)} value={String(item.node_id)}>{String(item.node_key)} · {String(item.host_reference)}</option>)}</select></ConfigField><ConfigField label={text("Admin Agent 共享目录", "Admin Agent shared directory")} hint={adminStorage.length ? text("只显示 Admin Agent 运行信息用途的存储。", "Only Admin Agent runtime-information storage is shown.") : text("暂无存储，请先登记 Admin Agent 共享目录。", "No storage available; register an Admin Agent directory first.")}><select name="storage_id" required><option value="">{text("请选择存储", "Select storage")}</option>{adminStorage.map((item) => <option key={String(item.storage_id)} value={String(item.storage_id)}>{String(item.storage_key)} · {displayRowValue(lang, item.backend_kind)}</option>)}</select></ConfigField><ConfigField label={text("节点实际挂载路径", "Node mount path")} hint={text("填写该运行节点上实际可访问的目录或挂载点。共享存储登记的是统一位置，不同节点的本地路径可能不同；平台不会自动执行挂载。", "Enter the directory or mount point visible on this runtime node. The storage profile is the shared logical location; each node may expose a different local path. The platform does not mount it automatically.")}><input name="mount_reference" required /></ConfigField><input type="hidden" name="role_scope" value="ADMIN_AGENT" /><ConfigField label={text("绑定原因", "Binding reason")} hint={text("必填并写入审计。", "Required and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("只绑定平台运行信息目录，不改变平台权限。", "Binds runtime-information storage only; it does not change platform permissions.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("绑定 Admin Agent 目录", "Bind Admin Agent directory")}</button></ConfigField></form>
+    <DataTable headers={[text("节点", "Node"), text("存储", "Storage"), text("挂载引用", "Mount reference"), text("状态", "Status")]} rows={bindings.filter((item) => String(item.role_scope || "").toUpperCase() === "ADMIN_AGENT").map((item) => [item.node_key, item.storage_key, item.mount_reference, displayRowValue(lang, item.status)])} empty={text("暂无 Admin Agent 目录绑定", "No Admin Agent directory binding")} text={text} />
+  </InfoPanel>;
+}
+
+function PlatformOperationsPage({
+  lang, text, onNotice, embedded,
 }: {
   lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void;
+  embedded?: boolean;
 }) {
   const [payload, setPayload] = useState<Row>({});
   const [enrollments, setEnrollments] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"overview" | "admission" | "upgrade" | "containment">("overview");
+  const [tab, setTab] = useState<"overview" | "admin-management" | "admission" | "upgrade" | "containment">("overview");
   const [path, setPath] = useState("PLATFORM_DEPLOYED");
   const [trustMode, setTrustMode] = useState("MUTUAL_TRUST");
   const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
@@ -1266,7 +1462,7 @@ function PlatformOperationsPage({
     event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true);
     try {
       await api("/api/platform/admin-enrollments", { method: "POST", body: JSON.stringify({
-        admission_path: path, node_id: String(data.get("node_id") || ""), public_key: String(data.get("public_key") || ""),
+        admission_path: path, node_id: String(data.get("node_id") || ""), public_key: path === "EXTERNAL_ADMIN" ? String(data.get("public_key") || "") : "",
         host_reference: path === "PLATFORM_DEPLOYED" ? String(data.get("host_reference") || "") : "",
         ssh_port: Number(data.get("ssh_port") || 22), os_user: path === "PLATFORM_DEPLOYED" ? String(data.get("os_user") || "") : "",
         deployment_target: path === "PLATFORM_DEPLOYED" ? String(data.get("deployment_target") || "") : "",
@@ -1275,7 +1471,7 @@ function PlatformOperationsPage({
         reason: String(data.get("reason") || ""),
       }) });
       event.currentTarget.reset(); setPath("PLATFORM_DEPLOYED"); setTrustMode("MUTUAL_TRUST"); await load();
-      onNotice(text("Admin Agent 候选已登记，等待受认证适配器完成 SSH 验证。密码仅在本次请求中使用，未写入数据库或审计。", "Admin Agent candidate recorded; an authenticated adapter must complete SSH verification. The password was used only for this request and was not persisted or audited."));
+      onNotice(text("Admin Agent 候选已登记；平台部署节点信息已自动采集并生成受管节点记录，等待受认证适配器完成 SSH 验证。密码仅在本次请求中使用，未写入数据库或审计。", "Admin Agent candidate recorded; deployment-node metadata was collected automatically and a managed-node record was created. An authenticated adapter must complete SSH verification. The password was used only for this request and was not persisted or audited."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const submitContainment = async (event: FormEvent<HTMLFormElement>) => {
@@ -1295,13 +1491,14 @@ function PlatformOperationsPage({
       onNotice(result.automation_state === "WAITING_FOR_TRUSTED_SIGNATURE" ? text("升级包已暂存，正等待受信任签名。", "Package staged and waiting for a trusted signature.") : text("升级包已校验，受控升级与 Skill 分发已自动编排。", "Package verified; controlled upgrade and Skill distribution were scheduled automatically."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const tabs: Array<[typeof tab, string, string]> = [["overview", "管理概览", "Management overview"], ["admission", "Admin Agent 接入", "Admin Agent admission"], ["upgrade", "升级与 Skill 分发", "Upgrade & Skill distribution"], ["containment", "紧急阻断", "Emergency containment"]];
-  return <section className="page-stack"><SectionHeading title={text("平台操作", "Platform operations")} subtitle={text("高权限管理操作独立于功能配置。所有接入、升级和阻断均为受保护操作，并保留数据库审计证据。", "Privileged operations are separate from Function Configuration. Admissions, upgrades, and containment are protected operations with database audit evidence.")} text={text} />
+  const tabs: Array<[typeof tab, string, string]> = [["overview", "运行概览", "Runtime overview"], ["admin-management", "Admin Agent 管理", "Admin Agent management"], ["admission", "Admin Agent 接入", "Admin Agent admission"], ["upgrade", "升级与 Skill 分发", "Upgrade & Skill distribution"], ["containment", "紧急阻断", "Emergency containment"]];
+  return <section className={embedded ? "page-stack platform-configuration-subpage" : "page-stack"}>{!embedded && <SectionHeading title={text("平台运行", "Platform operations")} subtitle={text("平台级接入、升级和阻断配置独立于能力开关。所有操作均受保护，并保留数据库审计证据。", "Platform admission, upgrade, and containment settings are separate from capability switches. Every operation is protected and retained as database audit evidence.")} text={text} />}
     <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     <ViewToggle value={tab} onChange={(value) => setTab(value as typeof tab)} options={tabs.map(([key, zh, en]) => [key, text(zh, en)])} />
     {loading ? <PageLoading text={text} /> : <>
       {tab === "overview" && <><InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}><p className="cx-form-hint">{text("仅管理员、平台管理智能体及经审批的 Admin Agent 可加入。聊天仅形成建议；变更必须转换为结构化操作并审计。", "Only administrators, platform management Agents, and approved Admin Agents may join. Chat produces advice only; changes must become structured audited operations.")}</p><div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, management.admin_group?.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong></InfoPanel></div><DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} /></InfoPanel></>}
-      {tab === "admission" && <><InfoPanel title={text("登记 Admin Agent 候选", "Register an Admin Agent candidate")} text={text}><p className="cx-form-hint">{text("平台部署会校验目标节点元数据。外部 Admin 使用独立的密钥/接入包路径，不接收基础设施凭证。", "Platform deployment verifies target metadata. External Admin uses a separate key/package path and never receives infrastructure credentials.")}</p><form className="configuration-form admin-admission-form" onSubmit={submitEnrollment}><ConfigField label={text("接入路径", "Admission path")} hint={text("选择后展示对应的安全字段。", "Shows the appropriate secure fields for the selected path.")}><select value={path} onChange={(event) => setPath(event.target.value)}><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select></ConfigField><ConfigField label={text("节点名称或 ID", "Node name or ID")} hint={text("用于成员、故障域和审计关联。", "Used for membership, failure-domain, and audit correlation.")}><input name="node_id" required /></ConfigField><ConfigField label={text("Admin 公钥", "Admin public key")} hint={text("只保存摘要，用于候选身份验证。", "Only a digest is stored for candidate identity verification.")}><textarea name="public_key" required /></ConfigField>{path === "PLATFORM_DEPLOYED" && <><ConfigField label={text("主机或 IP", "Host or IP")} hint={text("目标节点的可达地址。", "Reachable address of the target node.")}><input name="host_reference" required /></ConfigField><ConfigField label={text("SSH 端口", "SSH port")} hint={text("填写目标节点的 SSH 端口；留空时服务端按 22 处理。", "Enter the target SSH port; the server uses 22 when omitted.")}><input name="ssh_port" type="number" min="1" max="65535" /></ConfigField><ConfigField label={text("系统用户", "Operating-system user")} hint={text("用于部署与节点验证。", "Used for deployment and node verification.")}><input name="os_user" required /></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("受管运行时、虚拟机或客户适配器目标。", "Managed runtime, virtual machine, or customer-adapter target.")}><input name="deployment_target" required /></ConfigField><ConfigField label={text("SSH 验证方式", "SSH verification mode")} hint={text("互信不传密码；一次性密码只用于当前验证。", "Mutual trust sends no password; a one-use password is used only for this verification.")}><select value={trustMode} onChange={(event) => setTrustMode(event.target.value)}><option value="MUTUAL_TRUST">{text("已配置 SSH 互信", "SSH mutual trust configured")}</option><option value="ONE_USE_PASSWORD">{text("一次性 SSH 密码", "One-use SSH password")}</option></select></ConfigField>{trustMode === "ONE_USE_PASSWORD" && <ConfigField label={text("一次性 SSH 密码", "One-use SSH password")} hint={text("仅用于本次验证，提交后立即丢弃且永不存储。", "Used only for this verification, discarded after submission, and never stored.")}><input name="ssh_password" type="password" autoComplete="new-password" required /></ConfigField>}<ConfigField label={text("故障域", "Failure domain")} hint={text("用于避免高可用成员集中在同一故障域。", "Prevents high-availability members from concentrating in one failure domain.")}><input name="failure_domain" required /></ConfigField></>}<ConfigField label={text("接入原因", "Admission reason")} hint={text("必须说明新增管理节点的原因。", "Explain why this management node is being added.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("候选需经过身份验证、观察和批准后才加入投票组。", "The candidate must be verified, observed, and approved before joining the voting group.")} action><button className="primary-button" disabled={busy}><UserPlus size={15} />{text("登记候选", "Register candidate")}</button></ConfigField></form></InfoPanel><InfoPanel title={text("候选状态", "Candidate status")} text={text}><DataTable headers={[text("候选", "Candidate"), text("路径", "Path"), text("节点", "Node"), text("状态", "State")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status)])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} /></InfoPanel></>}
+      {tab === "admin-management" && <AdminAgentStoragePanel lang={lang} text={text} onNotice={onNotice} />}
+      {tab === "admission" && <><InfoPanel title={text("登记 Admin Agent 候选", "Register an Admin Agent candidate")} text={text}><p className="cx-form-hint">{text("平台部署由现有 Admin Agent 自动完成身份密钥生成、节点登记和接入验证；外部 Admin 使用独立的密钥/接入包路径，不接收基础设施凭证。", "Platform deployment uses the existing Admin Agent to generate identity material, register the node, and complete admission verification. External Admin uses a separate key/package path and never receives infrastructure credentials.")}</p><form className="configuration-form admin-admission-form" onSubmit={submitEnrollment}><ConfigField label={text("接入路径", "Admission path")} hint={text("选择后展示对应的安全字段。", "Shows the appropriate secure fields for the selected path.")}><select value={path} onChange={(event) => setPath(event.target.value)}><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select></ConfigField><ConfigField label={text("节点名称或 ID", "Node name or ID")} hint={text("用于成员、故障域和审计关联。", "Used for membership, failure-domain, and audit correlation.")}><input name="node_id" required /></ConfigField>{path === "EXTERNAL_ADMIN" && <ConfigField label={text("Admin Agent 身份公钥", "Admin Agent identity public key")} hint={text("外部 Admin 需要提供其身份公钥；不是服务器 SSH 主机公钥，也不是 API Key。平台只保存公钥摘要。", "External Admin must provide its identity public key. This is not the server SSH host key or an API key. The platform stores only its digest.")} multiline><textarea className="config-textarea" name="public_key" required /></ConfigField>}{path === "PLATFORM_DEPLOYED" && <><ConfigField label={text("主机或 IP", "Host or IP")} hint={text("目标节点的可达地址。", "Reachable address of the target node.")}><input name="host_reference" required /></ConfigField><ConfigField label={text("SSH 端口", "SSH port")} hint={text("填写目标节点的 SSH 端口；留空时服务端按 22 处理。", "Enter the target SSH port; the server uses 22 when omitted.")}><input name="ssh_port" type="number" min="1" max="65535" /></ConfigField><ConfigField label={text("系统用户", "Operating-system user")} hint={text("用于部署与节点验证。", "Used for deployment and node verification.")}><input name="os_user" required /></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("受管运行时、虚拟机或客户适配器目标。", "Managed runtime, virtual machine, or customer-adapter target.")}><input name="deployment_target" required /></ConfigField><ConfigField label={text("SSH 验证方式", "SSH verification mode")} hint={text("互信不传密码；一次性密码只用于当前验证。", "Mutual trust sends no password; a one-use password is used only for this verification.")}><select value={trustMode} onChange={(event) => setTrustMode(event.target.value)}><option value="MUTUAL_TRUST">{text("已配置 SSH 互信", "SSH mutual trust configured")}</option><option value="ONE_USE_PASSWORD">{text("一次性 SSH 密码", "One-use SSH password")}</option></select></ConfigField>{trustMode === "ONE_USE_PASSWORD" && <ConfigField label={text("一次性 SSH 密码", "One-use SSH password")} hint={text("仅用于本次验证，提交后立即丢弃且永不存储。", "Used only for this verification, discarded after submission, and never stored.")}><input name="ssh_password" type="password" autoComplete="new-password" required /></ConfigField>}<ConfigField label={text("故障域", "Failure domain")} hint={text("用于避免高可用成员集中在同一故障域。", "Prevents high-availability members from concentrating in one failure domain.")}><input name="failure_domain" required /></ConfigField></>}<ConfigField label={text("接入原因", "Admission reason")} hint={text("必须说明新增管理节点的原因。", "Explain why this management node is being added.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("候选需经过身份验证、观察和批准后才加入投票组。", "The candidate must be verified, observed, and approved before joining the voting group.")} action><button className="primary-button" disabled={busy}><UserPlus size={15} />{text("登记候选", "Register candidate")}</button></ConfigField></form></InfoPanel><InfoPanel title={text("候选状态", "Candidate status")} text={text}><DataTable headers={[text("候选", "Candidate"), text("路径", "Path"), text("节点", "Node"), text("状态", "State")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status)])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} /></InfoPanel></>}
       {tab === "upgrade" && <InfoPanel title={text("平台升级与 Skill 自动分发", "Platform upgrade and automatic Skill distribution")} text={text}><p className="cx-form-hint">{text("上传发布流程生成的平台版本 ZIP 包。服务端验证 manifest、摘要、签名、目标数据库、版本和企业版兼容性；通过后自动建立平台维护计划，并向受控智能体分发新版 Skill 通知。运行中的任务只会在安全点切换，不需要逐个智能体人工升级。", "Upload a platform release ZIP produced by the release pipeline. The service validates the manifest, digests, signature, target database, version, and Enterprise compatibility; it then automatically creates the platform maintenance plan and distributes new Skill notices to governed Agents. Running work switches only at a safe point, without per-Agent manual upgrades.")}</p><form className="configuration-form" onSubmit={uploadUpgrade}><ConfigField label={text("平台新版 ZIP 压缩包", "New platform release ZIP")} hint={text("只接受发布流程生成的平台安装包。", "Only accepts a platform installation package generated by the release pipeline.")}><input name="package" type="file" accept=".zip,application/zip" onChange={(event) => setUpgradeFile(event.currentTarget.files?.[0] || null)} required /></ConfigField><ConfigField label={text("升级原因", "Upgrade reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("平台不会执行 ZIP 中的任意脚本。", "The platform never executes arbitrary scripts from the ZIP.")} action><button className="primary-button" disabled={busy || !upgradeFile}><Upload size={15} />{text("上传并自动编排平台包", "Upload and schedule platform package")}</button></ConfigField></form><DataTable headers={[text("升级 ID", "Upgrade ID"), text("版本", "Version"), text("状态", "Status")]} rows={(management.upgrades || []).map((item: Row) => [item.upgrade_id, item.package_version, displayRowValue(lang, item.status)])} empty={text("暂无暂存升级包", "No staged upgrade package")} text={text} /></InfoPanel>}
       {tab === "containment" && <InfoPanel title={text("紧急阻断", "Emergency containment")} text={text}><p className="cx-form-hint">{text("先撤销平台授权和任务接收能力，再由受认证运行时或基础设施适配器确认进程级终止。该操作只影响指定实例，不扩大到其他节点。", "Platform authority and work acceptance are removed first. A trusted runtime or infrastructure adapter then confirms process termination. This affects only the specified instance and does not expand to other nodes.")}</p><form className="configuration-form containment-form" onSubmit={submitContainment}><ConfigField label={text("智能体 ID", "Agent ID")} hint={text("要隔离的生产智能体。", "Production Agent to isolate.")}><input name="agent_id" required /></ConfigField><ConfigField label={text("实例 ID", "Instance ID")} hint={text("仅影响指定运行实例。", "Limits containment to the specified runtime instance.")}><input name="instance_id" required /></ConfigField><ConfigField label={text("阻断动作", "Containment action")} hint={text("按风险选择排空、隔离或请求终止。", "Choose drain, quarantine, or termination based on risk.")}><select name="requested_state" defaultValue="DRAIN"><option value="DRAIN">{text("排空新任务", "Drain new work")}</option><option value="QUARANTINE">{text("隔离", "Quarantine")}</option><option value="TERMINATE">{text("请求终止", "Request termination")}</option><option value="INFRA_TERMINATE">{text("请求基础设施终止", "Request infrastructure termination")}</option></select></ConfigField><ConfigField label={text("阻断原因", "Containment reason")} hint={text("必须填写影响判断依据。", "Required impact rationale.")}><input name="reason" required /></ConfigField><ConfigField label={text("确认文本", "Confirmation text")} hint={text("输入 CONTAIN 以确认此受保护操作。", "Enter CONTAIN to confirm this protected operation.")}><input name="confirmation" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("操作和影响范围均写入审计。", "The operation and impact scope are written to audit.")} action><button className="small-button danger" disabled={busy}><StopCircle size={15} />{text("提交阻断", "Issue containment")}</button></ConfigField></form></InfoPanel>}
     </>}
@@ -1974,7 +2171,7 @@ const statusLabels: Record<string, [string, string]> = {
   ACTIVE: ["活动", "Active"],
   RUNNING: ["运行中", "Running"],
   WAITING: ["等待中", "Waiting"],
-  READY: ["待放行", "Ready"],
+  READY: ["已就绪", "Ready"],
   RELEASED: ["已放行", "Released"],
   REJECTED: ["已拒绝", "Rejected"],
   PROPOSED: ["待审批", "Proposed"],
@@ -4546,7 +4743,7 @@ function MonitorPage({
   return (
     <section>
       <SectionHeading
-        title={text("运行概览", "Runtime overview")}
+        title={text("Admin Agent 管理", "Admin Agent management")}
         subtitle={text(
           "统一观察身份、运行状态和数据库持久化边界。当前实例固定使用 Production 基线，稳定能力由版本发布与数据库服务端门禁共同控制。",
           "Observe identity, runtime state, and database persistence boundaries. This installation is fixed to the Production baseline; stable capabilities are jointly controlled by the release and database-side gates.",
@@ -5035,7 +5232,7 @@ function AgentsPage({
   ];
   const externalRegistration = <>
     <InfoPanel title={text("外部注册策略", "External registration policy")} text={text}>
-      <div className="external-registration-status"><span className="cx-form-hint">{text("注册策略", "Registration policy")}</span><span className={`compact-status ${String(externalPolicy.state || "").toLowerCase()}`}>{externalPolicy.state ? displayRowValue(lang, externalPolicy.state) : text("读取中", "Loading")}</span><p className="cx-form-hint">{text("这里只显示新外部智能体的注册策略，不显示或预填运行时。创建令牌时必须填写 Agent 名称；既有智能体不会被删除。配置位置：功能配置 → 外部智能体注册。", "This shows only the registration policy for new external Agents; runtime is neither shown nor prefilled. An Agent name is required when creating a Token; existing Agents are not deleted. Configure it in Capability configuration → External Agent registration.")}</p></div>
+      <div className="external-registration-status"><span className="cx-form-hint">{text("注册策略", "Registration policy")}</span><span className={`compact-status ${String(externalPolicy.state || "").toLowerCase()}`}>{externalPolicy.state ? displayRowValue(lang, externalPolicy.state) : text("读取中", "Loading")}</span><p className="cx-form-hint">{text("这里只显示新外部智能体的注册策略，不显示或预填运行时。创建令牌时必须填写 Agent 名称；既有智能体不会被删除。配置位置：平台配置 → 能力与策略 → 外部智能体注册。", "This shows only the registration policy for new external Agents; runtime is neither shown nor prefilled. An Agent name is required when creating a Token; existing Agents are not deleted. Configure it in Platform configuration → Capabilities & policies → External Agent registration.")}</p></div>
     </InfoPanel>
     <InfoPanel title={text("生成注册令牌", "Create Enrollment Token")} text={text}>
       <p className="cx-form-hint">{text("外部智能体必须携带一次性令牌通过 Skill-first 注册。令牌只显示一次，并确定智能体归属、环境和风险范围。", "An external Agent must present a one-time Token for Skill-first registration. The Token is shown once and fixes ownership, environment, and risk scope.")}</p>
@@ -5049,7 +5246,7 @@ function AgentsPage({
       {token && <div className="one-time-token"><b>{text("请立即保存令牌", "Save this Token now")}</b><code>{token.token}</code><small>{text("平台只保存摘要，不会再次显示明文。", "Only a digest is stored; plaintext will not be shown again.")}</small></div>}
     </InfoPanel>
       <InfoPanel title={text("外部注册边界", "External registration boundary")} text={text}>
-      <p>{text("外部注册不会直接获得平台管理权限。注册后仍需经过身份、归属、安全域、Skill、Tool 和审批策略检查。管理员可以在功能配置中关闭新的外部注册。", "External registration never grants platform-management authority. Identity, ownership, Security Domain, Skill, Tool, and approval policies are still checked after registration. Administrators can disable new external registration in Capability configuration.")}</p>
+      <p>{text("外部注册不会直接获得平台管理权限。注册后仍需经过身份、归属、安全域、Skill、Tool 和审批策略检查。管理员可以在平台配置的能力与策略中关闭新的外部注册。", "External registration never grants platform-management authority. Identity, ownership, Security Domain, Skill, Tool, and approval policies are still checked after registration. Administrators can disable new external registration under Platform configuration → Capabilities & policies.")}</p>
     </InfoPanel>
     <InfoPanel title={text("注册历史", "Enrollment history")} text={text}>
       <DataTable headers={[text("令牌记录", "Grant"), text("智能体名称", "Agent name"), text("环境", "Environment"), text("使用次数", "Usage"), text("状态", "Status")]} rows={grants.map((item) => [item.grant_id, item.agent_name || "-", displayRowValue(lang, item.environment), `${item.used_count || 0}/${item.max_uses || 1}`, displayRowValue(lang, item.status)])} empty={text("暂无外部注册记录", "No external registration records")} text={text} />

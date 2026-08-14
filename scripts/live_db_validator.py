@@ -175,6 +175,24 @@ V442_MIGRATION_SCRIPTS = V441_MIGRATION_SCRIPTS + (
 V443_MIGRATION_SCRIPTS = V442_MIGRATION_SCRIPTS + (
     "39_v4_4_3_security_domain_binding.sql",
 )
+V444_MIGRATION_SCRIPTS = V443_MIGRATION_SCRIPTS + (
+    "40_v4_4_4_agent_pool_cloud.sql",
+    "41_v4_4_4_node_storage_binding.sql",
+    "42_v4_4_4_storage_purpose.sql",
+)
+V444_AGENT_POOL_TABLES = (
+    "CX_PORTAL_LLM_POLICIES", "CX_PORTAL_LLM_ALLOWLIST", "CX_PLATFORM_ADMIN_COMMANDS",
+    "CX_MANAGED_NODES", "CX_SHARED_STORAGE_PROFILES", "CX_EXTERNAL_DB_ENDPOINTS",
+)
+V444_AGENT_POOL_REQUIRED_COLUMNS = {
+    "CX_PORTAL_LLM_POLICIES": frozenset({"POLICY_ID", "DEFAULT_PROFILE_ID", "VERSION"}),
+    "CX_PORTAL_LLM_ALLOWLIST": frozenset({"POLICY_ID", "PROFILE_ID", "STATUS"}),
+    "CX_PLATFORM_ADMIN_COMMANDS": frozenset({"COMMAND_ID", "COMMAND_TYPE", "STATUS", "EXPIRES_AT", "REASON"}),
+    "CX_MANAGED_NODES": frozenset({"NODE_ID", "NODE_KEY", "HOST_REFERENCE", "TRUST_MODE", "VALIDATION_STATE"}),
+    "CX_SHARED_STORAGE_PROFILES": frozenset({"STORAGE_ID", "STORAGE_KEY", "BACKEND_KIND", "LOCATION_REF", "VALIDATION_STATE"}),
+    "CX_MANAGED_NODE_STORAGE_BINDINGS": frozenset({"BINDING_ID", "NODE_ID", "STORAGE_ID", "MOUNT_REFERENCE", "ROLE_SCOPE", "STATUS", "REASON"}),
+    "CX_EXTERNAL_DB_ENDPOINTS": frozenset({"ENDPOINT_ID", "ENDPOINT_KEY", "HOST_REFERENCE", "PORT", "TLS_REQUIRED", "STATUS"}),
+}
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
     "CX_LLM_PROVIDER_PROFILES", "CX_DEPLOYMENT_TARGETS",
@@ -1197,6 +1215,28 @@ def validate_v443_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v444_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    base = validate_v443_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("40_v4_4_4_agent_pool_cloud.sql")
+    raw_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in selected.values()
+        if path.is_file() and path.name in {"40_v4_4_4_agent_pool_cloud.sql", "41_v4_4_4_node_storage_binding.sql", "42_v4_4_4_storage_purpose.sql"}
+    )
+    source = _normalized_marker_text(raw_source)
+    control = {
+        "scripts_required": list(V444_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V444_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "tables_missing": [name for name in V444_AGENT_POOL_TABLES if name not in source],
+        "template_keys_present": all(key in raw_source for key in ("CODE_PLAN", "CODE_PROGRAM", "CODE_REVIEW", "OFFICE_TEXT", "PPT_DESIGN")),
+        "no_reusable_ssh_password": "SSH_PASSWORD" not in source and "PASSWORD" not in source,
+    }
+    control["passed"] = not control["scripts_missing"] and not control["tables_missing"] and control["template_keys_present"] and control["no_reusable_ssh_password"]
+    return {"database": database, "v443": base, "v444_agent_pool": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1250,9 +1290,9 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
     for table in tuple(dict.fromkeys(
         V43_REQUIRED_TABLES + V434_COMPLIANCE_TABLES + V435_PLATFORM_TABLES
         + V436_NATIVE_AGENT_TABLES + V437_BOOTSTRAP_TABLES + tuple(V437_BOOTSTRAP_REQUIRED_COLUMNS)
-        + V440_SDD_TABLES + V441_ADMIN_HA_TABLES + V442_GRAPH_OPERATIONS_TABLES + V443_SECURITY_DOMAIN_TABLES
+        + V440_SDD_TABLES + V441_ADMIN_HA_TABLES + V442_GRAPH_OPERATIONS_TABLES + V443_SECURITY_DOMAIN_TABLES + V444_AGENT_POOL_TABLES
         + tuple(V440_SDD_REQUIRED_COLUMNS) + tuple(V441_ADMIN_HA_REQUIRED_COLUMNS)
-        + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
+        + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS) + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1337,6 +1377,7 @@ class ProbeResult:
     v437_bootstrap_embedding_contract: dict[str, Any] = field(default_factory=dict)
     v442_graph_operations_contract: dict[str, Any] = field(default_factory=dict)
     v443_security_domain_binding_contract: dict[str, Any] = field(default_factory=dict)
+    v444_agent_pool_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1415,6 +1456,17 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     result.v443_security_domain_binding_contract["passed"] = not any((
         result.v443_security_domain_binding_contract["tables_missing"],
         result.v443_security_domain_binding_contract["columns_missing"],
+    ))
+    result.v444_agent_pool_contract = {
+        "tables_missing": sorted(set(V444_AGENT_POOL_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V444_AGENT_POOL_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v444_agent_pool_contract["passed"] = not any((
+        result.v444_agent_pool_contract["tables_missing"], result.v444_agent_pool_contract["columns_missing"],
     ))
 
 
@@ -1711,11 +1763,14 @@ def main() -> int:
     requires_v440 = target_version.startswith("4.4.")
     requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3"))
     requires_v442 = target_version.startswith(("4.4.2", "4.4.3"))
-    requires_v443 = target_version.startswith("4.4.3")
+    requires_v443 = target_version.startswith(("4.4.3", "4.4.4"))
+    requires_v444 = target_version.startswith("4.4.4")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v443:
+            if requires_v444:
+                migration_scripts, validator = V444_MIGRATION_SCRIPTS, validate_v444_static_contract
+            elif requires_v443:
                 migration_scripts, validator = V443_MIGRATION_SCRIPTS, validate_v443_static_contract
             elif requires_v442:
                 migration_scripts, validator = V442_MIGRATION_SCRIPTS, validate_v442_static_contract
@@ -1802,6 +1857,7 @@ def main() -> int:
                 and (not requires_v437 or result.v437_bootstrap_embedding_contract.get("passed") is True)
                 and (not requires_v442 or result.v442_graph_operations_contract.get("passed") is True)
                 and (not requires_v443 or result.v443_security_domain_binding_contract.get("passed") is True)
+                and (not requires_v444 or result.v444_agent_pool_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

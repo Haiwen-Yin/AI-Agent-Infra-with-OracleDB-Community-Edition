@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.3
+# Security - AI Agent Infra with DB v4.4.4
 
 ## v4.4.3 Security Domain Boundary
 
@@ -580,3 +580,18 @@ fences only Portal assignments and Agent instances recorded with the local node
 identity. Other nodes in the same Admin Agent collaboration group retain their
 leases. Claimed deliveries from the local node return to `PENDING` for bounded
 reclaim rather than remaining invisibly stuck.
+
+### v4.4.4 Agent Pool Endpoint and Administration Command Boundaries
+
+External database endpoint discovery is bound to the registered Agent's active
+Enrollment Grant. The grant policy snapshot carries only the endpoint
+reference and Security Domain reference; it never carries a database password
+or API key. Expired, revoked, or unbound grants fall back to the initialization
+endpoint, and repeated discovery requests are rate limited per Agent identity.
+
+The protected Administration Channel accepts typed `/platform` commands only
+when a human administrator explicitly mentions a management Agent. Read-only
+commands return credential-free control-plane summaries. Mutating commands are
+converted to Action Cards and require the existing separated approval path.
+Neither ordinary prose, prompts, Skills, Tools, nor an LLM response can execute
+a database mutation.
