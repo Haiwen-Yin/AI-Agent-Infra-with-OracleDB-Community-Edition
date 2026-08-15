@@ -1373,6 +1373,13 @@ def _v444_script_names(database: str, config_path: Path, edition: str) -> list[s
         names.append("41_v4_4_4_node_storage_binding.sql")
     if "42_v4_4_4_storage_purpose.sql" not in names:
         names.append("42_v4_4_4_storage_purpose.sql")
+    # v4.4.4 has an additive host-onboarding step. Keep it in the same
+    # versioned chain so an established v4.4.4 baseline receives it through
+    # the per-step journal rather than requiring a fictitious patch release.
+    if "43_v4_4_4_agent_pool_node_onboarding.sql" not in names:
+        names.append("43_v4_4_4_agent_pool_node_onboarding.sql")
+    if "44_v4_4_4_managed_node_local_info_path.sql" not in names:
+        names.append("44_v4_4_4_managed_node_local_info_path.sql")
     return names
 
 

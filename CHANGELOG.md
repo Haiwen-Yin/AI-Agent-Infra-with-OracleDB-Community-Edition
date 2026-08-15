@@ -10,6 +10,13 @@
 - Moved Agent Pool and cloud-environment controls to a dedicated Dashboard
   configuration page and added audited managed-node/shared-storage bindings
   for Admin Agent runtime directories.
+- Completed Agent Pool Host onboarding with bounded reachability verification,
+  one-time bootstrap receipt, dedicated runtime-storage binding, administrator
+  activation, and authenticated heartbeat. Raw bootstrap tokens, SSH
+  passwords, database keys, and private keys are never persisted.
+- Moved Agent Pool Configuration under Platform Operations after Admin Agent
+  admission. MaaS, SaaS, and virtualization stay explicit deployment-adapter
+  boundaries.
 
 ## v4.4.3 - 2026-08-13
 

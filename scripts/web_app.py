@@ -334,9 +334,12 @@ def _bootstrap_managed_node() -> None:
     """Record this platform runtime as an Admin Agent node automatically."""
     try:
         host = os.environ.get("CX_NODE_HOST", "").strip() or agent_gateway_api.local_node_id().split(":", 1)[0]
+        module_dir = Path(__file__).resolve().parent
+        deployment_dir = module_dir.parent if module_dir.name == "scripts" else module_dir
         platform_agent_pool.ensure_managed_node(
             node_key=DEFAULT_NODE_ID, host_reference=host, roles=["ADMIN_AGENT"],
-            actor="SYSTEM_BOOTSTRAP", reason="Platform startup collected the local runtime node metadata",
+            actor="SYSTEM_BOOTSTRAP", agent_info_path=str(deployment_dir),
+            reason="Platform startup collected the local runtime node metadata",
         )
     except Exception:
         logger.info("Managed node discovery is pending migration", exc_info=True)
@@ -1170,6 +1173,10 @@ class LLMProviderProfileBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class RetirementBody(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class PortalLLMPolicyBody(BaseModel):
     default_profile_id: str = Field(min_length=1, max_length=128)
     allowed_profile_ids: list[str] = Field(min_length=1, max_length=100)
@@ -1194,6 +1201,7 @@ class ManagedNodeBody(BaseModel):
     roles: list[str] = Field(default_factory=list, max_length=8)
     failure_domain: str = Field(default="", max_length=128)
     trust_mode: str = Field(default="MUTUAL_TRUST", max_length=32)
+    agent_info_path: str = Field(default="", max_length=512)
     reason: str = Field(min_length=3, max_length=2000)
 
 
@@ -1211,6 +1219,29 @@ class NodeStorageBindingBody(BaseModel):
     mount_reference: str = Field(min_length=1, max_length=512)
     role_scope: str = Field(default="ADMIN_AGENT", min_length=1, max_length=64)
     reason: str = Field(min_length=3, max_length=2000)
+
+
+class AgentPoolNodeOnboardingBody(BaseModel):
+    node_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+    expires_seconds: int = Field(default=1800, ge=300, le=86400)
+
+
+class AgentPoolNodeActivationBody(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class AgentPoolNodeCheckinBody(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    runtime_version: str = Field(min_length=1, max_length=128)
+    hostname: str = Field(min_length=1, max_length=128)
+    shared_path: str = Field(default="", max_length=512)
+    agent_info_path: str = Field(default="", max_length=512)
+
+
+class AgentPoolNodeHeartbeatBody(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    runtime_version: str = Field(default="unknown", max_length=128)
 
 
 class ExternalEndpointBody(BaseModel):
@@ -1351,6 +1382,7 @@ class AdminEnrollmentBody(BaseModel):
     ssh_trust_mode: str = Field(default="MUTUAL_TRUST", max_length=32)
     ssh_password: str = Field(default="", max_length=2048)
     failure_domain: str = Field(default="", max_length=128)
+    agent_info_path: str = Field(default="", max_length=512)
     reason: str = Field(min_length=3, max_length=2000)
     package_digest: str = Field(default="", max_length=128)
 
@@ -2052,7 +2084,7 @@ def platform_admin_enrollment(
             host_reference=body.host_reference, ssh_port=body.ssh_port,
             os_user=body.os_user, deployment_target=body.deployment_target,
             ssh_trust_mode=body.ssh_trust_mode, ssh_password=body.ssh_password,
-            failure_domain=body.failure_domain,
+            failure_domain=body.failure_domain, agent_info_path=body.agent_info_path,
         )
     except (admin_management.ManagementError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2518,6 +2550,14 @@ def llm_provider_profile_probe(
         raise _identity_http_error(exc, "LLM Provider draft probe failed", identity_status=503) from exc
 
 
+@app.delete("/api/llm-provider-profiles/{profile_id}")
+def llm_provider_profile_retire(profile_id: str, body: RetirementBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return native_agent_api.retire_llm_profile(str(session["principal_id"]), profile_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "LLM Provider Profile could not be retired") from exc
+
+
 @app.get("/api/platform/portal-llm-policy")
 def portal_llm_policy(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
     try:
@@ -2579,6 +2619,58 @@ def managed_node_validate(node_id: str, session: Dict[str, Any] = Depends(requir
     try:
         return platform_agent_pool.validate_node(str(session["principal_id"]), node_id)
     except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/platform/managed-nodes/{node_id}")
+def managed_node_retire(node_id: str, body: RetirementBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.retire_node(str(session["principal_id"]), node_id, body.reason)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/agent-pool/onboardings")
+def agent_pool_node_onboardings(limit: int = 100, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return {"items": platform_agent_pool.list_node_onboardings(str(session["principal_id"]), limit)}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/agent-pool/onboardings")
+def agent_pool_node_onboarding_create(body: AgentPoolNodeOnboardingBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.create_node_onboarding(str(session["principal_id"]), body.node_id, body.reason, body.expires_seconds)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/agent-pool/onboardings/{onboarding_id}/activate")
+def agent_pool_node_onboarding_activate(onboarding_id: str, body: AgentPoolNodeActivationBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.activate_node_onboarding(str(session["principal_id"]), onboarding_id, body.reason)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/agent-pool/node-onboardings/{onboarding_id}/check-in")
+def agent_pool_node_onboarding_checkin(onboarding_id: str, body: AgentPoolNodeCheckinBody) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.node_onboarding_checkin(onboarding_id, body.token, body.runtime_version, body.hostname, body.shared_path, body.agent_info_path)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Agent Pool node check-in was rejected") from exc
+    except platform_agent_pool.AgentPoolError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/agent-pool/node-onboardings/{onboarding_id}/heartbeat")
+def agent_pool_node_onboarding_heartbeat(onboarding_id: str, body: AgentPoolNodeHeartbeatBody) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.node_onboarding_heartbeat(onboarding_id, body.token, body.runtime_version)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Agent Pool node heartbeat was rejected") from exc
+    except platform_agent_pool.AgentPoolError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -4227,7 +4319,15 @@ def action_cards(channel_id: str, session: Dict[str, Any] = Depends(require_acti
 @app.post("/api/actions/{action_id}/decision")
 def action_decision(action_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("channels.actions.decide"))) -> Dict[str, Any]:
     try:
-        changed = identity_api.decide_action_card(str(session["principal_id"]), action_id, body.decision, body.reason)
+        actor = str(session["principal_id"])
+        changed = identity_api.decide_action_card(actor, action_id, body.decision, body.reason)
+        if changed and str(body.decision or "").upper() in {"CONFIRM", "APPROVE", "RELEASE"}:
+            action = {str(k).lower(): v for k, v in dict(connection.execute_query_one("SELECT ACTION_TYPE,PAYLOAD_JSON FROM CX_ACTION_CARDS WHERE ACTION_ID=:id", {"id": action_id}) or {}).items()}
+            if str(action.get("action_type") or "").upper() == "PLATFORM_ADMIN_COMMAND":
+                payload = json.loads(str(action.get("payload_json") or "{}"))
+                command_id = str(payload.get("command_id") or "")
+                if command_id:
+                    platform_agent_pool.execute_approved_command(actor, command_id, action_id)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Action decision failed") from exc
     return {"success": changed, "action_id": action_id}

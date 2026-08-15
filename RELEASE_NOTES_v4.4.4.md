@@ -3,8 +3,8 @@
 ## Product
 
 v4.4.4 extends Chuanxu (川序) as a governed AI Agent management platform
-with Portal Agent Pool model governance and basic cloud demonstration
-environment management.
+with Portal Agent Pool model governance and a complete, database-audited host
+onboarding flow for a cloud demonstration environment.
 
 ## Highlights
 
@@ -15,8 +15,10 @@ environment management.
   mutation proposals with scope, reason, expiry, approval state, and audit
   evidence. Chat text is not an authorization or SQL execution boundary.
 - Added managed-node inventory for Admin, Compliance, and Agent Pool roles.
-  Mutual SSH trust and bounded one-use validation are supported without
-  persisting reusable SSH passwords.
+  Agent Pool host onboarding now covers registration, bounded reachability
+  validation, one-time bootstrap token, target-host receipt, dedicated shared
+  storage binding, administrator activation, and heartbeat. Mutual SSH trust
+  and one-use validation never persist reusable SSH passwords.
 - Added shared-storage profiles. Local directories and mount points are the
   first executable backend; NFS, object storage, and unified storage are
   explicit adapter states rather than misleading ready states.
@@ -31,11 +33,16 @@ environment management.
   return credential-free control-plane results; mutation commands create
   governed Action Cards and cannot be executed by chat text or model output.
 - Added bounded managed-node reachability and local shared-storage validation
-  actions with localized result feedback.
+  actions with localized result feedback, plus the packaged
+  `scripts/agent_pool_node.py` host-side receipt and heartbeat helper.
 - Added a dedicated Agent Pool configuration page, fixed globally stretched
   checkbox and multiline-field controls, and added the additive node-storage
-  binding migration. Admin Agent runtime shared directories are now explicitly
-  bound to a managed node and role scope with an audited mount reference.
+  binding migration. Agent Pool hosts configure their local Agent information
+  directory during node registration and use `AGENT_POOL_RUNTIME` only for
+  cross-node shared runtime state. Admin Agent nodes configure their own local
+  information directory during node registration, separate from the optional
+  `ADMIN_RUNTIME` coordination directory. Local paths are not converted to
+  another storage type.
 
 ## Security boundaries
 

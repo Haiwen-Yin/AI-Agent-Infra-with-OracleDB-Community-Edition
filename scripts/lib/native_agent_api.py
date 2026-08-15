@@ -430,13 +430,55 @@ def list_llm_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
     suffix, params = _limit(limit)
     rows = _rows(connection.execute_query(
         "SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,SECRET_PRESENT,HEALTH_STATE,"
-        "VERSION,APPROVED_FOR_JSON,UPDATED_BY,UPDATED_AT FROM CX_LLM_PROVIDER_PROFILES ORDER BY PROFILE_KEY" + suffix,
+        "VERSION,APPROVED_FOR_JSON,UPDATED_BY,UPDATED_AT FROM CX_LLM_PROVIDER_PROFILES WHERE STATUS <> 'RETIRED' ORDER BY PROFILE_KEY" + suffix,
         params,
     ))
     for row in rows:
         row.pop("api_key_cipher", None)
         row["secret_present"] = str(row.get("secret_present") or "N").upper() == "Y"
     return rows
+
+
+def retire_llm_profile(actor: str, profile_id: str, reason: str) -> Dict[str, Any]:
+    """Retire an LLM profile and revoke its stored secret without deleting history."""
+    if identity_api.effective_access(str(actor), "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required")
+    profile_key = _text(profile_id, 128)
+    why = _text(reason, 2000)
+    if not profile_key or len(why) < 3:
+        raise NativeAgentError("an LLM profile and removal reason of at least three characters are required")
+
+    def work(tx: Any) -> Dict[str, Any]:
+        profile = _row(tx.query_one(
+            "SELECT PROFILE_ID,PROFILE_KEY,STATUS FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id FOR UPDATE",
+            {"id": profile_key}))
+        if not profile:
+            raise NativeAgentError("LLM Provider Profile is unavailable")
+        if str(profile.get("status") or "").upper() == "RETIRED":
+            raise NativeAgentError("LLM Provider Profile is already retired")
+        blockers: list[str] = []
+        checks = (
+            ("Portal default profile", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_POLICIES WHERE DEFAULT_PROFILE_ID=:id"),
+            ("Portal allowlist", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_ALLOWLIST WHERE PROFILE_ID=:id AND STATUS='ACTIVE'"),
+            ("active native Agent", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS WHERE LLM_PROFILE_ID=:id AND STATUS NOT IN ('RETIRED','DISABLED','QUARANTINED')"),
+            ("pending business Agent request", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_PROVISION_REQUESTS WHERE LLM_PROFILE_ID=:id AND STATUS IN ('APPROVAL_PENDING','APPROVED','PROVISIONING','PENDING')"),
+        )
+        for label, query in checks:
+            try:
+                count = _row(tx.query_one(query, {"id": profile_key})) or {}
+                if int(count.get("cnt") or 0) > 0:
+                    blockers.append(label)
+            except Exception:
+                continue
+        if blockers:
+            raise NativeAgentError("LLM profile removal blocked by: " + ", ".join(blockers))
+        tx.execute(
+            "UPDATE CX_LLM_PROVIDER_PROFILES SET STATUS='RETIRED',HEALTH_STATE='RETIRED',API_KEY_CIPHER=NULL,SECRET_PRESENT='N',UPDATED_BY=:actor,UPDATE_REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:id",
+            {"id": profile_key, "actor": actor, "reason": why},
+        )
+        _audit(tx, actor, "LLM_PROFILE_RETIRE", "LLM_PROFILE", profile_key, "ALLOW", why)
+        return {"profile_id": profile_key, "profile_key": profile.get("profile_key"), "status": "RETIRED", "secret_present": False}
+    return connection.execute_transaction_callback(work)
 
 
 def upsert_llm_profile(actor: str, profile_key: str, provider_url: str, model_id: str,
@@ -854,11 +896,20 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
     stripped = str(body or "").strip()
     if stripped.lower().startswith("/platform "):
         from . import platform_agent_pool
-        pieces = stripped.split(None, 2)
+        pieces = stripped.split(None, 4)
         command_type = pieces[1].upper() if len(pieces) > 1 else ""
-        command_reason = pieces[2].strip() if len(pieces) > 2 else ""
+        command_target: Dict[str, Any] = {}
+        command_parameters: Dict[str, Any] = {}
+        if command_type == "AGENT_DRAIN":
+            if len(pieces) < 4:
+                raise NativeAgentError("AGENT_DRAIN requires source node, destination node, and reason")
+            command_target = {"node_id": pieces[2].strip()}
+            command_parameters = {"target_node_id": pieces[3].strip()}
+            command_reason = stripped.split(None, 4)[4].strip() if len(stripped.split(None, 4)) > 4 else ""
+        else:
+            command_reason = pieces[2].strip() if len(pieces) > 2 else ""
         command = platform_agent_pool.create_command(
-            actor, command_type, {}, {}, "DEFAULT", command_reason,
+            actor, command_type, command_target, command_parameters, "DEFAULT", command_reason,
         )
         command_notice = {"command_id": command.get("command_id"), "command_type": command_type,
                           "status": command.get("status"), "result": command.get("result") or {},

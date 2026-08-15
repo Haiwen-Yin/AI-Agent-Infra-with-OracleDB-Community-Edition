@@ -108,6 +108,8 @@ reason, and server-side scope checks.
 | `/api/agent-templates` | GET | Read published locked templates. |
 | `/api/native-manifests` | GET | Read versioned, digest-checked built-in Skill/Tool manifests. |
 | `/api/llm-provider-profiles` | GET/POST | Read redacted or create encrypted LLM profiles. |
+| `/api/llm-provider-profiles/{profile_id}` | DELETE | Retire an LLM profile after dependency checks; requires an audited reason and revokes its stored API key ciphertext. This is a logical retirement, not physical deletion. |
+| `/api/platform/managed-nodes/{node_id}` | DELETE | Retire a managed node after runtime, onboarding, storage-binding, Admin HA, and execution dependency checks; requires an audited reason. Bootstrap system nodes cannot be retired. |
 | `/api/deployment-targets` | GET | Read deployment targets and reference adapter contracts. |
 | `/api/agent-provision-requests` | GET/POST | Read scoped requests or submit a human request. |
 | `/api/agent-provision-requests/{id}/decision` | POST | Approve or reject with separated approval and reason. |

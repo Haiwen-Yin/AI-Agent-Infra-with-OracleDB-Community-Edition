@@ -618,17 +618,40 @@ recovery.
 ### v4.4.4 Agent Pool and External Endpoint Setup
 
 Register Admin, Compliance, and Agent Pool hosts as managed nodes before using
-them as runtime targets. Node validation performs only bounded DNS/TCP
-reachability checks; it does not become a remote shell or persist reusable SSH
-passwords. Local shared directories are validated for directory existence and
+them as runtime targets. For an Agent Pool host, the Dashboard sequence is:
+
+1. Register the host, role, SSH port, operating-system user, and failure domain.
+2. Run bounded reachability validation. This does not become a remote shell.
+3. Issue a short-lived one-time bootstrap token and run the packaged
+   `scripts/agent_pool_node.py` on the target host.
+4. Enter the parent of the node-local Agent information directory during host
+   registration. For example, `/root` resolves to
+   `/root/AI-Agent-Infra-with-DB`. It is local filesystem storage on that node, arranged as
+   `agents/<agent-id>/...`; each Agent gets a separate directory and directory
+   contents never grant database authority. Register and bind only
+   `AGENT_POOL_RUNTIME` for shared idle-Agent/runtime state.
+5. Activate the checked-in node. Activation fails closed until the shared
+   runtime binding and the node-local information directory both exist. The node remains online only while its
+   authenticated helper sends heartbeats.
+
+The token digest is persisted, never the token, SSH password, database key, or
+private key. Local shared directories are validated for directory existence and
 read/write/execute access. NFS, object storage, and unified storage profiles
 remain adapter-managed until a corresponding storage adapter is installed.
-After a profile and node are registered, bind them from the separate Agent Pool
-configuration page by selecting the managed node, storage profile, node-local
-mount reference, and role scope (normally `ADMIN_AGENT`). The binding is
-audited and describes a runtime storage location only; it does not grant data,
-database, Skill, Tool, or Channel access. Removing a binding also requires an
-audited reason.
+The binding is audited and describes a runtime storage location only; it does
+not grant data, database, Skill, Tool, or Channel access. MaaS, SaaS, and
+virtualization targets use deployment adapters rather than the Host bootstrap
+path. Removing a binding also requires an audited reason.
+
+Admin Agent nodes receive their node-local Agent information and runtime path
+when the node is added. The initial platform node records its actual deployment
+directory automatically; every additional node requires an explicit parent
+directory. It is independent per node and must not be confused
+with `ADMIN_RUNTIME`, which is the optional shared platform-management
+coordination directory. The platform does not convert local paths to NFS,
+object storage, or another backend; the Admin Agent runtime must apply
+Agent-specific subdirectories and local filesystem ownership and permission
+controls.
 
 For an externally registered Agent that must use a public database endpoint,
 create the endpoint profile with the Agent enrollment grant ID. The platform

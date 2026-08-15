@@ -179,19 +179,23 @@ V444_MIGRATION_SCRIPTS = V443_MIGRATION_SCRIPTS + (
     "40_v4_4_4_agent_pool_cloud.sql",
     "41_v4_4_4_node_storage_binding.sql",
     "42_v4_4_4_storage_purpose.sql",
+    "43_v4_4_4_agent_pool_node_onboarding.sql",
+    "44_v4_4_4_managed_node_local_info_path.sql",
 )
 V444_AGENT_POOL_TABLES = (
     "CX_PORTAL_LLM_POLICIES", "CX_PORTAL_LLM_ALLOWLIST", "CX_PLATFORM_ADMIN_COMMANDS",
     "CX_MANAGED_NODES", "CX_SHARED_STORAGE_PROFILES", "CX_EXTERNAL_DB_ENDPOINTS",
+    "CX_AGENT_POOL_NODE_ONBOARDINGS",
 )
 V444_AGENT_POOL_REQUIRED_COLUMNS = {
     "CX_PORTAL_LLM_POLICIES": frozenset({"POLICY_ID", "DEFAULT_PROFILE_ID", "VERSION"}),
     "CX_PORTAL_LLM_ALLOWLIST": frozenset({"POLICY_ID", "PROFILE_ID", "STATUS"}),
     "CX_PLATFORM_ADMIN_COMMANDS": frozenset({"COMMAND_ID", "COMMAND_TYPE", "STATUS", "EXPIRES_AT", "REASON"}),
-    "CX_MANAGED_NODES": frozenset({"NODE_ID", "NODE_KEY", "HOST_REFERENCE", "TRUST_MODE", "VALIDATION_STATE"}),
+    "CX_MANAGED_NODES": frozenset({"NODE_ID", "NODE_KEY", "HOST_REFERENCE", "TRUST_MODE", "AGENT_INFO_PATH", "VALIDATION_STATE"}),
     "CX_SHARED_STORAGE_PROFILES": frozenset({"STORAGE_ID", "STORAGE_KEY", "BACKEND_KIND", "LOCATION_REF", "VALIDATION_STATE"}),
     "CX_MANAGED_NODE_STORAGE_BINDINGS": frozenset({"BINDING_ID", "NODE_ID", "STORAGE_ID", "MOUNT_REFERENCE", "ROLE_SCOPE", "STATUS", "REASON"}),
     "CX_EXTERNAL_DB_ENDPOINTS": frozenset({"ENDPOINT_ID", "ENDPOINT_KEY", "HOST_REFERENCE", "PORT", "TLS_REQUIRED", "STATUS"}),
+    "CX_AGENT_POOL_NODE_ONBOARDINGS": frozenset({"ONBOARDING_ID", "NODE_ID", "INTEGRATION_KIND", "TOKEN_DIGEST", "STATUS", "EXPIRES_AT", "LAST_HEARTBEAT_AT"}),
 }
 V436_NATIVE_AGENT_TABLES = (
     "CX_NATIVE_BOOTSTRAP", "CX_AGENT_TEMPLATES", "CX_NATIVE_MANIFESTS", "CX_NATIVE_AGENTS",
@@ -1222,7 +1226,7 @@ def validate_v444_static_contract(database: str, scripts: Sequence[Path]) -> dic
     raw_source = "\n".join(
         path.read_text(encoding="utf-8")
         for path in selected.values()
-        if path.is_file() and path.name in {"40_v4_4_4_agent_pool_cloud.sql", "41_v4_4_4_node_storage_binding.sql", "42_v4_4_4_storage_purpose.sql"}
+        if path.is_file() and path.name in {"40_v4_4_4_agent_pool_cloud.sql", "41_v4_4_4_node_storage_binding.sql", "42_v4_4_4_storage_purpose.sql", "43_v4_4_4_agent_pool_node_onboarding.sql", "44_v4_4_4_managed_node_local_info_path.sql"}
     )
     source = _normalized_marker_text(raw_source)
     control = {

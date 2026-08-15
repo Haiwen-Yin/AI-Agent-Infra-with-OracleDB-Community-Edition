@@ -293,7 +293,7 @@ def create_admin_enrollment(
     actor: str, admission_path: str, public_key: str, node_id: str, reason: str,
     package_digest: str = "", *, host_reference: str = "", ssh_port: int = 22,
     os_user: str = "", deployment_target: str = "", ssh_trust_mode: str = "MUTUAL_TRUST",
-    ssh_password: str = "", failure_domain: str = "",
+    ssh_password: str = "", failure_domain: str = "", agent_info_path: str = "",
 ) -> Dict[str, Any]:
     _require_manage(actor)
     path = str(admission_path or "").upper()
@@ -356,6 +356,7 @@ def create_admin_enrollment(
             node_key=node_id, host_reference=host_reference, roles=["ADMIN_AGENT"],
             actor=actor, ssh_port=ssh_port, os_user=os_user,
             failure_domain=failure_domain,
+            agent_info_path=platform_agent_pool.resolve_agent_info_path(agent_info_path) if agent_info_path else "",
             reason="Admin Agent deployment metadata was collected automatically",
         )
     return {"enrollment_id": enrollment_id, "target_id": target_id or None, "admission_path": path, "status": "CANDIDATE", "public_key_digest": digest, "password_persisted": False, "managed_node": discovered_node}

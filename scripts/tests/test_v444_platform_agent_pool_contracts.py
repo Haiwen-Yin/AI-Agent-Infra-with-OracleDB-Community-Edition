@@ -16,7 +16,13 @@ def test_v444_migrations_exist_for_all_adapters():
         assert "CX_MANAGED_NODE_STORAGE_BINDINGS" in (ROOT / "adapters" / adapter / "deploy" / "41_v4_4_4_node_storage_binding.sql").read_text(encoding="utf-8").upper()
         purpose = (ROOT / "adapters" / adapter / "deploy" / "42_v4_4_4_storage_purpose.sql").read_text(encoding="utf-8").upper()
         assert "STORAGE_PURPOSE" in purpose
+        onboarding = (ROOT / "adapters" / adapter / "deploy" / "43_v4_4_4_agent_pool_node_onboarding.sql").read_text(encoding="utf-8").upper()
+        assert "CX_AGENT_POOL_NODE_ONBOARDINGS" in onboarding
+        assert "TOKEN_DIGEST" in onboarding
         assert "CX_EXTERNAL_DB_ENDPOINTS" in text
+        local_path = (ROOT / "adapters" / adapter / "deploy" / "44_v4_4_4_managed_node_local_info_path.sql").read_text(encoding="utf-8").upper()
+        assert "AGENT_INFO_PATH" in local_path
+        assert "AGENT_POOL_AGENT_RUNTIME" in local_path
 
 
 def test_v444_service_never_accepts_arbitrary_command_types():
@@ -45,6 +51,71 @@ def test_v444_node_credentials_are_not_part_of_persisted_contract():
     assert "ssh_password" not in source
     assert "ONE_USE_PASSWORD" in source
     assert "ROLE_JSON" in source
+
+
+def test_v444_managed_resources_have_governed_retirement_contracts():
+    pool = (ROOT / "shared/lib/platform_agent_pool.py").read_text(encoding="utf-8")
+    native = (ROOT / "shared/lib/native_agent_api.py").read_text(encoding="utf-8")
+    web = (ROOT / "shared/web_app.py").read_text(encoding="utf-8")
+    ui = (ROOT / "shared/web/src/App.tsx").read_text(encoding="utf-8")
+    assert "def retire_node" in pool
+    assert "FROM CX_MANAGED_NODES WHERE STATUS <> 'RETIRED'" in pool
+    assert "WHERE n.STATUS <> 'RETIRED' ORDER BY o.CREATED_AT DESC" in pool
+    assert "AND n.STATUS <> 'RETIRED' ORDER BY b.CREATED_AT DESC" in pool
+    assert "SYSTEM_BOOTSTRAP" in pool
+    assert "MANAGED_NODE_RETIRE" in pool
+    assert "CX_RUNTIME_WORKERS" in pool and "CX_RUNTIME_EXECUTIONS" in pool
+    assert "CX_ADMIN_AGENT_MEMBERS" in pool
+    assert "def execute_approved_command" in pool
+    assert "STATUS='DRAINING'" in pool
+    assert "requeued_expired_tasks" in pool
+    assert "def retire_llm_profile" in native
+    assert "FROM CX_LLM_PROVIDER_PROFILES WHERE STATUS <> 'RETIRED'" in native
+    assert "LLM_PROFILE_RETIRE" in native
+    assert "CX_PORTAL_LLM_ALLOWLIST" in native
+    assert "CX_NATIVE_PROVISION_REQUESTS" in native
+    assert '@app.delete("/api/platform/managed-nodes/{node_id}")' in web
+    assert '@app.delete("/api/llm-provider-profiles/{profile_id}")' in web
+    assert 'method: "DELETE"' in ui
+    assert "系统节点，不可移除" in ui
+
+
+def test_v444_management_channel_drain_is_typed_and_approval_bound():
+    native = (ROOT / "shared/lib/native_agent_api.py").read_text(encoding="utf-8")
+    web = (ROOT / "shared/web_app.py").read_text(encoding="utf-8")
+    assert 'command_type == "AGENT_DRAIN"' in native
+    assert "source node, destination node, and reason" in native
+    assert "execute_approved_command" in web
+
+
+def test_v444_local_agent_directory_is_resolved_and_bootstrap_discovered():
+    source = (ROOT / "shared/lib/platform_agent_pool.py").read_text(encoding="utf-8")
+    web = (ROOT / "shared/web_app.py").read_text(encoding="utf-8")
+    ui = (ROOT / "shared/web/src/App.tsx").read_text(encoding="utf-8")
+    assert 'AI-Agent-Infra-with-DB' in source
+    assert "def resolve_agent_info_path" in source
+    assert "MANAGED_NODE_LOCAL_PATH_DISCOVER" in source
+    assert 'deployment_dir = module_dir.parent if module_dir.name == "scripts" else module_dir' in web
+    assert "agent_info_path=str(deployment_dir)" in web
+    assert "LocalAgentPathField" in ui
+    assert "Resolved storage directory" in ui
+
+
+def test_v444_pool_host_onboarding_is_token_bound_and_requires_storage():
+    source = (ROOT / "shared/lib/platform_agent_pool.py").read_text(encoding="utf-8")
+    assert "def create_node_onboarding" in source
+    assert "def node_onboarding_checkin" in source
+    assert "def activate_node_onboarding" in source
+    assert "def node_onboarding_heartbeat" in source
+    assert "bootstrap_token" in source
+    assert "TOKEN_DIGEST" in source
+    assert "AGENT_POOL_RUNTIME" in source
+    assert "AGENT_INFO_PATH" in source
+    assert "local Agent information directory" in source
+    tool = (ROOT / "shared/scripts/agent_pool_node.py").read_text(encoding="utf-8")
+    assert "/api/agent-pool/node-onboardings/" in tool
+    assert "--token" in tool
+    assert "--agent-info-path" in tool
 
 
 def test_v444_template_seed_keys_are_present():
@@ -97,6 +168,13 @@ def test_v444_agent_pool_is_a_platform_configuration_subpage():
     pages = api.split("pages = {", 1)[1].split("feature_map =", 1)[0]
     assert '"agent-pool"' not in pages
     assert "ADMIN_RUNTIME" in ui and "AGENT_POOL_RUNTIME" in ui
-    assert "Admin Agent 运行信息目录绑定" in ui
-    assert "Agent Pool 运行时目录绑定" in ui
+    assert "Agent Pool 运行时共享目录绑定" in ui
+    assert "本地 Agent 信息目录" in ui
     assert "storage_purpose" in ui
+
+
+def test_v444_runner_selects_the_additive_host_onboarding_step():
+    runner = (ROOT / "migration_runner.py").read_text(encoding="utf-8")
+    selected = runner.split("def _v444_script_names", 1)[1].split("def _prepare_migration", 1)[0]
+    assert 'names.append("43_v4_4_4_agent_pool_node_onboarding.sql")' in selected
+    assert 'names.append("44_v4_4_4_managed_node_local_info_path.sql")' in selected

@@ -777,8 +777,7 @@ tbody tr:hover {
   z-index: 2;
 }
 /* Runtime nodes are created from startup/deployment discovery. */
-form:has(input[name="roles"][value="ADMIN_AGENT"]),
-form:has(input[name="roles"][value="AGENT_POOL"]) {
+form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   display: none !important;
 }
 .data-count {
@@ -1915,7 +1914,7 @@ form:has(input[name="roles"][value="AGENT_POOL"]) {
 }
 .agent-pool-page .pool-config-stack {
   display: grid;
-  gap: 12px;
+  gap: 20px;
   margin: 12px 0;
 }
 .agent-pool-page .pool-config-block {
@@ -1955,6 +1954,26 @@ form:has(input[name="roles"][value="AGENT_POOL"]) {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 9px 10px;
   align-items: end;
+}
+.pool-bootstrap-command {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.pool-bootstrap-command code {
+  display: block;
+  overflow-x: auto;
+  padding: 10px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .file-picker {
   display: flex;
@@ -2144,6 +2163,10 @@ form:has(input[name="roles"][value="AGENT_POOL"]) {
   font-size: 10px;
   line-height: 1.25;
   max-width: 68ch;
+}
+.local-agent-path-field > small {
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
 }
 .derived-value {
   display: inline-flex;
