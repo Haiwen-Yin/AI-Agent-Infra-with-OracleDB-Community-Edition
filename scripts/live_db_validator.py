@@ -182,6 +182,15 @@ V444_MIGRATION_SCRIPTS = V443_MIGRATION_SCRIPTS + (
     "43_v4_4_4_agent_pool_node_onboarding.sql",
     "44_v4_4_4_managed_node_local_info_path.sql",
 )
+V445_MIGRATION_SCRIPTS = V444_MIGRATION_SCRIPTS + (
+    "45_v4_4_5_graph_run_contract.sql",
+)
+V445_GRAPH_RUN_REQUIRED_COLUMNS = {
+    "GRAPH_RUNS": frozenset({
+        "DEFINITION_DIGEST", "PLAN_DIGEST", "COMPATIBILITY_LEVEL",
+        "STATE_SCHEMA_VERSION", "BUDGET_SCHEMA_VERSION",
+    }),
+}
 V444_AGENT_POOL_TABLES = (
     "CX_PORTAL_LLM_POLICIES", "CX_PORTAL_LLM_ALLOWLIST", "CX_PLATFORM_ADMIN_COMMANDS",
     "CX_MANAGED_NODES", "CX_SHARED_STORAGE_PROFILES", "CX_EXTERNAL_DB_ENDPOINTS",
@@ -1241,6 +1250,26 @@ def validate_v444_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v445_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    base = validate_v444_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("45_v4_4_5_graph_run_contract.sql")
+    source = migration.read_text(encoding="utf-8").upper() if migration and migration.is_file() else ""
+    markers = {
+        "DEFINITION_DIGEST", "PLAN_DIGEST", "COMPATIBILITY_LEVEL",
+        "STATE_SCHEMA_VERSION", "BUDGET_SCHEMA_VERSION", "GRAPH_COMPILE_PLANS",
+    }
+    control = {
+        "scripts_required": list(V445_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V445_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
+        "plan_version_binding": "P.GRAPH_VERSION_ID = R.GRAPH_VERSION_ID" in source,
+    }
+    control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"] and control["plan_version_binding"]
+    return {"database": database, "v444": base, "v445_graph_run_contract": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1296,7 +1325,8 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
         + V436_NATIVE_AGENT_TABLES + V437_BOOTSTRAP_TABLES + tuple(V437_BOOTSTRAP_REQUIRED_COLUMNS)
         + V440_SDD_TABLES + V441_ADMIN_HA_TABLES + V442_GRAPH_OPERATIONS_TABLES + V443_SECURITY_DOMAIN_TABLES + V444_AGENT_POOL_TABLES
         + tuple(V440_SDD_REQUIRED_COLUMNS) + tuple(V441_ADMIN_HA_REQUIRED_COLUMNS)
-        + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS) + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS)
+        + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
+        + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS) + tuple(V445_GRAPH_RUN_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1382,6 +1412,7 @@ class ProbeResult:
     v442_graph_operations_contract: dict[str, Any] = field(default_factory=dict)
     v443_security_domain_binding_contract: dict[str, Any] = field(default_factory=dict)
     v444_agent_pool_contract: dict[str, Any] = field(default_factory=dict)
+    v445_graph_run_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1472,6 +1503,14 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     result.v444_agent_pool_contract["passed"] = not any((
         result.v444_agent_pool_contract["tables_missing"], result.v444_agent_pool_contract["columns_missing"],
     ))
+    result.v445_graph_run_contract = {
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V445_GRAPH_RUN_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v445_graph_run_contract["passed"] = not result.v445_graph_run_contract["columns_missing"]
 
 
 def _capture_v431_organization(cursor: Any, database: str) -> dict[str, Any]:
@@ -1765,14 +1804,17 @@ def main() -> int:
     requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
     requires_v437 = target_version.startswith(("4.3.7", "4.4."))
     requires_v440 = target_version.startswith("4.4.")
-    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3"))
-    requires_v442 = target_version.startswith(("4.4.2", "4.4.3"))
-    requires_v443 = target_version.startswith(("4.4.3", "4.4.4"))
-    requires_v444 = target_version.startswith("4.4.4")
+    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5"))
+    requires_v442 = target_version.startswith(("4.4.2", "4.4.3", "4.4.4", "4.4.5"))
+    requires_v443 = target_version.startswith(("4.4.3", "4.4.4", "4.4.5"))
+    requires_v444 = target_version.startswith(("4.4.4", "4.4.5"))
+    requires_v445 = target_version.startswith("4.4.5")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v444:
+            if requires_v445:
+                migration_scripts, validator = V445_MIGRATION_SCRIPTS, validate_v445_static_contract
+            elif requires_v444:
                 migration_scripts, validator = V444_MIGRATION_SCRIPTS, validate_v444_static_contract
             elif requires_v443:
                 migration_scripts, validator = V443_MIGRATION_SCRIPTS, validate_v443_static_contract
@@ -1862,6 +1904,7 @@ def main() -> int:
                 and (not requires_v442 or result.v442_graph_operations_contract.get("passed") is True)
                 and (not requires_v443 or result.v443_security_domain_binding_contract.get("passed") is True)
                 and (not requires_v444 or result.v444_agent_pool_contract.get("passed") is True)
+                and (not requires_v445 or result.v445_graph_run_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

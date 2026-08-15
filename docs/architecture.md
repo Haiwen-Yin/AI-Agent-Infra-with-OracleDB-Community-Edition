@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.4.4
+# Architecture - AI Agent Infra with DB v4.4.5
 
 ## v4.4.3 Governed Collaboration Boundary
 
@@ -40,6 +40,14 @@ distribution acknowledgements. The deployment adapter or node performs the
 actual maintenance action only after the database plan enters its permitted
 state. An Agent retains its old Skill snapshot until it declares a safe point;
 failed or unreachable recipients remain explicitly marked as drift.
+
+Managed-node lifecycle is database-authoritative. Retirement is a logical
+state transition that removes a node or LLM profile from active inventory
+while retaining history and evidence. The protected Channel can create an
+approved drain plan: the source stops accepting new claims, expired retryable
+work may move to an active destination, and running work is left to finish.
+This operational drain is not incident containment and never force-kills
+active tasks.
 
 ## v4.4.0 Governed Software Delivery Graph
 
@@ -639,6 +647,16 @@ The new `GRAPH_*` tables represent executable topology and runtime evidence:
 
 ```text
 Graph Definition -> Graph Version -> Compiler Plan -> Graph Run
+
+At Run admission, the database also stores the Version definition digest,
+compiled Plan digest, compatibility level, State schema version, and budget
+schema version. The Plan must reference the requested Version and its
+definition digest must match; a mismatch fails closed before a Ready node is
+inserted. A fork whose plan contains a `NON_IDEMPOTENT` side effect is created
+with `PAUSED` Run state and `WAITING` entry work. Resume requires an approved
+`GRAPH_FORK_REPLAY` request bound to that child Run or a bounded compensation
+evidence reference. Agent Cards and protocol metadata remain descriptive and
+cannot create any of these grants.
                                               |-> Node Run -> Attempt -> Worker lease
                                               |-> State Event -> Checkpoint
                                               |-> Transition -> Trace / Evaluation

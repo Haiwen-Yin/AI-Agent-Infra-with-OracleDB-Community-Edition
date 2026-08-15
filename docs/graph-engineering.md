@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.4.4
+# Graph Engineering - AI Agent Infra with DB v4.4.5
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -152,3 +152,11 @@ completed independent A2A client conformance, durable A2A streaming, or a real
 OTLP Collector delivery/retry/dead-letter validation. Do not enable either
 preview in a production profile until those deployment-specific controls are
 validated.
+# v4.4.5 Runtime Admission Note
+
+Every new Graph Run stores the Definition digest, compiled Plan digest,
+compatibility level, State schema version, and budget schema version used at
+admission. The requested Version and Plan must match before Ready work exists.
+Forking a plan with a non-repeatable external effect creates a paused child;
+approval or compensation evidence is required before resuming it. Agent Card
+and protocol metadata remain descriptive and cannot grant capabilities.

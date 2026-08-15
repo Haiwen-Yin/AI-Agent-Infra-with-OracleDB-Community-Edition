@@ -462,15 +462,12 @@ def reduce_values(reducer: str, values: Iterable[Any]) -> Any:
             result.extend(value if isinstance(value, list) else [value])
         return result
     if reducer == "SET_UNION":
-        result = []
-        seen = set()
+        values_by_marker = {}
         for value in values:
             for item in (value if isinstance(value, list) else [value]):
                 marker = _canonical(item)
-                if marker not in seen:
-                    seen.add(marker)
-                    result.append(item)
-        return result
+                values_by_marker.setdefault(marker, item)
+        return [values_by_marker[marker] for marker in sorted(values_by_marker)]
     if reducer == "SUM":
         return sum(values)
     if reducer == "FIRST":

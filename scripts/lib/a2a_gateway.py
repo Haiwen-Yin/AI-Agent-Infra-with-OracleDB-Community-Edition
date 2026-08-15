@@ -38,16 +38,47 @@ def negotiate(versions: Iterable[str]) -> str:
     return PROTOCOL_VERSION
 
 
-def agent_card(agent: Dict[str, Any], *, authenticated: bool = False) -> Dict[str, Any]:
-    """Produce a bounded Agent Card; no database credential can be disclosed."""
+def _skill_projection(skills: Iterable[Any]) -> List[Dict[str, str]]:
+    """Normalize capability metadata without treating it as authority."""
+    projected: Dict[str, Dict[str, str]] = {}
+    for item in skills or []:
+        if isinstance(item, str):
+            skill_id = item.strip()[:128]
+            name = skill_id
+        elif isinstance(item, dict):
+            skill_id = str(item.get("id") or item.get("skill_id") or "").strip()[:128]
+            name = str(item.get("name") or item.get("skill_name") or skill_id).strip()[:256]
+        else:
+            continue
+        if skill_id:
+            projected[skill_id] = {"id": skill_id, "name": name or skill_id}
+    return [projected[key] for key in sorted(projected)]
+
+
+def agent_card(agent: Dict[str, Any], *, authenticated: bool = False,
+               granted_skills: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
+    """Produce a bounded Agent Card projected from explicit platform grants.
+
+    ``agent["skills"]`` is untrusted advertised metadata.  A Skill is exposed
+    only when its identifier is also present in ``granted_skills``.  Keeping
+    that argument explicit prevents an Agent Card or framework adapter from
+    becoming an authority source.
+    """
+    advertised = {item["id"]: item for item in _skill_projection(agent.get("skills") or [])}
+    granted = {item["id"]: item for item in _skill_projection(granted_skills or [])}
+    effective_skills = []
+    if authenticated:
+        for skill_id in sorted(set(advertised).intersection(granted)):
+            effective_skills.append({
+                "id": skill_id,
+                "name": granted[skill_id].get("name") or advertised[skill_id]["name"],
+            })
     card = {
         "protocolVersion": PROTOCOL_VERSION,
         "name": str(agent.get("name") or agent.get("agent_name") or "Graph Agent")[:256],
         "description": str(agent.get("description") or "")[:1000],
         "capabilities": {"streaming": True, "pushNotifications": False},
-        "skills": [{"id": str(item.get("id") or item.get("skill_id") or "")[:128],
-                    "name": str(item.get("name") or item.get("skill_name") or "")[:256]}
-                   for item in (agent.get("skills") or []) if isinstance(item, dict)],
+        "skills": effective_skills,
     }
     if authenticated:
         card["supportedInterfaces"] = ["tasks/send", "tasks/get", "tasks/cancel", "tasks/subscribe"]

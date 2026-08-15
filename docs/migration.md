@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra with DB v4.4.4
+# Migration Guide - AI Agent Infra with DB v4.4.5
 
 ## v4.4.3 Security Domain Governance Migration
 
@@ -24,6 +24,29 @@ or bind an existing collaboration group. The normal Dashboard workflow never
 uses a manually typed Domain ID for Channel creation. `DEFAULT` remains for
 bootstrap or constrained proof-of-concept work, not implicit production use.
 Do not edit an applied migration or delete journal rows to retry it.
+
+## v4.4.5 Graph Run Contract Migration
+
+Migration `45_v4_4_5_graph_run_contract.sql` is additive for Oracle,
+PostgreSQL, and YashanDB. It records the Definition digest, compiled Plan
+digest, compatibility level, State schema version, and budget schema version
+used for each Graph Run. Backfill only occurs when the existing Version and
+Plan are linked and their Definition digests match; ambiguous legacy Runs
+remain unfilled and require review. The migration never rewrites checkpoints,
+State Events, attempts, or audit history.
+
+Run it through the journaled migration runner:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.5 \
+  --database <oracle|pg|yashandb> --edition <community|enterprise> \
+  --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+New Run admission rejects a Plan belonging to another Version or a digest
+mismatch before creating Ready work. Apply the migration before starting the
+v4.4.5 service.
 
 ## v4.4.2 Embedding And Graph Operations
 

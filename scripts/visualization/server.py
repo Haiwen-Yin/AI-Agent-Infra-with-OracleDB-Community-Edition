@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.4 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.5 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.4"
+VERSION = "4.4.5"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -1817,11 +1817,15 @@ class VisHandler(BaseHTTPRequestHandler):
                 self._send_json({'success': graph_runtime.pause_run(run_id, actor, data.get('reason', ''))})
                 return
             if action == 'resume':
-                self._send_json({'success': graph_runtime.resume_run(run_id, actor, data.get('reason', ''))})
+                self._send_json({'success': graph_runtime.resume_run(
+                    run_id, actor, data.get('reason', ''), data.get('resolution'),
+                )})
                 return
             if action == 'fork':
                 child_id = graph_runtime.fork_run(run_id, actor, data.get('reason', ''), data.get('idempotency_key'))
-                self._send_json({'success': True, 'run_id': child_id, 'parent_run_id': run_id}, 201)
+                child = graph_runtime.get_run(child_id) or {}
+                self._send_json({'success': True, 'run_id': child_id, 'parent_run_id': run_id,
+                                 'status': child.get('status'), 'reason_code': child.get('error_code')}, 201)
                 return
             if action == 'migrate':
                 result = graph_runtime.migrate_run(
@@ -4804,8 +4808,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.4', VERSION)
-            html = html.replace('2026-08-14', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.5', VERSION)
+            html = html.replace('2026-08-15', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

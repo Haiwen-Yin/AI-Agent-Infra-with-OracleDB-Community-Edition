@@ -1,4 +1,4 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.4.4
+# Recovery and High Availability - AI Agent Infra with DB v4.4.5
 
 ## v4.4.1 Management Plane Recovery
 
@@ -100,6 +100,12 @@ The tests do not establish exactly-once execution in arbitrary external
 systems. An uncertain `NON_IDEMPOTENT` side effect must be externally
 confirmed, compensated, or resolved by an authorized human; it must not be
 silently replayed.
+
+In v4.4.5, a fork that could replay such an effect is durably created as
+`PAUSED` before its entry work can be claimed. Resume validates either an
+approved `GRAPH_FORK_REPLAY` request bound to the child Run or bounded
+compensation evidence. The Run's immutable Version and Plan digests and
+budget/state contract versions are retained for replacement-worker checks.
 
 ## Database High Availability
 

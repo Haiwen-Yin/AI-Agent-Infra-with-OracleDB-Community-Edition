@@ -1,7 +1,7 @@
 {
   "name": "chuanxu-web",
   "private": true,
-  "version": "4.4.3",
+  "version": "4.4.5",
   "scripts": {
     "build": "NODE_OPTIONS=--require=./rollup-wasm-hook.cjs vite build"
   },

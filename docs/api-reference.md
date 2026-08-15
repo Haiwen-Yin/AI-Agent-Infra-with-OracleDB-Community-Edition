@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.4.4
+# API Reference - AI Agent Infra with DB v4.4.5
 
 ## v4.4.3 Security Domain Governance API
 
@@ -117,6 +117,15 @@ reason, and server-side scope checks.
 | `/api/native-agents/{id}/execute` | POST | Queue a bounded execution unit. |
 | `/api/native-executions/{id}` | GET | Read the caller's authorized execution state/result. |
 | `/api/platform/external-agent-registration` | GET/PUT | Inspect or change the new external Skill-first registration policy. |
+
+The protected Platform Administration Channel also accepts the closed typed
+command `/platform AGENT_DRAIN <source_node_id> <destination_node_id>
+<reason>`. It creates an Action Card and requires the configured approval path.
+An approved command marks the source `DRAINING`, rejects new claims, and may
+requeue only expired retryable executions to an active destination. Running
+executions are not forcibly terminated. Retirement is a separate audited
+logical transition; retired resources stay in history but are omitted from
+active inventory.
 
 ## v4.3.5 Platform Capability API
 
@@ -811,9 +820,9 @@ validation; normal callers must use these service routes rather than direct
 | `/api/graph-runs/{run_id}/evaluations` | GET | Read registered evaluator results. |
 | `/api/graph-runs/{run_id}/interventions` | GET | Read human controls and reasons. |
 | `/api/graph-runs/{run_id}/pause` | POST | Pause at a safe barrier. |
-| `/api/graph-runs/{run_id}/resume` | POST | Resume after authorization. |
+| `/api/graph-runs/{run_id}/resume` | POST | Resume after authorization. A fork paused for a non-repeatable effect additionally requires `resolution: {type: APPROVAL, approval_id}` bound to the child Run, or a recorded `COMPENSATION` evidence reference. |
 | `/api/graph-runs/{run_id}/cancel` | POST | Cancel with immutable reason. |
-| `/api/graph-runs/{run_id}/fork` | POST | Create a checkpoint branch. |
+| `/api/graph-runs/{run_id}/fork` | POST | Create a checkpoint branch. If the compiled plan contains `NON_IDEMPOTENT` nodes, the child is created as `PAUSED` before its first Ready claim and requires governed approval or compensation. |
 | `/api/graph-runs/{run_id}/migrate` | POST | Migrate a quiescent run to a published version. |
 | `/api/graph-worker/{operation}` | POST | Advertise, claim, heartbeat, checkpoint, complete, or fail work. |
 | `/api/graph/workers` | GET | Inspect registered Worker metadata. |

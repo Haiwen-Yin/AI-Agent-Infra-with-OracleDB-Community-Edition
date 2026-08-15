@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.4 - Community Edition - Workspace API
+"""AI Agent Infra v4.4.5 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.

@@ -105,6 +105,57 @@ const pageFromPath = () => {
   return parts[0] === "app" && parts[1] ? parts[1] : "monitor";
 };
 
+function useUrlState<T extends string>(
+  key: string,
+  allowed: readonly T[],
+  fallback: T,
+): [T, (value: T) => void] {
+  const read = () => {
+    const value = new URLSearchParams(window.location.search).get(key);
+    return value && allowed.includes(value as T) ? (value as T) : fallback;
+  };
+  const [state, setState] = useState<T>(read);
+  useEffect(() => {
+    const onPopState = () => setState(read());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [key, fallback, allowed.join("|")]);
+  const update = (value: T) => {
+    if (!allowed.includes(value)) return;
+    setState(value);
+    const url = new URL(window.location.href);
+    if (value === fallback) url.searchParams.delete(key);
+    else url.searchParams.set(key, value);
+    window.history.replaceState({}, "", url.pathname + url.search);
+  };
+  return [state, update];
+}
+
+function useUrlParam(
+  key: string,
+  fallback = "",
+): [string, (value: string) => void] {
+  const read = () => {
+    const value = new URLSearchParams(window.location.search).get(key) || "";
+    return value.length <= 200 ? value : fallback;
+  };
+  const [state, setState] = useState<string>(read);
+  useEffect(() => {
+    const onPopState = () => setState(read());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [key, fallback]);
+  const update = (value: string) => {
+    if (value.length > 200) return;
+    setState(value);
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+    window.history.replaceState({}, "", url.pathname + url.search);
+  };
+  return [state, update];
+}
+
 const validationFieldLabels: Record<string, [string, string]> = {
   reason: ["变更原因", "change reason"],
   profile_key: ["配置键", "profile key"],
@@ -314,11 +365,10 @@ function App() {
         onLogin={(value) => {
           if (value.csrf_token)
             localStorage.setItem("cxDashboardCsrf", value.csrf_token);
-          setAuthSetup(null);
-          setMe(value);
-          api<Row>("/api/capabilities")
-            .then(setCapabilities)
-            .catch(() => undefined);
+          // A login can happen in a tab that still runs the bundle loaded
+          // before a controlled upgrade. Reload at the session boundary so
+          // the no-store shell resolves the current hashed UI assets.
+          window.location.reload();
         }}
         onNotice={setNotice}
         notice={notice}
@@ -1061,14 +1111,14 @@ function PlatformConfigurationPage({
   onCapabilitiesChanged: () => Promise<void>;
   initialSection?: "capabilities" | "operations";
 }) {
-  const [section, setSection] = useState<"capabilities" | "operations">(() => {
-    if (initialSection) return initialSection;
-    return new URLSearchParams(window.location.search).get("config") === "operations" ? "operations" : "capabilities";
-  });
+  const [section, setSection] = useUrlState(
+    "config",
+    ["capabilities", "operations"] as const,
+    initialSection || "capabilities",
+  );
   const selectSection = (value: "capabilities" | "operations") => {
     setSection(value);
     const url = new URL(window.location.href);
-    url.searchParams.set("config", value);
     url.searchParams.delete("section");
     window.history.replaceState({}, "", url.pathname + url.search);
   };
@@ -1102,10 +1152,7 @@ function PlatformCapabilitiesPage({
     ["registration", "外部智能体注册", "External Agent registration"],
     ["session", "会话策略", "Session policies"],
   ];
-  const platformTabFromLocation = (): PlatformTab => {
-    const value = new URLSearchParams(window.location.search).get("section");
-    return platformTabs.some(([key]) => key === value) ? value as PlatformTab : "capabilities";
-  };
+  const platformTabKeys = platformTabs.map(([key]) => key) as PlatformTab[];
   const [payload, setPayload] = useState<Row>({ items: [], history: [] });
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Row | null>(null);
@@ -1117,12 +1164,13 @@ function PlatformCapabilitiesPage({
   const [busy, setBusy] = useState(false);
   const [policies, setPolicies] = useState<Row>({});
   const [graphMatrix, setGraphMatrix] = useState<Row>({ items: [] });
-  const [activeTab, setActiveTab] = useState<PlatformTab>(platformTabFromLocation);
+  const [activeTab, setActiveTab] = useUrlState(
+    "section",
+    platformTabKeys,
+    "capabilities",
+  );
   const selectPlatformTab = (tab: PlatformTab) => {
     setActiveTab(tab);
-    const url = new URL(window.location.href);
-    url.searchParams.set("section", tab);
-    window.history.replaceState({}, "", url.pathname + url.search);
   };
   const load = async () => {
     setLoading(true);
@@ -1142,11 +1190,6 @@ function PlatformCapabilitiesPage({
     }
   };
   useEffect(() => { void load(); }, []);
-  useEffect(() => {
-    const onPopState = () => setActiveTab(platformTabFromLocation());
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
   const items = listPayload(payload, ["items"]);
   const groups: [string, Row[]][] = [
     [text("系统保护能力", "Protected system capabilities"), items.filter((item) => item.mandatory)],
@@ -1212,8 +1255,7 @@ function PlatformCapabilitiesPage({
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   return <>
-    {!embedded && <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} />}
-    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {!embedded && <SectionHeading title={text("功能配置", "Capability configuration")} subtitle={text("以数据库为权威来源控制当前实例开放的产品能力；身份、安全、授权与审计边界不可关闭。", "Control product capabilities for this installation from the authoritative database; identity, security, authorization, and audit boundaries cannot be disabled.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />}
     <div className="view-toggle platform-config-tabs" role="tablist" aria-label={text("功能配置分区", "Capability configuration sections")}>
       {platformTabs.map(([key, zh, en]) => <button type="button" role="tab" aria-selected={activeTab === key} className={activeTab === key ? "active" : ""} key={key} onClick={() => selectPlatformTab(key)}>{text(zh, en)}</button>)}
     </div>
@@ -1523,7 +1565,11 @@ function PlatformOperationsPage({
   const [enrollments, setEnrollments] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"overview" | "admin-management" | "admission" | "agent-pool" | "upgrade" | "containment">("overview");
+  const [tab, setTab] = useUrlState(
+    "tab",
+    ["overview", "admin-management", "admission", "agent-pool", "upgrade", "containment"] as const,
+    "overview",
+  );
   const [path, setPath] = useState("PLATFORM_DEPLOYED");
   const [trustMode, setTrustMode] = useState("MUTUAL_TRUST");
   const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
@@ -1576,8 +1622,7 @@ function PlatformOperationsPage({
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const tabs: Array<[typeof tab, string, string]> = [["overview", "运行概览", "Runtime overview"], ["admin-management", "Admin Agent 管理", "Admin Agent management"], ["admission", "Admin Agent 接入", "Admin Agent admission"], ["agent-pool", "Agent Pool 配置", "Agent Pool configuration"], ["upgrade", "升级与 Skill 分发", "Upgrade & Skill distribution"], ["containment", "紧急阻断", "Emergency containment"]];
-  return <section className={embedded ? "page-stack platform-configuration-subpage" : "page-stack"}>{!embedded && <SectionHeading title={text("平台运行", "Platform operations")} subtitle={text("平台级接入、升级和阻断配置独立于能力开关。所有操作均受保护，并保留数据库审计证据。", "Platform admission, upgrade, and containment settings are separate from capability switches. Every operation is protected and retained as database audit evidence.")} text={text} />}
-    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+  return <section className={embedded ? "page-stack platform-configuration-subpage" : "page-stack"}>{!embedded && <SectionHeading title={text("平台运行", "Platform operations")} subtitle={text("平台级接入、升级和阻断配置独立于能力开关。所有操作均受保护，并保留数据库审计证据。", "Platform admission, upgrade, and containment settings are separate from capability switches. Every operation is protected and retained as database audit evidence.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />}
     <ViewToggle value={tab} onChange={(value) => setTab(value as typeof tab)} options={tabs.map(([key, zh, en]) => [key, text(zh, en)])} />
     {loading ? <PageLoading text={text} /> : <>
       {tab === "overview" && <><InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}><p className="cx-form-hint">{text("仅管理员、平台管理智能体及经审批的 Admin Agent 可加入。聊天仅形成建议；变更必须转换为结构化操作并审计。", "Only administrators, platform management Agents, and approved Admin Agents may join. Chat produces advice only; changes must become structured audited operations.")}</p><div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, management.admin_group?.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong></InfoPanel></div><DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} /></InfoPanel></>}
@@ -1685,8 +1730,7 @@ function DeploymentModelsPage({
   const readiness = payload.readiness?.readiness || {};
   const embeddingDeployed = Boolean(readiness.platform_deployed);
   return <>
-    <SectionHeading title={text("部署与模型", "Deployment & models")} subtitle={text("Bootstrap Deployment Agent 仅在本地执行受校验安装；此处管理部署证据、LLM/Embedding 契约与重嵌入队列。", "The Bootstrap Deployment Agent runs verified installation locally; this view governs deployment evidence, LLM/Embedding Contracts, and re-embedding jobs.")} text={text} />
-    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    <SectionHeading title={text("部署与模型", "Deployment & models")} subtitle={text("Bootstrap Deployment Agent 仅在本地执行受校验安装；此处管理部署证据、LLM/Embedding 契约与重嵌入队列。", "The Bootstrap Deployment Agent runs verified installation locally; this view governs deployment evidence, LLM/Embedding Contracts, and re-embedding jobs.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />
     {loading ? <PageLoading text={text} /> : <>
       <div className="metric-grid">
         <InfoPanel title={text("向量就绪状态", "Embedding readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, readiness.state || "UNCONFIGURED")}</strong><p className="cx-form-hint">{text("只有已验证且可写的空间可以写入和参与向量检索。", "Only verified writable spaces can accept vectors or participate in vector retrieval.")}</p></InfoPanel>
@@ -1873,8 +1917,7 @@ function NativeAgentsPage({
     return statusLabel(state || "-");
   };
   return <>
-    {!embedded && <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} />}
-    <div className="page-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
+    {!embedded && <SectionHeading title={text("原生智能体", "Native Agents")} subtitle={text("平台原生管理智能体不依赖外部 Agent；业务智能体通过申请、审批、部署和激活形成可审计生命周期。LLM 只提供推理能力，不是安全边界。", "Platform-native management Agents bootstrap without an external Agent; business Agents follow an auditable request, approval, deployment, and activation lifecycle. An LLM provides reasoning only and is never a security boundary.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />}
     {loading ? <PageLoading text={text} /> : <>
       <div className="metric-grid native-summary-grid">
         <InfoPanel title={text("初始化状态", "Bootstrap status")} text={text}><strong className="metric-value">{bootstrapStatusLabel(data.bootstrap?.status)}</strong><p className="cx-form-hint">{text("初始化只创建和校验平台管理智能体，不调用模型。智能体是否可执行由下方“状态”和“模型配置”决定。", "Bootstrap only creates and verifies platform management Agents; it makes no model call. Execution readiness is determined by each Agent's status and model profile below.")}</p>{bootstrapFeedback && <p className="operation-feedback" role="status">{bootstrapFeedback}</p>}{canManage && <button type="button" className="primary-button" disabled={busy} onClick={async () => { setBusy(true); setBootstrapFeedback(text("正在检查并初始化平台原生智能体...", "Checking and initializing platform-native Agents...")); try { const result = await api<Row>("/api/platform/native-bootstrap", { method: "POST", body: "{}" }); await load(); const completed = ["READY", "COMPLETED"].includes(String(result.status || "").toUpperCase()); const message = completed ? text("平台原生智能体初始化已完成；当前状态已刷新。", "Platform-native Agent initialization is complete and the current status was refreshed.") : text(`初始化已处理，当前状态：${bootstrapStatusLabel(result.status)}。`, `Initialization was processed. Current status: ${bootstrapStatusLabel(result.status)}.`); setBootstrapFeedback(message); onNotice(message); } catch (error) { const message = (error as Error).message; setBootstrapFeedback(message); onNotice(message); } finally { setBusy(false); } }}><Bot className={busy ? "spin" : ""} size={15} />{busy ? text("处理中", "Working") : text("初始化或刷新状态", "Initialize or refresh status")}</button>}</InfoPanel>
@@ -1905,7 +1948,11 @@ function MemoryLifecyclePage({
   onNotice: (value: string) => void;
 }) {
   type MemoryView = "overview" | "library" | "chain" | "workbench" | "jobs";
-  const [view, setView] = useState<MemoryView>("overview");
+  const [view, setView] = useUrlState<MemoryView>(
+    "view",
+    ["overview", "library", "chain", "workbench", "jobs"],
+    "overview",
+  );
   const [payload, setPayload] = useState<Row>({ nodes: [], edges: [] });
   const [jobs, setJobs] = useState<Row[]>([]);
   const [candidates, setCandidates] = useState<Row[]>([]);
@@ -1913,7 +1960,11 @@ function MemoryLifecyclePage({
   const [selected, setSelected] = useState<Row | null>(null);
   const [chainData, setChainData] = useState<Row>({ nodes: [], relations: [] });
   const [loading, setLoading] = useState(true);
-  const [libraryMode, setLibraryMode] = useState<"list" | "graph">("list");
+  const [libraryMode, setLibraryMode] = useUrlState<"list" | "graph">(
+    "library",
+    ["list", "graph"],
+    "list",
+  );
   const [libraryItems, setLibraryItems] = useState<Row[]>([]);
   const [libraryPageSize, setLibraryPageSize] = useState(20);
   const [libraryCursorHistory, setLibraryCursorHistory] = useState<string[]>([""]);
@@ -2007,9 +2058,8 @@ function MemoryLifecyclePage({
     ["jobs", "策略与作业", "Policies and jobs", Activity],
   ];
   return <section>
-    <SectionHeading title={text("记忆", "Memory")} subtitle={text("版本化记忆将内容、使用事件和动态效果分离；默认只向运行提供当前且获授权的版本。", "Versioned Memory separates content, usage events, and dynamic effectiveness; only current authorized versions are returned to runtime by default.")} text={text} />
+    <SectionHeading title={text("记忆", "Memory")} subtitle={text("版本化记忆将内容、使用事件和动态效果分离；默认只向运行提供当前且获授权的版本。", "Versioned Memory separates content, usage events, and dynamic effectiveness; only current authorized versions are returned to runtime by default.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />
     <ViewToggle value={view} options={tabs.map(([key, zh, en, Icon]) => [key, text(zh, en), Icon])} onChange={(value) => setView(value as MemoryView)} />
-    <div className="page-toolbar cx-memory-toolbar"><button className="icon-button" onClick={() => void load()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button></div>
     {loading && <PageLoading text={text} />}
     {!loading && view === "overview" && <div className="cx-metric-grid">
       <InfoPanel title={text("当前可用版本", "Current usable versions")} text={text}><strong className="metric-value">{nodes.length}</strong><p>{text("不包含已归档、隔离和逻辑不可用版本。", "Archived, quarantined, and logically unavailable versions are excluded.")}</p></InfoPanel>
@@ -2670,7 +2720,11 @@ function DataPage({
   const [graphData, setGraphData] = useState<Row>({ nodes: [], edges: [] });
   const [detail, setDetail] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"list" | "graph">("list");
+  const [view, setView] = useUrlState<"list" | "graph">(
+    "view",
+    ["list", "graph"],
+    "list",
+  );
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
@@ -3238,7 +3292,11 @@ function GraphPage({
   const [runs, setRuns] = useState<Row[]>([]);
   const [filter, setFilter] = useState("ALL");
   const [detail, setDetail] = useState<Row | null>(null);
-  const [view, setView] = useState("overview");
+  const [view, setView] = useUrlState(
+    "view",
+    ["overview", "definitions", "types", "runs", "relationships"] as const,
+    "overview",
+  );
   const [loading, setLoading] = useState(true);
   const load = async () => {
     setLoading(true);
@@ -3855,15 +3913,23 @@ function OrganizationPage({
   const [roots, setRoots] = useState<Row[]>([]);
   const [scopeNodes, setScopeNodes] = useState<Row[]>([]);
   const [graph, setGraph] = useState<Row>({ nodes: [], edges: [] });
-  const [focusId, setFocusId] = useState("");
+  const [focusId, setFocusId] = useUrlParam("focus");
   const [selected, setSelected] = useState<Row | null>(null);
   const [detail, setDetail] = useState<Row | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Row[]>([]);
-  const [mode, setMode] = useState<OrganizationMode>("organization");
+  const [mode, setMode] = useUrlState<OrganizationMode>(
+    "view",
+    ["organization", "anomalies", "people", "agents"] as const,
+    "organization",
+  );
   const [orientation, setOrientation] =
     useState<OrganizationOrientation>("UD");
-  const [panel, setPanel] = useState("details");
+  const [panel, setPanel] = useUrlState(
+    "panel",
+    ["details", "draft", "impact", "history", "conflicts"] as const,
+    "details",
+  );
   const [changes, setChanges] = useState<Row[]>([]);
   const [draft, setDraft] = useState<Row | null>(null);
   const [historyRows, setHistoryRows] = useState<Row[]>([]);
@@ -5112,7 +5178,11 @@ function AgentsPage({
   onNotice: (value: string) => void;
   initialView?: "registered" | "native";
 }) {
-  const [view, setView] = useState<"registered" | "external" | "native">(initialView === "native" ? "native" : "registered");
+  const [view, setView] = useUrlState<"registered" | "external" | "native">(
+    "view",
+    ["registered", "external", "native"],
+    initialView === "native" ? "native" : "registered",
+  );
   const [agents, setAgents] = useState<Row[]>([]);
   const [grants, setGrants] = useState<Row[]>([]);
   const [externalPolicy, setExternalPolicy] = useState<Row>({});
@@ -5585,6 +5655,7 @@ function Channels({
   const [securityDomains, setSecurityDomains] = useState<Row[]>([]);
   const [channelTotal, setChannelTotal] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<Row | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useUrlParam("channel");
   const [messages, setMessages] = useState<Row[]>([]);
   const [members, setMembers] = useState<Row[]>([]);
   const [threads, setThreads] = useState<Row[]>([]);
@@ -5595,7 +5666,7 @@ function Channels({
   const [body, setBody] = useState("");
   const [selectedMessagePrincipal, setSelectedMessagePrincipal] = useState<Row | null>(null);
   const [threadId, setThreadId] = useState("");
-  const [view, setView] = useState("chat");
+  const [view, setView] = useUrlState("view", ["chat", "manage"] as const, "chat");
   const [pageSize, setPageSize] = useState(20);
   const [cursorHistory, setCursorHistory] = useState<string[]>([""]);
   const [nextCursor, setNextCursor] = useState("");
@@ -5617,7 +5688,18 @@ function Channels({
       setNextCursor(String(value.next_cursor || ""));
       setChannelTotal(typeof value.total_items === "number" ? value.total_items : undefined);
       setSecurityDomains(domainValue.items || []);
-      if (!selected && list[0]) setSelected(list[0]);
+      const requested = selectedChannelId
+        ? list.find((item: Row) => String(item.channel_id) === selectedChannelId)
+        : null;
+      if (requested) setSelected(requested);
+      else if (!selected && list[0]) {
+        setSelected(list[0]);
+        setSelectedChannelId(String(list[0].channel_id));
+      } else if (selectedChannelId && !list.some((item: Row) => String(item.channel_id) === selectedChannelId)) {
+        setSelected(null);
+        setSelectedChannelId("");
+        onNotice(text("频道不存在或当前无权访问，已返回频道列表。", "The Channel is unavailable or unauthorized; returned to the Channel list."));
+      }
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -5625,6 +5707,10 @@ function Channels({
           : text("频道加载失败", "Channel loading failed"),
       );
     } finally { setLoading(false); }
+  };
+  const selectChannel = (channel: Row | null) => {
+    setSelected(channel);
+    setSelectedChannelId(channel ? String(channel.channel_id) : "");
   };
   const loadSelected = async (channel: Row) => {
     const id = encodeURIComponent(String(channel.channel_id));
@@ -5709,7 +5795,7 @@ function Channels({
       });
       form.reset();
       await load();
-      setSelected(created);
+      selectChannel(created);
       onNotice(
         text(
           "频道已创建，创建者已成为频道所有者。",
@@ -6119,7 +6205,7 @@ function Channels({
               <button
                 key={item.channel_id}
                 className={`channel-item ${selected.channel_id === item.channel_id ? "active" : ""}`}
-                onClick={() => setSelected(item)}
+                onClick={() => selectChannel(item)}
               >
                 <MessageSquare size={15} />
                 <span>
@@ -8397,10 +8483,12 @@ function SectionHeading({
   title,
   subtitle,
   text,
+  actions,
 }: {
   title: string;
   subtitle: string;
   text: (zh: string, en: string) => string;
+  actions?: React.ReactNode;
 }) {
   return (
     <div className="section-heading">
@@ -8408,12 +8496,26 @@ function SectionHeading({
         <h1>{title}</h1>
         <p>{subtitle}</p>
       </div>
-      <span className="secure-badge">
-        <ShieldCheck size={15} />
-        {text("数据库授权", "DB governed")}
-      </span>
+      <div className="section-heading-actions">
+        {actions}
+        <span className="secure-badge">
+          <ShieldCheck size={15} />
+          {text("数据库授权", "DB governed")}
+        </span>
+      </div>
     </div>
   );
+}
+function PageRefresh({
+  loading,
+  onRefresh,
+  text,
+}: {
+  loading: boolean;
+  onRefresh: () => void | Promise<void>;
+  text: (zh: string, en: string) => string;
+}) {
+  return <button className="icon-button" onClick={() => void onRefresh()} title={text("刷新", "Refresh")}><RefreshCw className={loading ? "spin" : ""} size={15} />{text("刷新", "Refresh")}</button>;
 }
 function PageLoading({ text }: { text: (zh: string, en: string) => string }) {
   return (

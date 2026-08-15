@@ -195,6 +195,25 @@ def test_control_plane_static_assets_are_not_reused_after_a_security_fix():
     assert 'headers={"Cache-Control": "no-store"}' in static_route
 
 
+def test_dashboard_login_reloads_the_current_ui_bundle():
+    app = (TEMPLATES_DIR.parent.parent / "web" / "src" / "App.tsx").read_text(
+        encoding="utf-8"
+    )
+    login_callback = app.split("onLogin={(value) => {", 1)[1].split("}}", 1)[0]
+    assert 'localStorage.setItem("cxDashboardCsrf", value.csrf_token)' in login_callback
+    assert "window.location.reload()" in login_callback
+
+
+def test_summary_metrics_fill_the_available_page_width():
+    stylesheet = (TEMPLATES_DIR.parent.parent / "web" / "src" / "app.css").read_text(
+        encoding="utf-8"
+    )
+    metric_grid = stylesheet.split(".metric-grid {", 1)[1].split("}", 1)[0]
+    assert "repeat(auto-fit, minmax(240px, 1fr))" in metric_grid
+    assert "width: 100%" in metric_grid
+    assert ".native-summary-grid" not in stylesheet
+
+
 def test_dashboard_and_portal_use_the_mfa_dashboard_entry():
     web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
     portal_login = (TEMPLATES_DIR / "portal_login.html").read_text(encoding="utf-8")

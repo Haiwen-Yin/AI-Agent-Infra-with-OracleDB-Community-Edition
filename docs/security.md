@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.4
+# Security - AI Agent Infra with DB v4.4.5
 
 ## v4.4.3 Security Domain Boundary
 
@@ -179,6 +179,16 @@ credentials, tokens, secrets, and protected policy data are excluded by
 default.
 
 ## v4.3.2 Memory Boundary
+
+### v4.4.5 Graph Run Admission Boundary
+
+Run admission stores the immutable Definition and Plan digests plus the
+compatibility, State schema, and budget schema versions used by that Run. A
+Plan is accepted only when it belongs to the requested Version and its digest
+matches the Version digest. A fork that could replay a non-repeatable external
+effect starts paused before any Worker claim; resuming it requires a governed
+approval bound to the child Run or bounded compensation evidence. Protocol
+metadata, Agent Cards, and URL state cannot satisfy this boundary.
 
 Memory bodies, summaries, graph labels, representations, candidates, model
 output, and feedback are untrusted data. They cannot grant a Principal access,
@@ -595,3 +605,14 @@ commands return credential-free control-plane summaries. Mutating commands are
 converted to Action Cards and require the existing separated approval path.
 Neither ordinary prose, prompts, Skills, Tools, nor an LLM response can execute
 a database mutation.
+
+Node draining and retirement are separate from emergency containment.
+`/platform AGENT_DRAIN` is a typed, scope-checked proposal and cannot be
+activated merely because an Agent or model emitted that text. Its Action Card
+records source, destination, reason, expected version and expiry, and must be
+approved by the configured human/Admin policy. Execution fences new work on
+the source and retries only expired retryable claims. It does not terminate a
+task already running; a separate containment incident is required for that
+higher-impact action. Retired nodes and LLM profiles remain auditable but are
+excluded from active discovery, and LLM retirement revokes stored encrypted
+API-key ciphertext.

@@ -167,8 +167,9 @@ def test_v442_dashboard_removes_manual_embedding_operations_and_keeps_forms_labe
     assert 'text("保存绑定", "Save binding")' not in ui
     assert 'text("加入队列", "Queue job")' not in ui
     assert 'name="profile_key" required placeholder' not in ui
-    assert 'url.searchParams.set("section", tab)' in ui
-    assert 'platformTabFromLocation' in ui
+    assert "function useUrlState" in ui
+    assert '"section"' in ui
+    assert 'platformTabKeys' in ui
 
 
 def test_v442_dashboard_automates_embedding_activation_and_uses_named_external_agents():
@@ -409,3 +410,10 @@ def test_v442_compliance_draft_is_structured_and_forms_do_not_use_instructional_
     assert 'name="agent_name" required placeholder' not in ui
     assert 'text("合规控制模板", "Compliance control templates")' in ui
     assert 'text("受管配置", "Governed profiles")' not in ui
+
+
+def test_v445_platform_child_state_uses_shared_url_state_contract():
+    ui = (Path(__file__).parents[1] / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "function useUrlState" in ui
+    assert '"config"' in ui
+    assert '"section"' in ui

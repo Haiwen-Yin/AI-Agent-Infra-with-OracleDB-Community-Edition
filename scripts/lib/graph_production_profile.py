@@ -78,7 +78,7 @@ def list_capabilities() -> Dict[str, Any]:
     rows = _db_rows()
     return {
         "profile_key": PROFILE_KEY,
-        "profile_version": "4.4.2",
+        "profile_version": "4.4.5",
         "items": [
             {**row, "display_name_zh": CAPABILITIES[key]["zh"], "display_name_en": CAPABILITIES[key]["en"]}
             for row in rows

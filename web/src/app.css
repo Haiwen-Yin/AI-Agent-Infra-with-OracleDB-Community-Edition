@@ -226,6 +226,12 @@ a {
   font-size: 12px;
   line-height: 1.35;
 }
+.section-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
 .eyebrow {
   margin: 0;
   color: var(--brand);
@@ -294,7 +300,8 @@ a {
 .cx-sync-indicator.active { color: var(--brand); }
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  width: 100%;
   gap: 12px;
   margin: 25px 0 18px;
 }
@@ -771,10 +778,10 @@ tbody tr:hover {
 }
 .page-toolbar:has(> .icon-button:only-child) {
   justify-content: flex-end;
-  margin-top: -34px;
-  margin-bottom: 18px;
-  position: relative;
-  z-index: 2;
+  /* Keep the control in normal flow when a page subtitle wraps. The former
+     negative offset caused refresh buttons to overlap the heading/content. */
+  margin-top: 8px;
+  margin-bottom: 14px;
 }
 /* Runtime nodes are created from startup/deployment discovery. */
 form:has(input[name="roles"][value="ADMIN_AGENT"]) {
@@ -2242,9 +2249,6 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   height: 36px;
   margin: 0;
 }
-.native-summary-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 .management-metric-grid .info-panel {
   min-width: 0;
 }
@@ -2444,6 +2448,10 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
     flex-direction: column;
     gap: 10px;
   }
+  .section-heading-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
   .section-heading-main {
     align-items: flex-start;
     flex-direction: column;
@@ -2598,6 +2606,9 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   }
   .cx-main {
     padding-inline: 11px;
+  }
+  .metric-grid {
+    grid-template-columns: 1fr;
   }
   .metric {
     min-height: 92px;

@@ -326,14 +326,45 @@ def register_worker(worker_id: str, runtime: str, capabilities: Optional[List[st
     return True
 
 
+def run_contract_snapshot(graph_version_id: str, plan_id: str,
+                          version: Optional[Dict[str, Any]],
+                          plan: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Validate and freeze the immutable contract used to admit one Run."""
+    version = {str(key).lower(): value for key, value in dict(version or {}).items()}
+    plan = {str(key).lower(): value for key, value in dict(plan or {}).items()}
+    if str(plan.get("graph_version_id") or "") != str(graph_version_id):
+        raise ValueError("compiled Plan does not belong to the requested Graph Version")
+    version_digest = str(version.get("definition_digest") or "").lower()
+    plan_definition_digest = str(plan.get("definition_digest") or "").lower()
+    plan_digest = str(plan.get("plan_digest") or "").lower()
+    if version_digest != plan_definition_digest:
+        raise ValueError("compiled Plan definition digest does not match the Graph Version")
+    for name, value in (("definition", version_digest), ("plan", plan_digest)):
+        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+            raise ValueError(f"{name} digest must be a SHA-256 hex digest")
+    schema_version = str(version.get("schema_version") or "").strip()
+    if not schema_version:
+        raise ValueError("Graph Version schema version is required")
+    return {
+        "definition_digest": version_digest,
+        "plan_digest": plan_digest,
+        "compatibility_level": "COMPATIBLE",
+        "state_schema_version": schema_version,
+        "budget_schema_version": "graph-budget/1",
+    }
+
+
 def create_run(graph_version_id: str, plan_id: str, actor_id: str,
                initial_state: Optional[Dict[str, Any]] = None,
                budget: Optional[Dict[str, Any]] = None,
-               idempotency_key: Optional[str] = None) -> str:
+               idempotency_key: Optional[str] = None, *,
+               start_paused: bool = False,
+               admission_evidence: Optional[Dict[str, Any]] = None) -> str:
     if not graph_version_id or not plan_id or not actor_id:
         raise ValueError("graph_version_id, plan_id, and actor_id are required")
     version = connection.execute_query_one(
-        "SELECT STATUS FROM GRAPH_VERSIONS WHERE GRAPH_VERSION_ID = :graph_version_id",
+        "SELECT STATUS, DEFINITION_DIGEST, SCHEMA_VERSION FROM GRAPH_VERSIONS "
+        "WHERE GRAPH_VERSION_ID = :graph_version_id",
         {"graph_version_id": graph_version_id},
     )
     if not version or str(version.get("status") or "").upper() not in {"PUBLISHED", "DEPRECATED"}:
@@ -349,30 +380,48 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
     node_run_id = _id("NR")
     ready_id = _id("READY")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    plan_row = connection.execute_query_one("SELECT PLAN_JSON FROM GRAPH_COMPILE_PLANS WHERE PLAN_ID = :plan_id", {"plan_id": plan_id})
+    plan_row = connection.execute_query_one(
+        "SELECT GRAPH_VERSION_ID, DEFINITION_DIGEST, PLAN_DIGEST, PLAN_JSON "
+        "FROM GRAPH_COMPILE_PLANS WHERE PLAN_ID = :plan_id",
+        {"plan_id": plan_id},
+    )
+    contract = run_contract_snapshot(graph_version_id, plan_id, version, plan_row)
     plan = _json((plan_row or {}).get("plan_json"), {}) or {}
     entry = plan.get("entry_node")
     if not entry:
         raise ValueError("compiled plan has no entry node")
     effective_budget = budget or plan.get("budget") or {}
+    run_status = "PAUSED" if start_paused else "RUNNING"
+    node_status = "WAITING" if start_paused else "READY"
+    ready_status = "WAITING" if start_paused else "READY"
     statements = [(
-        "INSERT INTO GRAPH_RUNS (RUN_ID, GRAPH_VERSION_ID, PLAN_ID, STATUS, ACTOR_ID, IDEMPOTENCY_KEY, INPUT_STATE_JSON, BUDGET_JSON, BUDGET_USAGE_JSON, CREATED_AT, UPDATED_AT) "
-        "VALUES (:run_id, :graph_version_id, :plan_id, 'RUNNING', :actor_id, :idempotency_key, :input_state_json, :budget_json, :budget_usage_json, :created_at, :updated_at)",
+        "INSERT INTO GRAPH_RUNS (RUN_ID, GRAPH_VERSION_ID, PLAN_ID, STATUS, ACTOR_ID, IDEMPOTENCY_KEY, "
+        "INPUT_STATE_JSON, BUDGET_JSON, BUDGET_USAGE_JSON, DEFINITION_DIGEST, PLAN_DIGEST, "
+        "COMPATIBILITY_LEVEL, STATE_SCHEMA_VERSION, BUDGET_SCHEMA_VERSION, CREATED_AT, UPDATED_AT) "
+        "VALUES (:run_id, :graph_version_id, :plan_id, :run_status, :actor_id, :idempotency_key, "
+        ":input_state_json, :budget_json, :budget_usage_json, :definition_digest, :plan_digest, "
+        ":compatibility_level, :state_schema_version, :budget_schema_version, :created_at, :updated_at)",
         {"run_id": run_id, "graph_version_id": graph_version_id, "plan_id": plan_id, "actor_id": actor_id,
          # Some Oracle-compatible engines treat NULLs in composite unique
          # constraints as equal.  An internal key keeps independent Runs
          # portable while an external key remains unchanged when supplied.
          "idempotency_key": idempotency_key or f"__run_{run_id}",
          "input_state_json": _canonical(graph_state.encode_secret_state(initial_state or {})),
-         "budget_json": _canonical(effective_budget), "budget_usage_json": _canonical({}), "created_at": now, "updated_at": now},
+         "budget_json": _canonical(effective_budget), "budget_usage_json": _canonical({}),
+         "definition_digest": contract["definition_digest"], "plan_digest": contract["plan_digest"],
+         "compatibility_level": contract["compatibility_level"],
+         "state_schema_version": contract["state_schema_version"],
+         "budget_schema_version": contract["budget_schema_version"],
+         "run_status": run_status, "created_at": now, "updated_at": now},
     ), (
         "INSERT INTO GRAPH_NODE_RUNS (NODE_RUN_ID, RUN_ID, NODE_KEY, STATUS, ITERATION_NO, CREATED_AT, UPDATED_AT) "
-        "VALUES (:node_run_id, :run_id, :node_key, 'READY', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-        {"node_run_id": node_run_id, "run_id": run_id, "node_key": entry},
+        "VALUES (:node_run_id, :run_id, :node_key, :node_status, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        {"node_run_id": node_run_id, "run_id": run_id, "node_key": entry, "node_status": node_status},
     ), (
         "INSERT INTO GRAPH_READY_NODES (READY_ID, NODE_RUN_ID, RUN_ID, NODE_KEY, STATUS, PRIORITY, AVAILABLE_AT, CREATED_AT) "
-        "VALUES (:ready_id, :node_run_id, :run_id, :node_key, 'READY', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-        {"ready_id": ready_id, "node_run_id": node_run_id, "run_id": run_id, "node_key": entry},
+        "VALUES (:ready_id, :node_run_id, :run_id, :node_key, :ready_status, 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        {"ready_id": ready_id, "node_run_id": node_run_id, "run_id": run_id, "node_key": entry,
+         "ready_status": ready_status},
     )]
     def _create(tx):
         for sql, params in statements:
@@ -380,7 +429,9 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
         _record_governance_event(
             "RUN_CREATED", actor_id, "Graph Run created", run_id=run_id,
             detail={"graph_version_id": graph_version_id, "plan_id": plan_id,
-                    "idempotency_key": bool(idempotency_key)}, tx=tx,
+                    "idempotency_key": bool(idempotency_key), "initial_status": run_status,
+                    "run_contract": contract,
+                    "admission_evidence": _redact(admission_evidence or {})}, tx=tx,
         )
 
     try:
@@ -401,7 +452,10 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
 
 def get_run(run_id: str) -> Optional[Dict[str, Any]]:
     return _row(connection.execute_query_one(
-        "SELECT RUN_ID, GRAPH_VERSION_ID, PLAN_ID, STATUS, ACTOR_ID, IDEMPOTENCY_KEY, INPUT_STATE_JSON, CURRENT_CHECKPOINT_ID, BUDGET_JSON, BUDGET_USAGE_JSON, ERROR_CODE, ERROR_MESSAGE, CREATED_AT, UPDATED_AT, COMPLETED_AT FROM GRAPH_RUNS WHERE RUN_ID = :run_id",
+        "SELECT RUN_ID, GRAPH_VERSION_ID, PLAN_ID, STATUS, ACTOR_ID, IDEMPOTENCY_KEY, INPUT_STATE_JSON, "
+        "CURRENT_CHECKPOINT_ID, BUDGET_JSON, BUDGET_USAGE_JSON, DEFINITION_DIGEST, PLAN_DIGEST, "
+        "COMPATIBILITY_LEVEL, STATE_SCHEMA_VERSION, BUDGET_SCHEMA_VERSION, ERROR_CODE, ERROR_MESSAGE, "
+        "CREATED_AT, UPDATED_AT, COMPLETED_AT FROM GRAPH_RUNS WHERE RUN_ID = :run_id",
         {"run_id": run_id},
     ))
 
@@ -1691,17 +1745,61 @@ def pause_run(run_id: str, actor_id: str, reason: str) -> bool:
     return bool(connection.execute_transaction_callback(_pause))
 
 
-def resume_run(run_id: str, actor_id: str, reason: str) -> bool:
+def _fork_replay_resolution(tx: Any, run_id: str,
+                            resolution: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    resolution = resolution if isinstance(resolution, dict) else {}
+    decision_type = str(resolution.get("type") or "").upper()
+    if decision_type == "APPROVAL":
+        approval_id = str(resolution.get("approval_id") or "").strip()
+        if not approval_id:
+            raise PermissionError("fork replay requires an approved request")
+        approval = tx.query_one(
+            "SELECT APPROVAL_ID, STATUS, RESOURCE_ID, ACTION FROM GOV_APPROVAL_REQUESTS "
+            "WHERE APPROVAL_ID = :approval_id",
+            {"approval_id": approval_id},
+        )
+        if not approval or str(approval.get("status") or "").upper() != "APPROVED":
+            raise PermissionError("fork replay approval is not approved")
+        if str(approval.get("resource_id") or "") != run_id:
+            raise PermissionError("fork replay approval is not bound to this Run")
+        if str(approval.get("action") or "").upper() != "GRAPH_FORK_REPLAY":
+            raise PermissionError("fork replay approval has the wrong action")
+        return {"type": "APPROVAL", "approval_id": approval_id}
+    if decision_type == "COMPENSATION":
+        evidence = str(resolution.get("evidence") or resolution.get("reference") or "").strip()
+        if not evidence:
+            raise PermissionError("fork replay compensation requires evidence")
+        return {"type": "COMPENSATION", "evidence": evidence[:1000]}
+    raise PermissionError("fork replay requires approval or a compensation decision")
+
+
+def resume_run(run_id: str, actor_id: str, reason: str,
+               resolution: Optional[Dict[str, Any]] = None) -> bool:
     if not str(reason or "").strip():
         raise ValueError("resume reason is required")
     def _resume(tx):
-        changed = tx.execute("UPDATE GRAPH_RUNS SET STATUS = 'RUNNING', UPDATED_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id AND STATUS = 'PAUSED'", {"run_id": run_id})
+        current = tx.query_one(
+            "SELECT STATUS, ERROR_CODE FROM GRAPH_RUNS WHERE RUN_ID = :run_id",
+            {"run_id": run_id},
+        )
+        if not current or str(current.get("status") or "").upper() != "PAUSED":
+            return False
+        replay_resolution = None
+        if str(current.get("error_code") or "").upper() == "FORK_REPLAY_APPROVAL_REQUIRED":
+            replay_resolution = _fork_replay_resolution(tx, run_id, resolution)
+        changed = tx.execute(
+            "UPDATE GRAPH_RUNS SET STATUS = 'RUNNING', ERROR_CODE = NULL, ERROR_MESSAGE = NULL, "
+            "UPDATED_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id AND STATUS = 'PAUSED'",
+            {"run_id": run_id},
+        )
         if not changed:
             return False
         tx.execute("UPDATE GRAPH_READY_NODES SET STATUS = 'READY', AVAILABLE_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id AND STATUS = 'WAITING'", {"run_id": run_id})
         tx.execute("UPDATE GRAPH_NODE_RUNS SET STATUS = 'READY', UPDATED_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id AND STATUS = 'WAITING'", {"run_id": run_id})
-        _intervention_tx(tx, run_id, "RESUME", actor_id, reason)
-        _trace_tx(tx, run_id, "RUN_RESUMED", status="RUNNING", detail={"reason": reason})
+        evidence = {"fork_replay_resolution": replay_resolution} if replay_resolution else None
+        _intervention_tx(tx, run_id, "RESUME", actor_id, reason, evidence=evidence)
+        _trace_tx(tx, run_id, "RUN_RESUMED", status="RUNNING",
+                  detail={"reason": reason, "fork_replay_resolution": replay_resolution})
         return True
     return bool(connection.execute_transaction_callback(_resume))
 
@@ -1800,6 +1898,23 @@ def compensate(run_id: str, node_run_id: str, actor_id: str, reason: str) -> boo
     return force_route(run_id, node_run_id, str(edge.get("edge_id")), actor_id, reason)
 
 
+def fork_replay_decision(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the immutable admission decision for replaying a compiled plan."""
+    nodes = plan.get("nodes") or list((plan.get("node_index") or {}).values())
+    non_repeatable = sorted({
+        str(node.get("node_key") or "")
+        for node in nodes if isinstance(node, dict)
+        and str(node.get("side_effect_class") or "NONE").upper() == "NON_IDEMPOTENT"
+        and str(node.get("node_key") or "").strip()
+    })
+    return {
+        "allowed": not non_repeatable,
+        "status": "RUNNING" if not non_repeatable else "PAUSED",
+        "reason_code": None if not non_repeatable else "FORK_REPLAY_APPROVAL_REQUIRED",
+        "non_repeatable_nodes": non_repeatable,
+    }
+
+
 def fork_run(run_id: str, actor_id: str, reason: str, idempotency_key: Optional[str] = None) -> str:
     if not str(reason or "").strip():
         raise ValueError("fork reason is required")
@@ -1807,9 +1922,29 @@ def fork_run(run_id: str, actor_id: str, reason: str, idempotency_key: Optional[
     if not run:
         raise ValueError("Graph Run not found")
     plan = _plan_for_run(run_id)
-    child_id = create_run(run["graph_version_id"], run["plan_id"], actor_id, recover_state(run_id), run.get("budget") or {}, idempotency_key or f"fork:{run_id}:{_hash(reason)[:16]}")
-    append_checkpoint(child_id, recover_state(run_id), actor_id, snapshot_kind="FORK", reducer_evidence={"parent_run_id": run_id, "reason": reason})
-    connection.execute("UPDATE GRAPH_RUNS SET ERROR_MESSAGE = :reason, UPDATED_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id", {"run_id": child_id, "reason": f"Forked from {run_id}: {reason}"})
+    decision = fork_replay_decision(plan)
+    child_id = create_run(
+        run["graph_version_id"], run["plan_id"], actor_id, recover_state(run_id),
+        run.get("budget") or {}, idempotency_key or f"fork:{run_id}:{_hash(reason)[:16]}",
+        start_paused=not decision["allowed"],
+        admission_evidence={"parent_run_id": run_id, "fork_replay": decision},
+    )
+    append_checkpoint(
+        child_id, recover_state(run_id), actor_id, snapshot_kind="FORK",
+        reducer_evidence={"parent_run_id": run_id, "reason": reason, "fork_replay": decision},
+    )
+    if decision["allowed"]:
+        connection.execute(
+            "UPDATE GRAPH_RUNS SET ERROR_MESSAGE = :reason, UPDATED_AT = CURRENT_TIMESTAMP WHERE RUN_ID = :run_id",
+            {"run_id": child_id, "reason": f"Forked from {run_id}: {reason}"},
+        )
+    else:
+        connection.execute(
+            "UPDATE GRAPH_RUNS SET ERROR_CODE = :error_code, ERROR_MESSAGE = :reason, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE RUN_ID = :run_id AND STATUS = 'PAUSED'",
+            {"run_id": child_id, "error_code": decision["reason_code"],
+             "reason": f"Forked from {run_id}; approval or compensation is required before replay"},
+        )
     return child_id
 
 

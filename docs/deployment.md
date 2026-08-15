@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.4
+# Deployment Guide - AI Agent Infra with DB v4.4.5
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -62,7 +62,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.4 --database <oracle|pg|yashandb> \
+  --version 4.4.5 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -81,7 +81,7 @@ authorization, and it does not depend on an external Agent calling a Skill.
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py \
-  --version 4.4.4 --database <oracle|pg|yashandb> \
+  --version 4.4.5 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -643,6 +643,30 @@ not grant data, database, Skill, Tool, or Channel access. MaaS, SaaS, and
 virtualization targets use deployment adapters rather than the Host bootstrap
 path. Removing a binding also requires an audited reason.
 
+#### Retiring a node or draining work
+
+Node removal in Dashboard is logical retirement, not physical deletion. The
+record remains in audit/history but is hidden from active selectors. Before
+retirement, the protected Platform Administration Channel can prepare an
+Agent Pool node for maintenance:
+
+```text
+/platform AGENT_DRAIN <source_node_id> <destination_node_id> <reason>
+```
+
+The request becomes an Action Card and requires the configured human/Admin
+approval path. After approval, the source enters `DRAINING` and accepts no new
+work. Only expired retryable claims may return to `PENDING` and move to an
+active destination. Work already running is allowed to finish; drain does not
+forcibly kill or copy it. Retire the source only after active executions,
+bindings, onboarding records and Admin HA memberships have cleared. If no
+destination is suitable, the plan remains pending and reports remediation.
+
+LLM profile removal follows the same logical-retirement model. It is blocked
+while referenced by Portal policy, active native Agents or pending requests;
+after retirement, encrypted API-key ciphertext is revoked and the profile is
+removed from active selection while audit history remains.
+
 Admin Agent nodes receive their node-local Agent information and runtime path
 when the node is added. The initial platform node records its actual deployment
 directory automatically; every additional node requires an explicit parent
@@ -658,6 +682,7 @@ create the endpoint profile with the Agent enrollment grant ID. The platform
 records the endpoint reference in the grant policy snapshot. Only the Agent
 redeemed from that active, unexpired grant can discover the profile. Agents
 without a valid binding receive the initialization endpoint instead.
+
 # v4.3.7 Bootstrap Deployment and Embedding Worker
 
 For a new prepared database target, use the package-local Bootstrap Deployment
