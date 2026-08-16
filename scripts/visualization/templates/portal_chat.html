@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.5">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.6">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.5 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.4.6 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -72,6 +72,12 @@ function portalFetch(url,options){
   options=options||{};
   var headers={};
   Object.keys(options.headers||{}).forEach(function(key){headers[key]=options.headers[key]});
+  var clientId=sessionStorage.getItem('cxPortalClientInstance');
+  if(!clientId){clientId=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random());sessionStorage.setItem('cxPortalClientInstance',clientId)}
+  var pageId=sessionStorage.getItem('cxPortalPageInstance');
+  if(!pageId){pageId=clientId;sessionStorage.setItem('cxPortalPageInstance',pageId)}
+  headers['X-CX-Client-Instance']=clientId;
+  headers['X-CX-Page-Instance']=pageId;
   var method=String(options.method||'GET').toUpperCase();
   var csrf=localStorage.getItem('cxPortalCsrf');
   if(csrf&&method!=='GET'&&method!=='HEAD')headers['X-CSRF-Token']=csrf;

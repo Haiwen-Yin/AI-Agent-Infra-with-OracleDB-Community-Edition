@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra with DB v4.4.5
+# Migration Guide - AI Agent Infra with DB v4.4.6
 
 ## v4.4.3 Security Domain Governance Migration
 
@@ -787,3 +787,18 @@ Application rollback restores the coordinated pre-v4.3.0 backup and uses the
 previous application profile. A schema downgrade is not performed. Remote
 non-idempotent effects that reached an uncertain outcome require confirmation,
 compensation, or human review and are never blindly replayed.
+
+## v4.4.6 Identity, Portal, and Graph Posture
+
+Create and verify a recoverable backup manifest before applying v4.4.6. Run
+the common migration set with `--version 4.4.6`; the runner applies the Human
+profile and registration policy contract, external identity transaction
+tables, Portal connection and page leases, and Graph capability posture. The
+portable alignment step keeps the shared runtime table names equivalent across
+Oracle, PostgreSQL, and YashanDB.
+
+Both steps are additive and journaled. Re-running an applied step is a
+read-only no-op. Existing local, LDAP, and OIDC identities and pending
+registration requests are retained. Application rollback uses the coordinated
+pre-upgrade backup and previous application package; no destructive schema
+downgrade is attempted.

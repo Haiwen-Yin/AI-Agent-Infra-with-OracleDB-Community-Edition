@@ -1,4 +1,4 @@
-# Chuanxu Product UI Guidelines v4.4.5
+# Chuanxu Product UI Guidelines v4.4.6
 
 These reusable rules apply to authenticated Dashboard pages in every edition.
 
@@ -17,6 +17,20 @@ quarters. The shared desktop grid uses
 `repeat(auto-fit, minmax(240px, 1fr))`; it becomes two columns at 780 pixels or
 below and one column at 430 pixels or below. Page-specific fixed columns must
 not reserve unused space.
+
+## Hierarchical tabs
+
+Pages with first-level and context-dependent second-level tabs render both
+groups in one horizontal navigation row on desktop. The complete first-level
+group comes first; child tabs follow after a visible vertical separator and use
+smaller, subordinate styling. Child tabs never split or reorder first-level
+destinations. Each level uses a separate allowlisted URL parameter so refresh,
+history navigation, direct links, and re-login restore the same view.
+
+At narrow widths, each tab group may wrap as a complete group. The two levels
+must not interleave, overlap, clip labels, or add a second-level separator to a
+page that has only one tab level. Browser checks compare group bounding boxes
+and verify URL restoration in both Chinese and English.
 
 ## Login and cache behavior
 

@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import secrets
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -240,6 +241,22 @@ def principal_summary(principal_id: str) -> Dict[str, Any]:
     }
 
 
+def is_global_read_only_principal(principal_id: str) -> bool:
+    """Recognize an externally provisioned read-only runtime contract.
+
+    Provisioning and lifecycle are intentionally outside the distributable
+    repository. Runtime recognition is an exact database fact and does not
+    infer this state from a username, display name, or ordinary role.
+    """
+    row = _row(connection.execute_query_one(
+        "SELECT OVERRIDE_ID FROM CX_USER_PERMISSION_OVERRIDES WHERE PRINCIPAL_ID = :principal_id "
+        "AND RESOURCE_ACTION = 'system.runtime.global_readonly' AND EFFECT = 'ALLOW' "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP) " + _limit_clause("marker_limit"),
+        {"principal_id": principal_id, "marker_limit": 1},
+    ))
+    return bool(row)
+
+
 def _secret_digest(value: str, purpose: str) -> str:
     pepper = os.environ.get("CX_IDENTITY_PEPPER")
     if pepper:
@@ -332,6 +349,247 @@ def _valid_invite_code(invite_code: str) -> bool:
         return False
     actual = _secret_digest(invite_code, "human-invite")
     return hmac.compare_digest(actual, expected)
+
+
+_REGISTRATION_FIELD_DEFAULTS = {
+    "display_name": "REQUIRED",
+    "email": "OPTIONAL",
+    "mobile": "OPTIONAL",
+}
+
+
+def registration_field_policies(context: str = "SELF") -> Dict[str, Dict[str, Any]]:
+    """Read the database-authoritative registration contract.
+
+    The fallback is only for pre-v4.4.6 installations during an upgrade.  Once
+    the migration is present, a policy query failure is surfaced rather than
+    silently weakening a configured requirement.
+    """
+    normalized = str(context or "SELF").strip().upper()[:32]
+    try:
+        rows = _required_query(
+            "SELECT FIELD_KEY, FIELD_STATE, VISIBLE, MUTABLE_AFTER_ACTIVATION, VERSION "
+            "FROM CX_REG_FIELD_POLICIES WHERE REGISTRATION_CONTEXT = :context",
+            {"context": normalized},
+        )
+    except IdentityError:
+        rows = []
+    result = {
+        key: {"field_key": key, "field_state": state, "visible": True,
+              "mutable_after_activation": True, "version": 0}
+        for key, state in _REGISTRATION_FIELD_DEFAULTS.items()
+    }
+    for row in rows:
+        key = str(row.get("field_key") or "").strip().lower()
+        if key not in result:
+            continue
+        state = str(row.get("field_state") or "").upper()
+        if state not in {"REQUIRED", "OPTIONAL", "DISABLED"}:
+            raise IdentityError("registration policy is invalid")
+        result[key] = {
+            "field_key": key,
+            "field_state": state,
+            "visible": str(row.get("visible") or "Y").upper() not in {"N", "0", "FALSE"},
+            "mutable_after_activation": str(row.get("mutable_after_activation") or "Y").upper() not in {"N", "0", "FALSE"},
+            "version": int(row.get("version") or 0),
+        }
+    return result
+
+
+def _registration_policy_value(key: str, default: str = "", executor: Any = None) -> str:
+    executor = executor or connection
+    query_one = getattr(executor, "query_one", None) or executor.execute_query_one
+    try:
+        row = _row(query_one(
+            "SELECT POLICY_VALUE FROM CX_IDENTITY_PLATFORM_POLICIES WHERE POLICY_KEY = :policy_key",
+            {"policy_key": key},
+        ))
+    except Exception:
+        row = None
+    return str((row or {}).get("policy_value") or default)
+
+
+def human_registration_token_required() -> bool:
+    value = _registration_policy_value("human_registration_token_required", "false").strip().upper()
+    return value in {"1", "TRUE", "YES", "ON"}
+
+
+def update_registration_field_policy(actor_principal_id: str, context: str, field_key: str,
+                                     field_state: str, expected_version: int, reason: str) -> Dict[str, Any]:
+    """Update one registration field without weakening optimistic concurrency."""
+    _require(actor_principal_id, "users.permissions.manage")
+    normalized_context = str(context or "SELF").strip().upper()[:32]
+    normalized_key = str(field_key or "").strip().lower()
+    normalized_state = str(field_state or "").strip().upper()
+    if normalized_context not in {"SELF", "INVITATION", "ADMIN", "EXTERNAL_FIRST_LOGIN"}:
+        raise IdentityError("Registration context is invalid")
+    if normalized_key not in _REGISTRATION_FIELD_DEFAULTS or normalized_state not in {"REQUIRED", "OPTIONAL", "DISABLED"}:
+        raise IdentityError("Registration field policy is invalid")
+    if not str(reason or "").strip():
+        raise IdentityError("Registration policy reason is required")
+    changed = connection.execute(
+        "UPDATE CX_REG_FIELD_POLICIES SET FIELD_STATE = :field_state, VERSION = VERSION + 1, "
+        "REASON = :reason, UPDATED_BY = :actor, UPDATED_AT = CURRENT_TIMESTAMP "
+        "WHERE REGISTRATION_CONTEXT = :context AND FIELD_KEY = :field_key AND VERSION = :expected_version",
+        {"field_state": normalized_state, "reason": str(reason)[:2000], "actor": actor_principal_id,
+         "context": normalized_context, "field_key": normalized_key, "expected_version": int(expected_version)},
+    )
+    if changed != 1:
+        raise IdentityError("Registration policy version conflict")
+    _audit(actor_principal_id, "REGISTRATION_FIELD_POLICY_UPDATE", "REGISTRATION_POLICY",
+           f"{normalized_context}:{normalized_key}", "ALLOW", reason)
+    return registration_field_policies(normalized_context)[normalized_key]
+
+
+def set_human_registration_token_required(actor_principal_id: str, required: bool,
+                                           expected_version: int, reason: str) -> Dict[str, Any]:
+    _require(actor_principal_id, "users.permissions.manage")
+    if not str(reason or "").strip():
+        raise IdentityError("Registration policy reason is required")
+    changed = connection.execute(
+        "UPDATE CX_IDENTITY_PLATFORM_POLICIES SET POLICY_VALUE = :value, VERSION = VERSION + 1, "
+        "REASON = :reason, UPDATED_BY = :actor, UPDATED_AT = CURRENT_TIMESTAMP "
+        "WHERE POLICY_KEY = 'human_registration_token_required' AND VERSION = :expected_version",
+        {"value": "true" if required else "false", "reason": str(reason)[:2000],
+         "actor": actor_principal_id, "expected_version": int(expected_version)},
+    )
+    if changed != 1:
+        raise IdentityError("Registration policy version conflict")
+    _audit(actor_principal_id, "HUMAN_REGISTRATION_TOKEN_POLICY_UPDATE", "REGISTRATION_POLICY",
+           "human_registration_token_required", "ALLOW", reason)
+    return registration_administration_policy()
+
+
+def registration_administration_policy(context: str = "SELF") -> Dict[str, Any]:
+    normalized = str(context or "SELF").strip().upper()[:32]
+    row = _row(connection.execute_query_one(
+        "SELECT POLICY_VALUE, VERSION, REASON, UPDATED_BY, UPDATED_AT FROM CX_IDENTITY_PLATFORM_POLICIES "
+        "WHERE POLICY_KEY = 'human_registration_token_required'"
+    )) or {}
+    return {
+        "context": normalized,
+        "fields": registration_field_policies(normalized),
+        "token_required": str(row.get("policy_value") or "false").upper() in {"1", "TRUE", "YES", "ON"},
+        "token_policy_version": int(row.get("version") or 0),
+        "reason": row.get("reason") or "",
+        "updated_by": row.get("updated_by") or "",
+        "updated_at": _iso(row.get("updated_at")),
+    }
+
+
+def _normalize_registration_profile(display_name: str, email: str, mobile: str, context: str = "SELF") -> Dict[str, str]:
+    policies = registration_field_policies(context)
+    values = {
+        "display_name": str(display_name or "").strip(),
+        "email": str(email or "").strip().casefold(),
+        "mobile": str(mobile or "").strip(),
+    }
+    if values["email"] and not re.fullmatch(r"[^@\s]{1,254}@[^@\s]{1,254}", values["email"]):
+        raise IdentityError("Registration data is invalid")
+    if values["mobile"]:
+        compact = re.sub(r"[ .()\-]", "", values["mobile"])
+        if not re.fullmatch(r"\+?[0-9]{7,20}", compact):
+            raise IdentityError("Registration data is invalid")
+        values["mobile"] = compact
+    for key, policy in policies.items():
+        state = policy["field_state"]
+        if state == "DISABLED":
+            values[key] = ""
+        elif state == "REQUIRED" and not values[key]:
+            raise IdentityError("Registration data is invalid")
+        if len(values[key]) > {"display_name": 256, "email": 320, "mobile": 64}[key]:
+            raise IdentityError("Registration data is invalid")
+    return values
+
+
+def _upsert_human_profile(principal_id: str, profile: Dict[str, str], updated_by: str = "") -> None:
+    """Keep the canonical profile table aligned with legacy identity columns."""
+    try:
+        changed = connection.execute(
+            "UPDATE CX_HUMAN_PROFILES SET DISPLAY_NAME = :display_name, EMAIL = :email, MOBILE = :mobile, "
+            "VERSION = VERSION + 1, UPDATED_BY = :updated_by, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE PRINCIPAL_ID = :principal_id",
+            {**profile, "principal_id": principal_id, "updated_by": updated_by or principal_id},
+        )
+        if changed == 0:
+            try:
+                connection.execute(
+                    "INSERT INTO CX_HUMAN_PROFILES(PRINCIPAL_ID, DISPLAY_NAME, EMAIL, MOBILE, UPDATED_BY) "
+                    "VALUES (:principal_id, :display_name, :email, :mobile, :updated_by)",
+                    {**profile, "principal_id": principal_id, "updated_by": updated_by or principal_id},
+                )
+            except Exception:
+                # A concurrent profile repair may have inserted the row.
+                pass
+    except Exception as exc:
+        raise IdentityError("identity profile service is unavailable") from exc
+
+
+def issue_human_registration_token(actor_principal_id: str, expires_in_seconds: int, reason: str) -> Dict[str, Any]:
+    _require(actor_principal_id, "users.approve")
+    if not str(reason or "").strip():
+        raise IdentityError("Token issue reason is required")
+    ttl = max(60, min(int(expires_in_seconds), 7 * 86400))
+    expires_at = _now() + timedelta(seconds=ttl)
+    raw = secrets.token_urlsafe(32)
+    token_id = _id("HRT")
+    connection.execute(
+        "INSERT INTO CX_HUMAN_REG_TOKENS(TOKEN_ID, TOKEN_DIGEST, PURPOSE, SPONSOR_PRINCIPAL_ID, "
+        "EXPIRES_AT, MAX_USES, USED_COUNT, REASON) VALUES (:token_id, :token_digest, 'HUMAN_REGISTRATION', "
+        ":sponsor, :expires_at, 1, 0, :reason)",
+        {"token_id": token_id, "token_digest": _secret_digest(raw, "human-registration"),
+         "sponsor": actor_principal_id, "expires_at": expires_at, "reason": str(reason)[:2000]},
+    )
+    _audit(actor_principal_id, "HUMAN_REGISTRATION_TOKEN_ISSUE", "REGISTRATION_TOKEN", token_id, "ALLOW", reason)
+    return {"token_id": token_id, "token": raw, "expires_at": _iso(expires_at)}
+
+
+def revoke_human_registration_token(actor_principal_id: str, token_id: str, reason: str) -> bool:
+    _require(actor_principal_id, "users.approve")
+    if not str(reason or "").strip():
+        raise IdentityError("Token revoke reason is required")
+    changed = connection.execute(
+        "UPDATE CX_HUMAN_REG_TOKENS SET REVOKED_AT = CURRENT_TIMESTAMP WHERE TOKEN_ID = :token_id "
+        "AND REVOKED_AT IS NULL AND USED_COUNT = 0", {"token_id": str(token_id)[:128]},
+    )
+    if changed != 1:
+        raise IdentityError("Registration token is unavailable")
+    _audit(actor_principal_id, "HUMAN_REGISTRATION_TOKEN_REVOKE", "REGISTRATION_TOKEN", token_id, "ALLOW", reason)
+    return True
+
+
+def list_human_registration_tokens(actor_principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    _require(actor_principal_id, "users.read")
+    rows = _required_query(
+        "SELECT TOKEN_ID, SPONSOR_PRINCIPAL_ID, EXPIRES_AT, USED_COUNT, MAX_USES, REVOKED_AT, CREATED_AT, REASON "
+        "FROM CX_HUMAN_REG_TOKENS WHERE PURPOSE = 'HUMAN_REGISTRATION' ORDER BY CREATED_AT DESC " + _limit_clause(),
+        {"limit": max(1, min(int(limit), 500))},
+    )
+    for row in rows:
+        row["usable"] = not row.get("revoked_at") and int(row.get("used_count") or 0) < int(row.get("max_uses") or 1)
+    return rows
+
+
+def _consume_human_registration_token(raw_token: str) -> Optional[str]:
+    if not raw_token:
+        return None
+    digest = _secret_digest(raw_token, "human-registration")
+    rows = _required_query(
+        "SELECT TOKEN_ID FROM CX_HUMAN_REG_TOKENS WHERE TOKEN_DIGEST = :token_digest AND PURPOSE = 'HUMAN_REGISTRATION' "
+        "AND REVOKED_AT IS NULL AND USED_COUNT < MAX_USES AND EXPIRES_AT > CURRENT_TIMESTAMP",
+        {"token_digest": digest},
+    )
+    if not rows:
+        raise IdentityError("Registration token is invalid")
+    token_id = str(rows[0]["token_id"])
+    changed = connection.execute(
+        "UPDATE CX_HUMAN_REG_TOKENS SET USED_COUNT = USED_COUNT + 1 WHERE TOKEN_ID = :token_id "
+        "AND REVOKED_AT IS NULL AND USED_COUNT < MAX_USES AND EXPIRES_AT > CURRENT_TIMESTAMP",
+        {"token_id": token_id},
+    )
+    if changed != 1:
+        raise IdentityError("Registration token is invalid")
+    return token_id
 
 
 def _local_identity(username: str) -> Optional[Dict[str, Any]]:
@@ -520,11 +778,11 @@ def _default_registration_organization() -> str:
 
 def register_human(
     username: str, password: str, email: str = "", invite_code: str = "", *,
-    display_name: str = "",
+    display_name: str = "", mobile: str = "", registration_token: str = "",
 ) -> Dict[str, Any]:
     username = _normalize_username(username)
-    display_name = str(display_name or username).strip()
-    if not username or len(username) > 128 or not password or not display_name or len(display_name) > 256:
+    profile = _normalize_registration_profile(display_name, email, mobile, "SELF")
+    if not username or len(username) > 128 or not password:
         raise IdentityError("Registration data is invalid")
     mode = registration_mode()
     if mode == "CLOSED":
@@ -533,6 +791,9 @@ def register_human(
         raise IdentityError("Invitation is required")
     if mode == "DIRECTORY":
         raise IdentityError("Directory registration must be completed by the configured provider")
+    token_id = _consume_human_registration_token(registration_token) if registration_token else None
+    if human_registration_token_required() and not token_id:
+        raise IdentityError("Registration token is required")
     if _local_identity(username) or _row(connection.execute_query_one(
         "SELECT REQUEST_ID FROM CX_REGISTRATION_REQUESTS "
         "WHERE lower(USERNAME) = :username AND STATUS = 'PENDING'",
@@ -546,8 +807,8 @@ def register_human(
         def activate(tx: Any) -> tuple[str, str]:
             user_id = _create_system_user_tx(tx, username, password_hash)
             principal_id = _ensure_principal_tx(
-                tx, user_id, username, password_hash, "ACTIVE", "USER", email,
-                display_name, app_access=False,
+                tx, user_id, username, password_hash, "ACTIVE", "USER", profile["email"],
+                profile["display_name"], app_access=False,
             )
             tx.execute(
                 "INSERT INTO CX_ORGANIZATION_MEMBERS(MEMBERSHIP_ID, ORGANIZATION_ID, PRINCIPAL_ID, "
@@ -559,15 +820,18 @@ def register_human(
             )
             return user_id, principal_id
         user_id, principal_id = connection.execute_transaction_callback(activate)
+        _upsert_human_profile(principal_id, profile, principal_id)
         _audit(principal_id, "HUMAN_REGISTER", "HUMAN", principal_id, "ALLOW", "open registration")
         return {"request_id": request_id, "user_id": user_id, "principal_id": principal_id,
                 "organization_id": organization_id, "username": username,
                 "status": "ACTIVE", "role": "USER"}
     connection.execute(
-        "INSERT INTO CX_REGISTRATION_REQUESTS(REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, PASSWORD_HASH, AUTH_SOURCE, REGISTRATION_MODE, STATUS) "
-        "VALUES (:request_id, :username, :display_name, :email, :password_hash, 'LOCAL', :registration_mode, 'PENDING')",
-        {"request_id": request_id, "username": username, "display_name": display_name,
-         "email": email or None, "password_hash": password_hash, "registration_mode": mode},
+        "INSERT INTO CX_REGISTRATION_REQUESTS(REQUEST_ID, USERNAME, DISPLAY_NAME, EMAIL, MOBILE, PASSWORD_HASH, AUTH_SOURCE, REGISTRATION_MODE, STATUS, REGISTRATION_TOKEN_ID, POLICY_VERSION) "
+        "VALUES (:request_id, :username, :display_name, :email, :mobile, :password_hash, 'LOCAL', :registration_mode, 'PENDING', :token_id, :policy_version)",
+        {"request_id": request_id, "username": username, "display_name": profile["display_name"],
+         "email": profile["email"] or None, "mobile": profile["mobile"] or None,
+         "password_hash": password_hash, "registration_mode": mode, "token_id": token_id,
+         "policy_version": max(int(item.get("version") or 0) for item in registration_field_policies("SELF").values())},
     )
     _audit(None, "HUMAN_REGISTER", "HUMAN", request_id, "PENDING", "approval registration")
     return {"request_id": request_id, "username": username, "status": "PENDING", "role": "USER"}
@@ -1374,6 +1638,198 @@ def create_session(principal_id: str, user_id: str, node_id: str, auth_method: s
     return {"session_id": raw_id, "csrf_token": csrf, "expires_at": _iso(expires) or ""}
 
 
+def _portal_connection_limit(principal_id: str, executor: Any = None) -> int:
+    executor = executor or connection
+    query_one = getattr(executor, "query_one", None) or executor.execute_query_one
+    row = _row(query_one(
+        "SELECT MAX_CONNECTIONS FROM CX_PORTAL_CONN_POLICIES WHERE PRINCIPAL_ID = :principal_id",
+        {"principal_id": principal_id},
+    ))
+    configured = int((row or {}).get("max_connections") or 1)
+    platform_max = int(_registration_policy_value("portal_connection_platform_max", "8", executor) or 8)
+    return max(1, min(configured, platform_max, 32))
+
+
+def portal_connection_policy(actor_principal_id: str, principal_id: str) -> Dict[str, Any]:
+    _require(actor_principal_id, "users.sessions.read")
+    row = _row(connection.execute_query_one(
+        "SELECT PRINCIPAL_ID, MAX_CONNECTIONS, VERSION, REASON, UPDATED_BY, UPDATED_AT "
+        "FROM CX_PORTAL_CONN_POLICIES WHERE PRINCIPAL_ID = :principal_id",
+        {"principal_id": principal_id},
+    )) or {}
+    active = _row(connection.execute_query_one(
+        "SELECT COUNT(*) AS CNT FROM CX_PORTAL_CONNECTIONS WHERE PRINCIPAL_ID = :principal_id "
+        "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
+        {"principal_id": principal_id},
+    )) or {}
+    return {
+        "principal_id": principal_id,
+        "configured_limit": int(row.get("max_connections") or 1),
+        "effective_limit": _portal_connection_limit(principal_id),
+        "active_connections": int(active.get("cnt") or 0),
+        "version": int(row.get("version") or 0),
+        "reason": row.get("reason") or "",
+        "updated_by": row.get("updated_by") or "",
+        "updated_at": _iso(row.get("updated_at")),
+    }
+
+
+def set_portal_connection_policy(actor_principal_id: str, principal_id: str, max_connections: int,
+                                 expected_version: int, reason: str) -> Dict[str, Any]:
+    _require(actor_principal_id, "users.permissions.manage")
+    requested = int(max_connections)
+    platform_max = int(_registration_policy_value("portal_connection_platform_max", "8") or 8)
+    if requested < 1 or requested > min(platform_max, 32):
+        raise IdentityError("Portal connection limit is invalid")
+    if not str(reason or "").strip():
+        raise IdentityError("Portal connection policy reason is required")
+    current = _row(connection.execute_query_one(
+        "SELECT VERSION FROM CX_PORTAL_CONN_POLICIES WHERE PRINCIPAL_ID = :principal_id",
+        {"principal_id": principal_id},
+    ))
+    if current:
+        changed = connection.execute(
+            "UPDATE CX_PORTAL_CONN_POLICIES SET MAX_CONNECTIONS = :max_connections, VERSION = VERSION + 1, "
+            "REASON = :reason, UPDATED_BY = :actor, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE PRINCIPAL_ID = :principal_id AND VERSION = :expected_version",
+            {"max_connections": requested, "reason": str(reason)[:2000], "actor": actor_principal_id,
+             "principal_id": principal_id, "expected_version": int(expected_version)},
+        )
+        if changed != 1:
+            raise IdentityError("Portal connection policy version conflict")
+    else:
+        if int(expected_version) != 0:
+            raise IdentityError("Portal connection policy version conflict")
+        connection.execute(
+            "INSERT INTO CX_PORTAL_CONN_POLICIES(PRINCIPAL_ID, MAX_CONNECTIONS, VERSION, REASON, UPDATED_BY) "
+            "VALUES (:principal_id, :max_connections, 1, :reason, :actor)",
+            {"principal_id": principal_id, "max_connections": requested,
+             "reason": str(reason)[:2000], "actor": actor_principal_id},
+        )
+    _audit(actor_principal_id, "PORTAL_CONNECTION_POLICY_UPDATE", "PRINCIPAL", principal_id, "ALLOW", reason)
+    return portal_connection_policy(actor_principal_id, principal_id)
+
+
+def portal_connection_inventory(actor_principal_id: str, principal_id: str) -> List[Dict[str, Any]]:
+    _require(actor_principal_id, "users.sessions.read")
+    return _required_query(
+        "SELECT CONNECTION_ID, NODE_ID, STATUS, FENCING_TOKEN, LEASE_EXPIRES_AT, LAST_HEARTBEAT_AT, "
+        "CREATED_AT, RELEASED_AT, RELEASE_REASON FROM CX_PORTAL_CONNECTIONS "
+        "WHERE PRINCIPAL_ID = :principal_id ORDER BY CREATED_AT DESC " + _limit_clause(),
+        {"principal_id": principal_id, "limit": 100},
+    )
+
+
+def force_release_portal_connection(actor_principal_id: str, principal_id: str,
+                                    connection_id: str, reason: str) -> bool:
+    _require(actor_principal_id, "sessions.revoke")
+    if not str(reason or "").strip():
+        raise IdentityError("Portal connection release reason is required")
+    changed = connection.execute(
+        "UPDATE CX_PORTAL_CONNECTIONS SET STATUS = 'RELEASED', RELEASED_AT = CURRENT_TIMESTAMP, "
+        "RELEASE_REASON = :reason WHERE CONNECTION_ID = :connection_id AND PRINCIPAL_ID = :principal_id "
+        "AND STATUS = 'ACTIVE'",
+        {"reason": str(reason)[:1000], "connection_id": str(connection_id)[:128], "principal_id": principal_id},
+    )
+    if changed:
+        _audit(actor_principal_id, "PORTAL_CONNECTION_FORCE_RELEASE", "PORTAL_CONNECTION",
+               connection_id, "ALLOW", reason)
+    return changed == 1
+
+
+def acquire_portal_connection(principal_id: str, raw_session_id: str, client_instance: str, node_id: str,
+                              ttl_seconds: int = 300) -> Dict[str, Any]:
+    """Atomically reserve one Portal connection slot for a Web Session."""
+    if not principal_id or not raw_session_id or not client_instance:
+        raise IdentityError("Portal connection identity is invalid")
+    session_digest = hashlib.sha256(raw_session_id.encode("utf-8")).hexdigest()
+    client_digest = _secret_digest(str(client_instance)[:256], "portal-client")
+    connection_id = _id("PC")
+    now = _now()
+    expires = now + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
+
+    def reserve(tx: Any) -> Dict[str, Any]:
+        limit = _portal_connection_limit(principal_id, tx)
+        active = tx.query_one(
+            "SELECT COUNT(*) AS CNT FROM CX_PORTAL_CONNECTIONS WHERE PRINCIPAL_ID = :principal_id "
+            "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
+            {"principal_id": principal_id},
+        ) or {}
+        if int(active.get("cnt") or 0) >= limit:
+            raise IdentityError("Portal connection limit reached")
+        tx.execute(
+            "INSERT INTO CX_PORTAL_CONNECTIONS(CONNECTION_ID, PRINCIPAL_ID, SESSION_DIGEST, CLIENT_INSTANCE_DIGEST, NODE_ID, "
+            "STATUS, FENCING_TOKEN, LEASE_EXPIRES_AT, LAST_HEARTBEAT_AT) VALUES (:connection_id, :principal_id, :session_digest, "
+            ":client_digest, :node_id, 'ACTIVE', 1, :expires_at, :now)",
+            {"connection_id": connection_id, "principal_id": principal_id, "session_digest": session_digest,
+             "client_digest": client_digest, "node_id": str(node_id)[:128], "expires_at": expires, "now": now},
+        )
+        return {"connection_id": connection_id, "session_digest": session_digest,
+                "lease_expires_at": _iso(expires) or "", "read_only": False}
+    return connection.execute_transaction_callback(reserve)
+
+
+def release_portal_connection(raw_session_id: str, reason: str = "logout") -> bool:
+    digest = hashlib.sha256(str(raw_session_id or "").encode("utf-8")).hexdigest()
+    changed = connection.execute(
+        "UPDATE CX_PORTAL_CONNECTIONS SET STATUS = 'RELEASED', RELEASED_AT = CURRENT_TIMESTAMP, RELEASE_REASON = :reason "
+        "WHERE SESSION_DIGEST = :session_digest AND STATUS = 'ACTIVE'",
+        {"session_digest": digest, "reason": str(reason)[:1000]},
+    )
+    return changed > 0
+
+
+def heartbeat_portal_connection(raw_session_id: str, ttl_seconds: int = 300) -> bool:
+    digest = hashlib.sha256(str(raw_session_id or "").encode("utf-8")).hexdigest()
+    expires = _now() + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
+    return connection.execute(
+        "UPDATE CX_PORTAL_CONNECTIONS SET LAST_HEARTBEAT_AT = :now, LEASE_EXPIRES_AT = :expires_at "
+        "WHERE SESSION_DIGEST = :session_digest AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
+        {"session_digest": digest, "now": _now(), "expires_at": expires},
+    ) == 1
+
+
+def acquire_portal_page_lease(raw_session_id: str, page_instance: str, ttl_seconds: int = 60) -> Dict[str, Any]:
+    """Fence Portal mutations to one page instance at a time."""
+    session_digest = hashlib.sha256(str(raw_session_id or "").encode("utf-8")).hexdigest()
+    page_digest = _secret_digest(str(page_instance or "")[:256], "portal-page")
+    if not raw_session_id or not page_instance:
+        raise IdentityError("Portal page identity is invalid")
+    now = _now()
+    expires = now + timedelta(seconds=max(30, min(3600, int(ttl_seconds))))
+
+    def lease(tx: Any) -> Dict[str, Any]:
+        connection_row = _row(tx.query_one(
+            "SELECT CONNECTION_ID FROM CX_PORTAL_CONNECTIONS WHERE SESSION_DIGEST = :session_digest "
+            "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP", {"session_digest": session_digest},
+        ))
+        if not connection_row:
+            raise IdentityError("Portal connection is unavailable")
+        existing = _row(tx.query_one(
+            "SELECT LEASE_ID, PAGE_INSTANCE_DIGEST, FENCING_TOKEN, LEASE_EXPIRES_AT FROM CX_PORTAL_PAGE_LEASES "
+            "WHERE CONNECTION_ID = :connection_id AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
+            {"connection_id": connection_row["connection_id"]},
+        ))
+        if existing and str(existing.get("page_instance_digest")) != page_digest:
+            raise IdentityError("Portal page is in use")
+        if existing:
+            tx.execute(
+                "UPDATE CX_PORTAL_PAGE_LEASES SET LAST_HEARTBEAT_AT = :now, LEASE_EXPIRES_AT = :expires_at "
+                "WHERE LEASE_ID = :lease_id", {"now": now, "expires_at": expires, "lease_id": existing["lease_id"]},
+            )
+            return {"lease_id": existing["lease_id"], "fencing_token": int(existing.get("fencing_token") or 1), "read_only": False}
+        lease_id = _id("PPL")
+        tx.execute(
+            "INSERT INTO CX_PORTAL_PAGE_LEASES(LEASE_ID, CONNECTION_ID, SESSION_DIGEST, PAGE_INSTANCE_DIGEST, "
+            "FENCING_TOKEN, STATUS, LEASE_EXPIRES_AT, LAST_HEARTBEAT_AT) VALUES (:lease_id, :connection_id, :session_digest, "
+            ":page_digest, 1, 'ACTIVE', :expires_at, :now)",
+            {"lease_id": lease_id, "connection_id": connection_row["connection_id"], "session_digest": session_digest,
+             "page_digest": page_digest, "expires_at": expires, "now": now},
+        )
+        return {"lease_id": lease_id, "fencing_token": 1, "read_only": False}
+    return connection.execute_transaction_callback(lease)
+
+
 def resolve_session(raw_session_id: str, touch: bool = True, ttl_seconds: int = 300,
                     absolute_ttl_seconds: int = SESSION_MAX_SECONDS,
                     expected_scope: str = "") -> Optional[Dict[str, Any]]:
@@ -1775,8 +2231,10 @@ def list_agents(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     if effective_access(principal_id, "agents.read.all")["decision"] == "ALLOW":
         return _required_query(
             "SELECT p.PRINCIPAL_ID AS AGENT_ID, p.STATUS, p.CREATED_AT, p.UPDATED_AT, "
-            "MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE, MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID "
+            "MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE, MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID, "
+            "COALESCE(MAX(n.SOURCE), 'EXTERNAL_SKILL') AS AGENT_SOURCE "
             "FROM CX_PRINCIPALS p LEFT JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID = p.PRINCIPAL_ID "
+            "LEFT JOIN CX_NATIVE_AGENTS n ON n.AGENT_ID = p.PRINCIPAL_ID "
             "WHERE p.PRINCIPAL_TYPE = 'AGENT' "
             "GROUP BY p.PRINCIPAL_ID, p.STATUS, p.CREATED_AT, p.UPDATED_AT "
             "ORDER BY p.UPDATED_AT DESC " + _limit_clause(),
@@ -1785,8 +2243,10 @@ def list_agents(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     visibility = _agent_visibility_clause(principal_id)
     return _required_query(
         "SELECT p.PRINCIPAL_ID AS AGENT_ID, p.STATUS, p.CREATED_AT, p.UPDATED_AT, "
-        "MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE, MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID "
+        "MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE, MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID, "
+        "COALESCE(MAX(n.SOURCE), 'EXTERNAL_SKILL') AS AGENT_SOURCE "
         "FROM CX_PRINCIPALS p JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID = p.PRINCIPAL_ID "
+        "LEFT JOIN CX_NATIVE_AGENTS n ON n.AGENT_ID = p.PRINCIPAL_ID "
         "WHERE p.PRINCIPAL_TYPE = 'AGENT' AND r.STATUS = 'ACTIVE' AND " + visibility + " "
         "GROUP BY p.PRINCIPAL_ID, p.STATUS, p.CREATED_AT, p.UPDATED_AT "
         "ORDER BY p.UPDATED_AT DESC " + _limit_clause(),
@@ -1807,8 +2267,9 @@ def list_agents_cursor(principal_id: str, *, page_size: int = 20, cursor: str = 
     if effective_access(principal_id, "agents.read.all")["decision"] == "ALLOW":
         sql = (
             "SELECT p.PRINCIPAL_ID AS AGENT_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT,MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE,"
-            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID FROM CX_PRINCIPALS p LEFT JOIN CX_AGENT_RELATIONSHIPS r "
-            "ON r.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT'" + after_clause + " "
+            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID,COALESCE(MAX(n.SOURCE),'EXTERNAL_SKILL') AS AGENT_SOURCE "
+            "FROM CX_PRINCIPALS p LEFT JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=p.PRINCIPAL_ID "
+            "LEFT JOIN CX_NATIVE_AGENTS n ON n.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT'" + after_clause + " "
             "GROUP BY p.PRINCIPAL_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT ORDER BY p.PRINCIPAL_ID " + _limit_clause()
         )
     else:
@@ -1816,8 +2277,10 @@ def list_agents_cursor(principal_id: str, *, page_size: int = 20, cursor: str = 
         params["principal_id"] = principal_id
         sql = (
             "SELECT p.PRINCIPAL_ID AS AGENT_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT,MIN(r.RELATIONSHIP_ROLE) AS RELATIONSHIP_ROLE,"
-            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID FROM CX_PRINCIPALS p JOIN CX_AGENT_RELATIONSHIPS r "
-            "ON r.AGENT_ID=p.PRINCIPAL_ID WHERE p.PRINCIPAL_TYPE='AGENT' AND r.STATUS='ACTIVE' AND " + visibility +
+            "MIN(r.PRINCIPAL_ID) AS RELATED_PRINCIPAL_ID,COALESCE(MAX(n.SOURCE),'EXTERNAL_SKILL') AS AGENT_SOURCE "
+            "FROM CX_PRINCIPALS p JOIN CX_AGENT_RELATIONSHIPS r ON r.AGENT_ID=p.PRINCIPAL_ID "
+            "LEFT JOIN CX_NATIVE_AGENTS n ON n.AGENT_ID=p.PRINCIPAL_ID "
+            "WHERE p.PRINCIPAL_TYPE='AGENT' AND r.STATUS='ACTIVE' AND " + visibility +
             after_clause + " GROUP BY p.PRINCIPAL_ID,p.STATUS,p.CREATED_AT,p.UPDATED_AT ORDER BY p.PRINCIPAL_ID " + _limit_clause()
         )
     rows = _required_query(sql, params)

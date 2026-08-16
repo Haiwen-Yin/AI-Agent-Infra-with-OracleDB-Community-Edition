@@ -1,4 +1,4 @@
-# Python Runtime Policy - AI Agent Infra with DB v4.4.5
+# Python Runtime Policy - AI Agent Infra with DB v4.4.6
 
 The release requires an accessible CPython **3.14 or newer** interpreter.
 There is no preferred vendor or installation source.

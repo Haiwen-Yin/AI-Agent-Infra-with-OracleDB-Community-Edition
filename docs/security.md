@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.5
+# Security - AI Agent Infra with DB v4.4.6
 
 ## v4.4.3 Security Domain Boundary
 
@@ -585,6 +585,13 @@ validity, classification, Principal status, instance fencing, and token expiry.
 PostgreSQL RLS applies the same Channel membership predicate to Barrier arrivals
 so an Agent cannot read an arrival merely because it is the arrival's author.
 
+Administrative registration policy changes use optimistic version checks and
+require an authenticated reason. Provider profiles store only a secret-manager
+reference; configuration alone never enables a provider, and provider tests do
+not fetch arbitrary administrator-supplied URLs. Every authenticated mutation
+is also subject to the session's database authorization and CSRF boundary.
+
+
 Gateway restart recovery is node-scoped. Web startup or shutdown revokes and
 fences only Portal assignments and Agent instances recorded with the local node
 identity. Other nodes in the same Admin Agent collaboration group retain their
@@ -616,3 +623,18 @@ task already running; a separate containment incident is required for that
 higher-impact action. Retired nodes and LLM profiles remain auditable but are
 excluded from active discovery, and LLM retirement revokes stored encrypted
 API-key ciphertext.
+
+## v4.4.6 Human and Portal Admission
+
+Registration field requirements are read from versioned database policy and
+are enforced again by the service. Browser-required markers are not a security
+boundary. Human Registration Tokens use a purpose-separated keyed digest,
+expire, can be revoked before use, and are consumed once. They cannot be used
+as Agent Enrollment, password-reset, or external-login credentials.
+
+Portal and Dashboard cookies remain entry-scoped. Portal connection slots and
+exclusive page-operation leases are database-backed and fenced by Session and
+page-instance digests. A reused Session cannot mutate through chat, streaming,
+bulk, keyboard, hidden-menu, or direct API paths while another page owns the
+lease. Provider claims and QR/OIDC metadata are identity evidence only; role,
+scope, organization, entry access, MFA, and approval remain separate checks.

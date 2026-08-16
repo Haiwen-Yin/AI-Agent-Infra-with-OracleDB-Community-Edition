@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.5 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.6 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.5"
+VERSION = "4.4.6"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -501,6 +501,24 @@ def _get_session(request_handler):
             finally:
                 connection.set_agent_context(previous_agent_id)
         sessions[session_id] = sess
+    if session_scope == 'PORTAL' and sess.get('principal_id'):
+        # A copied Portal cookie may be valid while another page owns the
+        # operation lease. Keep the session visible for read-only inspection,
+        # but fence every mutation through the page lease boundary.
+        client_instance = request_handler.headers.get('X-CX-Client-Instance', '').strip()
+        page_instance = request_handler.headers.get('X-CX-Page-Instance', '').strip() or client_instance
+        try:
+            identity_api.heartbeat_portal_connection(session_id, _session_timeout('PORTAL'))
+            if page_instance:
+                page_lease = identity_api.acquire_portal_page_lease(session_id, page_instance)
+                sess['portal_page_lease_id'] = page_lease.get('lease_id')
+                sess['portal_read_only'] = False
+        except identity_api.IdentityError:
+            sess['portal_read_only'] = True
+        except Exception:
+            # A missing lease schema or temporary database failure must never
+            # turn a valid authenticated read into an operational bypass.
+            sess['portal_read_only'] = True
     timeout = _session_timeout()
     if time.time() - sess.get('last_access', sess['created_at']) > timeout:
         sessions.pop(session_id, None)
@@ -854,6 +872,10 @@ class VisHandler(BaseHTTPRequestHandler):
             if not identity_api.entry_allowed(str(result[1].get('principal_id') or ''), entry):
                 self._send_error(403, '{} access is disabled'.format(entry.title()))
                 return None
+            if entry == 'PORTAL' and result[1].get('portal_read_only') and self.command.upper() not in {'GET', 'HEAD'}:
+                if self.path not in {'/portal/api/agent/release', '/portal/api/auth/logout'}:
+                    self._send_error(423, 'Portal page is read-only because another page is active')
+                    return None
         except Exception:
             self._send_error(503, 'Entry-access policy is unavailable')
             return None
@@ -3622,8 +3644,8 @@ class VisHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             username = data.get('username', '').strip()
             password = data.get('password', '').strip()
-            if not username or not password or len(username) < 3 or len(password) < 6:
-                self._send_json({'success': False, 'error': 'Username min 3 chars, password min 6 chars'}, 400)
+            if not username or not password or len(username) < 3 or len(password) < 12:
+                self._send_json({'success': False, 'error': 'Username min 3 chars, password min 12 chars'}, 400)
                 return
             db_exists = connection.execute_query_one(
                 "SELECT USER_ID, AUTH_SOURCE FROM SYSTEM_USERS WHERE UPPER(USERNAME) = UPPER(:v_uname)",
@@ -3635,10 +3657,11 @@ class VisHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({'success': False, 'error': 'Username already exists'}, 409)
                 return
-            result = user_api.register_user(username, password)
-            if not result:
-                self._send_json({'success': False, 'error': 'Username already exists'}, 409)
-                return
+            result = identity_api.register_human(
+                username, password, str(data.get('email') or ''), str(data.get('invite_code') or ''),
+                display_name=str(data.get('display_name') or ''), mobile=str(data.get('mobile') or ''),
+                registration_token=str(data.get('registration_token') or ''),
+            )
             if str(result.get('status') or '').upper() == 'PENDING':
                 self._send_json({
                     'success': True,
@@ -3759,6 +3782,25 @@ class VisHandler(BaseHTTPRequestHandler):
             mfa_level=mfa_level, require_identity=True,
         )
         sess = sessions[session_id]
+        try:
+            client_instance = self.headers.get('X-CX-Client-Instance', '').strip() or self.headers.get('User-Agent', 'portal')
+            portal_connection = identity_api.acquire_portal_connection(
+                principal_id, session_id, client_instance, _portal_node_id(), _session_timeout('PORTAL'),
+            )
+            sess['portal_connection_id'] = portal_connection['connection_id']
+            page_instance = self.headers.get('X-CX-Page-Instance', '').strip() or client_instance
+            page_lease = identity_api.acquire_portal_page_lease(session_id, page_instance)
+            sess['portal_page_lease_id'] = page_lease['lease_id']
+        except identity_api.IdentityError as exc:
+            identity_api.revoke_session(session_id, 'portal connection admission denied')
+            sessions.pop(session_id, None)
+            self._send_json({'success': False, 'error': str(exc)}, 409)
+            return
+        except Exception:
+            identity_api.revoke_session(session_id, 'portal connection admission unavailable')
+            sessions.pop(session_id, None)
+            self._send_json({'success': False, 'error': 'Portal connection service unavailable'}, 503)
+            return
         portal_agent = _get_or_assign_portal_agent(str(user['user_id']))
         if portal_agent:
             sess['agent_id'] = portal_agent['agent_id']
@@ -4351,6 +4393,10 @@ class VisHandler(BaseHTTPRequestHandler):
             # presented by the same browser so switching to /app requires a
             # fresh Dashboard admission.
             raw_portal_session_id = session_data[0]
+            try:
+                identity_api.release_portal_connection(raw_portal_session_id, 'portal logout')
+            except Exception:
+                logger.warning('Portal connection release failed', exc_info=True)
             dashboard_cookie = SimpleCookie(self.headers.get('Cookie', ''))
             dashboard_name = _get_cookie_name('DASHBOARD')
             raw_dashboard_session_id = (
@@ -4808,8 +4854,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.5', VERSION)
-            html = html.replace('2026-08-15', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.6', VERSION)
+            html = html.replace('2026-08-16', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

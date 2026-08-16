@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.4.5
+# API Reference - AI Agent Infra with DB v4.4.6
 
 ## v4.4.3 Security Domain Governance API
 
@@ -891,3 +891,41 @@ HTTP or MCP operations below. It never receives or edits database credentials:
 The same workflow is framework-neutral and can be driven by OpenClaw, Hermes
 Agent, or another runtime that can consume `SKILL.md`. The internal v4.2.1
 closure is included in v4.3.0 and is not a separately released API contract.
+
+## v4.4.6 Identity Admission APIs
+
+- `GET /api/auth/registration-policy` returns the current public SELF
+  registration field contract and whether a Human Registration Token is
+  required.
+- `POST /api/auth/register` submits the normalized display name, email,
+  mobile, password, and optional Human Registration Token to the configured
+  approval mode.
+- `GET|POST|DELETE /api/registration/tokens` provides authorized inventory,
+  one-time issue, and revoke operations. Raw Token values are returned only by
+  the successful issue response.
+- `GET /api/auth/external/providers`, `POST /api/auth/external/start`, and
+  `POST /api/auth/external/callback` expose the provider-neutral transaction
+  boundary. A validated callback still requires an approved binding and normal
+  MFA, entry, role, scope, and organization admission.
+
+Provider-specific adapters must validate issuer, audience, signature, state,
+nonce, PKCE where supported, exact redirect allowlists, and replay status.
+Unavailable or unvalidated adapters return an unavailable posture and cannot
+create a Session.
+
+Administrative identity controls are exposed separately from public login:
+
+- `GET /api/registration/policy` reads the current field and Token policy.
+- `PUT /api/registration/policy/{context}/{field_key}` changes one field with
+  an expected version and audit reason.
+- `PUT /api/registration/token-policy` changes the one-time registration
+  Token requirement with an expected version and audit reason.
+- `GET /api/users/{principal_id}/portal-connections` returns the bounded
+  connection policy and safe active-session inventory.
+- `PUT /api/users/{principal_id}/portal-connections/policy` changes the
+  per-user Portal limit; `DELETE .../{connection_id}` force-releases one
+  active connection with an audited reason.
+- `GET /api/identity/providers` and `PUT /api/identity/providers` manage the
+  provider-neutral external identity profile. `POST .../{provider_id}/test`
+  returns an unavailable posture until a separately validated adapter is
+  installed. Disabled profiles with no active bindings can be deleted.

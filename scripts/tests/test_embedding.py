@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.5 - Embedding API Tests
+"""AI Agent Infra v4.4.6 - Embedding API Tests
 
 Tests: generate, store, retrieve, search, vector similarity, hybrid search, multi-type search, batch, dimension detection, stats, delete.
 """

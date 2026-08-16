@@ -185,6 +185,29 @@ V444_MIGRATION_SCRIPTS = V443_MIGRATION_SCRIPTS + (
 V445_MIGRATION_SCRIPTS = V444_MIGRATION_SCRIPTS + (
     "45_v4_4_5_graph_run_contract.sql",
 )
+V446_MIGRATION_SCRIPTS = V445_MIGRATION_SCRIPTS + (
+    "46_v4_4_6_identity_portal_graph.sql",
+    "47_v4_4_6_portable_contract_alignment.sql",
+)
+V446_IDENTITY_PORTAL_GRAPH_TABLES = (
+    "CX_HUMAN_PROFILES", "CX_REG_FIELD_POLICIES", "CX_IDENTITY_PLATFORM_POLICIES",
+    "CX_HUMAN_REG_TOKENS", "CX_IDENTITY_PROVIDERS", "CX_EXTERNAL_ID_BINDINGS",
+    "CX_EXT_LOGIN_TXNS", "CX_PORTAL_CONN_POLICIES", "CX_PORTAL_CONNECTIONS",
+    "CX_PORTAL_PAGE_LEASES", "CX_GRAPH_CAP_POSTURE",
+)
+V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS = {
+    "CX_HUMAN_PROFILES": frozenset({"PRINCIPAL_ID", "DISPLAY_NAME", "REMEDIATION_STATE", "VERSION"}),
+    "CX_REG_FIELD_POLICIES": frozenset({"POLICY_ID", "FIELD_KEY", "REGISTRATION_CONTEXT", "FIELD_STATE", "VERSION"}),
+    "CX_IDENTITY_PLATFORM_POLICIES": frozenset({"POLICY_KEY", "POLICY_VALUE", "VERSION", "REASON"}),
+    "CX_HUMAN_REG_TOKENS": frozenset({"TOKEN_ID", "TOKEN_DIGEST", "PURPOSE", "EXPIRES_AT", "USED_COUNT"}),
+    "CX_IDENTITY_PROVIDERS": frozenset({"PROVIDER_ID", "PROVIDER_KEY", "ADAPTER_TYPE", "CAPABILITY_STATUS", "STATUS"}),
+    "CX_EXTERNAL_ID_BINDINGS": frozenset({"BINDING_ID", "PRINCIPAL_ID", "PROVIDER_ID", "PROVIDER_SUBJECT", "STATUS"}),
+    "CX_EXT_LOGIN_TXNS": frozenset({"TRANSACTION_ID", "TRANSACTION_DIGEST", "STATE_DIGEST", "NONCE_DIGEST", "EXPIRES_AT", "STATUS"}),
+    "CX_PORTAL_CONN_POLICIES": frozenset({"PRINCIPAL_ID", "MAX_CONNECTIONS", "VERSION"}),
+    "CX_PORTAL_CONNECTIONS": frozenset({"CONNECTION_ID", "PRINCIPAL_ID", "SESSION_DIGEST", "FENCING_TOKEN", "LEASE_EXPIRES_AT"}),
+    "CX_PORTAL_PAGE_LEASES": frozenset({"LEASE_ID", "CONNECTION_ID", "SESSION_DIGEST", "PAGE_INSTANCE_DIGEST", "FENCING_TOKEN"}),
+    "CX_GRAPH_CAP_POSTURE": frozenset({"CAPABILITY_KEY", "POSTURE", "EDITION_SCOPE"}),
+}
 V445_GRAPH_RUN_REQUIRED_COLUMNS = {
     "GRAPH_RUNS": frozenset({
         "DEFINITION_DIGEST", "PLAN_DIGEST", "COMPATIBILITY_LEVEL",
@@ -1270,6 +1293,23 @@ def validate_v445_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v446_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    base = validate_v445_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("46_v4_4_6_identity_portal_graph.sql")
+    source = migration.read_text(encoding="utf-8").upper() if migration and migration.is_file() else ""
+    markers = {"HUMAN_REGISTRATION", "PORTAL_CONNECTION", "PORTAL_PAGE", "EXTERNAL", "GRAPH_CAP", "TOKEN_DIGEST", "FENCING_TOKEN"}
+    control = {
+        "scripts_required": list(V446_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V446_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
+        "private_lifecycle_logic_absent": all(term not in source for term in ("CREATE USER", "PASSWORD", "OBSERVER")),
+    }
+    control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"] and control["private_lifecycle_logic_absent"]
+    return {"database": database, "v445": base, "v446_identity_portal_graph": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1327,6 +1367,7 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
         + tuple(V440_SDD_REQUIRED_COLUMNS) + tuple(V441_ADMIN_HA_REQUIRED_COLUMNS)
         + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
         + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS) + tuple(V445_GRAPH_RUN_REQUIRED_COLUMNS)
+        + tuple(V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1413,6 +1454,7 @@ class ProbeResult:
     v443_security_domain_binding_contract: dict[str, Any] = field(default_factory=dict)
     v444_agent_pool_contract: dict[str, Any] = field(default_factory=dict)
     v445_graph_run_contract: dict[str, Any] = field(default_factory=dict)
+    v446_identity_portal_graph_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1511,6 +1553,18 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
         },
     }
     result.v445_graph_run_contract["passed"] = not result.v445_graph_run_contract["columns_missing"]
+    result.v446_identity_portal_graph_contract = {
+        "tables_missing": sorted(set(V446_IDENTITY_PORTAL_GRAPH_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v446_identity_portal_graph_contract["passed"] = not any((
+        result.v446_identity_portal_graph_contract["tables_missing"],
+        result.v446_identity_portal_graph_contract["columns_missing"],
+    ))
 
 
 def _capture_v431_organization(cursor: Any, database: str) -> dict[str, Any]:
@@ -1804,15 +1858,18 @@ def main() -> int:
     requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
     requires_v437 = target_version.startswith(("4.3.7", "4.4."))
     requires_v440 = target_version.startswith("4.4.")
-    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5"))
-    requires_v442 = target_version.startswith(("4.4.2", "4.4.3", "4.4.4", "4.4.5"))
-    requires_v443 = target_version.startswith(("4.4.3", "4.4.4", "4.4.5"))
-    requires_v444 = target_version.startswith(("4.4.4", "4.4.5"))
-    requires_v445 = target_version.startswith("4.4.5")
+    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6"))
+    requires_v442 = target_version.startswith(("4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6"))
+    requires_v443 = target_version.startswith(("4.4.3", "4.4.4", "4.4.5", "4.4.6"))
+    requires_v444 = target_version.startswith(("4.4.4", "4.4.5", "4.4.6"))
+    requires_v445 = target_version.startswith(("4.4.5", "4.4.6"))
+    requires_v446 = target_version.startswith("4.4.6")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v445:
+            if requires_v446:
+                migration_scripts, validator = V446_MIGRATION_SCRIPTS, validate_v446_static_contract
+            elif requires_v445:
                 migration_scripts, validator = V445_MIGRATION_SCRIPTS, validate_v445_static_contract
             elif requires_v444:
                 migration_scripts, validator = V444_MIGRATION_SCRIPTS, validate_v444_static_contract
@@ -1905,6 +1962,7 @@ def main() -> int:
                 and (not requires_v443 or result.v443_security_domain_binding_contract.get("passed") is True)
                 and (not requires_v444 or result.v444_agent_pool_contract.get("passed") is True)
                 and (not requires_v445 or result.v445_graph_run_contract.get("passed") is True)
+                and (not requires_v446 or result.v446_identity_portal_graph_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

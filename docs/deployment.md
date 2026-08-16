@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.5
+# Deployment Guide - AI Agent Infra with DB v4.4.6
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -62,7 +62,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.5 --database <oracle|pg|yashandb> \
+  --version 4.4.6 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -81,7 +81,7 @@ authorization, and it does not depend on an external Agent calling a Skill.
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py \
-  --version 4.4.5 --database <oracle|pg|yashandb> \
+  --version 4.4.6 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -214,10 +214,10 @@ integrity before install. The current v4.3.5 artifact includes the verified
 glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
-For upgrades, preserve the v4.1.x core and apply the complete additive chain
-through `migration_runner.py --version 4.3.5`. The v4.3.5 `production` profile
-retains the stable Graph Runtime and keeps Dynamic Graph, A2A, and OpenTelemetry
-previews disabled. The validated local recovery boundary covers replacement
+For upgrades, preserve the stable core and apply the complete additive chain
+through `migration_runner.py --version 4.4.6`. The current `production`
+profile retains the stable Graph Runtime and keeps interoperability extensions
+such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
 does not claim database failover, RPO, or RTO. Multi-tenant deployment and
 public Internet exposure remain outside this private single-tenant contract.

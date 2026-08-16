@@ -30,16 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
 
 
-VERSION = "4.4.5"
+VERSION = "4.4.6"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -215,6 +215,25 @@ async def enforce_platform_capability(request: Request, call_next):
             return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_BLOCKED", "message": str(exc)}}, status_code=409)
         except graph_production_profile.ProfileUnavailable:
             return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_UNAVAILABLE", "capability": graph_capability}}, status_code=503)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def enforce_database_read_only_session(request: Request, call_next):
+    """Fence every authenticated browser mutation for a DB-marked identity."""
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {
+        "/api/auth/logout", "/portal/api/auth/logout",
+    }:
+        scope = "PORTAL" if request.url.path.startswith("/portal/") else "DASHBOARD"
+        session = _session_from_request(request, scope)
+        if session:
+            try:
+                with _schema_owner_context():
+                    read_only = identity_api.is_global_read_only_principal(str(session["principal_id"]))
+            except Exception:
+                return JSONResponse({"detail": "Authorization service unavailable"}, status_code=503)
+            if read_only:
+                return JSONResponse({"detail": "This session is read-only"}, status_code=403)
     return await call_next(request)
 
 
@@ -717,7 +736,62 @@ class RegistrationBody(BaseModel):
     username: str = Field(min_length=3, max_length=128)
     password: str = Field(min_length=12, max_length=1024)
     email: str = Field(default="", max_length=320)
+    mobile: str = Field(default="", max_length=64)
     invite_code: str = Field(default="", max_length=512)
+    registration_token: str = Field(default="", max_length=512)
+
+
+class HumanRegistrationTokenBody(BaseModel):
+    expires_in_seconds: int = Field(default=3600, ge=60, le=604800)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class RegistrationFieldPolicyBody(BaseModel):
+    field_state: str = Field(min_length=1, max_length=16)
+    expected_version: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class RegistrationTokenPolicyBody(BaseModel):
+    required: bool
+    expected_version: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class PortalConnectionPolicyBody(BaseModel):
+    max_connections: int = Field(ge=1, le=32)
+    expected_version: int = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ExternalProviderBody(BaseModel):
+    provider_key: str = Field(min_length=1, max_length=128)
+    adapter_type: str = Field(min_length=1, max_length=128)
+    protocol_type: str = Field(min_length=1, max_length=64)
+    issuer: str = Field(default="", max_length=512)
+    tenant_reference: str = Field(default="", max_length=256)
+    endpoints: Dict[str, Any] = Field(default_factory=dict)
+    redirect_allowlist: list[str] = Field(default_factory=list, max_length=20)
+    scopes: list[str] = Field(default_factory=list, max_length=100)
+    credential_reference: str = Field(default="", max_length=256)
+    attribute_mapping: Dict[str, Any] = Field(default_factory=dict)
+    registration_policy: str = Field(default="APPROVAL", max_length=32)
+    status: str = Field(default="DISABLED", max_length=24)
+    expected_version: int = Field(default=0, ge=0)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ExternalLoginStartBody(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=128)
+    entry: str = Field(default="PORTAL", max_length=16)
+    redirect_uri: str = Field(default="", max_length=2048)
+
+
+class ExternalLoginCallbackBody(BaseModel):
+    transaction_id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=512)
+    nonce: str = Field(min_length=1, max_length=512)
+    callback_digest: str = Field(min_length=1, max_length=512)
 
 
 class LoginBody(BaseModel):
@@ -1664,6 +1738,60 @@ def shell(page: str = "monitor") -> FileResponse:
     return _shell()
 
 
+@app.get("/register", include_in_schema=False)
+def registration_page() -> FileResponse:
+    """Use one entry-independent registration surface for both consoles."""
+    return _shell()
+
+
+@app.get("/api/auth/registration-policy")
+def registration_policy() -> Dict[str, Any]:
+    try:
+        return {
+            "context": "SELF",
+            "fields": identity_api.registration_field_policies("SELF"),
+            "token_required": identity_api.human_registration_token_required(),
+        }
+    except identity_api.IdentityError as exc:
+        raise HTTPException(status_code=503, detail="Registration policy service unavailable") from exc
+
+
+@app.get("/api/auth/external/providers")
+def external_identity_providers(entry: str = "PORTAL") -> Dict[str, Any]:
+    try:
+        return {"items": external_identity_api.list_providers(entry)}
+    except external_identity_api.ExternalIdentityError as exc:
+        raise HTTPException(status_code=400, detail="External identity provider is unavailable") from exc
+
+
+@app.post("/api/auth/external/start")
+def external_identity_start(body: ExternalLoginStartBody) -> Dict[str, Any]:
+    try:
+        return external_identity_api.start_transaction(body.provider_id, body.entry, body.redirect_uri)
+    except external_identity_api.ExternalIdentityError as exc:
+        raise HTTPException(status_code=400, detail="External identity login cannot be started") from exc
+
+
+@app.post("/api/auth/external/callback")
+def external_identity_callback(body: ExternalLoginCallbackBody) -> Dict[str, Any]:
+    try:
+        # This validates the transaction only. A provider adapter must still
+        # normalize claims and pass the separate binding/approval workflow.
+        return external_identity_api.validate_callback(
+            body.transaction_id, body.state, body.nonce, body.callback_digest,
+        )
+    except external_identity_api.ExternalIdentityError as exc:
+        raise HTTPException(status_code=400, detail="External identity callback was rejected") from exc
+
+
+@app.get("/api/auth/external/status/{transaction_id}")
+def external_identity_status(transaction_id: str) -> Dict[str, Any]:
+    try:
+        return external_identity_api.transaction_status(transaction_id)
+    except external_identity_api.ExternalIdentityError as exc:
+        raise HTTPException(status_code=404, detail="External identity transaction is unavailable") from exc
+
+
 @app.get("/login", include_in_schema=False)
 def legacy_login_redirect() -> RedirectResponse:
     """Retire the password-only Dashboard entry in favor of MFA admission."""
@@ -1676,6 +1804,7 @@ def register(body: RegistrationBody) -> Dict[str, Any]:
         result = identity_api.register_human(
             body.username, body.password, body.email, body.invite_code,
             display_name=body.display_name,
+            mobile=body.mobile, registration_token=body.registration_token,
         )
     except identity_api.IdentityError as exc:
         raise HTTPException(status_code=400, detail="Registration could not be completed") from exc
@@ -1850,6 +1979,7 @@ def me(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]:
         access = identity_api.effective_access(str(session["principal_id"]), "profile.read")
         summary = identity_api.principal_summary(str(session["principal_id"]))
         required_mfa = security_lifecycle.mfa_required(str(session["principal_id"]))
+        read_only = identity_api.is_global_read_only_principal(str(session["principal_id"]))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Identity governance service unavailable") from exc
     return {
@@ -1863,6 +1993,7 @@ def me(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]:
         "profile": summary,
         "expires_at": _browser_session_expiry(session.get("expires_at")),
         "session_timeout_seconds": _session_timeout_seconds(),
+        "read_only": read_only,
     }
 
 
@@ -1921,6 +2052,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
             action: identity_api.effective_access(str(session["principal_id"]), action)
             for action in sorted(set(pages.values()) | operation_actions)
         }
+        read_only = identity_api.is_global_read_only_principal(str(session["principal_id"]))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Authorization service unavailable") from exc
     try:
@@ -1933,6 +2065,12 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         and (page not in feature_map or features is None or features.has_feature(feature_map[page]))
         and platform_page_states.get(page, True)
     ]
+    if read_only:
+        for action in operation_actions:
+            access_by_action[action] = {
+                "decision": "DENY", "scopes": ["NONE"], "sources": ["session:read-only"],
+                "policy_version": session.get("permission_version"),
+            }
     profile = _runtime_profile()
     return {
         "version": session.get("permission_version"), "release_version": VERSION,
@@ -1942,6 +2080,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "features": sorted(getattr(features, "FEATURES", set()) if features else set()),
         "platform_capabilities": platform_page_states,
         "session_timeout_seconds": _session_timeout_seconds(),
+        "read_only": read_only,
     }
 
 
@@ -3400,6 +3539,163 @@ def registration_reject(request_id: str, body: DecisionBody, session: Dict[str, 
         return identity_api.reject_registration(request_id, str(session["principal_id"]), body.reason)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Registration decision failed") from exc
+
+
+@app.get("/api/registration/tokens")
+def registration_tokens(limit: int = 100, session: Dict[str, Any] = Depends(require_action("users.read"))) -> Dict[str, Any]:
+    try:
+        return {"items": identity_api.list_human_registration_tokens(str(session["principal_id"]), limit)}
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=503, detail="Registration token inventory is unavailable") from exc
+
+
+@app.post("/api/registration/tokens")
+def registration_token_issue(body: HumanRegistrationTokenBody, session: Dict[str, Any] = Depends(require_action("users.approve"))) -> Dict[str, Any]:
+    try:
+        return identity_api.issue_human_registration_token(
+            str(session["principal_id"]), body.expires_in_seconds, body.reason,
+        )
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Registration token issue was denied") from exc
+
+
+@app.delete("/api/registration/tokens/{token_id}")
+def registration_token_revoke(token_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("users.approve"))) -> Dict[str, Any]:
+    try:
+        return {"success": identity_api.revoke_human_registration_token(
+            str(session["principal_id"]), token_id, body.reason,
+        )}
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Registration token revoke was denied") from exc
+
+
+@app.get("/api/registration/policy")
+def registration_policy_admin(
+    context: str = "SELF",
+    session: Dict[str, Any] = Depends(require_action("users.read")),
+) -> Dict[str, Any]:
+    try:
+        return identity_api.registration_administration_policy(context)
+    except identity_api.IdentityError as exc:
+        raise HTTPException(status_code=503, detail="Registration policy service unavailable") from exc
+
+
+@app.put("/api/registration/policy/{context}/{field_key}")
+def registration_field_policy_update(
+    context: str, field_key: str, body: RegistrationFieldPolicyBody,
+    session: Dict[str, Any] = Depends(require_action("users.permissions.manage")),
+) -> Dict[str, Any]:
+    try:
+        return identity_api.update_registration_field_policy(
+            str(session["principal_id"]), context, field_key,
+            body.field_state, body.expected_version, body.reason,
+        )
+    except identity_api.IdentityError as exc:
+        status = 409 if "conflict" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail="Registration policy update was rejected") from exc
+
+
+@app.put("/api/registration/token-policy")
+def registration_token_policy_update(
+    body: RegistrationTokenPolicyBody,
+    session: Dict[str, Any] = Depends(require_action("users.permissions.manage")),
+) -> Dict[str, Any]:
+    try:
+        return identity_api.set_human_registration_token_required(
+            str(session["principal_id"]), body.required, body.expected_version, body.reason,
+        )
+    except identity_api.IdentityError as exc:
+        status = 409 if "conflict" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail="Registration Token policy update was rejected") from exc
+
+
+@app.get("/api/users/{principal_id}/portal-connections")
+def user_portal_connections(
+    principal_id: str,
+    session: Dict[str, Any] = Depends(require_action("users.sessions.read")),
+) -> Dict[str, Any]:
+    try:
+        actor = str(session["principal_id"])
+        return {
+            "policy": identity_api.portal_connection_policy(actor, principal_id),
+            "items": identity_api.portal_connection_inventory(actor, principal_id),
+        }
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Portal connection inventory is unavailable") from exc
+
+
+@app.put("/api/users/{principal_id}/portal-connections/policy")
+def user_portal_connection_policy_update(
+    principal_id: str, body: PortalConnectionPolicyBody,
+    session: Dict[str, Any] = Depends(require_action("users.permissions.manage")),
+) -> Dict[str, Any]:
+    try:
+        return identity_api.set_portal_connection_policy(
+            str(session["principal_id"]), principal_id, body.max_connections,
+            body.expected_version, body.reason,
+        )
+    except identity_api.IdentityError as exc:
+        status = 409 if "conflict" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail="Portal connection policy update was rejected") from exc
+
+
+@app.delete("/api/users/{principal_id}/portal-connections/{connection_id}")
+def user_portal_connection_release(
+    principal_id: str, connection_id: str, body: DecisionBody,
+    session: Dict[str, Any] = Depends(require_action("sessions.revoke")),
+) -> Dict[str, Any]:
+    try:
+        return {"success": identity_api.force_release_portal_connection(
+            str(session["principal_id"]), principal_id, connection_id, body.reason,
+        )}
+    except identity_api.IdentityError as exc:
+        raise HTTPException(status_code=400, detail="Portal connection release was rejected") from exc
+
+
+@app.get("/api/identity/providers")
+def identity_provider_configurations(
+    session: Dict[str, Any] = Depends(require_action("users.security.manage")),
+) -> Dict[str, Any]:
+    try:
+        return {"items": external_identity_api.list_provider_configurations(str(session["principal_id"]))}
+    except (external_identity_api.ExternalIdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="External identity provider inventory is unavailable") from exc
+
+
+@app.put("/api/identity/providers")
+def identity_provider_save(
+    body: ExternalProviderBody,
+    session: Dict[str, Any] = Depends(require_action("users.security.manage")),
+) -> Dict[str, Any]:
+    try:
+        return external_identity_api.save_provider_configuration(str(session["principal_id"]), body.model_dump())
+    except (external_identity_api.ExternalIdentityError, PermissionError) as exc:
+        status = 409 if "conflict" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail="External identity provider configuration was rejected") from exc
+
+
+@app.post("/api/identity/providers/{provider_id}/test")
+def identity_provider_test(
+    provider_id: str, body: DecisionBody,
+    session: Dict[str, Any] = Depends(require_action("users.security.manage")),
+) -> Dict[str, Any]:
+    try:
+        return external_identity_api.provider_test(str(session["principal_id"]), provider_id, body.reason)
+    except (external_identity_api.ExternalIdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail="External identity provider test was unavailable") from exc
+
+
+@app.delete("/api/identity/providers/{provider_id}")
+def identity_provider_delete(
+    provider_id: str, body: DecisionBody,
+    session: Dict[str, Any] = Depends(require_action("users.security.manage")),
+) -> Dict[str, Any]:
+    try:
+        return {"success": external_identity_api.delete_provider_configuration(
+            str(session["principal_id"]), provider_id, body.reason,
+        )}
+    except (external_identity_api.ExternalIdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail="External identity provider deletion was rejected") from exc
 
 
 @app.get("/api/users/{principal_id}/access")

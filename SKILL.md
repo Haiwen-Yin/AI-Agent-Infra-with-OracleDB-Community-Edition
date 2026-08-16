@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.4.5 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.4.6 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -143,6 +143,18 @@ paused and requires an approved `GRAPH_FORK_REPLAY` decision bound to the child
 Run, or bounded compensation evidence, before resume. Agent Card and protocol
 metadata remain descriptive and cannot grant Skills or Tools.
 
+v4.4.6 adds governed Human registration and Portal admission. Portal and
+Dashboard link to one independent registration surface. Display name, email,
+and mobile requirements come from a versioned database policy; an optional
+purpose-separated Human Registration Token is one-use and is not an Agent
+Enrollment Token. Portal connection limits and page-operation leases prevent
+one Session from being operated concurrently in copied pages. External
+identity providers remain unavailable until a validated customer adapter is
+installed; provider claims never grant roles, organization membership, or
+Security Domain access. Graph capability posture is explicit and evidence
+bound rather than inferred from an Agent Card, prompt, Skill, or protocol
+description.
+
 ## 2. Package Contents
 
 After extracting the release zip, you have:
@@ -151,7 +163,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.5.md   # this release's notes
+├── RELEASE_NOTES_v4.4.6.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -192,7 +204,11 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
     │   ├── 16_v4_3_0_identity_channels.sql
     │   ├── 17_v4_3_0_governance_lifecycle.sql
     │   ├── 18_v4_3_0_security_lifecycle.sql
-    │   └── 19_v4_3_1_organization_governance.sql
+    │   ├── 19_v4_3_1_organization_governance.sql
+    │   ├── ...                     # journaled additive release steps
+    │   ├── 45_v4_4_5_graph_run_contract.sql
+    │   ├── 46_v4_4_6_identity_portal_graph.sql
+    │   └── 47_v4_4_6_portable_contract_alignment.sql
     ├── lib/                        # business modules
     │   ├── connection.py           #   oracledb thin-mode pool
     │   ├── config.py               #   config loader (auto-decrypts)
@@ -213,7 +229,7 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 | Component | Minimum | Notes |
 |-----------|---------|-------|
 | Oracle AI Database | 26ai (23.26.2+) | Deep Data Security requires 23.26.2+ |
-| Python | 3.8+ (3.14 recommended) | oracledb thin mode - no Oracle Client needed |
+| Python | 3.14+ | selected through `scripts/python_runtime.sh`; oracledb thin mode needs no Oracle Client |
 | oracledb driver | 4.0.1+ | bundled in `vendor/` |
 | DBMS_CRYPTO grant | required | `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>;` |
 | Oracle Text grants | required before `1_schema.sql` | `CTXAPP` + `EXECUTE ON CTXSYS.CTX_DDL` |
@@ -228,7 +244,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.5.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.6.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -253,7 +269,7 @@ glibc 2.34+ and the RHEL 8/glibc 2.28 source-built wheel. The installer and
 `verify_deps.py` select the compatible one automatically. Customers on newer
 systems do not need to rebuild cryptography; the reproducible source-build
 procedure is documented in `docs/cryptography-build.md`.
-The current v4.4.2 archive includes the verified glibc 2.28 wheel; do not
+The current release archive includes the verified glibc 2.28 wheel; do not
 rename the `manylinux_2_34` wheel or substitute an older cryptography release.
 
 ## 5. Configuration
@@ -343,16 +359,22 @@ The schema script `1_schema.sql` is idempotent - it auto-aborts if
 `DOMIDX_STATUS=VALID` and `DOMIDX_OPSTATUS=VALID`; missing Oracle Text
 prerequisites fail the deployment instead of leaving a broken search index.
 
-For the integrated v4.3.0 profile, use `scripts/migration_runner.py` for the
-additive migration tail. Community applies these nine scripts in order:
-`9_v4_2_0_graph_engineering.sql`, `10_v4_2_0_graph_runtime.sql`,
-`11_v4_2_0_graph_control.sql`, `12_v4_2_0_graph_edge_scope.sql`,
-`14_v4_2_0_graph_triggers.sql`, `15_v4_2_1_executor_registry.sql`,
-`16_v4_3_0_identity_channels.sql`, and
-`17_v4_3_0_governance_lifecycle.sql`, and
-`18_v4_3_0_security_lifecycle.sql`. Enterprise inserts
-`13_v4_2_0_scheduler_ha.sql` between `12` and `14`, for ten scripts total.
-The internal `15` step is part of v4.3.0 and is not a public v4.2.1 release.
+Use the checksum-journaled migration runner for every additive release step;
+do not select or reorder individual migration files manually:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.6 \
+  --database oracle --edition <community|enterprise> --oracle-config config.json
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.6 \
+  --database oracle --edition <community|enterprise> --oracle-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+The runner applies the edition-aware chain through steps `46` and `47`,
+checks immutable digests and prerequisites, resumes only journaled incomplete
+work, and treats an already applied step as a read-only no-op. The internal
+step `15` is part of the integrated release line, not a separate v4.2.1
+package.
 
 ## 7. Start the Server
 
@@ -372,8 +394,19 @@ protected local identity flow.
 
 ## 8. Business Agent Registration
 
-Business Agents register against the Admin Agent to obtain encrypted
-database credentials:
+The preferred Skill-first path is a user-sponsored, one-use Agent Enrollment
+Token. An authorized Human creates it in Dashboard **Agents -> External Agent
+registration** (`POST /api/enrollment/grants`). The external Agent redeems it
+once at `POST /api/enrollment/redeem` with its Agent ID, runtime, node identity,
+and proof material. The Token fixes owner, environment, risk, and optional
+Security Domain; it does not grant Skills, Tools, model access, or platform
+administration. The Agent then authenticates through the Gateway and uses
+instance-scoped short-lived tokens. Never place the Token in a prompt, log,
+URL, repository, or long-lived configuration.
+
+The CLI below is the retained Admin-managed bootstrap path for deployments
+that explicitly issue an Admin registration token. It is not interchangeable
+with Human Registration Tokens or user-sponsored Agent Enrollment Tokens:
 
 ```bash
 # Register a new Business Agent
@@ -408,6 +441,10 @@ Once the server is running, these endpoints are available:
 |----------|----------|--------|-------------|
 | **System** | `/api/health` | GET | Health check |
 | **Auth** | `/api/login` | POST | Admin login |
+| **Human registration** | `/api/auth/registration-policy` | GET | Read public registration requirements |
+| **Human registration** | `/api/auth/register` | POST | Submit one independent Human registration request |
+| **Agent enrollment** | `/api/enrollment/grants` | GET/POST | List or issue governed one-use Agent Enrollment Tokens |
+| **Agent enrollment** | `/api/enrollment/redeem` | POST | Redeem one Agent Enrollment Token |
 | **Agents** | `/api/agents` | GET/POST | List / register agents |
 | **Agents** | `/api/agents/discover` | GET | Discover pool agents |
 | **Memory** | `/api/memory` | GET/POST | Memory search / store |
@@ -448,12 +485,13 @@ established Dashboard, Portal, and Agent paths are retained through the
 request-local compatibility bridge to `visualization/server.py`; the bridge
 does not open a second listener or grant direct database access. Legacy callers
 remain subject to session, CSRF, Agent identity, and permission checks. The
-`production` exposes the stable Graph Runtime and rejects Dynamic Graph, A2A,
-and OpenTelemetry preview controls. `graph-preview` enables only Dynamic Graph;
-`development` and `experimental-4.2` additionally enable the isolated A2A and
-OpenTelemetry mappings for controlled validation. A2A independent-client
-conformance, durable streaming, and real OTLP Collector delivery are not
-complete in v4.3.3 and must not be treated as production protocol support.
+The database-authoritative Graph capability profile labels each capability as
+`PRODUCTION`, `CONTROLLED`, `DISABLED`, or `UNAVAILABLE`. Graph Runtime core,
+recovery, and governed inspection are production capabilities. Dynamic Graph,
+A2A, OTLP, replay, and other interoperability operations are available only
+when their explicit capability, edition, authorization, dependency, and
+evidence gates allow them. Metadata availability never implies mutation
+authority or production conformance.
 
 ## 10. Security Model
 
@@ -499,7 +537,7 @@ Tests use the configured owner-only (`0600`) `config.json` connection. Set
 
 Server log: `viz_server.log` in the project directory.
 
-## 14. v4.3.0 Integrated Graph Engineering
+## 13. v4.3.0 Integrated Graph Engineering
 
 This package uses the integrated v4.3.0 profile. In addition to the v4.1
 runtime, it provides versioned Graph Definitions, deterministic compilation,
@@ -594,7 +632,7 @@ while its Dynamic Graph, A2A, and OpenTelemetry controls remain preview-only.
 The Graph implementation is graduated by configuration and evidence, not by a
 second long-lived implementation.
 
-## 13. Offline Deployment
+## 14. Offline Deployment
 
 The release zip contains the compiled Web runtime and the bundled dependency
 set. The Web assets require no Node.js, npm, or network access. Python is
@@ -660,3 +698,24 @@ Markdown are not execution state and must not control code changes, tests,
 reviews, gates, or release decisions. Conflict, missing evidence, or high-risk
 Graph changes pause the affected run for governed review; do not bypass a gate
 by editing database tables or calling adapter SQL directly.
+
+## v4.4.4-v4.4.6 Current Operations
+
+v4.4.4 adds governed Admin Agent and Agent Pool node/storage configuration,
+external database endpoints, Portal LLM allowlists, platform templates, and
+logical retirement for nodes and LLM profiles. Local Agent information paths
+are configured per node; Admin runtime sharing and Agent Pool runtime sharing
+remain separate purposes. Platform Administration Channel requests may create
+typed inspection or preparation proposals, but mutations still require an
+authorized Action Card, reason, and applicable approval.
+
+v4.4.5 admits Graph Runs only when Definition, compiled Plan, runtime profile,
+state schema, budget schema, and capability contracts match. Non-repeatable
+forks start paused until governed approval or compensation evidence exists.
+
+v4.4.6 adds one Human registration page, versioned field and Token policies,
+provider-neutral external identity transactions, Portal connection limits,
+exclusive page-operation leases, and explicit Graph capability posture. Apply
+steps `46` and `47` only through the migration runner. An Agent consuming this
+Skill must fail closed on unknown registration fields, unavailable providers,
+lease conflicts, missing capability evidence, or authorization failures.

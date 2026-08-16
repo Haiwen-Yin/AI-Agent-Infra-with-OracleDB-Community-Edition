@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.4.5
+# Architecture - AI Agent Infra with DB v4.4.6
 
 ## v4.4.3 Governed Collaboration Boundary
 
