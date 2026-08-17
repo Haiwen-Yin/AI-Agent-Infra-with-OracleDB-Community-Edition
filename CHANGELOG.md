@@ -10,6 +10,38 @@
 - Standardized configuration panel width, grouping, and spacing across the
   Dashboard. This maintenance release adds no database migration.
 
+## v4.4.6 - 2026-08-16
+
+- Added database-authoritative Human registration with configurable display
+  name, email, mobile, and one-use Human Registration Token policies.
+- Unified Portal and Dashboard registration through an independent
+  registration surface while preserving separate Agent Enrollment Tokens.
+- Added exclusive Portal operation-page leases and configurable per-user
+  connection limits; reused sessions can be inspected but cannot mutate.
+- Added provider-neutral external identity transaction and callback contracts
+  for future WeCom, DingTalk, Feishu, OIDC, and customer adapters. Claims never
+  grant roles or access by themselves.
+- Added explicit Graph Engineering capability posture: `PRODUCTION`,
+  `CONTROLLED`, `DISABLED`, or `UNAVAILABLE`.
+- Added additive identity, Portal, Graph posture, and portable contract
+  alignment migrations for Oracle, PostgreSQL, and YashanDB.
+
+## v4.4.5 - 2026-08-15
+
+- Preserved Dashboard child-view state through bounded URL deep links across
+  refresh, re-login, direct navigation, and browser history without exposing
+  credentials, tokens, message bodies, or model secrets.
+- Added immutable Graph Run admission contracts for Definition and Plan
+  digests, compatibility, State schema, and budget schema versions. Plans from
+  another Graph Version or with a mismatched digest fail closed.
+- Governed Agent Card projection by explicit platform Skill grants; protocol
+  metadata remains descriptive and cannot grant authority.
+- Paused forks before the first Worker claim when replay could reach a
+  non-repeatable external effect. Resume requires an approved
+  `GRAPH_FORK_REPLAY` decision or bounded compensation evidence.
+- Added equivalent additive Graph Run contract migrations for Oracle,
+  PostgreSQL, and YashanDB.
+
 ## v4.4.4 - 2026-08-14
 
 - Added governed Portal Agent Pool LLM policy and Portal-side profile
