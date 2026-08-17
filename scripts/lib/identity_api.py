@@ -2040,6 +2040,105 @@ def effective_access(
     return {"decision": decision, "action": action, "scopes": sorted(scopes or {"NONE"}), "roles": [r["role_code"] for r in roles], "sources": sources, "policy_version": _permission_version(principal_id)}
 
 
+def effective_access_many(principal_id: str, actions: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    """Evaluate a presentation manifest from one current authorization snapshot."""
+    requested = sorted({str(action).strip() for action in actions if str(action).strip()})
+    if not requested:
+        return {}
+    principal = _row(connection.execute_query_one(
+        "SELECT PRINCIPAL_TYPE, STATUS, PERMISSION_VERSION FROM CX_PRINCIPALS "
+        "WHERE PRINCIPAL_ID = :principal_id", {"principal_id": principal_id},
+    ))
+    policy_version = int((principal or {}).get("permission_version") or 0)
+    if not principal or str(principal.get("status") or "").upper() != "ACTIVE":
+        return {action: {
+            "decision": "DENY", "action": action, "scopes": ["NONE"], "roles": [],
+            "sources": ["principal:inactive-or-unknown"], "policy_version": policy_version,
+        } for action in requested}
+
+    roles = _rows(_required_query(
+        "SELECT ROLE_CODE FROM CX_USER_ROLES WHERE PRINCIPAL_ID = :principal_id AND STATUS = 'ACTIVE' "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP)",
+        {"principal_id": principal_id},
+    ))
+    if not roles:
+        roles = [{"role_code": "AGENT" if str(principal.get("principal_type") or "").upper() == "AGENT" else "END_USER"}]
+    permissions: set[str] = set()
+    base_scopes: set[str] = set()
+    base_sources: List[str] = []
+    for role_row in roles:
+        code = str(role_row.get("role_code") or "END_USER").upper()
+        template = _row(connection.execute_query_one(
+            "SELECT PERMISSIONS_JSON, DATA_SCOPES_JSON FROM CX_ROLE_TEMPLATES WHERE ROLE_CODE = :role_code",
+            {"role_code": code},
+        ))
+        fallback = ROLE_FALLBACKS.get(code, ROLE_FALLBACKS["END_USER"])
+        try:
+            permissions.update(json.loads(template.get("permissions_json") or "[]") if template else fallback["permissions"])
+        except (ValueError, TypeError):
+            permissions.update(fallback["permissions"])
+        try:
+            role_scopes = set(json.loads(template.get("data_scopes_json") or "[]")) if template else set(fallback["scopes"])
+        except (ValueError, TypeError):
+            role_scopes = set(fallback["scopes"])
+        base_scopes.update(role_scopes & SCOPES)
+        base_sources.append(f"role:{code}")
+
+    overrides_by_action: Dict[str, List[Dict[str, Any]]] = {}
+    for override in _rows(_required_query(
+        "SELECT RESOURCE_ACTION, EFFECT, DATA_SCOPE, SECURITY_DOMAIN_ID, REASON, GRANTED_BY "
+        "FROM CX_USER_PERMISSION_OVERRIDES WHERE PRINCIPAL_ID = :principal_id "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP) ORDER BY CREATED_AT DESC",
+        {"principal_id": principal_id},
+    )):
+        overrides_by_action.setdefault(str(override.get("resource_action") or ""), []).append(override)
+    delegations = _rows(_required_query(
+        "SELECT DELEGATION_ID, GRANTOR_PRINCIPAL_ID, PERMISSIONS_JSON, DATA_SCOPE "
+        "FROM CX_DELEGATIONS WHERE GRANTEE_PRINCIPAL_ID = :principal_id AND STATUS = 'ACTIVE' "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP) ORDER BY CREATED_AT DESC",
+        {"principal_id": principal_id},
+    ))
+
+    results: Dict[str, Dict[str, Any]] = {}
+    for action in requested:
+        scopes = set(base_scopes)
+        sources = list(base_sources)
+        decision = "ALLOW" if _permission_match(permissions, action) else "DENY"
+        explicit_deny = False
+        for override in overrides_by_action.get(action, []):
+            sources.append(f"override:{override.get('granted_by') or 'unknown'}")
+            if str(override.get("effect") or "").upper() == "DENY":
+                decision = "DENY"
+                explicit_deny = True
+                break
+            decision = "ALLOW"
+            override_scope = str(override.get("data_scope") or "NONE").upper()
+            if override_scope in SCOPES:
+                scopes.add(override_scope)
+        if not explicit_deny:
+            for delegation in delegations:
+                try:
+                    delegated_permissions = json.loads(delegation.get("permissions_json") or "[]")
+                except (TypeError, ValueError):
+                    continue
+                grantor_id = str(delegation.get("grantor_principal_id") or "")
+                if not grantor_id or grantor_id == principal_id or not isinstance(delegated_permissions, list) or not _permission_match(delegated_permissions, action):
+                    continue
+                if effective_access(grantor_id, action, _include_delegations=False).get("decision") != "ALLOW":
+                    continue
+                decision = "ALLOW"
+                delegation_scope = str(delegation.get("data_scope") or "NONE").upper()
+                if delegation_scope in SCOPES:
+                    scopes.add(delegation_scope)
+                sources.append(f"delegation:{delegation.get('delegation_id') or 'unknown'}:{grantor_id}")
+        results[action] = {
+            "decision": decision, "action": action, "scopes": sorted(scopes or {"NONE"}),
+            "roles": [str(role.get("role_code") or "") for role in roles],
+            "sources": sources, "policy_version": policy_version,
+        }
+    return results
+
+
 def _permission_version(principal_id: str) -> int:
     row = _row(connection.execute_query_one("SELECT PERMISSION_VERSION FROM CX_PRINCIPALS WHERE PRINCIPAL_ID = :principal_id", {"principal_id": principal_id}))
     return int((row or {}).get("permission_version") or 1)

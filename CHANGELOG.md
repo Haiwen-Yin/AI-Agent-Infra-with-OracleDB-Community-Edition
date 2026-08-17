@@ -1,5 +1,15 @@
 # Changelog
 
+## v4.4.7 - 2026-08-17
+
+- Hardened LLM Provider Profile save, reference-safe logical retirement,
+  saved-profile probing, returned-model identity checks, and health writeback.
+- Reduced Dashboard startup latency by calculating the complete capability
+  manifest from one current authorization snapshot and loading authentication
+  and capability data in parallel.
+- Standardized configuration panel width, grouping, and spacing across the
+  Dashboard. This maintenance release adds no database migration.
+
 ## v4.4.4 - 2026-08-14
 
 - Added governed Portal Agent Pool LLM policy and Portal-side profile

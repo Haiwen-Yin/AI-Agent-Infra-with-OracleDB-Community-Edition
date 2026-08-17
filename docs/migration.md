@@ -1,4 +1,11 @@
-# Migration Guide - AI Agent Infra with DB v4.4.6
+# Migration Guide - AI Agent Infra with DB v4.4.7
+
+## v4.4.7 Maintenance Release
+
+v4.4.7 adds no database migration. Upgrade from v4.4.6 by applying the normal
+signed package, preflight, controlled service rollout, and Skill distribution
+process. Do not invent or run a v4.4.7 SQL step; verify the existing schema,
+saved LLM health probes, and Dashboard authorization manifest after rollout.
 
 ## v4.4.3 Security Domain Governance Migration
 

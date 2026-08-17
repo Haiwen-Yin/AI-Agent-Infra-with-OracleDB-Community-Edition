@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.6
+# Security - AI Agent Infra with DB v4.4.7
 
 ## v4.4.3 Security Domain Boundary
 
@@ -623,6 +623,25 @@ task already running; a separate containment incident is required for that
 higher-impact action. Retired nodes and LLM profiles remain auditable but are
 excluded from active discovery, and LLM retirement revokes stored encrypted
 API-key ciphertext.
+
+## v4.4.7 LLM Health and Authorization Manifest
+
+An active LLM Provider Profile is healthy only after a bounded saved-profile
+probe receives a valid completion from the configured model. A provider
+namespace prefix is accepted, but an endpoint that serves another model is
+marked `DEGRADED`. Probe responses and audit facts never include the API key,
+ciphertext, prompt body, or completion body.
+
+LLM retirement remains logical and fail-closed. Portal default and allowlist
+references, active native Agents, and pending Business Agent requests must be
+removed or replaced before retirement. Successful retirement revokes the
+stored encrypted secret while preserving auditable history.
+
+The Dashboard capability manifest evaluates all requested actions from one
+current database authorization snapshot. This is a query optimization, not an
+authorization cache: principal status, active roles, explicit overrides,
+delegation validity, read-only state, and platform capability state are checked
+on every manifest request.
 
 ## v4.4.6 Human and Portal Admission
 

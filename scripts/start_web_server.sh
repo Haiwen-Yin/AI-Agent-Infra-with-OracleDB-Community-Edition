@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Chuanxu v4.4.6 - AI Agent Infra v4.4.6 - {{EDITION_LABEL}} unified FastAPI/Uvicorn server controller.
+# Chuanxu v4.4.7 - AI Agent Infra v4.4.7 - {{EDITION_LABEL}} unified FastAPI/Uvicorn server controller.
 
 set -euo pipefail
 
@@ -34,7 +34,7 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR/scripts:$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export CX_DATABASE_DIALECT="$DB_DIALECT"
 export CX_RUNTIME_PROFILE="$PROFILE"
-export AI_AGENT_RELEASE_DATE="2026-08-16"
+export AI_AGENT_RELEASE_DATE="2026-08-17"
 
 read_config() {
   "$PYTHON" - "$1" "$2" <<'PY'
@@ -106,7 +106,7 @@ start_server() {
     echo "FastAPI and Uvicorn are not installed for the selected Python. Run scripts/install_offline.sh with the same Python 3.14+ interpreter, then retry." >&2
     exit 1
   fi
-  echo "Starting Chuanxu v4.4.6 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
+  echo "Starting Chuanxu v4.4.7 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
   setsid nohup "$PYTHON" -m uvicorn web_app:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-access-log >>"$LOG_FILE" 2>&1 &
   echo "$!" >"$PID_FILE"

@@ -214,12 +214,13 @@ def test_summary_metrics_fill_the_available_page_width():
     assert ".native-summary-grid" not in stylesheet
 
 
-def test_dashboard_and_portal_use_the_mfa_dashboard_entry():
+def test_portal_exposes_separate_dashboard_and_registration_entries():
     web_app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
     portal_login = (TEMPLATES_DIR / "portal_login.html").read_text(encoding="utf-8")
     assert '@app.get("/login", include_in_schema=False)' in web_app
     assert 'RedirectResponse(url="/app", status_code=302)' in web_app
-    assert '<a href="/app" class="admin-link"' in portal_login
+    assert '<a href="/app">' in portal_login
+    assert '<a href="/register?entry=portal">' in portal_login
 
 
 def test_dashboard_mfa_is_explicitly_configured_after_login():

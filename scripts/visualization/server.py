@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.6 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.7 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.6"
+VERSION = "4.4.7"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -4854,8 +4854,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.6', VERSION)
-            html = html.replace('2026-08-16', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.7', VERSION)
+            html = html.replace('2026-08-17', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

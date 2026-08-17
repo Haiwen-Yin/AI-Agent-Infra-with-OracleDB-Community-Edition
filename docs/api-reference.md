@@ -1,4 +1,11 @@
-# API Reference - AI Agent Infra with DB v4.4.6
+# API Reference - AI Agent Infra with DB v4.4.7
+
+## v4.4.7 Maintenance APIs
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/capabilities` | GET | Return the page and action manifest from one current database authorization snapshot; this is not a permission cache. |
+| `/api/llm-provider-profiles/{profile_id}/probe` | POST | Probe a saved active LLM profile, verify returned model identity, and write `HEALTHY` or `DEGRADED` without returning secrets or provider content. |
 
 ## v4.4.3 Security Domain Governance API
 
@@ -108,6 +115,7 @@ reason, and server-side scope checks.
 | `/api/agent-templates` | GET | Read published locked templates. |
 | `/api/native-manifests` | GET | Read versioned, digest-checked built-in Skill/Tool manifests. |
 | `/api/llm-provider-profiles` | GET/POST | Read redacted or create encrypted LLM profiles. |
+| `/api/llm-provider-profiles/{profile_id}/probe` | POST | Probe one saved active profile, verify the returned model identity, and write `HEALTHY` or `DEGRADED` without returning credentials or provider content. |
 | `/api/llm-provider-profiles/{profile_id}` | DELETE | Retire an LLM profile after dependency checks; requires an audited reason and revokes its stored API key ciphertext. This is a logical retirement, not physical deletion. |
 | `/api/platform/managed-nodes/{node_id}` | DELETE | Retire a managed node after runtime, onboarding, storage-binding, Admin HA, and execution dependency checks; requires an audited reason. Bootstrap system nodes cannot be retired. |
 | `/api/deployment-targets` | GET | Read deployment targets and reference adapter contracts. |

@@ -1,4 +1,4 @@
-# Loop Engineering - AI Agent Infra with DB v4.4.6
+# Loop Engineering - AI Agent Infra with DB v4.4.7
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project

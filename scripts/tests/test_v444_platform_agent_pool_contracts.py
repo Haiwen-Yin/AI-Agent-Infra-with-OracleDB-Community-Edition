@@ -74,10 +74,21 @@ def test_v444_managed_resources_have_governed_retirement_contracts():
     assert "LLM_PROFILE_RETIRE" in native
     assert "CX_PORTAL_LLM_ALLOWLIST" in native
     assert "CX_NATIVE_PROVISION_REQUESTS" in native
+    assert "class LLMProfileInUse" in native
+    assert "LLM_PROFILE_IN_USE:" in native
     assert '@app.delete("/api/platform/managed-nodes/{node_id}")' in web
     assert '@app.delete("/api/llm-provider-profiles/{profile_id}")' in web
     assert 'method: "DELETE"' in ui
     assert "系统节点，不可移除" in ui
+
+
+def test_llm_profile_form_keeps_a_stable_form_reference_across_await():
+    ui = (ROOT / "shared/web/src/App.tsx").read_text(encoding="utf-8")
+    submit = ui.split("const submitProfile = async", 1)[1].split("const testProfile = async", 1)[0]
+    assert "const formElement = event.currentTarget" in submit
+    assert "formElement.reset()" in submit
+    assert "event.currentTarget.reset()" not in submit
+    assert "LLM_PROFILE_IN_USE:" in ui
 
 
 def test_v444_management_channel_drain_is_typed_and_approval_bound():

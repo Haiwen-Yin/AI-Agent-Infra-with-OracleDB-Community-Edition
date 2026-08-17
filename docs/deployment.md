@@ -1,4 +1,10 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.6
+# Deployment Guide - AI Agent Infra with DB v4.4.7
+
+v4.4.7 is a maintenance release over the v4.4.6 Production Profile. It adds
+saved LLM model-identity probing, health-state writeback, reference-safe LLM
+retirement, batched real-time Dashboard capability evaluation, and consistent
+configuration layout. It adds no database migration and does not change the
+minimum database privilege boundary.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -62,7 +68,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.6 --database <oracle|pg|yashandb> \
+  --version 4.4.7 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -81,7 +87,7 @@ authorization, and it does not depend on an external Agent calling a Skill.
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py \
-  --version 4.4.6 --database <oracle|pg|yashandb> \
+  --version 4.4.7 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -215,7 +221,7 @@ glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.6`. The current `production`
+through `migration_runner.py --version 4.4.7`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it

@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.4.6
+# Graph Engineering - AI Agent Infra with DB v4.4.7
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.

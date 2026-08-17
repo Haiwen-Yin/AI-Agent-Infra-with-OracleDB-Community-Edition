@@ -39,7 +39,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
 
 
-VERSION = "4.4.6"
+VERSION = "4.4.7"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -2048,10 +2048,9 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
     }
     features = _edition_features()
     try:
-        access_by_action = {
-            action: identity_api.effective_access(str(session["principal_id"]), action)
-            for action in sorted(set(pages.values()) | operation_actions)
-        }
+        access_by_action = identity_api.effective_access_many(
+            str(session["principal_id"]), set(pages.values()) | operation_actions,
+        )
         read_only = identity_api.is_global_read_only_principal(str(session["principal_id"]))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Authorization service unavailable") from exc
@@ -2689,10 +2688,29 @@ def llm_provider_profile_probe(
         raise _identity_http_error(exc, "LLM Provider draft probe failed", identity_status=503) from exc
 
 
+@app.post("/api/llm-provider-profiles/{profile_id}/probe")
+def llm_provider_profile_saved_probe(
+    profile_id: str,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return native_agent_api.probe_saved_llm_profile(str(session["principal_id"]), profile_id)
+    except native_agent_api.NativeAgentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="platform management permission is required") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "LLM Provider Profile probe failed", identity_status=503) from exc
+
+
 @app.delete("/api/llm-provider-profiles/{profile_id}")
 def llm_provider_profile_retire(profile_id: str, body: RetirementBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
     try:
         return native_agent_api.retire_llm_profile(str(session["principal_id"]), profile_id, body.reason)
+    except native_agent_api.LLMProfileInUse as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except native_agent_api.NativeAgentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise _identity_http_error(exc, "LLM Provider Profile could not be retired") from exc
 

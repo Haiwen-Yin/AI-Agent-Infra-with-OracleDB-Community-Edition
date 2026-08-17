@@ -46,6 +46,14 @@ class NativeAgentConflict(NativeAgentError):
     """Optimistic concurrency or lifecycle conflict."""
 
 
+class LLMProfileInUse(NativeAgentConflict):
+    """An LLM profile still has governed references that block retirement."""
+
+    def __init__(self, blockers: Iterable[str]):
+        self.blockers = tuple(str(item) for item in blockers)
+        super().__init__("LLM_PROFILE_IN_USE:" + ",".join(self.blockers))
+
+
 def _id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(20)}"
 
@@ -69,6 +77,15 @@ def _json(value: Any) -> str:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
+
+
+def _llm_model_matches(expected: Any, observed: Any) -> bool:
+    """Accept provider namespaces, but never silently accept another model."""
+    expected_name = _text(expected, 256).lower()
+    observed_name = _text(observed, 256).lower()
+    if not expected_name or not observed_name:
+        return False
+    return observed_name == expected_name or observed_name.rsplit("/", 1)[-1] == expected_name.rsplit("/", 1)[-1]
 
 
 def _enterprise() -> bool:
@@ -458,20 +475,17 @@ def retire_llm_profile(actor: str, profile_id: str, reason: str) -> Dict[str, An
             raise NativeAgentError("LLM Provider Profile is already retired")
         blockers: list[str] = []
         checks = (
-            ("Portal default profile", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_POLICIES WHERE DEFAULT_PROFILE_ID=:id"),
-            ("Portal allowlist", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_ALLOWLIST WHERE PROFILE_ID=:id AND STATUS='ACTIVE'"),
-            ("active native Agent", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS WHERE LLM_PROFILE_ID=:id AND STATUS NOT IN ('RETIRED','DISABLED','QUARANTINED')"),
-            ("pending business Agent request", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_PROVISION_REQUESTS WHERE LLM_PROFILE_ID=:id AND STATUS IN ('APPROVAL_PENDING','APPROVED','PROVISIONING','PENDING')"),
+            ("PORTAL_DEFAULT", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_POLICIES WHERE DEFAULT_PROFILE_ID=:id"),
+            ("PORTAL_ALLOWLIST", "SELECT COUNT(*) AS CNT FROM CX_PORTAL_LLM_ALLOWLIST WHERE PROFILE_ID=:id AND STATUS='ACTIVE'"),
+            ("ACTIVE_NATIVE_AGENT", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS WHERE LLM_PROFILE_ID=:id AND STATUS NOT IN ('RETIRED','DISABLED','QUARANTINED')"),
+            ("PENDING_AGENT_REQUEST", "SELECT COUNT(*) AS CNT FROM CX_NATIVE_PROVISION_REQUESTS WHERE LLM_PROFILE_ID=:id AND STATUS IN ('APPROVAL_PENDING','APPROVED','PROVISIONING','PENDING')"),
         )
         for label, query in checks:
-            try:
-                count = _row(tx.query_one(query, {"id": profile_key})) or {}
-                if int(count.get("cnt") or 0) > 0:
-                    blockers.append(label)
-            except Exception:
-                continue
+            count = _row(tx.query_one(query, {"id": profile_key})) or {}
+            if int(count.get("cnt") or 0) > 0:
+                blockers.append(label)
         if blockers:
-            raise NativeAgentError("LLM profile removal blocked by: " + ", ".join(blockers))
+            raise LLMProfileInUse(blockers)
         tx.execute(
             "UPDATE CX_LLM_PROVIDER_PROFILES SET STATUS='RETIRED',HEALTH_STATE='RETIRED',API_KEY_CIPHER=NULL,SECRET_PRESENT='N',UPDATED_BY=:actor,UPDATE_REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:id",
             {"id": profile_key, "actor": actor, "reason": why},
@@ -561,6 +575,9 @@ def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id:
             payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
         if not isinstance(payload, dict) or not (payload.get("choices") or []):
             raise NativeAgentError("LLM provider returned no completion")
+        observed_model = _text(payload.get("model"), 256)
+        if not _llm_model_matches(model, observed_model):
+            raise NativeAgentError("LLM provider returned a different model")
         elapsed_ms = round((time.monotonic() - started) * 1000)
         # The audit contains only the profile identity and outcome; it never
         # contains the URL query, prompt, response, or API Key.
@@ -568,7 +585,7 @@ def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id:
             _audit(tx, actor, "LLM_PROFILE_DRAFT_PROBE", "LLM_PROFILE_DRAFT", key,
                    "ALLOW", "LLM draft connectivity probe verified")
             return {"status": "VERIFIED", "profile_key": key,
-                    "observed_model": _text(payload.get("model") or model, 256),
+                    "observed_model": observed_model,
                     "latency_ms": elapsed_ms}
         return connection.execute_transaction_callback(work)
     except (NativeAgentError, urllib.error.URLError, TimeoutError, ValueError) as exc:
@@ -577,6 +594,8 @@ def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id:
                    "DENY", "LLM draft connectivity probe failed")
             return {"status": "FAILED", "profile_key": key}
         connection.execute_transaction_callback(work)
+        if isinstance(exc, NativeAgentError):
+            raise NativeAgentError(str(exc)) from exc
         raise NativeAgentError("LLM provider probe failed") from exc
 
 
@@ -588,6 +607,40 @@ def _policy_row() -> Dict[str, Any]:
     if not row:
         raise NativeAgentError("external Agent registration policy is unavailable")
     return row
+
+
+def probe_saved_llm_profile(actor: str, profile_id: str, *, timeout: int = 20) -> Dict[str, Any]:
+    """Probe a persisted profile and update only its safe health projection."""
+    if identity_api.effective_access(str(actor), "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required")
+    key = _text(profile_id, 128)
+    row = _row(connection.execute_query_one(
+        "SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS "
+        "FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id", {"id": key},
+    ))
+    if not row or str(row.get("status") or "").upper() != "ACTIVE":
+        raise NativeAgentError("LLM Provider Profile is unavailable")
+    secret = ""
+    cipher = str(row.get("api_key_cipher") or "")
+    if cipher:
+        from .connection_crypto import decrypt_section
+        secret = str(decrypt_section(cipher).get("api_key") or "")
+    try:
+        result = probe_llm_profile(
+            actor, str(row.get("profile_key") or key), str(row.get("provider_url") or ""),
+            str(row.get("model_id") or ""), secret, timeout=timeout,
+        )
+    except Exception:
+        connection.execute(
+            "UPDATE CX_LLM_PROVIDER_PROFILES SET HEALTH_STATE='DEGRADED',UPDATED_AT=CURRENT_TIMESTAMP "
+            "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": key},
+        )
+        raise
+    connection.execute(
+        "UPDATE CX_LLM_PROVIDER_PROFILES SET HEALTH_STATE='HEALTHY',UPDATED_AT=CURRENT_TIMESTAMP "
+        "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": key},
+    )
+    return {**result, "profile_id": key, "health_state": "HEALTHY"}
 
 
 def external_registration_policy() -> Dict[str, Any]:

@@ -413,10 +413,20 @@ a {
 }
 .info-panel {
   min-width: 0;
+  margin-bottom: 14px;
   padding: 19px;
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow);
+}
+.two-column-panels > .info-panel,
+.split-grid > .info-panel,
+.metric-grid > .info-panel {
+  margin-bottom: 0;
+}
+.native-contract-panels {
+  align-items: stretch;
+  margin-top: 0;
 }
 .panel-title,
 .subhead,
@@ -2036,8 +2046,8 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .agent-pool-page .pool-config-stack {
   display: grid;
-  gap: 20px;
-  margin: 12px 0;
+  gap: 14px;
+  margin: 14px 0 0;
 }
 .agent-pool-page .pool-config-block {
   display: grid;
@@ -2052,7 +2062,17 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   font-size: 13px;
 }
 .agent-pool-page .pool-llm-policy-form {
-  margin-top: 12px;
+  margin-top: 14px;
+}
+.agent-pool-page .info-panel > .configuration-form + .configuration-form,
+.agent-pool-page .info-panel > .compact-form + .compact-form {
+  margin-top: 14px;
+}
+.agent-pool-page .pool-config-stack + .info-panel {
+  margin-top: 14px;
+}
+.agent-pool-page > .info-panel > .pool-llm-policy-form + .info-panel {
+  margin-top: 14px;
 }
 .platform-configuration-subpage .node-storage-binding-form {
   margin-top: 12px;

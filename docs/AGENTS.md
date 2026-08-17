@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.6 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.7 Unified Repository Guide
 
-> **v4.4.6** - The unified single-source repository that generates all 6 release
+> **v4.4.7** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -359,11 +359,16 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.6`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.7`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration
 - Empty `api_key` SHALL NOT block LLM calls
+- A saved profile is `HEALTHY` only when a bounded probe returns a completion
+  from the configured model. A reachable endpoint serving another model is
+  `DEGRADED`; provider namespaces may prefix an otherwise matching model ID.
+- Retiring an LLM profile is blocked while it remains referenced by Portal,
+  an active native Agent, or a pending Business Agent request.
 - Add `reasoning_effort: "none"` for reasoning models
 - Streaming: only yield `content` tokens, skip `reasoning_content`
 - Non-streaming: fall back to `reasoning_content` if `content` empty
