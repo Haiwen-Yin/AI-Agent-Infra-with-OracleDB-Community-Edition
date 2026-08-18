@@ -11,9 +11,21 @@
 The current release is a small maintenance and optimization update over the
 v4.4.6 Production Profile. It improves LLM profile save feedback, model
 identity probing, health writeback, reference-safe logical retirement, the
-Dashboard capability manifest, and configuration-panel consistency. It adds no
-database migration; the governed Portal, Agent Pool, Platform Administration
-Channel, and native Agent capabilities from earlier releases remain available.
+Dashboard capability manifest, protected management knowledge, and
+configuration-panel consistency. It adds no database migration; the governed
+Portal, Agent Pool, Platform Administration Channel, and native Agent
+capabilities from earlier releases remain available.
+
+v4.4.7 maturity is explicit: Graph Runtime core and authorized Graph
+inspection are available in the Production Profile. Manifest draft import,
+SLO read-only views, and checkpoint fork are `CONTROLLED` capabilities that
+require their own authorization and evidence. MCP 2026-07-28 negotiation and
+`server/discover`, independent A2A 1.0.1 conformance, replacement-Worker
+checkpoint/resume and stream de-duplication, sandbox and approval replay,
+bounded tool-result compaction, OTLP Collector delivery, and authorization-
+filtered GraphRAG projections remain deferred research. They are not current
+production claims and are not enabled by metadata, prompts, Skills, or Agent
+requests.
 
 v4.4.3 added governed Security Domain administration for project collaboration.
 Security Domains remain the explicit authorization boundary; Channels and legacy

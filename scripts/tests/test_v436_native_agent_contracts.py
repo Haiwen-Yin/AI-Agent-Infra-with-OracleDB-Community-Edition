@@ -82,7 +82,9 @@ def test_builtin_templates_include_sensitive_profiles_and_locked_fields():
     for _, _, _, content in native_agent_api.BUILTIN_TEMPLATES:
         assert content["locked_fields"]
         assert content["isolation_level"] in native_agent_api.ISOLATION_LEVELS
-    assert {item[0] for item in native_agent_api.BUILTIN_MANIFESTS} >= {"platform-admin-tools", "restricted-agent-skills"}
+    assert {item[0] for item in native_agent_api.BUILTIN_MANIFESTS} >= {
+        "platform-admin-tools", "restricted-agent-skills", "platform-admin-knowledge",
+    }
 
 
 def test_dashboard_exposes_governed_deployment_and_native_agents_to_platform_administrators():

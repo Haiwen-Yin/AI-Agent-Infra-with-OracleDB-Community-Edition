@@ -6,6 +6,16 @@ retirement, batched real-time Dashboard capability evaluation, and consistent
 configuration layout. It adds no database migration and does not change the
 minimum database privilege boundary.
 
+The current maturity boundary is deliberate. Production includes the stable
+Graph Runtime core and authorized Graph inspection. Manifest draft import,
+SLO read-only views, and checkpoint fork require controlled authorization and
+fresh evidence. MCP 2026-07-28 negotiation and `server/discover`, independent
+A2A 1.0.1 conformance, replacement-Worker resume and stream de-duplication,
+sandbox/approval replay, bounded tool-result compaction, OTLP Collector
+delivery, and authorization-filtered GraphRAG projections remain research
+items. Do not enable or sell them as production capabilities merely because a
+module, protocol version, Skill, or metadata record exists.
+
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
 > name; database-specific package names identify the adapter and edition.
@@ -247,15 +257,17 @@ does not infer a violation from idleness, a missing Skill call, a model
 opinion, or an offline external process. Exceptions require a reason,
 compensating controls, expiry, and a distinct active Human approver.
 
-### v4.3.3 Preview Controls
+### Historical v4.3.3 Preview Controls
 
-Do not enable a preview merely to expose an endpoint. `development` and
-`experimental-4.2` enable the isolated Dynamic Graph, A2A 1.0.1, and OTLP
-mapping surfaces for controlled validation. `production` denies these controls
-by design. A2A currently maps Tasks to existing Graph Runs but does not provide
-independent-client conformance or durable stream delivery. OTLP currently
-persists redacted projection metadata but does not deliver to a real Collector.
-Neither preview changes database authority, identity, policy, or audit rules.
+This section records the earlier profile design. In v4.4.7 the
+database-authoritative capability matrix is authoritative: Graph Runtime core
+and authorized inspection are Production; manifest draft import, read-only SLO
+views, and checkpoint fork are `CONTROLLED`; replay, Dynamic Graph migration,
+framework-adapter execution, A2A, and OTLP are `DISABLED`. Do not expose an
+endpoint merely because older deployment profiles recognized it. A2A still
+lacks independent-client conformance and durable stream delivery; OTLP still
+lacks real Collector delivery, retry, and dead-letter evidence. Neither
+extension changes database authority, identity, policy, or audit rules.
 
 Existing v4.0.1 installations must then apply
 `8_portal_node_ownership.sql` before deploying or restarting the web service.

@@ -9,6 +9,21 @@
   and capability data in parallel.
 - Standardized configuration panel width, grouping, and spacing across the
   Dashboard. This maintenance release adds no database migration.
+- Fixed the protected management Channel's final SSE delta flush so short
+  provider responses are delivered incrementally instead of appearing only at
+  completion.
+- Added private signed management knowledge for the native Agent-template
+  workflow, including required security and approval controls and an explicit
+  statement of the current template-editing API boundary.
+- Added immutable management knowledge v2 with complete Dashboard navigation,
+  Business Agent template semantics, and request-language-aligned Chinese or
+  English management responses; retained v1 as audit history.
+- Stacked the managed Skill / Tool manifest and deployment adapter contract
+  panels vertically at full content width.
+- Clarified the release maturity boundary: Graph Runtime core and authorized
+  inspection are Production Profile capabilities; controlled Graph items and
+  protocol/GraphRAG research remain evidence-gated and are not promoted by
+  metadata alone.
 
 ## v4.4.6 - 2026-08-16
 

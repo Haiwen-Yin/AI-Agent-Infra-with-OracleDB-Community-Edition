@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from lib import a2a_gateway, graph_governance, graph_runtime, graph_state
 
@@ -116,9 +117,18 @@ def test_v445_has_equivalent_additive_run_contract_migrations():
         "DEFINITION_DIGEST", "PLAN_DIGEST", "COMPATIBILITY_LEVEL",
         "STATE_SCHEMA_VERSION", "BUDGET_SCHEMA_VERSION",
     }
-    for adapter in ("oracle", "pg", "yashandb"):
-        source = (root / "adapters" / adapter / "deploy" /
-                  "45_v4_4_5_graph_run_contract.sql").read_text(encoding="utf-8").upper()
+    if (root / "adapters").is_dir():
+        scripts = [
+            root / "adapters" / adapter / "deploy" / "45_v4_4_5_graph_run_contract.sql"
+            for adapter in ("oracle", "pg", "yashandb")
+        ]
+    else:
+        manifest = root / "build-manifest.json"
+        assert manifest.is_file(), "generated package must include build-manifest.json"
+        json.loads(manifest.read_text(encoding="ascii"))["database"]["key"]
+        scripts = [root / "scripts" / "deploy" / "45_v4_4_5_graph_run_contract.sql"]
+    for script in scripts:
+        source = script.read_text(encoding="utf-8").upper()
         assert required <= {marker for marker in required if marker in source}
         assert "P.GRAPH_VERSION_ID = R.GRAPH_VERSION_ID" in source
 

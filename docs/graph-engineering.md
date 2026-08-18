@@ -21,6 +21,19 @@ within the v4.3.x maturity cycle. Capacity baselines, failure-injection/restore 
 Enterprise multi-Scheduler HA, and complete evaluator migration remain
 evidence-gated follow-up work and are not implied by an unverified build.
 
+## v4.4.7 Current Research Boundary
+
+The Production Profile currently exposes Graph Runtime core and authorized
+inspection. The database capability matrix reports manifest draft import, SLO
+read-only views, and checkpoint fork as `CONTROLLED`; replay, Dynamic Graph
+migration, framework adapter execution, A2A, and OTLP remain `DISABLED` unless
+their own governed evidence changes that state. MCP stateless negotiation and
+`server/discover`, independent A2A client conformance, replacement-Worker
+resume/de-duplication, sandbox and approval replay, tool-result compaction,
+side-effect evidence, and authorization-filtered GraphRAG projections are
+research work, not released production features. This distinction is part of
+the release contract and must be carried into future OpenSpec changes.
+
 ## Concepts
 
 | Concept | Meaning |
@@ -97,10 +110,12 @@ migration/review behavior, and database evidence. The v4.3.0 production
 replacement gate established the stable core. The v4.3.3 release reinforces
 that core without creating a second execution kernel.
 
-`production` is the stable runtime profile. `development` and
-`experimental-4.2` explicitly enable preview controls. A profile boundary lets
-stable and preview controls share one source line without making preview
-behavior a production claim.
+`production` is the stable runtime profile. Older `development` and
+`experimental-4.2` labels are historical profile names, not v4.4.7 capability
+grants. The current database-authoritative matrix determines whether a
+capability is Production, `CONTROLLED`, or `DISABLED`, allowing stable and
+research surfaces to share one source line without making research behavior a
+production claim.
 
 ## v4.3.3 Trustworthy Runtime
 
@@ -138,14 +153,14 @@ Imports are always new Drafts. Unsigned, unverifiable, or scanned imports may
 be retained as `UNTRUSTED_DRAFT` for review but cannot be published. Private
 signing material is local publisher input and is never persisted or exported.
 
-### A2A And OpenTelemetry Previews
+### Historical A2A And OpenTelemetry Research
 
 The A2A 1.0.1 adapter maps a bounded Agent Card and Task identity to the
 existing Graph Run. The OpenTelemetry adapter creates a metadata-only,
 redacted projection with the pinned mapping version
 `otel-genai-preview-2026-08-03`. Both adapters are independent, default off,
-and are enabled only by `development` or `experimental-4.2`. They cannot grant
-authority or replace Graph, Trace, Audit, or governance evidence.
+and remain `DISABLED` in the v4.4.7 database-authoritative matrix. They cannot
+grant authority or replace Graph, Trace, Audit, or governance evidence.
 
 v4.3.3 provides the internal mapping and contract tests. It has not yet
 completed independent A2A client conformance, durable A2A streaming, or a real

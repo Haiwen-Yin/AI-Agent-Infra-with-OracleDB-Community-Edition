@@ -218,16 +218,18 @@ collaborating nodes untouched.
 The v4.3.0 production-profile replacement gate has passed, including the
 failure-recovery and capacity evidence. v4.1.x remains available as the prior
 downloadable baseline and is limited to critical security or data-loss fixes.
-The integrated Graph implementation is available through explicit
-`production`, `graph-preview`, and `development` profiles; preview controls
-are opt-in and do not weaken authorization. The internal v4.2.1 closure is a
-traceability milestone, not a public release or a second maintained code line.
+The integrated Graph implementation is governed by the database-authoritative
+capability matrix. Graph Runtime core and authorized inspection are Production
+capabilities; manifest draft import, read-only SLO views, and checkpoint fork
+are `CONTROLLED`; replay, Dynamic Graph migration, framework-adapter execution,
+A2A, and OTLP are `DISABLED`. The internal v4.2.1 closure is a traceability
+milestone, not a public release or a second maintained code line.
 
 The `production` profile is the integrated stable-core runtime surface selected
 during packaging and is the recommended production profile for v4.3.0. It does
-not enable Graph Preview or another experimental capability merely because its
-tables and code are present. `graph-preview` remains an explicit capability
-profile for controlled validation.
+not enable a controlled or disabled capability merely because its tables and
+code are present; capability state and subject authorization are rechecked by
+the service and database.
 
 ## Canonical And Legacy Entry Points
 
@@ -702,11 +704,12 @@ the shared service contract.
 
 ## Profile Boundary
 
-`production`, `graph-preview`, `development`, and `experimental-4.2` are
-profiles generated from one source line. `production` contains the stable Graph
-Runtime; `graph-preview` enables only Dynamic Graph; `development` and
-`experimental-4.2` additionally expose A2A and OTLP preview controls for
-controlled validation. v4.3.3 keeps these protocol adapters disabled in
-production. The stable v4.1.x line remains the prior compatibility baseline.
+Profiles and capability flags are generated from one source line. The
+database-authoritative matrix supersedes the older `graph-preview`,
+`development`, and `experimental-4.2` capability labels: Graph Runtime core
+and authorized inspection are Production; manifest draft import, read-only SLO
+views, and checkpoint fork are `CONTROLLED`; replay, Dynamic Graph migration,
+framework-adapter execution, A2A, and OTLP remain `DISABLED`. The stable
+v4.1.x line remains the prior compatibility baseline.
 Profiles do not weaken database, API, Skill, Tool, model, memory, Artifact, or
 export authorization, and there is no long-lived source fork.

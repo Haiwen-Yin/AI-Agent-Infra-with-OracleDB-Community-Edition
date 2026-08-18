@@ -789,9 +789,11 @@ Response: Resource ZIP file (binary)
 
 The following routes are part of the integrated Graph surface. They use
 the same authenticated session, registered-Agent identity, policy decision,
-and audit boundary as the rest of the platform. `graph-preview` and
-`development` profiles expose the full control surface for controlled
-validation; normal callers must use these service routes rather than direct
+and audit boundary as the rest of the platform. Route availability follows the
+database-authoritative capability matrix: core Graph reads and authorized
+inspection are Production, manifest draft import/SLO/checkpoint-fork surfaces
+are `CONTROLLED`, and disabled capabilities return capability-disabled
+responses. Normal callers must use these service routes rather than direct
 `GRAPH_*` table DML.
 
 ### Definitions and Versions
@@ -872,11 +874,11 @@ canonical `operations` array, and `reason`; optional `run_id`, `checkpoint_id`,
 and `expected_version` supply fences. It creates a new Draft only. High-risk
 proposals require the existing approval workflow again at publication time.
 
-Preview mutations return a capability-disabled response unless the active
-profile enables them: Dynamic Graph allows `graph-preview`, `development`, or
-`experimental-4.2`; A2A and telemetry delivery allow only `development` or
-`experimental-4.2`. Read-only status and bounded public-card discovery may
-remain available to describe that disabled state. The current A2A adapter does
+Preview mutations return a capability-disabled response unless the
+database-authoritative matrix enables them. Dynamic Graph migration, framework
+adapter execution, A2A, and telemetry delivery remain `DISABLED` in the current
+release. Read-only status and bounded public-card discovery may remain
+available to describe that disabled state. The current A2A adapter does
 not expose durable streaming, pagination, callback push, or independent client
 conformance. The telemetry adapter does not send to a Collector in this release;
 it only persists the bounded metadata projection. These limitations are

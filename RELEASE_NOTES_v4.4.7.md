@@ -25,6 +25,31 @@ It has no database migration and does not change the authorization boundary.
   probes a newly saved profile, refreshes active profiles in the background,
   and provides a per-profile probe action.
 
+## Protected management Channel
+
+- Flushes the final bounded SSE delta when an LLM provider completes, so a
+  short final chunk is streamed before the durable completed response is
+  written. The durable response remains the reconnect and recovery source.
+- Adds a signed, database-backed private management knowledge manifest for
+  built-in Agent-template questions. The management Channel now states the
+  actual workflow and its security controls deterministically rather than
+  allowing an LLM to guess product capabilities.
+- Adds immutable knowledge version 2 while retaining version 1 as audit
+  history. Version 2 contains the complete Dashboard hierarchy, defines
+  built-in BUSINESS templates as selectable capability tendencies and security
+  baselines, and makes clear that templates do not grant authority.
+- Carries the current request language through model-backed and deterministic
+  management responses. Chinese questions receive Chinese answers and English
+  questions receive English answers, apart from product keys and proper names.
+- Fresh deployment and upgrade both seed this manifest through the native
+  bootstrap. Postflight verifies its managed state, content digest, built-in
+  signature, and publication status before reporting deployment completion.
+- The current workflow is bootstrap seed -> business Agent request -> separated
+  approval -> deployment -> LLM/Embedding and runtime checks -> activation.
+  The current release does not provide a direct Agent-template edit/publish
+  page or API; Compliance control-template drafts are a different governance
+  object and must not be presented as Agent-template editing.
+
 ## Dashboard performance and layout
 
 - Builds the Dashboard capability manifest from one current database
@@ -35,8 +60,8 @@ It has no database migration and does not change the authorization boundary.
   current Oracle ENT verification environment, the capability endpoint was
   reduced from approximately 2.54 seconds to 0.25 seconds.
 - Standardizes configuration-panel spacing, keeps Business Agent requests at
-  full page width, and groups managed Skill/Tool manifests with deployment
-  adapter contracts.
+  full page width, and stacks managed Skill/Tool manifests above deployment
+  adapter contracts with both panels at full page width.
 
 ## Protocol and Graph Engineering review
 
@@ -47,17 +72,33 @@ promote MCP, A2A, OTLP, replay, Dynamic Graph migration, framework adapters, or
 GraphRAG projections to Production without independent conformance, security,
 and database-adapter evidence.
 
+The released Production capability matrix enables Graph Runtime core and
+authorized inspection. Manifest draft import, SLO read-only views, and
+checkpoint fork remain `CONTROLLED`; replay, Dynamic Graph migration,
+framework-adapter execution, A2A, and OTLP remain `DISABLED`. These states are
+database-authoritative and cannot be promoted by a client, prompt, Skill, or
+protocol metadata.
+
 ## Verification scope
 
-- The shared source suite completed with 611 passed and 122 skipped tests. The
-  skipped tests require a generated database edition or a reachable live
-  Oracle, PostgreSQL, or YashanDB target; they are not recorded as passes.
+- The shared source suite completed with 623 passed and 122 skipped tests.
+- Final generated Enterprise suites completed with Oracle `691 passed, 7
+  skipped`, PostgreSQL `693 passed, 5 skipped`, and YashanDB `691 passed, 7
+  skipped`. Skips are adapter-isolation or unified-source ledger checks.
 - All 44 OpenSpec items passed strict validation. The React production build,
   six-edition static release gate, six archive builds, and offline dependency
   gates passed.
-- Oracle Enterprise v4.4.7 was exercised as the live Dashboard source for the
-  current bilingual website captures. LLM health-state behavior and the
-  capability-manifest latency change were verified in that environment.
-- This maintenance release has no database migration. Existing three-database
-  migration evidence remains historical baseline evidence and is not relabeled
-  as a new v4.4.7 online database result.
+- Read-only live validators passed for all three baselines. Graph Runtime
+  passed 13 database-backed scenarios per database, and memory lifecycle passed
+  2 scenarios per database.
+- PostgreSQL clean-install validation created a unique temporary database,
+  enabled `age` and `vector`, initialized 249 tables from the final package,
+  verified the package, and removed the database; post-cleanup inventory was
+  zero. Oracle and YashanDB baseline application-schema validation passed; the
+  application accounts do not expose approved isolated PDB-creation services.
+- The three final Enterprise package directories were started with their
+  packaged Python 3.14 runtimes. Oracle, PostgreSQL, and YashanDB each passed
+  administrator authentication plus protected Agent, Channel, LLM-profile,
+  and runtime-profile reads against the corresponding baseline database.
+- This maintenance release has no new database migration. The latest database
+  contract remains v4.4.6; v4.4.7 changes application behavior and tests only.

@@ -1,8 +1,17 @@
 """Regression coverage for the v4.4.1 migration completeness probe."""
 
 from pathlib import Path
+import json
+import pytest
 
 import migration_runner
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_MODE = (PACKAGE_ROOT / "build-manifest.json").is_file() and not (PACKAGE_ROOT / "adapters").is_dir()
+DATABASE_KEY = (
+    str(json.loads((PACKAGE_ROOT / "build-manifest.json").read_text(encoding="ascii"))["database"]["key"])
+    if PACKAGE_MODE else "oracle"
+)
 
 
 def test_v441_objects_complete_reads_schema_catalog(monkeypatch):
@@ -32,7 +41,13 @@ def test_v441_legacy_checksum_adoption_requires_complete_schema(monkeypatch):
 
 
 def test_oracle_admin_enrollment_not_null_repair_is_idempotent():
-    script = Path(migration_runner.REPO_ROOT) / "adapters/oracle/deploy/35_v4_4_1_admin_ha_upgrade.sql"
+    if DATABASE_KEY != "oracle":
+        pytest.skip("Oracle migration contract is validated by Oracle packages")
+    script = (
+        PACKAGE_ROOT / "scripts/deploy/35_v4_4_1_admin_ha_upgrade.sql"
+        if PACKAGE_MODE else
+        Path(migration_runner.REPO_ROOT) / "adapters/oracle/deploy/35_v4_4_1_admin_ha_upgrade.sql"
+    )
     content = script.read_text(encoding="utf-8")
     declaration = content.index("DECLARE\n  v_nullable CHAR(1);")
     procedure = content.index("  PROCEDURE ddl", declaration)

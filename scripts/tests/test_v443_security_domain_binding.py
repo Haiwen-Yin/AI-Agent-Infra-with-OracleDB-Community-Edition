@@ -8,11 +8,20 @@ from lib import identity_api, security_domain_api
 
 
 def test_v443_static_contract_is_complete_for_all_adapters():
+    import json
     import live_db_validator
 
     root = Path(__file__).resolve().parents[2]
-    for database in ("oracle", "pg", "yashandb"):
-        scripts = [root / "adapters" / database / "deploy" / name for name in live_db_validator.V443_MIGRATION_SCRIPTS]
+    if (root / "adapters").is_dir():
+        databases = ("oracle", "pg", "yashandb")
+        script_root = lambda database: root / "adapters" / database / "deploy"
+    else:
+        manifest = root / "build-manifest.json"
+        assert manifest.is_file(), "generated package must include build-manifest.json"
+        databases = (str(json.loads(manifest.read_text(encoding="utf-8"))["database"]["key"]),)
+        script_root = lambda _database: root / "scripts" / "deploy"
+    for database in databases:
+        scripts = [script_root(database) / name for name in live_db_validator.V443_MIGRATION_SCRIPTS]
         result = live_db_validator.validate_v443_static_contract(database, scripts)
         assert result["passed"] is True
         assert result["v443_security_domain_binding"]["single_active_group_binding"] is True

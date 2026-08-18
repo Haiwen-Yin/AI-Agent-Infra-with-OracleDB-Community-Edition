@@ -425,8 +425,15 @@ a {
   margin-bottom: 0;
 }
 .native-contract-panels {
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
   margin-top: 0;
+  margin-bottom: 14px;
+}
+.native-contract-panels > .info-panel {
+  width: 100%;
+  margin-bottom: 0;
 }
 .panel-title,
 .subhead,

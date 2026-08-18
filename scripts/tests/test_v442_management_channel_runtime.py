@@ -151,3 +151,82 @@ def test_status_requests_use_the_database_control_plane_not_model_reconstruction
     assert 'payload["management_status_snapshot"]' in native
     assert "_management_status_markdown(" in runtime
     assert '"database-control-plane"' in runtime
+
+
+def test_management_template_questions_use_private_control_plane_knowledge():
+    root = Path(__file__).resolve().parents[1]
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
+    assert '"platform-admin-knowledge"' in native
+    assert '"MANAGEMENT_KNOWLEDGE"' in native
+    assert "management_template_knowledge(" in native
+    assert "is_management_template_request(" in native
+    assert '"management_template_knowledge"]' in native
+    assert "_management_template_markdown(" in runtime
+    assert "当前没有直接创建、编辑或发布 Agent 模板的页面或 API" in native
+    assert "Compliance control templates are governance profiles" in native
+
+
+def test_management_knowledge_has_complete_navigation_and_template_semantics():
+    from lib import native_agent_api
+
+    manifests = [item for item in native_agent_api.BUILTIN_MANIFESTS if item[0] == "platform-admin-knowledge"]
+    assert len(manifests) == 1
+    knowledge = manifests[0][2]
+    workflow = knowledge["template_workflow"]
+    assert workflow["seed_location_zh"] == "Dashboard > 智能体 > 平台原生智能体生成 > 平台内置管理智能体"
+    assert workflow["seed_location_en"] == "Dashboard > Agents > Platform-native Agent provisioning > Built-in management Agents"
+    assert workflow["business_request_location_zh"].endswith("平台原生智能体生成 > 业务智能体申请")
+    assert workflow["approval_location_zh"].endswith("平台原生智能体生成 > 申请与审批")
+    assert "能力倾向" in workflow["template_meaning_zh"]
+    assert "不授予数据库、网络、Skill 或 Tool 权限" in workflow["template_meaning_zh"]
+    assert {item["key"] for item in knowledge["business_template_options"]} == {
+        "general-restricted", "code-development", "production-operations",
+    }
+
+
+def test_management_responses_follow_the_question_language():
+    from lib import native_agent_api, native_runtime
+
+    assert native_agent_api.management_response_language("如何申请内置 Agent 模板？") == "zh"
+    assert native_agent_api.management_response_language("How do I request a built-in Agent template?") == "en"
+    knowledge = next(item[2] for item in native_agent_api.BUILTIN_MANIFESTS if item[0] == "platform-admin-knowledge")
+    chinese = native_runtime._management_template_markdown({**knowledge, "response_language": "zh"})
+    english = native_runtime._management_template_markdown({**knowledge, "response_language": "en"})
+    assert "Dashboard > 智能体 > 平台原生智能体生成 > 平台内置管理智能体" in chinese
+    assert "Built-in Agent templates and platform Agent requests" not in chinese
+    assert "Dashboard > Agents > Platform-native Agent provisioning > Built-in management Agents" in english
+    assert "内置 Agent 模板与平台 Agent 申请" not in english
+    snapshot = {"native_agents": {}, "runtime_executions": {}, "llm_profiles": {}, "admin_group": {}}
+    assert "平台运行状态" in native_runtime._management_status_markdown(snapshot, "zh")
+    assert "Platform runtime status" in native_runtime._management_status_markdown(snapshot, "en")
+
+
+def test_native_manifest_and_adapter_panels_are_stacked_full_width():
+    root = Path(__file__).resolve().parents[1]
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")
+    assert '<div className="native-contract-panels">' in ui
+    layout = css.split(".native-contract-panels {", 1)[1].split("}", 1)[0]
+    child = css.split(".native-contract-panels > .info-panel {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: minmax(0, 1fr)" in layout
+    assert "width: 100%" in child
+
+
+def test_management_knowledge_is_not_in_general_manifest_listing():
+    root = Path(__file__).resolve().parents[1]
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    assert "MANIFEST_KIND <> 'MANAGEMENT_KNOWLEDGE'" in native
+    assert "platform.manage" in native.split("def list_manifests", 1)[1].split("def management_template_knowledge", 1)[0]
+
+
+def test_deployment_bootstrap_verifies_the_private_knowledge_seed():
+    root = Path(__file__).resolve().parents[1]
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    deployment = (root / "lib" / "deployment_orchestrator.py").read_text(encoding="utf-8")
+    bootstrap = native.split("def bootstrap_native_agents", 1)[1].split("def activate_bootstrap_agents", 1)[0]
+    assert "_verify_management_knowledge(tx)" in bootstrap
+    assert '"management_knowledge": knowledge' in bootstrap
+    assert "CONTENT_DIGEST" in native.split("def _verify_management_knowledge", 1)[1].split("def _principal_display_name", 1)[0]
+    assert "native_agent_api.bootstrap_native_agents()" in deployment
+    assert '_record_evidence(journal.run_id, "POSTFLIGHT"' in deployment

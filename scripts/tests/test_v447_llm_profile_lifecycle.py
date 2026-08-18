@@ -6,6 +6,10 @@ from lib import native_agent_api
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_MODE = (ROOT / "build-manifest.json").is_file() and not (ROOT / "shared").is_dir()
+LIB_ROOT = ROOT / ("scripts/lib" if PACKAGE_MODE else "shared/lib")
+WEB_APP_PATH = ROOT / ("scripts/web_app.py" if PACKAGE_MODE else "shared/web_app.py")
+UI_PATH = ROOT / ("web/src/App.tsx" if PACKAGE_MODE else "shared/web/src/App.tsx")
 
 
 class FakeTransaction:
@@ -80,15 +84,15 @@ def test_llm_probe_accepts_provider_namespace_but_rejects_wrong_model():
     assert native_agent_api._llm_model_matches("qwen3.8-27b", "qwen/qwen3.8-27b")
     assert not native_agent_api._llm_model_matches("qwen3.6-35b-a3b-claude-4.6-opus-reasoning-distilled", "qwen/qwen3.8-27b")
     assert not native_agent_api._llm_model_matches("qwen3.8-27b", "")
-    assert "LLM provider probe failed" in (ROOT / "shared/lib/native_agent_api.py").read_text(encoding="utf-8")
+    assert "LLM provider probe failed" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
 
 
 def test_async_forms_do_not_use_react_current_target_after_await():
-    source = (ROOT / "shared/web/src/App.tsx").read_text(encoding="utf-8")
+    source = UI_PATH.read_text(encoding="utf-8")
     assert "event.currentTarget.reset()" not in source
     assert "LLM_PROFILE_IN_USE:" in source
-    assert "def probe_saved_llm_profile" in (ROOT / "shared/lib/native_agent_api.py").read_text(encoding="utf-8")
-    assert "/api/llm-provider-profiles/{profile_id}/probe" in (ROOT / "shared/web_app.py").read_text(encoding="utf-8")
+    assert "def probe_saved_llm_profile" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
+    assert "/api/llm-provider-profiles/{profile_id}/probe" in WEB_APP_PATH.read_text(encoding="utf-8")
     assert "probeSavedProfile" in source
-    assert "LLM provider returned a different model" in (ROOT / "shared/lib/native_agent_api.py").read_text(encoding="utf-8")
+    assert "LLM provider returned a different model" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
     assert "refreshProfileHealth" in source

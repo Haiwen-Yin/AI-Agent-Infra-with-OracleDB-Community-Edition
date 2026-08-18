@@ -24,6 +24,7 @@ from . import connection, identity_api, cursor_pagination
 PLATFORM_ADMIN_AGENT_ID = "SYSTEM_PLATFORM_ADMIN_AGENT"
 COMPLIANCE_ADMIN_AGENT_ID = "SYSTEM_COMPLIANCE_ADMIN_AGENT"
 BOOTSTRAP_VERSION = "4.3.6"
+MANAGEMENT_KNOWLEDGE_VERSION = 2
 EXTERNAL_REGISTRATION_KEY = "external_agent_registration"
 AGENT_SOURCES = frozenset({"PLATFORM_BUILTIN", "PLATFORM_CREATED", "EXTERNAL_SKILL"})
 AGENT_STATES = frozenset({
@@ -73,6 +74,15 @@ def _rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _json(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=True,
                       sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _parse(value: Any, fallback: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _digest(value: Any) -> str:
@@ -159,6 +169,67 @@ BUILTIN_MANIFESTS = (
     ("platform-admin-tools", "TOOL", {"tools": ["agent_inventory", "runtime_status", "platform_notice", "audit_summary"]}),
     ("compliance-admin-tools", "TOOL", {"tools": ["posture_summary", "finding_explain", "remediation_draft", "compliance_notice"]}),
     ("restricted-agent-skills", "SKILL", {"skills": ["approved_skill_only"], "requires_gateway": True}),
+    ("platform-admin-knowledge", "MANAGEMENT_KNOWLEDGE", {
+        "knowledge_version": "2",
+        "audience": "PLATFORM_MANAGEMENT_AGENTS_ONLY",
+        "scope": "database_control_plane",
+        "template_workflow": {
+            "current_capability": "BUILTIN_SEEDS_AND_BUSINESS_REQUESTS",
+            "template_editing_page": None,
+            "template_editing_api": None,
+            "seed_location_zh": "Dashboard > 智能体 > 平台原生智能体生成 > 平台内置管理智能体",
+            "seed_location_en": "Dashboard > Agents > Platform-native Agent provisioning > Built-in management Agents",
+            "business_request_location_zh": "Dashboard > 智能体 > 平台原生智能体生成 > 业务智能体申请",
+            "business_request_location_en": "Dashboard > Agents > Platform-native Agent provisioning > Business Agent request",
+            "approval_location_zh": "Dashboard > 智能体 > 平台原生智能体生成 > 申请与审批",
+            "approval_location_en": "Dashboard > Agents > Platform-native Agent provisioning > Requests and approvals",
+            "template_meaning_zh": "内置 Agent 模板是申请平台业务 Agent 时的受管选项。不同模板代表不同的能力倾向、隔离要求和安全基线；模板本身不授予数据库、网络、Skill 或 Tool 权限。",
+            "template_meaning_en": "A built-in Agent template is a managed option selected when requesting a platform Business Agent. Templates express capability tendencies, isolation requirements, and security baselines; they do not grant database, network, Skill, or Tool authority.",
+            "compliance_distinction_zh": "合规控制模板是治理约束配置，不是 Agent 运行模板。",
+            "compliance_distinction_en": "Compliance control templates are governance profiles, not Agent runtime templates.",
+        },
+        "business_template_options": [
+            {"key": "general-restricted", "zh": "通用受限：面向一般工作，仅允许已审批 Skill，采用安全域隔离。", "en": "General restricted: general work with approved Skills only and Security Domain isolation."},
+            {"key": "code-development", "zh": "代码开发：面向受控工作区和代码任务，要求独立容器与复核。", "en": "Code development: controlled workspace and coding work with dedicated-container isolation and review."},
+            {"key": "production-operations", "zh": "生产运维：面向获批生产范围，仅允许白名单命令，要求变更单、审批和独立运行时。", "en": "Production operations: approved production scope with allowlisted commands, change ticket, approval, and dedicated runtime."},
+        ],
+        "required_request_controls_en": [
+            "agent_name", "template_key", "owner_principal_id", "provider_profile_id",
+            "deployment_target_id", "isolation_level", "classification", "purpose", "reason",
+        ],
+        "required_request_controls_zh": [
+            "智能体名称", "受管模板", "负责人账户", "LLM 配置", "部署目标",
+            "隔离级别", "数据分类", "业务目的", "申请原因",
+        ],
+        "security_controls_en": [
+            "approved Skills and Tools only",
+            "database access through scoped identity and gateway policy",
+            "network egress allowlist or isolation",
+            "data classification ceiling",
+            "separated approval; applicant cannot approve their own request",
+            "audit and retention evidence",
+            "LLM and Embedding compatibility checks before activation",
+        ],
+        "security_controls_zh": [
+            "只能使用已审批的 Skill 与 Tool",
+            "数据库访问由独立身份、范围授权和网关策略控制",
+            "网络出口必须使用白名单或隔离策略",
+            "数据分类不得超过模板与申请批准的上限",
+            "申请人与审批人职责分离，申请人不能审批自己的申请",
+            "保留操作审计与留存证据",
+            "激活前验证 LLM、Embedding、部署目标和运行时兼容性",
+        ],
+        "request_lifecycle_en": [
+            "TEMPLATE_SELECTED", "APPROVAL_PENDING", "APPROVED", "PROVISIONING", "ACTIVATION_PENDING", "ACTIVE",
+        ],
+        "request_lifecycle_zh": ["选择模板", "等待审批", "已批准", "部署中", "等待激活", "运行中"],
+        "immutability_en": "Published built-in template versions are immutable. A future template-authoring path must create a new reviewed version with digest, evidence, approval, and rollback target. Protected platform-admin and compliance-admin templates are not selectable for Business Agent requests and cannot be deleted or overwritten.",
+        "immutability_zh": "已发布的内置模板版本不可覆盖。未来的模板编制能力必须创建新版本，并具备摘要、证据、审批和回滚目标。受保护的 platform-admin 与 compliance-admin 模板不能用于业务 Agent 申请，也不能删除或直接覆盖。",
+        "external_registration_en": "External Skill-first registration is a separate enrollment path and does not create or modify a platform Agent template.",
+        "external_registration_zh": "外部 Skill-first 注册是独立接入路径，不会创建或修改平台 Agent 模板。",
+        "missing_capability_answer_en": "There is currently no direct Agent-template create, edit, or publish page or API. Do not claim that the Compliance control-template draft page edits an Agent template.",
+        "missing_capability_answer_zh": "当前没有直接创建、编辑或发布 Agent 模板的页面或 API。不得把“合规控制模板草稿”解释为 Agent 模板编辑功能。",
+    }),
 )
 
 
@@ -199,9 +270,10 @@ def _ensure_target(tx: Any, target_key: str = "local-managed") -> str:
 
 
 def _ensure_manifest(tx: Any, key: str, kind: str, content: Dict[str, Any]) -> bool:
+    version = MANAGEMENT_KNOWLEDGE_VERSION if kind == "MANAGEMENT_KNOWLEDGE" else 1
     existing = _row(tx.query_one(
-        "SELECT MANIFEST_ID FROM CX_NATIVE_MANIFESTS WHERE MANIFEST_KEY=:key AND VERSION=1 FOR UPDATE",
-        {"key": key},
+        "SELECT MANIFEST_ID FROM CX_NATIVE_MANIFESTS WHERE MANIFEST_KEY=:key AND VERSION=:version FOR UPDATE",
+        {"key": key, "version": version},
     ))
     if existing:
         return False
@@ -209,12 +281,38 @@ def _ensure_manifest(tx: Any, key: str, kind: str, content: Dict[str, Any]) -> b
     tx.execute(
         "INSERT INTO CX_NATIVE_MANIFESTS(MANIFEST_ID,MANIFEST_KEY,VERSION,MANIFEST_KIND,CONTENT_JSON,"
         "CONTENT_DIGEST,SIGNATURE,SIGNATURE_STATUS,STATUS,MANAGED,CREATED_BY) VALUES "
-        "(:id,:key,1,:kind,:content,:digest,:signature,'VERIFIED_BUILTIN','PUBLISHED','Y','SYSTEM_BOOTSTRAP')",
-        {"id": "AM_SEED_" + key.replace("-", "_").upper(), "key": key,
-         "kind": kind, "content": _json(content), "digest": digest,
+        "(:id,:key,:version,:kind,:content,:digest,:signature,'VERIFIED_BUILTIN','PUBLISHED','Y','SYSTEM_BOOTSTRAP')",
+        {"id": "AM_SEED_" + key.replace("-", "_").upper() + "_V" + str(version), "key": key,
+         "version": version, "kind": kind, "content": _json(content), "digest": digest,
          "signature": "BUILTIN-SHA256:" + digest},
     )
     return True
+
+
+def _verify_management_knowledge(tx: Any) -> Dict[str, Any]:
+    """Fail closed unless the deployment-owned knowledge seed is intact."""
+    row = _row(tx.query_one(
+        "SELECT MANIFEST_ID,MANIFEST_KIND,CONTENT_JSON,CONTENT_DIGEST,SIGNATURE,"
+        "SIGNATURE_STATUS,STATUS,MANAGED FROM CX_NATIVE_MANIFESTS "
+        "WHERE MANIFEST_KEY='platform-admin-knowledge' AND VERSION=:version FOR UPDATE",
+        {"version": MANAGEMENT_KNOWLEDGE_VERSION},
+    ))
+    if not row:
+        raise NativeAgentError("platform management knowledge was not initialized")
+    content = _parse(row.get("content_json"), {})
+    digest = str(row.get("content_digest") or "")
+    valid = (
+        isinstance(content, dict)
+        and str(row.get("manifest_kind") or "") == "MANAGEMENT_KNOWLEDGE"
+        and str(row.get("signature_status") or "") == "VERIFIED_BUILTIN"
+        and str(row.get("status") or "") == "PUBLISHED"
+        and str(row.get("managed") or "") == "Y"
+        and digest == _digest(content)
+        and str(row.get("signature") or "") == "BUILTIN-SHA256:" + digest
+    )
+    if not valid:
+        raise NativeAgentError("platform management knowledge verification failed")
+    return {"manifest_id": str(row.get("manifest_id") or ""), "status": "VERIFIED", "digest": digest}
 
 
 def _principal_display_name(agent_id: str) -> str:
@@ -290,8 +388,15 @@ def bootstrap_native_agents() -> Dict[str, Any]:
             _ensure_principal(tx, PLATFORM_ADMIN_AGENT_ID)
             if _enterprise():
                 _ensure_principal(tx, COMPLIANCE_ADMIN_AGENT_ID)
+            # Later releases may add immutable built-in knowledge without
+            # rerunning the original bootstrap or changing published seeds.
+            for key, kind, content in BUILTIN_MANIFESTS:
+                if kind != "TOOL" or _enterprise() or key == "restricted-agent-skills":
+                    _ensure_manifest(tx, key, kind, content)
+            knowledge = _verify_management_knowledge(tx)
             return {"status": "COMPLETED", "idempotent": True,
-                    "agents": [PLATFORM_ADMIN_AGENT_ID] + ([COMPLIANCE_ADMIN_AGENT_ID] if _enterprise() else [])}
+                    "agents": [PLATFORM_ADMIN_AGENT_ID] + ([COMPLIANCE_ADMIN_AGENT_ID] if _enterprise() else []),
+                    "management_knowledge": knowledge}
         if not marker:
             tx.execute(
                 "INSERT INTO CX_NATIVE_BOOTSTRAP(BOOTSTRAP_KEY,BOOTSTRAP_VERSION,STATUS,STARTED_AT) "
@@ -303,6 +408,7 @@ def bootstrap_native_agents() -> Dict[str, Any]:
         for key, kind, content in BUILTIN_MANIFESTS:
             if kind != "TOOL" or _enterprise() or key == "restricted-agent-skills":
                 _ensure_manifest(tx, key, kind, content)
+        knowledge = _verify_management_knowledge(tx)
         target_id = _ensure_target(tx)
         created = []
         if _ensure_native_agent(tx, PLATFORM_ADMIN_AGENT_ID, "PLATFORM_ADMIN", "platform-admin", target_id):
@@ -328,7 +434,8 @@ def bootstrap_native_agents() -> Dict[str, Any]:
         )
         _audit(tx, "SYSTEM_BOOTSTRAP", "NATIVE_AGENT_BOOTSTRAP_COMPLETE", "PLATFORM",
                "v4.3.6", "ALLOW", "native Agent bootstrap completed")
-        return {"status": "COMPLETED", "idempotent": not bool(created), "created": created}
+        return {"status": "COMPLETED", "idempotent": not bool(created), "created": created,
+                "management_knowledge": knowledge}
     try:
         return connection.execute_transaction_callback(work)
     except Exception as exc:
@@ -436,11 +543,52 @@ def list_templates(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
 
 def list_manifests(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
     suffix, params = _limit(limit)
+    management_access = identity_api.effective_access(actor, "platform.manage").get("decision") == "ALLOW"
+    private_clause = "" if management_access else " AND MANIFEST_KIND <> 'MANAGEMENT_KNOWLEDGE'"
     return _rows(connection.execute_query(
         "SELECT MANIFEST_ID,MANIFEST_KEY,VERSION,MANIFEST_KIND,CONTENT_JSON,CONTENT_DIGEST,"
         "SIGNATURE_STATUS,STATUS,MANAGED,CREATED_AT,UPDATED_AT FROM CX_NATIVE_MANIFESTS "
-        "WHERE STATUS='PUBLISHED' ORDER BY MANIFEST_KEY,VERSION DESC" + suffix, params,
+        "WHERE STATUS='PUBLISHED'" + private_clause + " ORDER BY MANIFEST_KEY,VERSION DESC" + suffix, params,
     ))
+
+
+def management_template_knowledge(actor: str, agent_id: str, response_language: str = "en") -> Dict[str, Any]:
+    """Read the private, signed product workflow knowledge for management Agents."""
+    if agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
+        raise NativeAgentError("management knowledge is limited to built-in management Agents")
+    if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required for management knowledge")
+    row = _row(connection.execute_query_one(
+        "SELECT CONTENT_JSON,CONTENT_DIGEST,SIGNATURE_STATUS FROM CX_NATIVE_MANIFESTS "
+        "WHERE MANIFEST_KEY='platform-admin-knowledge' AND VERSION=:version AND STATUS='PUBLISHED'",
+        {"version": MANAGEMENT_KNOWLEDGE_VERSION},
+    ))
+    if not row:
+        raise NativeAgentError("management knowledge is not initialized")
+    content = _parse(row.get("content_json"), {})
+    if (
+        not isinstance(content, dict)
+        or str(row.get("signature_status") or "") != "VERIFIED_BUILTIN"
+        or str(row.get("content_digest") or "") != _digest(content)
+    ):
+        raise NativeAgentError("management knowledge is not verified")
+    return {**content, "response_language": "zh" if response_language == "zh" else "en"}
+
+
+def management_response_language(body: str) -> str:
+    return "zh" if any("\u4e00" <= char <= "\u9fff" for char in str(body or "")) else "en"
+
+
+def is_management_template_request(body: str) -> bool:
+    """Recognize template lifecycle questions without broad model intent expansion."""
+    value = str(body or "").lower()
+    markers = (
+        "内置agent模板", "内置 agent 模板", "内置智能体模板", "平台原生智能体模板",
+        "添加内置", "修改内置", "创建模板", "编辑模板", "发布模板",
+        "built-in agent template", "native agent template", "create template",
+        "edit template", "publish template",
+    )
+    return any(marker in value for marker in markers)
 
 
 def list_llm_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -996,13 +1144,27 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
         if existing:
             return {"execution_id": execution_id, "agent_id": mentioned_agent_id,
                     "status": str(existing.get("status") or "PENDING"), "idempotent": True}
+        response_language = management_response_language(body)
         status_request = is_management_status_request(body)
         status_snapshot = management_status_snapshot(actor, mentioned_agent_id) if status_request else None
+        template_knowledge = management_template_knowledge(
+            actor, mentioned_agent_id, response_language,
+        ) if is_management_template_request(body) else None
+        system_prompt = (
+            "你是受保护管理频道中的平台管理 Agent。必须仅使用中文回答本次明确提及你的请求，并保持简洁。"
+            "不得声称已执行配置、安全、成员、升级或阻断变更；涉及这些变更时，应说明所需的受治理操作卡或审批路径。"
+            if response_language == "zh" else
+            "You are a platform management Agent in a protected administration Channel. "
+            "Answer the explicitly mentioned request concisely and only in English. Do not claim that you executed a "
+            "configuration, security, membership, upgrade, or containment change. For such changes, explain the "
+            "governed Action Card or approval path required."
+        )
         payload = {
             "messages": [
-                {"role": "system", "content": "You are a platform management Agent in a protected administration Channel. Answer the explicitly mentioned request concisely. Do not claim that you executed a configuration, security, membership, upgrade, or containment change. For such changes, explain the governed Action Card or approval path required."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": body},
             ],
+            "response_language": response_language,
             "channel_dispatch": {
                 "channel_id": channel_id, "message_id": message_id,
                 "thread_type": str(thread_type or "CHANNEL").upper(), "thread_id": thread_id or "",
@@ -1010,11 +1172,16 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
             },
         }
         if command_notice:
-            payload["messages"].insert(0, {"role": "system", "content":
+            command_prompt = (
+                "已记录一个显式的类型化平台命令。请仅说明该结果，不得声称执行了任何额外操作："
+                if response_language == "zh" else
                 "An explicit typed platform command was recorded. Present this result without claiming any additional action: "
-                + _json(command_notice)})
+            )
+            payload["messages"].insert(0, {"role": "system", "content": command_prompt + _json(command_notice)})
         if status_snapshot is not None:
             payload["management_status_snapshot"] = status_snapshot
+        if template_knowledge is not None:
+            payload["management_template_knowledge"] = template_knowledge
         input_json = _json(payload)
         tx.execute(
             "INSERT INTO CX_RUNTIME_EXECUTIONS(EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,INPUT_JSON,CONTEXT_DIGEST) "

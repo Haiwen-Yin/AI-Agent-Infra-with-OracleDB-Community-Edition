@@ -1523,8 +1523,9 @@ Graph 条件必须使用受管的 typed AST。缺少 operand、非 AST 子项、
 校验节点/边身份、端点、父版本以及动态来源 Run/Checkpoint 的同图关系。
 
 v4.3.0 的生产 profile 已通过数据库、浏览器、容量、故障恢复、清洁部署和
-长时间运行证据门禁，生产部署使用 v4.4.7 Production Profile。Graph Preview、
-Channel、Barrier 和 Gateway 通过 profile 与数据库权限显式控制；Channel 不能扩大
-数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。待 Graph
-Engineering 行业规范和项目合约稳定后，最新验证通过的实现可直接毕业为正式
-稳定能力，不维护第二套长期代码。
+长时间运行证据门禁，生产部署使用 v4.4.7 Production Profile。当前 Graph
+能力以数据库权威矩阵为准：Graph Runtime 核心与授权检查为 Production；
+Manifest Draft Import、SLO 只读和 Checkpoint Fork 为 `CONTROLLED`；Replay、
+Dynamic Graph Migration、Framework Adapter Execution、A2A 与 OTLP 为
+`DISABLED`。Channel、Barrier 和 Gateway 仍通过数据库权限显式控制；Channel
+不能扩大数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。

@@ -104,6 +104,7 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
     payload = json.dumps({"model": model, "messages": messages, "stream": True}, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(provider_url + "/chat/completions", data=payload, headers=headers, method="POST")
     content = ""
+    pending = ""
     last_emit = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -124,14 +125,21 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                 if not piece:
                     continue
                 content += piece
+                pending += piece
                 if len(content.encode("utf-8")) > 100000:
                     raise RuntimeError("LLM provider response is too large")
                 now = time.monotonic()
                 if now - last_emit >= 0.25:
                     # Callers receive only the new delta. The complete output
                     # remains local for persistence and integrity checks.
-                    on_delta(piece)
+                    on_delta(pending)
+                    pending = ""
                     last_emit = now
+            # The provider may finish before the throttle interval elapses.
+            # Flush the bounded remainder so the client never needs the final
+            # persisted response to discover text that was not streamed.
+            if pending:
+                on_delta(pending)
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise RuntimeError("LLM provider streaming request failed") from exc
     if not content:
@@ -191,12 +199,22 @@ def _channel_dispatch(input_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]
     return dispatch if isinstance(dispatch, dict) and str(dispatch.get("channel_id") or "") == "CH_PLATFORM_ADMINISTRATION" else None
 
 
-def _management_status_markdown(snapshot: Dict[str, Any]) -> str:
+def _management_status_markdown(snapshot: Dict[str, Any], language: str = "zh") -> str:
     """Render a credential-free database control-plane report deterministically."""
     native = snapshot.get("native_agents") if isinstance(snapshot, dict) else {}
     runtime = snapshot.get("runtime_executions") if isinstance(snapshot, dict) else {}
     llm = snapshot.get("llm_profiles") if isinstance(snapshot, dict) else {}
     group = snapshot.get("admin_group") if isinstance(snapshot, dict) else {}
+    if language == "en":
+        return "\n".join([
+            "## Platform runtime status", "",
+            "- **Scope**: Aggregated database control-plane state; excludes hosts, connections, credentials, tokens, and user data.",
+            f"- **Built-in Agents**: {int((native or {}).get('active') or 0)} active, {int((native or {}).get('non_active') or 0)} inactive.",
+            f"- **Runtime executions**: {int((runtime or {}).get('pending') or 0)} pending, {int((runtime or {}).get('claimed') or 0)} running, {int((runtime or {}).get('failed') or 0)} failed.",
+            f"- **LLM profiles**: {int((llm or {}).get('active') or 0)} active, {int((llm or {}).get('healthy') or 0)} healthy, {int((llm or {}).get('degraded') or 0)} degraded.",
+            f"- **Admin group**: status {str((group or {}).get('status') or 'UNKNOWN')}, {int((group or {}).get('active_voting_members') or 0)} voting members, term {int((group or {}).get('current_term') or 0)}.",
+            "", "> This is a read-only report. Configuration, membership, upgrade, and containment changes require governed Action Cards and approval workflows.",
+        ])
     return "\n".join([
         "## 平台运行状态",
         "",
@@ -210,6 +228,49 @@ def _management_status_markdown(snapshot: Dict[str, Any]) -> str:
     ])
 
 
+def _management_template_markdown(knowledge: Dict[str, Any]) -> str:
+    """Render fixed product workflow guidance; never ask the LLM to invent it."""
+    language = "zh" if str(knowledge.get("response_language") or "en") == "zh" else "en"
+    workflow = knowledge.get("template_workflow") or {}
+    controls = knowledge.get("security_controls_" + language) or []
+    lifecycle = knowledge.get("request_lifecycle_" + language) or []
+    required = knowledge.get("required_request_controls_" + language) or []
+    options = knowledge.get("business_template_options") or []
+    if language == "zh":
+        return "\n".join([
+            "## 内置 Agent 模板与平台 Agent 申请", "",
+            f"- **模板含义**：{workflow.get('template_meaning_zh') or '未配置'}",
+            f"- **内置管理 Agent**：{workflow.get('seed_location_zh') or '未配置'}。",
+            f"- **业务 Agent 申请**：{workflow.get('business_request_location_zh') or '未配置'}。",
+            f"- **申请审批**：{workflow.get('approval_location_zh') or '未配置'}。",
+            f"- **对象区别**：{workflow.get('compliance_distinction_zh') or '未配置'}",
+            f"- **当前边界**：{knowledge.get('missing_capability_answer_zh') or ''}",
+            "", "### 可选业务模板与能力倾向",
+            *[f"- **{item.get('key')}**：{item.get('zh')}" for item in options],
+            "", "### 申请必须填写", "- " + "、".join(required),
+            "", "### 安全与合规控制", *[f"- {item}" for item in controls],
+            "", "### 业务 Agent 生命周期", "- " + " -> ".join(lifecycle),
+            "", f"> {knowledge.get('immutability_zh') or ''}",
+            f"> {knowledge.get('external_registration_zh') or ''}",
+        ])
+    return "\n".join([
+        "## Built-in Agent templates and platform Agent requests", "",
+        f"- **Template meaning**: {workflow.get('template_meaning_en') or 'Not configured'}",
+        f"- **Built-in management Agents**: {workflow.get('seed_location_en') or 'Not configured'}.",
+        f"- **Business Agent request**: {workflow.get('business_request_location_en') or 'Not configured'}.",
+        f"- **Request approval**: {workflow.get('approval_location_en') or 'Not configured'}.",
+        f"- **Object distinction**: {workflow.get('compliance_distinction_en') or 'Not configured'}",
+        f"- **Current boundary**: {knowledge.get('missing_capability_answer_en') or ''}",
+        "", "### Selectable Business templates and capability tendencies",
+        *[f"- **{item.get('key')}**: {item.get('en')}" for item in options],
+        "", "### Required request fields", "- " + ", ".join(required),
+        "", "### Security and compliance controls", *[f"- {item}" for item in controls],
+        "", "### Business Agent lifecycle", "- " + " -> ".join(lifecycle),
+        "", f"> {knowledge.get('immutability_en') or ''}",
+        f"> {knowledge.get('external_registration_en') or ''}",
+    ])
+
+
 def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dict[str, Any],
                             output: Optional[Dict[str, Any]] = None, failure: str = "") -> None:
     """Return a managed runtime result to the protected Channel once only."""
@@ -219,7 +280,11 @@ def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dic
     channel_id = str(dispatch["channel_id"])
     content = str((output or {}).get("content") or "").strip()
     if not content:
-        content = "The management Agent could not complete this request. Check the Agent model configuration and the audit record before retrying."
+        content = (
+            "管理 Agent 未能完成本次请求。请检查 Agent 模型配置和审计记录后重试。"
+            if str(input_payload.get("response_language") or "en") == "zh" else
+            "The management Agent could not complete this request. Check the Agent model configuration and the audit record before retrying."
+        )
     identity_api.post_channel_agent_response(agent_id, channel_id, content, execution_id=execution_id,
                                              thread_type=str(dispatch.get("thread_type") or "CHANNEL"),
                                              thread_id=str(dispatch.get("thread_id") or ""))
@@ -247,7 +312,9 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         messages = input_payload.get("messages") if isinstance(input_payload, dict) else []
         profile = _llm_profile(str(agent.get("llm_profile_id") or ""))
         status_snapshot = input_payload.get("management_status_snapshot") if isinstance(input_payload, dict) else None
-        if not profile and not isinstance(status_snapshot, dict):
+        template_knowledge = input_payload.get("management_template_knowledge") if isinstance(input_payload, dict) else None
+        response_language = "zh" if str(input_payload.get("response_language") or "en") == "zh" else "en"
+        if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict):
             raise RuntimeError("Agent has no active LLM Provider Profile")
         dispatch = _channel_dispatch(input_payload)
         if dispatch:
@@ -256,8 +323,10 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                 str(agent.get("agent_id") or ""), channel_id, execution_id=execution_id,
                 thread_type=str(dispatch.get("thread_type") or "CHANNEL"), thread_id=str(dispatch.get("thread_id") or ""),
             )
-            if isinstance(status_snapshot, dict):
-                output = {"content": _management_status_markdown(status_snapshot), "model": "database-control-plane"}
+            if isinstance(template_knowledge, dict):
+                output = {"content": _management_template_markdown(template_knowledge), "model": "database-control-plane"}
+            elif isinstance(status_snapshot, dict):
+                output = {"content": _management_status_markdown(status_snapshot, response_language), "model": "database-control-plane"}
             else:
                 try:
                     output = _stream_llm(

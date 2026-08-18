@@ -146,9 +146,12 @@ Run evidence export is an administrator-only operation at
 limit between 1 and 1000, and records the export in Graph Governance Events.
 
 The `stable-4.1` profile intentionally ships only the legacy Graph Explorer.
-The `production` profile contains the integrated v4.3.0 surface, while
-`graph-preview` and `development` expose additional Graph controls for
-controlled validation. Both the stable and integrated profiles use the Chuanxu
+The `production` profile contains the integrated v4.3.0 surface. Current UI
+controls follow the database-authoritative capability matrix: Graph Runtime
+core and authorized inspection are Production; manifest draft import, SLO
+read-only, and checkpoint fork are `CONTROLLED`; replay, Dynamic Graph
+migration, framework-adapter execution, A2A, and OTLP are `DISABLED`. Both the
+stable and integrated profiles use the Chuanxu
 shared shell, bilingual controls, light-first defaults, dark theme, local
 assets, and responsive layouts. The UI never substitutes for database/API
 authorization and does not claim unverified live evidence.

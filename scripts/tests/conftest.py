@@ -38,6 +38,14 @@ if str(LIB_ROOT) not in sys.path:
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PACKAGED_EDITION = not (PACKAGE_ROOT / "adapters").is_dir()
 
+# Generated packages keep the production React application at ``web/`` while
+# a number of source contracts resolve paths relative to ``scripts/tests``.
+# Provide a test-only link so those contracts inspect the exact packaged UI
+# without duplicating production assets in the archive.
+_PACKAGE_WEB_COMPAT = PACKAGE_ROOT / "scripts" / "web"
+if PACKAGED_EDITION and (PACKAGE_ROOT / "web").is_dir() and not _PACKAGE_WEB_COMPAT.exists():
+    _PACKAGE_WEB_COMPAT.symlink_to(Path("..") / "web", target_is_directory=True)
+
 
 # ---------------------------------------------------------------------------
 # Connection parameters per backend. Defaults mirror editions/*.json but can
@@ -253,6 +261,12 @@ def pytest_configure(config):
         "markers",
         "yashandb: test runs against the YashanDB backend",
     )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove the generated-package-only UI path compatibility link."""
+    if _PACKAGE_WEB_COMPAT.is_symlink():
+        _PACKAGE_WEB_COMPAT.unlink()
 
 
 def pytest_collection_modifyitems(config, items):

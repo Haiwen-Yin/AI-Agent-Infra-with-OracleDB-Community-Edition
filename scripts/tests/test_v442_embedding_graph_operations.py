@@ -7,19 +7,31 @@ import live_db_validator
 from lib import graph_production_profile, knowledge_api
 
 
-def test_v442_static_contract_is_complete_for_all_adapters():
+def _adapter_scripts(names: tuple[str, ...] | list[str]):
     root = Path(__file__).resolve().parents[2]
-    for database in ("oracle", "pg", "yashandb"):
-        scripts = [root / "adapters" / database / "deploy" / name for name in live_db_validator.V442_MIGRATION_SCRIPTS]
+    if (root / "adapters").is_dir():
+        return [
+            (database, [root / "adapters" / database / "deploy" / name for name in names])
+            for database in ("oracle", "pg", "yashandb")
+        ]
+    manifest = root / "build-manifest.json"
+    assert manifest.is_file(), "generated package must include build-manifest.json"
+    import json
+
+    database = str(json.loads(manifest.read_text(encoding="utf-8"))["database"]["key"])
+    return [(database, [root / "scripts" / "deploy" / name for name in names])]
+
+
+def test_v442_static_contract_is_complete_for_all_adapters():
+    for database, scripts in _adapter_scripts(live_db_validator.V442_MIGRATION_SCRIPTS):
         result = live_db_validator.validate_v442_static_contract(database, scripts)
         assert result["passed"] is True
         assert result["v442_operations"]["no_plaintext_secret_markers"] is True
 
 
 def test_channel_pinning_migration_is_additive_for_all_adapters():
-    root = Path(__file__).resolve().parents[2]
-    for database in ("oracle", "pg", "yashandb"):
-        source = (root / "adapters" / database / "deploy" / "38_v4_4_2_channel_pinning.sql").read_text(encoding="utf-8")
+    for _database, scripts in _adapter_scripts(("38_v4_4_2_channel_pinning.sql",)):
+        source = scripts[0].read_text(encoding="utf-8")
         assert "PINNED" in source.upper()
         assert "IDX_CX_CHANNEL_PIN_ACTIVITY" in source.upper()
 

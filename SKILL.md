@@ -158,6 +158,16 @@ Security Domain access. Graph capability posture is explicit and evidence
 bound rather than inferred from an Agent Card, prompt, Skill, or protocol
 description.
 
+For v4.4.7, Graph Runtime core and authorized inspection are Production
+Profile capabilities. Manifest draft import, SLO read-only views, and
+checkpoint fork are controlled and require current authorization and evidence.
+MCP 2026-07-28 negotiation and `server/discover`, independent A2A 1.0.1
+conformance, replacement-Worker resume/de-duplication, sandbox and approval
+replay, tool-result compaction, OTLP Collector delivery, and authorization-
+filtered GraphRAG projections remain deferred research. An Agent must not
+infer support or authority from source modules, protocol metadata, or this
+Skill.
+
 ## 2. Package Contents
 
 After extracting the release zip, you have:
@@ -716,11 +726,12 @@ v4.4.5 admits Graph Runs only when Definition, compiled Plan, runtime profile,
 state schema, budget schema, and capability contracts match. Non-repeatable
 forks start paused until governed approval or compensation evidence exists.
 
-v4.4.6 adds one Human registration page, versioned field and Token policies;
-v4.4.7 adds saved LLM probing and lifecycle safety without changing the
-database authorization boundary.
+v4.4.6 adds one Human registration page, versioned field and Token policies,
 provider-neutral external identity transactions, Portal connection limits,
 exclusive page-operation leases, and explicit Graph capability posture. Apply
 steps `46` and `47` only through the migration runner. An Agent consuming this
 Skill must fail closed on unknown registration fields, unavailable providers,
 lease conflicts, missing capability evidence, or authorization failures.
+
+v4.4.7 adds saved LLM probing and lifecycle safety without changing the
+database authorization boundary.

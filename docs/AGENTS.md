@@ -141,9 +141,13 @@ only critical security or data-loss fixes. The complete v4.3.0 production
 replacement evidence gate has passed.
 
 `production` contains the integrated stable-core release surface and is the
-recommended runtime profile for production. `graph-preview` and `development`
-expose explicitly enabled Graph controls for controlled validation; they do not
-change database, API, Skill, Tool, model, or export authorization boundaries.
+recommended runtime profile for production. Current capability availability is
+defined by the database-authoritative Graph capability matrix, not by profile
+labels: Graph Runtime core and authorized inspection are Production; manifest
+draft import, read-only SLO views, and checkpoint fork are `CONTROLLED`; replay,
+Dynamic Graph migration, framework-adapter execution, A2A, and OTLP are
+`DISABLED`. No capability label changes database, API, Skill, Tool, model, or
+export authorization boundaries.
 The v4.3.0 release evidence manifest reports `PASS` and `passed: true`; its
 associated closure manifest reports `releasable: true`. v4.1.x remains
 downloadable as the previous baseline, not the current production
