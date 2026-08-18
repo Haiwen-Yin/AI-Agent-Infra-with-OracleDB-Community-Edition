@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.7 - Community Edition - Unified Search API
+"""AI Agent Infra v4.4.8 - Community Edition - Unified Search API
 
 Single entry point for AI agents to search across all data types and modalities.
 Agents choose search strategy based on scenario:
@@ -325,6 +325,7 @@ def search(
                 result["results"] = graph_api.get_neighbors(
                     seed_id, direction=kwargs.get("direction", "both"),
                     edge_type=kwargs.get("edge_type"), limit=top_k,
+                    principal_id=principal_id,
                 )
 
         elif strategy == "hybrid":
@@ -398,7 +399,7 @@ def search(
             for item in result["results"]:
                 eid = item.get("entity_id") if isinstance(item, dict) else None
                 if eid:
-                    item["_explanation"] = _explain_results(eid, text, strategy)
+                    item["_explanation"] = _explain_results(eid, text, strategy, principal_id)
         except Exception as e:
             logger.debug(f"Explain annotation failed: {e}")
 
@@ -406,7 +407,8 @@ def search(
     return result
 
 
-def _explain_results(entity_id: str, query_text: str, strategy: str) -> Dict[str, Any]:
+def _explain_results(entity_id: str, query_text: str, strategy: str,
+                     principal_id: Optional[str] = None) -> Dict[str, Any]:
     """Return per-result explanation: vector_score, text_score, graph_path.
 
     Reads stored explanation rows from SEARCH_EXPLANATIONS view when present;
@@ -464,7 +466,9 @@ def _explain_results(entity_id: str, query_text: str, strategy: str) -> Dict[str
 
         if strategy in ("graph", "unified", "unified_sql"):
             try:
-                path = graph_api.get_reachable(entity_id, max_hops=2, limit=5)
+                path = graph_api.get_reachable(
+                    entity_id, max_hops=2, limit=5, principal_id=principal_id,
+                )
                 explanation["graph_path"] = [p.get("entity_id") for p in path if p.get("entity_id")]
             except Exception as e:
                 logger.debug(f"Graph path computation failed: {e}")

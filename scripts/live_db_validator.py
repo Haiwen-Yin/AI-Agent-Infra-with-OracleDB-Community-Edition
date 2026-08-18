@@ -189,6 +189,61 @@ V446_MIGRATION_SCRIPTS = V445_MIGRATION_SCRIPTS + (
     "46_v4_4_6_identity_portal_graph.sql",
     "47_v4_4_6_portable_contract_alignment.sql",
 )
+V448_MIGRATION_SCRIPTS = V446_MIGRATION_SCRIPTS + (
+    "48_v4_4_8_platform_agent_isolation.sql",
+)
+V448_PLATFORM_AGENT_ISOLATION_TABLES = (
+    "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
+    "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_MAINTENANCE_ATTEMPTS",
+    "CX_PLATFORM_SAFE_AUTONOMY_POLICIES", "CX_PLATFORM_KNOWLEDGE",
+    "CX_PLATFORM_KNOWLEDGE_CHUNKS", "CX_PLATFORM_KNOWLEDGE_GRANTS",
+    "CX_DATABASE_ISOLATION_INVENTORY",
+)
+V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS = {
+    "CX_PLATFORM_COMMANDS": frozenset({
+        "COMMAND_KEY", "VERSION", "STATUS", "RISK_LEVEL", "EXECUTION_MODE",
+        "PARAMETER_SCHEMA", "EXAMPLE_TEXT", "LOCALIZED_METADATA",
+        "APPROVAL_POLICY", "EXPIRY_SECONDS", "CONTENT_DIGEST",
+    }),
+    "CX_PLATFORM_COMMAND_EXECUTORS": frozenset({
+        "COMMAND_KEY", "COMMAND_VERSION", "EXECUTOR_KEY", "STATE",
+        "EXPECTED_DIGEST", "RATE_LIMIT_PER_MINUTE", "FAILURE_BUDGET",
+    }),
+    "CX_PLATFORM_MAINTENANCE_TASKS": frozenset({
+        "TASK_ID", "COMMAND_ID", "STATUS", "RISK_LEVEL", "AUTONOMOUS",
+        "IDEMPOTENCY_KEY", "LEASE_OWNER", "LEASE_EXPIRES_AT", "FENCING_TOKEN",
+        "POSTFLIGHT_JSON", "EVIDENCE_JSON", "GRAPH_RUN_ID",
+    }),
+    "CX_PLATFORM_MAINTENANCE_ATTEMPTS": frozenset({
+        "ATTEMPT_ID", "TASK_ID", "ATTEMPT_NO", "STATUS", "FENCING_TOKEN",
+        "OUTPUT_JSON", "FAILURE_REASON",
+    }),
+    "CX_PLATFORM_SAFE_AUTONOMY_POLICIES": frozenset({
+        "POLICY_ID", "STATE", "ALLOWED_COMMAND_JSON", "RATE_LIMIT_PER_MINUTE",
+        "MAX_CONCURRENCY", "FAILURE_BUDGET", "VERSION", "REASON",
+    }),
+    "CX_PLATFORM_KNOWLEDGE": frozenset({
+        "KNOWLEDGE_KEY", "VERSION", "AUDIENCE", "SCOPE_TYPE",
+        "SECURITY_DOMAIN_ID", "OWNER_PRINCIPAL_ID", "CLASSIFICATION",
+        "CONTENT_JSON", "CONTENT_DIGEST", "SIGNATURE", "SIGNATURE_STATUS",
+        "STATUS", "VALID_FROM", "VALID_UNTIL",
+    }),
+    "CX_PLATFORM_KNOWLEDGE_CHUNKS": frozenset({
+        "KNOWLEDGE_ID", "CHUNK_NO", "CHUNK_TEXT", "CHUNK_DIGEST",
+        "AUDIENCE", "SCOPE_TYPE", "SECURITY_DOMAIN_ID",
+        "OWNER_PRINCIPAL_ID", "CLASSIFICATION", "STATUS",
+    }),
+    "CX_PLATFORM_KNOWLEDGE_GRANTS": frozenset({
+        "KNOWLEDGE_ID", "PRINCIPAL_ID", "SECURITY_DOMAIN_ID",
+        "GRANT_SCOPE", "STATUS", "VALID_FROM", "VALID_UNTIL", "GRANTED_BY",
+    }),
+    "CX_DATABASE_ISOLATION_INVENTORY": frozenset({
+        "OBJECT_TYPE", "OBJECT_NAME", "SCOPE_KEYS_JSON", "HUMAN_PATH",
+        "AGENT_PATH", "SHARING_MODEL", "DERIVED_INHERITANCE", "MOVE_POLICY",
+        "ORACLE_ENFORCEMENT", "PG_ENFORCEMENT", "YASHAN_ENFORCEMENT",
+        "VERIFICATION_REF", "STATUS", "VERSION",
+    }),
+}
 V446_IDENTITY_PORTAL_GRAPH_TABLES = (
     "CX_HUMAN_PROFILES", "CX_REG_FIELD_POLICIES", "CX_IDENTITY_PLATFORM_POLICIES",
     "CX_HUMAN_REG_TOKENS", "CX_IDENTITY_PROVIDERS", "CX_EXTERNAL_ID_BINDINGS",
@@ -1282,6 +1337,10 @@ def validate_v445_static_contract(database: str, scripts: Sequence[Path]) -> dic
         "DEFINITION_DIGEST", "PLAN_DIGEST", "COMPATIBILITY_LEVEL",
         "STATE_SCHEMA_VERSION", "BUDGET_SCHEMA_VERSION", "GRAPH_COMPILE_PLANS",
     }
+    native_revoke_markers = {
+        "REVOKE SELECT ON AIADMIN.COLLAB_GROUPS FROM AGENT_API",
+        "REVOKE SELECT ON AIADMIN.COLLAB_GROUP_MEMBERS FROM AGENT_API",
+    }
     control = {
         "scripts_required": list(V445_MIGRATION_SCRIPTS),
         "scripts_missing": [name for name in V445_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
@@ -1307,6 +1366,57 @@ def validate_v446_static_contract(database: str, scripts: Sequence[Path]) -> dic
     }
     control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"] and control["private_lifecycle_logic_absent"]
     return {"database": database, "v445": base, "v446_identity_portal_graph": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
+def validate_v448_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    base = validate_v446_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    contract = selected.get("48_v4_4_8_platform_agent_isolation.sql")
+    domain = selected.get("49_v4_4_8_security_domain_rls.sql")
+    contract_text = contract.read_text(encoding="utf-8").upper() if contract and contract.is_file() else ""
+    domain_text = domain.read_text(encoding="utf-8").upper() if domain and domain.is_file() else ""
+    markers = {
+        "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
+        "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_SAFE_AUTONOMY_POLICIES",
+        "CX_PLATFORM_KNOWLEDGE", "CX_PLATFORM_KNOWLEDGE_CHUNKS",
+        "CX_PLATFORM_KNOWLEDGE_GRANTS", "CX_DATABASE_ISOLATION_INVENTORY",
+        "SAFE AUTONOMY IS DISABLED BY DEFAULT", "EMERGENCY_CONTAINMENT",
+        "GOVERNED_EXECUTOR", "PROPOSAL_ONLY",
+        "GRAPH_RUN_ID",
+    }
+    pg_markers = {
+        "ENABLE ROW LEVEL SECURITY", "FORCE ROW LEVEL SECURITY",
+        "REVOKE ALL PRIVILEGES", "CX_PLATFORM_KNOWLEDGE_CHUNKS",
+    }
+    native_revoke_markers = {
+        "REVOKE SELECT ON AIADMIN.COLLAB_GROUPS FROM AGENT_API",
+        "REVOKE SELECT ON AIADMIN.COLLAB_GROUP_MEMBERS FROM AGENT_API",
+    }
+    domain_markers = set() if database != "pg" else {
+        "CX_CHANNEL_DOMAIN_MEMBER", "CX_DOMAIN_MEMBERS",
+        "CURRENT_USER", "AGENT_DB_IDENTITY", "CURRENT_AGENT_ID",
+    }
+    control = {
+        "scripts_required": list(V448_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V448_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in contract_text),
+        "domain_markers_missing": sorted(marker for marker in domain_markers if marker not in domain_text),
+    }
+    if database == "pg":
+        control["pg_markers_missing"] = sorted(marker for marker in pg_markers if marker not in contract_text)
+    else:
+        control["native_revoke_markers_missing"] = sorted(
+            marker for marker in native_revoke_markers if marker not in contract_text
+        )
+    control["passed"] = (
+        not control["scripts_missing"]
+        and not control["contract_markers_missing"]
+        and not control["domain_markers_missing"]
+        and (database != "pg" or not control.get("pg_markers_missing"))
+        and (database == "pg" or not control.get("native_revoke_markers_missing"))
+    )
+    return {"database": database, "v446": base, "v448_platform_agent_isolation": control,
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
@@ -1864,10 +1974,13 @@ def main() -> int:
     requires_v444 = target_version.startswith(("4.4.4", "4.4.5", "4.4.6"))
     requires_v445 = target_version.startswith(("4.4.5", "4.4.6"))
     requires_v446 = target_version.startswith("4.4.6")
+    requires_v448 = target_version.startswith("4.4.8")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v446:
+            if requires_v448:
+                migration_scripts, validator = V448_MIGRATION_SCRIPTS, validate_v448_static_contract
+            elif requires_v446:
                 migration_scripts, validator = V446_MIGRATION_SCRIPTS, validate_v446_static_contract
             elif requires_v445:
                 migration_scripts, validator = V445_MIGRATION_SCRIPTS, validate_v445_static_contract
@@ -1903,6 +2016,8 @@ def main() -> int:
                 else (REPO_ROOT / "adapters" / database / "deploy" / name)
                 for name in migration_scripts
             ]
+            if database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in migration_scripts:
+                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "49_v4_4_8_security_domain_rls.sql")
             static_contracts[database] = validator(database, scripts)
     # v4.3 replaced the pre-v4.3 execution/registration/governance catalog
     # with the CX control-plane catalog. Keep the legacy checks for older

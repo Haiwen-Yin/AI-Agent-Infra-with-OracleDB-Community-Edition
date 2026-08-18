@@ -169,6 +169,23 @@ BUILTIN_MANIFESTS = (
     ("platform-admin-tools", "TOOL", {"tools": ["agent_inventory", "runtime_status", "platform_notice", "audit_summary"]}),
     ("compliance-admin-tools", "TOOL", {"tools": ["posture_summary", "finding_explain", "remediation_draft", "compliance_notice"]}),
     ("restricted-agent-skills", "SKILL", {"skills": ["approved_skill_only"], "requires_gateway": True}),
+    ("compliance-admin-knowledge", "MANAGEMENT_KNOWLEDGE", {
+        "knowledge_version": "1",
+        "audience": "COMPLIANCE_ADMIN_AGENT_ONLY",
+        "scope": "compliance_control_plane",
+        "governance_workflow": {
+            "proposal_boundary_zh": "合规控制器只能创建整改案件和平台管理频道中的治理操作卡，不能自行批准或执行平台变更。",
+            "proposal_boundary_en": "The Compliance Controller may create remediation cases and governed Action Cards in the Platform Administration Channel, but cannot approve or execute platform changes itself.",
+            "action_type": "PLATFORM_COMPLIANCE_REMEDIATION",
+            "required_human_approval_zh": "所有平台变更必须由授权人类管理员最终批准。",
+            "required_human_approval_en": "Every platform change requires final approval by an authorized human administrator.",
+        },
+        "knowledge_isolation": {
+            "audience": "COMPLIANCE_ADMIN",
+            "scope_type": "COMPLIANCE_AGENT",
+            "classification": "RESTRICTED",
+        },
+    }),
     ("platform-admin-knowledge", "MANAGEMENT_KNOWLEDGE", {
         "knowledge_version": "2",
         "audience": "PLATFORM_MANAGEMENT_AGENTS_ONLY",
@@ -270,7 +287,7 @@ def _ensure_target(tx: Any, target_key: str = "local-managed") -> str:
 
 
 def _ensure_manifest(tx: Any, key: str, kind: str, content: Dict[str, Any]) -> bool:
-    version = MANAGEMENT_KNOWLEDGE_VERSION if kind == "MANAGEMENT_KNOWLEDGE" else 1
+    version = MANAGEMENT_KNOWLEDGE_VERSION if key == "platform-admin-knowledge" else 1
     existing = _row(tx.query_one(
         "SELECT MANIFEST_ID FROM CX_NATIVE_MANIFESTS WHERE MANIFEST_KEY=:key AND VERSION=:version FOR UPDATE",
         {"key": key, "version": version},
@@ -313,6 +330,89 @@ def _verify_management_knowledge(tx: Any) -> Dict[str, Any]:
     if not valid:
         raise NativeAgentError("platform management knowledge verification failed")
     return {"manifest_id": str(row.get("manifest_id") or ""), "status": "VERIFIED", "digest": digest}
+
+
+def _ensure_platform_knowledge(tx: Any) -> Dict[str, Any]:
+    """Migrate the signed manifest into the scoped private-knowledge model."""
+    source = _row(tx.query_one(
+        "SELECT MANIFEST_ID,CONTENT_JSON,CONTENT_DIGEST,SIGNATURE,SIGNATURE_STATUS,STATUS,MANAGED "
+        "FROM CX_NATIVE_MANIFESTS WHERE MANIFEST_KEY='platform-admin-knowledge' "
+        "AND VERSION=:version FOR UPDATE", {"version": MANAGEMENT_KNOWLEDGE_VERSION},
+    ))
+    if not source:
+        raise NativeAgentError("management knowledge source is unavailable")
+    content = _parse(source.get("content_json"), {})
+    digest = str(source.get("content_digest") or "")
+    if (
+        not isinstance(content, dict)
+        or digest != _digest(content)
+        or str(source.get("signature_status") or "") != "VERIFIED_BUILTIN"
+        or str(source.get("status") or "") != "PUBLISHED"
+        or str(source.get("managed") or "") != "Y"
+    ):
+        raise NativeAgentError("management knowledge migration verification failed")
+
+    knowledge_id = "PK_PLATFORM_ADMIN_KNOWLEDGE_V" + str(MANAGEMENT_KNOWLEDGE_VERSION)
+    existing = _row(tx.query_one(
+        "SELECT KNOWLEDGE_ID,CONTENT_DIGEST FROM CX_PLATFORM_KNOWLEDGE WHERE KNOWLEDGE_KEY=:key "
+        "AND VERSION=:version FOR UPDATE", {"key": "platform-admin-knowledge", "version": MANAGEMENT_KNOWLEDGE_VERSION},
+    ))
+    if not existing:
+        tx.execute(
+            "INSERT INTO CX_PLATFORM_KNOWLEDGE(KNOWLEDGE_ID,KNOWLEDGE_KEY,VERSION,KNOWLEDGE_KIND,AUDIENCE,"
+            "SCOPE_TYPE,CLASSIFICATION,CONTENT_JSON,CONTENT_DIGEST,SIGNATURE,SIGNATURE_STATUS,STATUS,"
+            "VALID_FROM,SOURCE_MANIFEST_ID,CREATED_BY) VALUES (:id,:key,:version,'MANAGEMENT_RUNBOOK',"
+            "'MANAGEMENT_AGENTS','MANAGEMENT_AGENT','RESTRICTED',:content,:digest,:signature,'VERIFIED_BUILTIN',"
+            "'PUBLISHED',CURRENT_TIMESTAMP,:source,'SYSTEM_BOOTSTRAP')",
+            {"id": knowledge_id, "key": "platform-admin-knowledge",
+             "version": MANAGEMENT_KNOWLEDGE_VERSION, "content": _json(content), "digest": digest,
+             "signature": "BUILTIN-SHA256:" + digest, "source": str(source.get("manifest_id") or "")},
+        )
+    elif str(existing.get("content_digest") or "") != digest:
+        raise NativeAgentError("scoped management knowledge digest mismatch")
+    return {"knowledge_id": knowledge_id, "status": "MIGRATED", "digest": digest}
+
+
+def _ensure_compliance_knowledge(tx: Any) -> Dict[str, Any]:
+    """Seed the Enterprise-only Compliance Admin private runbook."""
+    if not _enterprise():
+        return {"status": "UNAVAILABLE", "enterprise_only": True}
+    row = _row(tx.query_one(
+        "SELECT CONTENT_JSON,CONTENT_DIGEST,SIGNATURE,SIGNATURE_STATUS,STATUS,MANAGED "
+        "FROM CX_NATIVE_MANIFESTS WHERE MANIFEST_KEY='compliance-admin-knowledge' AND VERSION=1 FOR UPDATE",
+        {},
+    ))
+    if not row:
+        raise NativeAgentError("compliance management knowledge was not initialized")
+    content = _parse(row.get("content_json"), {})
+    digest = str(row.get("content_digest") or "")
+    if (
+        not isinstance(content, dict)
+        or digest != _digest(content)
+        or str(row.get("signature_status") or "") != "VERIFIED_BUILTIN"
+        or str(row.get("status") or "") != "PUBLISHED"
+        or str(row.get("managed") or "") != "Y"
+    ):
+        raise NativeAgentError("compliance management knowledge verification failed")
+    knowledge_id = "PK_COMPLIANCE_ADMIN_KNOWLEDGE_V1"
+    existing = _row(tx.query_one(
+        "SELECT KNOWLEDGE_ID,CONTENT_DIGEST FROM CX_PLATFORM_KNOWLEDGE "
+        "WHERE KNOWLEDGE_KEY='compliance-admin-knowledge' AND VERSION=1 FOR UPDATE", {},
+    ))
+    if not existing:
+        tx.execute(
+            "INSERT INTO CX_PLATFORM_KNOWLEDGE(KNOWLEDGE_ID,KNOWLEDGE_KEY,VERSION,KNOWLEDGE_KIND,AUDIENCE,"
+            "SCOPE_TYPE,CLASSIFICATION,CONTENT_JSON,CONTENT_DIGEST,SIGNATURE,SIGNATURE_STATUS,STATUS,"
+            "VALID_FROM,SOURCE_MANIFEST_ID,CREATED_BY) VALUES "
+            "(:id,'compliance-admin-knowledge',1,'COMPLIANCE_RUNBOOK','COMPLIANCE_ADMIN','COMPLIANCE_AGENT',"
+            "'RESTRICTED',:content,:digest,:signature,'VERIFIED_BUILTIN','PUBLISHED',CURRENT_TIMESTAMP,:source,'SYSTEM_BOOTSTRAP')",
+            {"id": knowledge_id, "content": _json(content), "digest": digest,
+             "signature": "BUILTIN-SHA256:" + digest,
+             "source": str(row.get("manifest_id") or "")},
+        )
+    elif str(existing.get("content_digest") or "") != digest:
+        raise NativeAgentError("compliance knowledge digest mismatch")
+    return {"knowledge_id": knowledge_id, "status": "MIGRATED", "digest": digest}
 
 
 def _principal_display_name(agent_id: str) -> str:
@@ -394,9 +494,12 @@ def bootstrap_native_agents() -> Dict[str, Any]:
                 if kind != "TOOL" or _enterprise() or key == "restricted-agent-skills":
                     _ensure_manifest(tx, key, kind, content)
             knowledge = _verify_management_knowledge(tx)
+            scoped_knowledge = _ensure_platform_knowledge(tx)
+            compliance_knowledge = _ensure_compliance_knowledge(tx)
             return {"status": "COMPLETED", "idempotent": True,
                     "agents": [PLATFORM_ADMIN_AGENT_ID] + ([COMPLIANCE_ADMIN_AGENT_ID] if _enterprise() else []),
-                    "management_knowledge": knowledge}
+                    "management_knowledge": knowledge, "scoped_knowledge": scoped_knowledge,
+                    "compliance_knowledge": compliance_knowledge}
         if not marker:
             tx.execute(
                 "INSERT INTO CX_NATIVE_BOOTSTRAP(BOOTSTRAP_KEY,BOOTSTRAP_VERSION,STATUS,STARTED_AT) "
@@ -409,6 +512,8 @@ def bootstrap_native_agents() -> Dict[str, Any]:
             if kind != "TOOL" or _enterprise() or key == "restricted-agent-skills":
                 _ensure_manifest(tx, key, kind, content)
         knowledge = _verify_management_knowledge(tx)
+        scoped_knowledge = _ensure_platform_knowledge(tx)
+        compliance_knowledge = _ensure_compliance_knowledge(tx)
         target_id = _ensure_target(tx)
         created = []
         if _ensure_native_agent(tx, PLATFORM_ADMIN_AGENT_ID, "PLATFORM_ADMIN", "platform-admin", target_id):
@@ -435,9 +540,18 @@ def bootstrap_native_agents() -> Dict[str, Any]:
         _audit(tx, "SYSTEM_BOOTSTRAP", "NATIVE_AGENT_BOOTSTRAP_COMPLETE", "PLATFORM",
                "v4.3.6", "ALLOW", "native Agent bootstrap completed")
         return {"status": "COMPLETED", "idempotent": not bool(created), "created": created,
-                "management_knowledge": knowledge}
+                "management_knowledge": knowledge, "scoped_knowledge": scoped_knowledge,
+                "compliance_knowledge": compliance_knowledge}
     try:
-        return connection.execute_transaction_callback(work)
+        result = connection.execute_transaction_callback(work)
+        try:
+            from . import platform_agent_pool
+            result["platform_command_registry"] = platform_agent_pool.ensure_platform_command_registry()
+            from . import isolation_inventory
+            result["isolation_inventory"] = isolation_inventory.ensure_isolation_inventory()
+        except Exception as exc:
+            raise NativeAgentError("platform control-plane bootstrap failed") from exc
+        return result
     except Exception as exc:
         raise NativeAgentError("native Agent bootstrap is unavailable") from exc
 
@@ -553,15 +667,24 @@ def list_manifests(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
 
 
 def management_template_knowledge(actor: str, agent_id: str, response_language: str = "en") -> Dict[str, Any]:
-    """Read the private, signed product workflow knowledge for management Agents."""
+    """Read scoped, signed product workflow knowledge for management Agents."""
     if agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
         raise NativeAgentError("management knowledge is limited to built-in management Agents")
     if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
         raise PermissionError("platform management permission is required for management knowledge")
+    is_compliance = agent_id == COMPLIANCE_ADMIN_AGENT_ID
+    knowledge_key = "compliance-admin-knowledge" if is_compliance else "platform-admin-knowledge"
+    version = 1 if is_compliance else MANAGEMENT_KNOWLEDGE_VERSION
+    audience = "COMPLIANCE_ADMIN" if is_compliance else "MANAGEMENT_AGENTS"
+    scope = "COMPLIANCE_AGENT" if is_compliance else "MANAGEMENT_AGENT"
     row = _row(connection.execute_query_one(
-        "SELECT CONTENT_JSON,CONTENT_DIGEST,SIGNATURE_STATUS FROM CX_NATIVE_MANIFESTS "
-        "WHERE MANIFEST_KEY='platform-admin-knowledge' AND VERSION=:version AND STATUS='PUBLISHED'",
-        {"version": MANAGEMENT_KNOWLEDGE_VERSION},
+        "SELECT CONTENT_JSON,CONTENT_DIGEST,SIGNATURE_STATUS FROM CX_PLATFORM_KNOWLEDGE "
+        "WHERE KNOWLEDGE_KEY=:knowledge_key AND VERSION=:version AND STATUS='PUBLISHED' "
+        "AND AUDIENCE=:audience AND SCOPE_TYPE=:scope "
+        "AND (VALID_FROM IS NULL OR VALID_FROM<=CURRENT_TIMESTAMP) "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP)",
+        {"knowledge_key": knowledge_key, "version": version,
+         "audience": audience, "scope": scope},
     ))
     if not row:
         raise NativeAgentError("management knowledge is not initialized")
@@ -572,7 +695,30 @@ def management_template_knowledge(actor: str, agent_id: str, response_language: 
         or str(row.get("content_digest") or "") != _digest(content)
     ):
         raise NativeAgentError("management knowledge is not verified")
+    identity_api._audit(actor, "PLATFORM_KNOWLEDGE_READ", "PLATFORM_KNOWLEDGE",
+                        knowledge_key, "ALLOW", "authorized scoped management knowledge read")
     return {**content, "response_language": "zh" if response_language == "zh" else "en"}
+
+
+def management_knowledge_projection(actor: str, agent_id: str) -> Dict[str, Any]:
+    """Return only the signed source projection for a management Agent.
+
+    Chunk, vector, full-text, and graph projections remain unavailable until
+    they are built with the same audience/scope/classification predicates. A
+    missing projection must fail closed rather than fall back to shared rows.
+    """
+    content = management_template_knowledge(actor, agent_id)
+    is_compliance = agent_id == COMPLIANCE_ADMIN_AGENT_ID
+    return {
+        "knowledge_key": "compliance-admin-knowledge" if is_compliance else "platform-admin-knowledge",
+        "projection_mode": "SIGNED_SOURCE_ONLY",
+        "chunk_projection": "UNAVAILABLE",
+        "fulltext_projection": "UNAVAILABLE",
+        "vector_projection": "UNAVAILABLE",
+        "graph_projection": "UNAVAILABLE",
+        "classification": "RESTRICTED",
+        "content": content,
+    }
 
 
 def management_response_language(body: str) -> str:
@@ -592,6 +738,8 @@ def is_management_template_request(body: str) -> bool:
 
 
 def list_llm_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
+    if identity_api.effective_access(str(actor), "platform.manage").get("decision") != "ALLOW":
+        raise PermissionError("platform management permission is required")
     suffix, params = _limit(limit)
     rows = _rows(connection.execute_query(
         "SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,SECRET_PRESENT,HEALTH_STATE,"
@@ -1066,7 +1214,7 @@ def is_management_status_request(body: str) -> bool:
 
 def create_channel_execution(actor: str, channel_id: str, message_id: str, body: str,
                              mentioned_agent_id: str, thread_type: str = "CHANNEL",
-                             thread_id: str = "") -> Dict[str, Any]:
+                             thread_id: str = "", *, response_language: str = "") -> Dict[str, Any]:
     """Queue one bounded management-channel response for an explicit mention.
 
     A Channel message is not an authority grant.  This narrow bridge exists
@@ -1079,6 +1227,9 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
 
     if channel_id != admin_management.ADMIN_CHANNEL_ID:
         raise NativeAgentError("native Channel execution is limited to the Platform Administration Channel")
+    is_platform_command = str(body or "").strip().lower().startswith("/platform ")
+    if is_platform_command and mentioned_agent_id != PLATFORM_ADMIN_AGENT_ID:
+        raise NativeAgentError("typed platform commands are handled by the Platform Admin Agent")
     if mentioned_agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
         raise NativeAgentError("mentioned Agent is not an approved management Agent")
     if mentioned_agent_id == COMPLIANCE_ADMIN_AGENT_ID and not _enterprise():
@@ -1101,22 +1252,39 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
         command_type = pieces[1].upper() if len(pieces) > 1 else ""
         command_target: Dict[str, Any] = {}
         command_parameters: Dict[str, Any] = {}
-        if command_type == "AGENT_DRAIN":
-            if len(pieces) < 4:
-                raise NativeAgentError("AGENT_DRAIN requires source node, destination node, and reason")
-            command_target = {"node_id": pieces[2].strip()}
-            command_parameters = {"target_node_id": pieces[3].strip()}
-            command_reason = stripped.split(None, 4)[4].strip() if len(stripped.split(None, 4)) > 4 else ""
+        if command_type == "HELP":
+            help_key = pieces[2].strip() if len(pieces) > 2 else ""
+            command_notice = {"help": platform_agent_pool.command_help(actor, help_key, channel_id)}
+            command_notice = {"command_type": "HELP", "status": "COMPLETED", **command_notice}
         else:
-            command_reason = pieces[2].strip() if len(pieces) > 2 else ""
-        command = platform_agent_pool.create_command(
-            actor, command_type, command_target, command_parameters, "DEFAULT", command_reason,
-        )
-        command_notice = {"command_id": command.get("command_id"), "command_type": command_type,
-                          "status": command.get("status"), "result": command.get("result") or {},
-                          "action_card": command.get("action_card") or {}}
+            if command_type == "AGENT_DRAIN":
+                if len(pieces) < 4:
+                    raise NativeAgentError("AGENT_DRAIN requires source node, destination node, and reason")
+                command_target = {"node_id": pieces[2].strip()}
+                command_parameters = {"target_node_id": pieces[3].strip()}
+                command_reason = stripped.split(None, 4)[4].strip() if len(stripped.split(None, 4)) > 4 else ""
+            else:
+                command_reason = pieces[2].strip() if len(pieces) > 2 else ""
+            command = platform_agent_pool.create_command(
+                actor, command_type, command_target, command_parameters, "DEFAULT", command_reason,
+            )
+            command_notice = {"command_id": command.get("command_id"), "command_type": command_type,
+                              "status": command.get("status"), "result": command.get("result") or {},
+                              "action_card": command.get("action_card") or {}}
+
+    command_help_snapshot = command_notice.get("help") if command_notice.get("command_type") == "HELP" else None
+    command_result_snapshot = command_notice if command_notice.get("status") == "COMPLETED" and command_notice.get("result") else None
+    status_request = is_management_status_request(body)
+    template_request = is_management_template_request(body)
+    deterministic_response = bool(
+        command_help_snapshot is not None
+        or command_result_snapshot is not None
+        or status_request
+        or template_request
+    )
 
     def work(tx: Any) -> Dict[str, Any]:
+        nonlocal response_language
         member = _row(tx.query_one(
             "SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent "
             "AND STATUS='ACTIVE' AND VOTING_ENABLED='Y' FOR UPDATE",
@@ -1126,7 +1294,9 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
             "SELECT AGENT_ID,STATUS,ACTIVATION_STATE,DEPLOYMENT_TARGET_ID,LLM_PROFILE_ID FROM CX_NATIVE_AGENTS "
             "WHERE AGENT_ID=:agent FOR UPDATE", {"agent": mentioned_agent_id},
         ))
-        if not member or not agent or str(agent.get("status") or "").upper() != "ACTIVE" or not str(agent.get("llm_profile_id") or ""):
+        if not member or not agent or str(agent.get("status") or "").upper() != "ACTIVE":
+            raise NativeAgentError("mentioned management Agent is not ready")
+        if not deterministic_response and not str(agent.get("llm_profile_id") or ""):
             raise NativeAgentError("mentioned management Agent is not ready")
         channel_member = _row(tx.query_one(
             "SELECT MEMBER_ID FROM CX_CHANNEL_MEMBERS WHERE CHANNEL_ID=:channel AND PRINCIPAL_ID=:agent "
@@ -1144,12 +1314,11 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
         if existing:
             return {"execution_id": execution_id, "agent_id": mentioned_agent_id,
                     "status": str(existing.get("status") or "PENDING"), "idempotent": True}
-        response_language = management_response_language(body)
-        status_request = is_management_status_request(body)
+        response_language = response_language or management_response_language(body)
         status_snapshot = management_status_snapshot(actor, mentioned_agent_id) if status_request else None
         template_knowledge = management_template_knowledge(
             actor, mentioned_agent_id, response_language,
-        ) if is_management_template_request(body) else None
+        ) if template_request else None
         system_prompt = (
             "你是受保护管理频道中的平台管理 Agent。必须仅使用中文回答本次明确提及你的请求，并保持简洁。"
             "不得声称已执行配置、安全、成员、升级或阻断变更；涉及这些变更时，应说明所需的受治理操作卡或审批路径。"
@@ -1180,6 +1349,10 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
             payload["messages"].insert(0, {"role": "system", "content": command_prompt + _json(command_notice)})
         if status_snapshot is not None:
             payload["management_status_snapshot"] = status_snapshot
+        if command_help_snapshot is not None:
+            payload["platform_command_help"] = command_help_snapshot
+        if command_result_snapshot is not None:
+            payload["platform_command_result"] = command_result_snapshot
         if template_knowledge is not None:
             payload["management_template_knowledge"] = template_knowledge
         input_json = _json(payload)

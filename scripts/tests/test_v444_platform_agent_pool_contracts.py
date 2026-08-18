@@ -16,6 +16,10 @@ PORTAL_TEMPLATE_PATH = ROOT / (
     "scripts/visualization/templates/portal_chat.html"
     if PACKAGE_MODE else "shared/visualization/templates/portal_chat.html"
 )
+VISUALIZATION_SERVER_PATH = ROOT / (
+    "scripts/visualization/server.py"
+    if PACKAGE_MODE else "shared/visualization/server.py"
+)
 NODE_TOOL_PATH = ROOT / ("scripts/agent_pool_node.py" if PACKAGE_MODE else "shared/scripts/agent_pool_node.py")
 MIGRATION_RUNNER_PATH = ROOT / ("scripts/migration_runner.py" if PACKAGE_MODE else "migration_runner.py")
 
@@ -54,7 +58,9 @@ def test_v444_service_never_accepts_arbitrary_command_types():
     source = (LIB_ROOT / "platform_agent_pool.py").read_text(encoding="utf-8")
     assert '"HEALTH_READ"' in source
     assert '"AGENT_QUARANTINE"' in source
-    assert "unsupported command or missing reason" in source
+    assert "UNKNOWN_PLATFORM_COMMAND" in source
+    assert "COMMAND_PARAMETER_REQUIRED" in source
+    assert "COMMAND_REASON_REQUIRED" in source
     assert "PENDING_APPROVAL" in source
     assert "create_action_card" in source
     assert "execute_read_command" in source
@@ -69,6 +75,17 @@ def test_v444_portal_selector_is_allowlist_bound_and_secret_free():
     template = PORTAL_TEMPLATE_PATH.read_text(encoding="utf-8")
     assert "/portal/api/llm-profiles" in template
     assert "/portal/api/llm-profile/select" in template
+
+
+def test_portal_llm_control_plane_reads_clear_agent_context():
+    source = VISUALIZATION_SERVER_PATH.read_text(encoding="utf-8")
+    for function in (
+        source.split("def _handle_portal_llm_select", 1)[1].split("def _portal_selected_llm", 1)[0],
+        source.split("def _portal_selected_llm", 1)[1].split("def _handle_portal_chat_send", 1)[0],
+        source.split("elif path == '/portal/api/llm-profiles':", 1)[1].split("elif path == '/portal/api/agent/status':", 1)[0],
+    ):
+        assert "connection.set_agent_context(None)" in function
+        assert "connection.get_current_agent_id()" in function
 
 
 def test_v444_node_credentials_are_not_part_of_persisted_contract():

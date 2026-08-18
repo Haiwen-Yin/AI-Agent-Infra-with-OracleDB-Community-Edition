@@ -271,6 +271,87 @@ def _management_template_markdown(knowledge: Dict[str, Any]) -> str:
     ])
 
 
+def _platform_command_help_markdown(help_payload: Dict[str, Any], language: str = "zh") -> str:
+    """Render command help directly from the database registry payload."""
+    item = help_payload.get("item")
+    if isinstance(item, dict):
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        name = str(metadata.get("name_zh" if language == "zh" else "name_en") or item.get("command_key") or "")
+        summary = str(metadata.get("summary_zh" if language == "zh" else "summary_en") or "")
+        return "\n".join([
+            "## 平台命令帮助" if language == "zh" else "## Platform command help", "",
+            f"- **{item.get('command_key')}** · {name}",
+            f"- **{'格式' if language == 'zh' else 'Syntax'}**: `{item.get('example')}`",
+            f"- **{'风险等级' if language == 'zh' else 'Risk'}**: {item.get('risk_level')}",
+            f"- **{'执行状态' if language == 'zh' else 'Execution'}**: {item.get('execution_mode')} / {item.get('executor_state')}",
+            f"- {summary}",
+            f"- **{'边界' if language == 'zh' else 'Boundary'}**: " + (
+                "该命令不因聊天文本或模型输出获得额外权限；需要变更时仍以操作卡和审批结果为准。"
+                if language == "zh" else
+                "Chat text and model output do not add authority; governed Action Cards and approvals remain authoritative."
+            ),
+        ])
+    items = help_payload.get("items") if isinstance(help_payload.get("items"), list) else []
+    rows = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        name = str(metadata.get("name_zh" if language == "zh" else "name_en") or entry.get("command_key") or "")
+        rows.append(f"- **{entry.get('command_key')}** · {name} · `{entry.get('risk_level')}` · `{entry.get('execution_mode')}`")
+    return "\n".join([
+        "## 平台命令帮助" if language == "zh" else "## Platform command help", "",
+        *(rows or [(("- 暂无可用命令。") if language == "zh" else "- No usable commands.")]),
+        "",
+        "> " + (
+            "输入 /platform HELP <COMMAND_KEY> 查看单个命令格式。命令发现按当前管理员权限过滤。"
+            if language == "zh" else
+            "Enter /platform HELP <COMMAND_KEY> for command-specific syntax. Discovery is filtered by the administrator's authority."
+        ),
+    ])
+
+
+def _platform_command_result_markdown(command: Dict[str, Any], language: str = "zh") -> str:
+    """Render a credential-free, deterministic platform command result."""
+    command_key = str(command.get("command_type") or "PLATFORM_COMMAND").upper()
+    status = str(command.get("status") or "UNKNOWN").upper()
+    result = command.get("result") if isinstance(command.get("result"), dict) else {}
+    if language == "zh":
+        title = "平台命令结果"
+        command_label = "命令"
+        status_label = "状态"
+        result_label = "结果"
+        scope_labels = {
+            "database_control_plane": "数据库控制平面",
+        }
+    else:
+        title = "Platform command result"
+        command_label = "Command"
+        status_label = "Status"
+        result_label = "Result"
+        scope_labels = {
+            "database_control_plane": "database control plane",
+        }
+    lines = [
+        f"## {title}",
+        "",
+        f"- **{command_label}**：`{command_key}`",
+        f"- **{status_label}**：`{status}`",
+        "",
+        f"### {result_label}",
+    ]
+    if result.get("status") == "ok":
+        scope = str(result.get("scope") or "")
+        if language == "zh":
+            lines.append(f"- 检查通过，范围：{scope_labels.get(scope, scope or '数据库控制平面')}。")
+        else:
+            lines.append(f"- Check passed, scope: {scope_labels.get(scope, scope or 'database control plane')}.")
+    else:
+        for key, value in result.items():
+            lines.append(f"- `{key}`: `{value}`")
+    return "\n".join(lines)
+
+
 def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dict[str, Any],
                             output: Optional[Dict[str, Any]] = None, failure: str = "") -> None:
     """Return a managed runtime result to the protected Channel once only."""
@@ -313,8 +394,10 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         profile = _llm_profile(str(agent.get("llm_profile_id") or ""))
         status_snapshot = input_payload.get("management_status_snapshot") if isinstance(input_payload, dict) else None
         template_knowledge = input_payload.get("management_template_knowledge") if isinstance(input_payload, dict) else None
+        command_help = input_payload.get("platform_command_help") if isinstance(input_payload, dict) else None
+        command_result = input_payload.get("platform_command_result") if isinstance(input_payload, dict) else None
         response_language = "zh" if str(input_payload.get("response_language") or "en") == "zh" else "en"
-        if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict):
+        if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict) and not isinstance(command_help, dict) and not isinstance(command_result, dict):
             raise RuntimeError("Agent has no active LLM Provider Profile")
         dispatch = _channel_dispatch(input_payload)
         if dispatch:
@@ -325,6 +408,10 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
             )
             if isinstance(template_knowledge, dict):
                 output = {"content": _management_template_markdown(template_knowledge), "model": "database-control-plane"}
+            elif isinstance(command_help, dict):
+                output = {"content": _platform_command_help_markdown(command_help, response_language), "model": "database-control-plane"}
+            elif isinstance(command_result, dict):
+                output = {"content": _platform_command_result_markdown(command_result, response_language), "model": "database-control-plane"}
             elif isinstance(status_snapshot, dict):
                 output = {"content": _management_status_markdown(status_snapshot, response_language), "model": "database-control-plane"}
             else:

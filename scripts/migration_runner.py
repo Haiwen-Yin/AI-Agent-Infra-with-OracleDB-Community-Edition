@@ -51,6 +51,9 @@ from live_db_validator import (
     V446_MIGRATION_SCRIPTS,
     V446_IDENTITY_PORTAL_GRAPH_TABLES,
     V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS,
+    V448_MIGRATION_SCRIPTS,
+    V448_PLATFORM_AGENT_ISOLATION_TABLES,
+    V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS,
     V443_SECURITY_DOMAIN_TABLES,
     V443_SECURITY_DOMAIN_REQUIRED_COLUMNS,
     _load_database_config,
@@ -110,8 +113,9 @@ SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS = frozenset({"4.4.3"})
 AGENT_POOL_CLOUD_MIGRATION_VERSIONS = frozenset({"4.4.4"})
 GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS = frozenset({"4.4.5"})
 IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
+PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS | PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS
 )
 
 # v4.4.1 was exercised against the retained PostgreSQL and YashanDB test
@@ -717,6 +721,36 @@ def _schema_columns_complete(cursor: Any, database: str, required: dict[str, fro
     return True
 
 
+def _v448_pg_security_domain_complete(cursor: Any) -> bool:
+    """Verify the stricter v4.4.8 PostgreSQL identity function is live."""
+    cursor.execute(
+        "SELECT p.proname, pg_get_functiondef(p.oid) "
+        "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+        "WHERE n.nspname='public' AND p.proname IN ("
+        "'current_agent_identity','cx_channel_domain_member','cx_agent_channel_member')"
+    )
+    bodies = {str(row[0]).lower(): str(row[1] or "") for row in cursor.fetchall()}
+    identity = bodies.get("current_agent_identity", "")
+    return (
+        "agent_db_identity" in identity
+        and "where not exists" in identity
+        and "current_agent_identity" in bodies.get("cx_agent_channel_member", "")
+        and "cx_channel_domain_member" in bodies.get("cx_agent_channel_member", "")
+    )
+
+
+def _v448_oracle_context_setter_complete(cursor: Any) -> bool:
+    """Verify the Oracle setter no longer accepts arbitrary End User identity."""
+    cursor.execute(
+        "SELECT TEXT FROM USER_SOURCE WHERE NAME='SET_AGENT_CONTEXT' AND TYPE='PACKAGE BODY' ORDER BY LINE"
+    )
+    source = "\n".join(str(row[0] or "") for row in cursor.fetchall()).lower()
+    return (
+        "ora_end_user_context.username" in source
+        and "agent identity does not match the trusted end user" in source
+    )
+
+
 def _channel_objects_complete(cursor: Any, database: str) -> bool:
     present = _schema_tables(cursor, database)
     return CHANNEL_REQUIRED_TABLES <= present and _schema_columns_complete(
@@ -778,6 +812,17 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
+    if MIGRATION_VERSION in PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS:
+        present = _schema_tables(cursor, database)
+        return set(V448_PLATFORM_AGENT_ISOLATION_TABLES) <= present and _schema_columns_complete(
+            cursor, database,
+            {
+                **V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS,
+                **V445_GRAPH_RUN_REQUIRED_COLUMNS,
+                **V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS,
+            },
+            present,
+        )
     if MIGRATION_VERSION in IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS:
         present = _schema_tables(cursor, database)
         return set(V446_IDENTITY_PORTAL_GRAPH_TABLES) <= present and _schema_columns_complete(
@@ -1160,6 +1205,12 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         return set(V443_SECURITY_DOMAIN_TABLES) <= present and _schema_columns_complete(
             cursor, database, V443_SECURITY_DOMAIN_REQUIRED_COLUMNS, present,
         )
+    if key == "48_v4_4_8_platform_agent_isolation":
+        return _objects_complete(cursor, database) and (
+            database != "oracle" or _v448_oracle_context_setter_complete(cursor)
+        )
+    if key == "49_v4_4_8_security_domain_rls":
+        return _v448_pg_security_domain_complete(cursor)
     return True
 
 
@@ -1432,6 +1483,15 @@ def _v446_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v448_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    names = _v446_script_names(database, config_path, edition)
+    if "48_v4_4_8_platform_agent_isolation.sql" not in names:
+        names.append("48_v4_4_8_platform_agent_isolation.sql")
+    if database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in names:
+        names.append("49_v4_4_8_security_domain_rls.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1566,7 +1626,7 @@ def _error_code(exc: Exception) -> str:
 
 def _is_existing_object(exc: Exception) -> bool:
     code = _error_code(exc).lstrip("-")
-    if code in {"955", "1430", "1408", "2043", "2261"}:
+    if code in {"955", "1430", "1408", "1927", "2043", "2261"}:
         return True
     message = str(exc).lower()
     return any(fragment in message for fragment in (
@@ -1610,10 +1670,25 @@ def _apply_statement_migration(
                             _script_key(script) == "37_v4_4_2_embedding_graph_operations"
                             and not _step_objects_complete(cursor, database, script)
                         )
-                        if additive_upgrade or native_sdd_repair or admin_ha_repair or graph_operations_repair:
+                        v448_isolation_repair = (
+                            _script_key(script) == "48_v4_4_8_platform_agent_isolation"
+                            and not _step_objects_complete(cursor, database, script)
+                        )
+                        v448_pg_domain_repair = (
+                            database == "pg"
+                            and _script_key(script) == "49_v4_4_8_security_domain_rls"
+                            and not _step_objects_complete(cursor, database, script)
+                        )
+                        if (
+                            additive_upgrade or native_sdd_repair or admin_ha_repair
+                            or graph_operations_repair or v448_isolation_repair
+                            or v448_pg_domain_repair
+                        ):
                             # Continue below and replay the idempotent script. The
                             # early v4.3 draft is not accepted as complete until
                             # every fencing/claim column is present.
+                            pass
+                        elif v448_isolation_repair:
                             pass
                         elif _legacy_v441_step_compatible(cursor, database, script, existing["checksum"]):
                             _upsert_step_row(
@@ -1873,7 +1948,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -1943,6 +2018,8 @@ def main() -> int:
             script_names = _v445_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.4.6":
             script_names = _v446_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.8":
+            script_names = _v448_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

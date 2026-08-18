@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import admin_ha, containment, connection, identity_api, native_agent_api, platform_agent_pool
+from . import admin_ha, compliance_api, containment, connection, identity_api, native_agent_api, platform_agent_pool
 
 ADMIN_CHANNEL_NAME = "PLATFORM_ADMINISTRATION"
 ADMIN_CHANNEL_ID = "CH_PLATFORM_ADMINISTRATION"
@@ -124,7 +124,7 @@ def initialize() -> Dict[str, Any]:
         management_agents = [native_agent_api.PLATFORM_ADMIN_AGENT_ID]
         if native_agent_api._enterprise():
             management_agents.append(native_agent_api.COMPLIANCE_ADMIN_AGENT_ID)
-        principals = _admin_principals(tx) + management_agents
+        principals = _admin_principals(tx) + management_agents + [compliance_api.COMPLIANCE_SERVICE_ID]
         created = []
         for principal_id in principals:
             principal = _row(tx.query_one("SELECT PRINCIPAL_ID,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE", {"id": principal_id}))

@@ -1602,6 +1602,41 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   background: var(--surface);
   box-shadow: 0 5px 16px color-mix(in srgb, var(--ink) 12%, transparent);
 }
+.platform-command-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 19px 8px;
+}
+.platform-command-panel {
+  display: grid;
+  gap: 6px;
+  margin: 0 19px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  max-height: 260px;
+  overflow: auto;
+}
+.platform-command-panel > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+}
+.platform-command-panel > button:hover,
+.platform-command-menu button:hover {
+  border-color: var(--brand);
+}
+.platform-command-menu button span,
+.platform-command-panel > button span {
+  min-width: 0;
+}
 .mention-menu button {
   display: flex;
   min-width: 0;

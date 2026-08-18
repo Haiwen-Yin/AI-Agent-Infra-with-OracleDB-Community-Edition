@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.7">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.8">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.7 - Portal Login</title>
+<title>Chuanxu Oracle Community v4.4.8 - Portal Login</title>
 <link rel="stylesheet" href="/static/pages/portal_login.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -80,7 +80,7 @@
     <div class="error-msg" id="mfaError"></div>
   </div>
 
-  <div class="version-badge">Oracle Community v4.4.7</div>
+  <div class="version-badge">Oracle Community v4.4.8</div>
 </div>
 
 <script>
@@ -126,6 +126,17 @@ function responseJson(response,fallback){
     if(!response.ok)throw new Error(data.detail||data.error||fallback);
     return data;
   });
+}
+
+function portalLoginError(error){
+  var zh=document.documentElement.getAttribute('data-lang')==='zh';
+  if(error==='Portal connection limit reached'){
+    return zh?'Portal 连接数已达上限，请先在其他页面退出或等待会话过期':'Portal connection limit reached; log out from another page or wait for the session to expire';
+  }
+  if(error==='Portal connection service unavailable'){
+    return zh?'Portal 连接服务不可用，请稍后重试':'Portal connection service is unavailable; try again later';
+  }
+  return error||(zh?'登录失败':'Login failed');
 }
 
 function showMfaSetup(data,username,password){
@@ -209,7 +220,7 @@ function handleLogin(e){
         document.getElementById('loginError').textContent=document.documentElement.getAttribute('data-lang')==='zh'?'暂无可用 Agent，请稍后再试':'No agent available, please try again later';
       }
     }else{
-      document.getElementById('loginError').textContent=d.error||'Login failed';
+      document.getElementById('loginError').textContent=portalLoginError(d.error);
     }
   })
   .catch(function(err){

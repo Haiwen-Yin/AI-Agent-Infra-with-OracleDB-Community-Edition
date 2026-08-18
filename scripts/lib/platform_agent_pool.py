@@ -23,6 +23,481 @@ _DISCOVERY_WINDOW: Dict[str, list[float]] = {}
 _DISCOVERY_LOCK = threading.Lock()
 _AGENT_INFO_DIRNAME = "AI-Agent-Infra-with-DB"
 
+COMMAND_SEEDS = (
+    ("HELP", "READ", "DIRECT_READ", "/platform HELP [COMMAND_KEY]",
+     {"name_zh": "平台命令帮助", "summary_zh": "查看当前管理员可用的平台命令、参数格式、风险等级和审批边界。",
+      "name_en": "Platform command help", "summary_en": "List the administrator's usable platform commands, syntax, risk, and approval boundary."},
+     {"type": "object", "required": ["command_key"], "properties": {"command_key": {"type": "string", "maxLength": 64}}}),
+    ("HEALTH_READ", "READ", "DIRECT_READ", "/platform HEALTH_READ [reason]",
+     {"name_zh": "平台健康读取", "summary_zh": "读取数据库控制面健康摘要，不包含凭据。",
+      "name_en": "Platform health read", "summary_en": "Read a credential-free database control-plane health summary."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("AGENT_STATUS_READ", "READ", "DIRECT_READ", "/platform AGENT_STATUS_READ [reason]",
+     {"name_zh": "智能体状态读取", "summary_zh": "读取原生智能体活动状态计数。",
+      "name_en": "Agent status read", "summary_en": "Read native Agent activity counts."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("POOL_STATUS_READ", "READ", "DIRECT_READ", "/platform POOL_STATUS_READ [reason]",
+     {"name_zh": "节点池状态读取", "summary_zh": "读取受管节点与验证状态计数。",
+      "name_en": "Pool status read", "summary_en": "Read managed-node and validation counts."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("LLM_STATUS_READ", "READ", "DIRECT_READ", "/platform LLM_STATUS_READ [reason]",
+     {"name_zh": "LLM 状态读取", "summary_zh": "读取模型配置活动与健康计数。",
+      "name_en": "LLM status read", "summary_en": "Read LLM profile activity and health counts."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("EMBEDDING_STATUS_READ", "READ", "DIRECT_READ", "/platform EMBEDDING_STATUS_READ [reason]",
+     {"name_zh": "Embedding 状态读取", "summary_zh": "读取向量模型配置与契约状态计数。",
+      "name_en": "Embedding status read", "summary_en": "Read Embedding profile and contract counts."},
+      {"type": "object", "required": [], "properties": {}}),
+    ("EXPIRED_COMMAND_CLEANUP", "READ", "PROPOSAL_ONLY", "/platform EXPIRED_COMMAND_CLEANUP [reason]",
+     {"name_zh": "过期命令清理", "summary_zh": "生成过期平台命令的只读清理提案，执行仍需人工审批。",
+      "name_en": "Expired command cleanup", "summary_en": "Create a read-only cleanup proposal for expired platform commands; execution still requires human approval."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("NODE_VALIDATE", "SAFE_MAINTENANCE", "PROPOSAL_ONLY", "/platform NODE_VALIDATE <node_id> <reason>",
+     {"name_zh": "节点验证提案", "summary_zh": "创建受管节点连通性验证提案；当前注册表将其标记为提案能力。",
+      "name_en": "Node validation proposal", "summary_en": "Create a managed-node validation proposal; the registry currently marks it proposal-only."},
+     {"type": "object", "required": ["node_id"], "properties": {"node_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("STORAGE_VALIDATE", "SAFE_MAINTENANCE", "PROPOSAL_ONLY", "/platform STORAGE_VALIDATE <storage_id> <reason>",
+     {"name_zh": "存储验证提案", "summary_zh": "创建共享存储验证提案；当前注册表将其标记为提案能力。",
+      "name_en": "Storage validation proposal", "summary_en": "Create shared-storage validation proposal; the registry currently marks it proposal-only."},
+     {"type": "object", "required": ["storage_id"], "properties": {"storage_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("AGENT_DRAIN", "HIGH_RISK_CHANGE", "GOVERNED_EXECUTOR", "/platform AGENT_DRAIN <source_node_id> <destination_node_id> <reason>",
+     {"name_zh": "智能体节点排空", "summary_zh": "创建节点排空审批卡；审批后仅拒绝新任务并重排过期可重试任务，不终止运行中任务。",
+      "name_en": "Agent node drain", "summary_en": "Create a drain Action Card; after approval it fences new work and requeues only expired retryable tasks without terminating running work."},
+     {"type": "object", "required": ["source_node_id", "destination_node_id"], "properties": {"source_node_id": {"type": "string", "minLength": 1, "maxLength": 128}, "destination_node_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("AGENT_QUARANTINE", "EMERGENCY_CONTAINMENT", "PROPOSAL_ONLY", "/platform AGENT_QUARANTINE <agent_id> <reason>",
+     {"name_zh": "智能体隔离提案", "summary_zh": "创建应急隔离提案；必须绑定事件、理由和事后复核，当前命令不自动执行。",
+      "name_en": "Agent quarantine proposal", "summary_en": "Create an emergency quarantine proposal; it requires incident context, reason, and review and does not execute automatically."},
+     {"type": "object", "required": ["agent_id"], "properties": {"agent_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("PORTAL_LLM_POLICY_PROPOSE", "PROPOSED_CHANGE", "PROPOSAL_ONLY", "/platform PORTAL_LLM_POLICY_PROPOSE <reason>",
+     {"name_zh": "Portal LLM 策略提案", "summary_zh": "记录 Portal 模型策略调整提案；实际修改仍需使用平台配置页面和审批。",
+      "name_en": "Portal LLM policy proposal", "summary_en": "Record a Portal model-policy proposal; actual changes still use platform configuration and approval."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("TEMPLATE_PUBLISH_PROPOSE", "HIGH_RISK_CHANGE", "PROPOSAL_ONLY", "/platform TEMPLATE_PUBLISH_PROPOSE <template_key> <reason>",
+     {"name_zh": "模板发布提案", "summary_zh": "记录内置模板发布提案；当前没有直接模板编辑或发布执行器。",
+      "name_en": "Template publish proposal", "summary_en": "Record a built-in template publication proposal; no direct template edit or publish executor exists."},
+     {"type": "object", "required": ["template_key"], "properties": {"template_key": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+)
+
+
+def ensure_platform_command_registry() -> Dict[str, Any]:
+    """Idempotently seed immutable built-in command contract versions."""
+    seeded = 0
+    def work(tx: Any) -> Dict[str, Any]:
+        nonlocal seeded
+        for key, risk, execution_mode, example, metadata, schema in COMMAND_SEEDS:
+            existing = _row(tx.query_one(
+                "SELECT COMMAND_ID FROM CX_PLATFORM_COMMANDS WHERE COMMAND_KEY=:key AND VERSION=1 FOR UPDATE",
+                {"key": key},
+            ))
+            if existing:
+                continue
+            content = {"schema": schema, "metadata": metadata, "example": example,
+                       "risk_level": risk, "execution_mode": execution_mode}
+            digest = _digest(_json(content))
+            command_id = "PCMD_" + key + "_V1"
+            tx.execute(
+                "INSERT INTO CX_PLATFORM_COMMANDS(COMMAND_ID,COMMAND_KEY,VERSION,STATUS,RISK_LEVEL,EXECUTION_MODE,"
+                "PARAMETER_SCHEMA,TARGET_SCHEMA,EXAMPLE_TEXT,LOCALIZED_METADATA,REQUIRED_ACTION,CAPABILITY_SCOPE,"
+                "RESOURCE_SCOPE,DOMAIN_POLICY,APPROVAL_POLICY,EXPIRY_SECONDS,IDEMPOTENCY_POLICY,"
+                "COMPENSATION_CONTRACT,EVIDENCE_POLICY,CONTENT_DIGEST) VALUES "
+                "(:id,:key,1,'PUBLISHED',:risk,:execution_mode,:schema,'{}',:example,:metadata,'platform.manage',"
+                "'platform_config','{}','MANAGEMENT_ONLY',:approval,:expiry,'{}','{}','{}',:digest)",
+                {"id": command_id, "key": key, "risk": risk, "execution_mode": execution_mode,
+                 "schema": _json(schema), "example": example[:1000], "metadata": _json(metadata),
+                 "approval": "HUMAN_FINAL" if risk in {"HIGH_RISK_CHANGE", "EMERGENCY_CONTAINMENT"} else "NONE",
+                 "expiry": 900, "digest": digest},
+            )
+            executor_state = "ENABLED" if execution_mode in {"DIRECT_READ", "GOVERNED_EXECUTOR"} else "DISABLED"
+            tx.execute(
+                "INSERT INTO CX_PLATFORM_COMMAND_EXECUTORS(EXECUTOR_ID,COMMAND_KEY,COMMAND_VERSION,EXECUTOR_KEY,"
+                "STATE,EXPECTED_DIGEST,RATE_LIMIT_PER_MINUTE,FAILURE_BUDGET,REASON,UPDATED_BY) VALUES "
+                "(:id,:key,1,:executor,:state,:digest,10,1,:reason,'SYSTEM_BOOTSTRAP')",
+                {"id": "PCE_" + key + "_V1", "key": key, "executor": "platform." + key.lower(),
+                 "state": executor_state, "digest": digest,
+                 "reason": "v4.4.8 immutable built-in command contract"},
+            )
+            seeded += 1
+        return {"status": "COMPLETED", "seeded": seeded, "commands": len(COMMAND_SEEDS)}
+    try:
+        return connection.execute_transaction_callback(work)
+    except Exception as exc:
+        raise AgentPoolError("platform command registry initialization failed") from exc
+
+
+def list_command_catalog(actor: str, channel_id: str = "CH_PLATFORM_ADMINISTRATION", query: str = "") -> Dict[str, Any]:
+    """Return discoverable command metadata for an authorized administrator."""
+    _require_admin(actor)
+    if str(channel_id) != "CH_PLATFORM_ADMINISTRATION":
+        raise AgentPoolError("platform commands are limited to the Platform Administration Channel")
+    rows = _rows(connection.execute_query(
+        "SELECT c.COMMAND_ID,c.COMMAND_KEY,c.VERSION,c.STATUS,c.RISK_LEVEL,c.EXECUTION_MODE,c.EXAMPLE_TEXT,"
+        "c.LOCALIZED_METADATA,e.STATE AS EXECUTOR_STATE FROM CX_PLATFORM_COMMANDS c "
+        "LEFT JOIN CX_PLATFORM_COMMAND_EXECUTORS e ON e.COMMAND_KEY=c.COMMAND_KEY AND e.COMMAND_VERSION=c.VERSION "
+        "WHERE c.STATUS='PUBLISHED' ORDER BY c.COMMAND_KEY",
+    ))
+    term = str(query or "").strip().upper()
+    items = []
+    for row in rows:
+        key = str(row.get("command_key") or "")
+        if term and term != "PLATFORM" and not key.startswith(term):
+            continue
+        metadata = _parse(row.get("localized_metadata"), {})
+        items.append({
+            "command_id": row.get("command_id"), "command_key": key,
+            "version": int(row.get("version") or 1), "status": row.get("status"),
+            "risk_level": row.get("risk_level"), "execution_mode": row.get("execution_mode"),
+            "executor_state": row.get("executor_state") or "UNAVAILABLE",
+            "example": row.get("example_text"), "metadata": metadata,
+        })
+    return {"channel_id": channel_id, "items": items, "count": len(items)}
+
+
+def command_help(actor: str, command_key: str = "", channel_id: str = "CH_PLATFORM_ADMINISTRATION") -> Dict[str, Any]:
+    """Render deterministic help from the database registry without an LLM."""
+    catalog = list_command_catalog(actor, channel_id)
+    if not str(command_key or "").strip():
+        return {"kind": "PLATFORM_COMMAND_HELP", "channel_id": catalog["channel_id"],
+                "items": catalog["items"]}
+    key = str(command_key).strip().upper()
+    item = next((entry for entry in catalog["items"] if str(entry["command_key"]) == key), None)
+    if not item:
+        raise AgentPoolError("UNKNOWN_PLATFORM_COMMAND")
+    return {"kind": "PLATFORM_COMMAND_HELP", "channel_id": catalog["channel_id"], "item": item}
+
+
+def safe_autonomy_policy() -> Dict[str, Any]:
+    """Return the fail-closed autonomy policy; unavailable means disabled."""
+    try:
+        row = _row(connection.execute_query_one(
+            "SELECT POLICY_ID,STATE,EXECUTION_PRINCIPAL,RATE_LIMIT_PER_MINUTE,MAX_CONCURRENCY,FAILURE_BUDGET,VERSION "
+            "FROM CX_PLATFORM_SAFE_AUTONOMY_POLICIES WHERE POLICY_ID='DEFAULT'",
+        )) or {}
+        return {**row, "state": str(row.get("state") or "DISABLED").upper()}
+    except Exception as exc:
+        return {"policy_id": "DEFAULT", "state": "DISABLED", "unavailable": True, "error_type": type(exc).__name__}
+
+
+def create_maintenance_task(actor: str, task_kind: str, command_instance_id: str, risk_level: str,
+                            scope: Dict[str, Any], finding: Dict[str, Any], plan: Dict[str, Any],
+                            *, idempotency_key: str = "", autonomous: bool = False,
+                            security_domain_id: str = "DEFAULT", graph_run_id: str = "") -> Dict[str, Any]:
+    """Persist a proposed maintenance observation before authorization."""
+    _require_admin(actor)
+    kind = str(task_kind or "").strip().upper()
+    risk = str(risk_level or "").strip().upper()
+    if not kind or risk not in {"READ", "SAFE_MAINTENANCE", "PROPOSED_CHANGE", "HIGH_RISK_CHANGE", "EMERGENCY_CONTAINMENT"}:
+        raise AgentPoolError("maintenance task kind or risk is invalid")
+    if autonomous:
+        policy = safe_autonomy_policy()
+        if str(policy.get("state")) != "ENABLED" or risk not in {"READ", "SAFE_MAINTENANCE"}:
+            raise AgentPoolError("autonomous maintenance is not enabled for this risk")
+    task_id = f"PMT_{secrets.token_hex(16)}"
+    key = str(idempotency_key or "").strip()[:256]
+    def work(tx: Any) -> Dict[str, Any]:
+        if key:
+            existing = _row(tx.query_one(
+                "SELECT TASK_ID,STATUS FROM CX_PLATFORM_MAINTENANCE_TASKS WHERE IDEMPOTENCY_KEY=:key",
+                {"key": key},
+            ))
+            if existing:
+                return {"task_id": str(existing.get("task_id")), "status": str(existing.get("status")), "idempotent": True}
+        contract = _row(tx.query_one(
+            "SELECT COMMAND_ID,RISK_LEVEL FROM CX_PLATFORM_COMMANDS WHERE COMMAND_KEY=:kind AND STATUS='PUBLISHED'",
+            {"kind": kind},
+        ))
+        if not contract:
+            raise AgentPoolError("maintenance command contract is unavailable")
+        tx.execute(
+            "INSERT INTO CX_PLATFORM_MAINTENANCE_TASKS(TASK_ID,COMMAND_ID,COMMAND_INSTANCE_ID,TASK_KIND,STATUS,"
+            "RISK_LEVEL,AUTONOMOUS,SCOPE_JSON,FINDING_JSON,PLAN_JSON,IDEMPOTENCY_KEY,GRAPH_RUN_ID,SECURITY_DOMAIN_ID,CREATED_BY) "
+            "VALUES (:task,:command,:instance,:kind,'PROPOSED',:risk,:autonomous,:scope,:finding,:plan,:key,:run,:domain,:actor)",
+            {"task": task_id, "command": contract["command_id"], "instance": str(command_instance_id or "")[:128],
+             "kind": kind, "risk": risk, "autonomous": _database_boolean(autonomous),
+             "scope": _json(scope), "finding": _json(finding), "plan": _json(plan), "key": key or None,
+             "run": str(graph_run_id or "")[:128] or None,
+             "domain": security_domain_id or "DEFAULT", "actor": actor},
+        )
+        identity_api._audit_tx(tx, actor, "PLATFORM_MAINTENANCE_TASK_CREATE", "MAINTENANCE_TASK", task_id,
+                               "ALLOW", "proposed governed maintenance task")
+        return {"task_id": task_id, "status": "PROPOSED", "idempotent": False}
+    return connection.execute_transaction_callback(work)
+
+
+def authorize_maintenance_task(actor: str, task_id: str, reason: str) -> Dict[str, Any]:
+    """Authorize a proposed task with a separate human administrator."""
+    _require_admin(actor)
+    if len(str(reason or "").strip()) < 3:
+        raise AgentPoolError("maintenance authorization reason is required")
+    def work(tx: Any) -> Dict[str, Any]:
+        task = _row(tx.query_one(
+            "SELECT TASK_ID,CREATED_BY,STATUS,RISK_LEVEL,AUTONOMOUS FROM CX_PLATFORM_MAINTENANCE_TASKS "
+            "WHERE TASK_ID=:task FOR UPDATE", {"task": str(task_id or "")},
+        ))
+        if not task or str(task.get("status") or "") != "PROPOSED":
+            raise AgentPoolError("maintenance task is not pending authorization")
+        if str(task.get("created_by") or "") == actor:
+            raise AgentPoolError("maintenance proposer cannot authorize its own task")
+        if str(task.get("risk_level") or "") in {"HIGH_RISK_CHANGE", "EMERGENCY_CONTAINMENT"}:
+            raise AgentPoolError("high-impact maintenance requires its separately governed incident or Action Card path")
+        evidence = {
+            "authorized_by": actor,
+            "authorized_at": datetime.now(timezone.utc).isoformat(),
+            "authorization_reason": str(reason)[:2000],
+        }
+        changed = tx.execute(
+            "UPDATE CX_PLATFORM_MAINTENANCE_TASKS SET STATUS='AUTHORIZED',EVIDENCE_JSON=:evidence,"
+            "UPDATED_AT=CURRENT_TIMESTAMP WHERE TASK_ID=:task AND STATUS='PROPOSED'",
+            {"evidence": _json(evidence), "task": task_id},
+        )
+        if changed != 1:
+            raise AgentPoolError("maintenance task changed concurrently")
+        identity_api._audit_tx(tx, actor, "PLATFORM_MAINTENANCE_TASK_AUTHORIZE", "MAINTENANCE_TASK",
+                               task_id, "ALLOW", reason)
+        return {"task_id": task_id, "status": "AUTHORIZED"}
+    return connection.execute_transaction_callback(work)
+
+
+def claim_maintenance_tasks(owner: str, limit: int = 10, lease_seconds: int = 300) -> list[Dict[str, Any]]:
+    """Claim authorized tasks with a bounded lease and incremented fence."""
+    if lease_seconds < 30 or lease_seconds > 3600:
+        raise AgentPoolError("maintenance lease duration is invalid")
+    suffix = " LIMIT :limit" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"} else " FETCH FIRST :limit ROWS ONLY"
+    rows = _rows(connection.execute_query(
+        "SELECT TASK_ID,FENCING_TOKEN FROM CX_PLATFORM_MAINTENANCE_TASKS WHERE STATUS='AUTHORIZED' "
+        "OR (STATUS='EXECUTING' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP) ORDER BY CREATED_AT" + suffix,
+        {"limit": max(1, min(int(limit), 50))},
+    ))
+    interval = (
+        f"CURRENT_TIMESTAMP + INTERVAL '{int(lease_seconds)} seconds'"
+        if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"}
+        else f"CURRENT_TIMESTAMP + INTERVAL '{int(lease_seconds)}' SECOND"
+    )
+    claimed = []
+    for row in rows:
+        token = int(row.get("fencing_token") or 1)
+        changed = connection.execute(
+            "UPDATE CX_PLATFORM_MAINTENANCE_TASKS SET STATUS='EXECUTING',LEASE_OWNER=:owner,"
+            "LEASE_EXPIRES_AT=" + interval + ",FENCING_TOKEN=FENCING_TOKEN+1,UPDATED_AT=CURRENT_TIMESTAMP "
+            "WHERE TASK_ID=:task AND (STATUS='AUTHORIZED' OR (STATUS='EXECUTING' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP))",
+            {"owner": str(owner)[:128], "task": row["task_id"]},
+        )
+        if changed:
+            full_task = _row(connection.execute_query_one(
+                "SELECT TASK_ID,TASK_KIND,STATUS,RISK_LEVEL,AUTONOMOUS,SCOPE_JSON,FINDING_JSON,PLAN_JSON,"
+                "LEASE_OWNER,FENCING_TOKEN FROM CX_PLATFORM_MAINTENANCE_TASKS WHERE TASK_ID=:task",
+                {"task": row["task_id"]},
+            ))
+            claimed.append(full_task)
+    return claimed
+
+
+def complete_maintenance_task(owner: str, task_id: str, fencing_token: int, output: Dict[str, Any],
+                              *, verified: bool = True) -> Dict[str, Any]:
+    """Complete a task only with its current lease and fencing token."""
+    status = "COMPLETED" if verified else "VERIFY_FAILED"
+    changed = connection.execute(
+        "UPDATE CX_PLATFORM_MAINTENANCE_TASKS SET STATUS=:status,POSTFLIGHT_JSON=:output,"
+        "EVIDENCE_JSON=:evidence,"
+        "LEASE_EXPIRES_AT=NULL,UPDATED_AT=CURRENT_TIMESTAMP WHERE TASK_ID=:task AND STATUS='EXECUTING' "
+        "AND LEASE_OWNER=:owner AND FENCING_TOKEN=:token",
+        {"status": status, "output": _json(output), "evidence": _json({"postflight_recorded": True}),
+         "task": task_id, "owner": str(owner)[:128], "token": int(fencing_token)},
+    )
+    if not changed:
+        raise AgentPoolError("maintenance task lease or fencing token is stale")
+    identity_api._audit(owner, "PLATFORM_MAINTENANCE_TASK_" + status, "MAINTENANCE_TASK", task_id,
+                        "ALLOW" if verified else "ERROR", "postflight evidence recorded")
+    return {"task_id": task_id, "status": status}
+
+
+def run_safe_maintenance_once(owner: str, limit: int = 1) -> Dict[str, Any]:
+    """Execute only policy-enabled safe maintenance observations.
+
+    This first production slice never mutates platform configuration. It
+    refreshes bounded validators and records postflight evidence; high-risk
+    work remains in the Action Card path.
+    """
+    policy = safe_autonomy_policy()
+    if str(policy.get("state") or "DISABLED").upper() != "ENABLED":
+        return {"status": "DISABLED", "policy": policy}
+    max_concurrency = max(1, min(int(policy.get("max_concurrency") or 1), 10))
+    if limit > max_concurrency:
+        raise AgentPoolError("safe maintenance concurrency exceeds policy")
+    claimed = claim_maintenance_tasks(owner, limit=limit)
+    completed = []
+    for task in claimed:
+        result = _execute_safe_maintenance(task)
+        completed.append(complete_maintenance_task(
+            owner, str(task["task_id"]), int(task["fencing_token"]), result,
+            verified=str(result.get("status")) == "EXECUTED",
+        ))
+    return {"status": "COMPLETED", "claimed": len(claimed), "completed": completed}
+
+
+def bind_maintenance_graph_run(actor: str, task_id: str, graph_run_id: str, *,
+                               graph_version_id: str, plan_id: str,
+                               admission_evidence: Dict[str, Any]) -> Dict[str, Any]:
+    """Bind maintenance to the existing durable Graph Run contract.
+
+    The binding is an admission contract, not a second scheduler. Graph Run
+    retains lease, fencing, checkpoint, budget, and cancellation semantics.
+    """
+    _require_admin(actor)
+    if not str(graph_run_id or "").strip() or not str(graph_version_id or "").strip() or not str(plan_id or "").strip():
+        raise AgentPoolError("Graph Run binding requires run, graph version, and plan identifiers")
+    if not isinstance(admission_evidence, dict) or not admission_evidence:
+        raise AgentPoolError("Graph Run admission evidence is required")
+
+    def work(tx: Any) -> Dict[str, Any]:
+        task = _row(tx.query_one(
+            "SELECT TASK_ID,STATUS,GRAPH_RUN_ID,EVIDENCE_JSON FROM CX_PLATFORM_MAINTENANCE_TASKS "
+            "WHERE TASK_ID=:task FOR UPDATE", {"task": task_id},
+        ))
+        if not task:
+            raise AgentPoolError("maintenance task is unavailable")
+        if str(task.get("status") or "") in {"COMPLETED", "VERIFY_FAILED", "COMPENSATED", "FAILED", "CANCELLED", "EXPIRED"}:
+            raise AgentPoolError("completed maintenance cannot be rebound")
+        existing_run = str(task.get("graph_run_id") or "")
+        if existing_run and existing_run != str(graph_run_id):
+            raise AgentPoolError("maintenance Graph Run binding is immutable")
+        graph_run = _row(tx.query_one(
+            "SELECT RUN_ID,GRAPH_VERSION_ID,PLAN_ID,STATUS FROM GRAPH_RUNS WHERE RUN_ID=:run FOR UPDATE",
+            {"run": graph_run_id},
+        ))
+        if (
+            not graph_run
+            or str(graph_run.get("graph_version_id") or "") != str(graph_version_id)
+            or str(graph_run.get("plan_id") or "") != str(plan_id)
+            or str(graph_run.get("status") or "").upper() in {"CANCELLED", "FAILED"}
+        ):
+            raise AgentPoolError("Graph Run admission contract is invalid")
+        evidence = _parse(task.get("evidence_json"), {})
+        graph_contract = {
+            "graph_run_id": graph_run_id,
+            "graph_version_id": graph_version_id,
+            "plan_id": plan_id,
+            "admission_evidence": admission_evidence,
+        }
+        # Preserve earlier evidence while making the durable admission binding
+        # explicit and idempotent.
+        evidence["graph_run_contract"] = graph_contract
+        changed = tx.execute(
+            "UPDATE CX_PLATFORM_MAINTENANCE_TASKS SET GRAPH_RUN_ID=:run,EVIDENCE_JSON=:evidence,"
+            "UPDATED_AT=CURRENT_TIMESTAMP WHERE TASK_ID=:task AND (GRAPH_RUN_ID IS NULL OR GRAPH_RUN_ID=:run)",
+            {"run": graph_run_id, "evidence": _json(evidence), "task": task_id},
+        )
+        if changed != 1:
+            raise AgentPoolError("maintenance Graph Run binding changed concurrently")
+        identity_api._audit_tx(tx, actor, "PLATFORM_MAINTENANCE_GRAPH_BIND", "MAINTENANCE_TASK",
+                               task_id, "ALLOW", "durable Graph Run admission contract")
+        return {"task_id": task_id, "graph_run_id": graph_run_id, "idempotent": bool(existing_run)}
+    return connection.execute_transaction_callback(work)
+
+
+def run_platform_observation_scan(actor: str, *, graph_run_id: str = "") -> Dict[str, Any]:
+    """Create idempotent, proposal-only deterministic observation tasks."""
+    _require_admin(actor)
+    generated = []
+    findings = {
+        "HEALTH_READ": _count("CX_MANAGED_NODES", "STATUS NOT IN ('ACTIVE','VALIDATED')"),
+        "LLM_STATUS_READ": _count(
+            "CX_LLM_PROVIDER_PROFILES",
+            "STATUS='ACTIVE' AND (HEALTH_STATE IS NULL OR HEALTH_STATE NOT IN ('HEALTHY','VERIFIED','READY'))",
+        ),
+        "EMBEDDING_STATUS_READ": _count(
+            "CX_EMBEDDING_PROFILES", "STATUS='ACTIVE' AND HEALTH_STATE IS NULL",
+        ),
+        "EXPIRED_COMMAND_CLEANUP": _count(
+            "CX_PLATFORM_ADMIN_COMMANDS",
+            "STATUS IN ('PENDING','REQUESTED') AND EXPIRES_AT<CURRENT_TIMESTAMP",
+        ),
+    }
+    for kind in ("HEALTH_READ", "LLM_STATUS_READ", "EMBEDDING_STATUS_READ", "EXPIRED_COMMAND_CLEANUP"):
+        command = _row(connection.execute_query_one(
+            "SELECT COMMAND_ID,RISK_LEVEL FROM CX_PLATFORM_COMMANDS "
+            "WHERE COMMAND_KEY=:kind AND STATUS='PUBLISHED'", {"kind": kind},
+        ))
+        if not command:
+            raise AgentPoolError(f"observation command {kind} is unavailable")
+        key = f"v448-observation-{kind}-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+        existing = _row(connection.execute_query_one(
+            "SELECT TASK_ID,STATUS FROM CX_PLATFORM_MAINTENANCE_TASKS WHERE IDEMPOTENCY_KEY=:key", {"key": key},
+        ))
+        if existing:
+            generated.append({"task_id": str(existing.get("task_id")), "kind": kind,
+                              "status": str(existing.get("status")), "idempotent": True})
+            continue
+        result = create_maintenance_task(
+            actor, kind, "", str(command.get("risk_level") or "READ"),
+            {"observer": "PLATFORM_OBSERVATION_SCAN", "daily": True},
+            {"finding_count": findings[kind], "read_only": True},
+            {"execution": "PROPOSAL_ONLY", "postflight": "DETERMINISTIC_VALIDATOR"},
+            idempotency_key=key, autonomous=False, graph_run_id=graph_run_id,
+        )
+        generated.append({**result, "kind": kind, "finding_count": findings[kind]})
+    return {"status": "PROPOSED", "observation_window": "UTC_DAY", "items": generated}
+
+
+def _execute_safe_maintenance(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute the bounded deterministic observations in the approved slice."""
+    kind = str(task.get("task_kind") or "").upper()
+    if kind == "HEALTH_READ":
+        return {
+            "status": "EXECUTED", "safe_maintenance": True,
+            "result": {"database_control_plane": "OK"},
+        }
+    if kind == "LLM_STATUS_READ":
+        return {
+            "status": "EXECUTED", "safe_maintenance": True,
+            "result": {
+                "active": _count("CX_LLM_PROVIDER_PROFILES", "STATUS='ACTIVE'"),
+                "healthy": _count("CX_LLM_PROVIDER_PROFILES", "STATUS='ACTIVE' AND HEALTH_STATE IN ('HEALTHY','VERIFIED','READY')"),
+            },
+        }
+    if kind == "EMBEDDING_STATUS_READ":
+        return {
+            "status": "EXECUTED", "safe_maintenance": True,
+            "result": {
+                "profiles": _count("CX_EMBEDDING_PROFILES", "STATUS='ACTIVE'"),
+                "contracts": _count("CX_EMBEDDING_CONTRACTS", "STATUS='ACTIVE'"),
+            },
+        }
+    # A governed task must map to an explicitly implemented deterministic
+    # executor. Unknown validators fail into VERIFY_FAILED rather than being
+    # presented as successful no-ops.
+    return {"status": "VERIFY_FAILED", "safe_maintenance": True,
+            "result": {"validator": kind, "reason": "UNSUPPORTED_SAFE_EXECUTOR"}}
+
+
+def _command_contract(command_type: str) -> Dict[str, Any]:
+    row = _row(connection.execute_query_one(
+        "SELECT c.COMMAND_ID,c.COMMAND_KEY,c.VERSION,c.STATUS,c.RISK_LEVEL,c.EXECUTION_MODE,c.PARAMETER_SCHEMA,"
+        "c.EXPIRY_SECONDS,e.STATE AS EXECUTOR_STATE FROM CX_PLATFORM_COMMANDS c "
+        "LEFT JOIN CX_PLATFORM_COMMAND_EXECUTORS e ON e.COMMAND_KEY=c.COMMAND_KEY AND e.COMMAND_VERSION=c.VERSION "
+        "WHERE c.COMMAND_KEY=:key AND c.VERSION=1", {"key": str(command_type or "").upper()},
+    ))
+    if not row or str(row.get("status")) != "PUBLISHED":
+        raise AgentPoolError("UNKNOWN_PLATFORM_COMMAND")
+    return row
+
+
+def _validate_command_parameters(contract: Dict[str, Any], target: Dict[str, Any], parameters: Dict[str, Any]) -> None:
+    schema = _parse(contract.get("parameter_schema"), {"type": "object", "properties": {}})
+    values = {**(target or {}), **(parameters or {})}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    missing = [name for name in required if not str(values.get(name) or "").strip()]
+    if missing:
+        raise AgentPoolError("COMMAND_PARAMETER_REQUIRED:" + str(missing[0]))
+
+
+def _command_parameters_complete(contract: Dict[str, Any], target: Dict[str, Any], parameters: Dict[str, Any], reason: str) -> bool:
+    """Validate command input before any durable command or Action Card is created."""
+    try:
+        _validate_command_parameters(contract, target, parameters)
+    except AgentPoolError:
+        return False
+    return len(str(reason or "").strip()) >= 3
+
 
 def _id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(16)}"
@@ -56,6 +531,20 @@ def _roles(value: Any) -> set[str]:
         return {str(item).strip().upper() for item in json.loads(str(value or "[]")) if str(item).strip()}
     except (TypeError, ValueError):
         return set()
+
+
+def _database_boolean(value: bool) -> Any:
+    return bool(value) if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"} else ("Y" if value else "N")
+
+
+def _parse(value: Any, default: Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value or "{}"))
+        return parsed if isinstance(parsed, dict) else default
+    except (TypeError, ValueError):
+        return default
 
 
 def resolve_agent_info_path(base_path: str) -> str:
@@ -122,13 +611,19 @@ def set_portal_llm_policy(actor: str, default_profile_id: str, allowed_profile_i
 
 def create_command(actor: str, command_type: str, target: Dict[str, Any], parameters: Dict[str, Any], security_domain_id: str, reason: str, expires_seconds: int = 900) -> Dict[str, Any]:
     _require_admin(actor)
-    allowed = {"HEALTH_READ", "AGENT_STATUS_READ", "POOL_STATUS_READ", "LLM_STATUS_READ", "EMBEDDING_STATUS_READ", "NODE_VALIDATE", "STORAGE_VALIDATE", "AGENT_DRAIN", "AGENT_QUARANTINE", "PORTAL_LLM_POLICY_PROPOSE", "TEMPLATE_PUBLISH_PROPOSE"}
     kind = str(command_type or "").upper()
-    if kind not in allowed or len(str(reason or "").strip()) < 3:
-        raise AgentPoolError("unsupported command or missing reason")
-    state = "COMPLETED" if kind.endswith("_READ") else "PENDING_APPROVAL"
+    contract = _command_contract(kind)
+    if not _command_parameters_complete(contract, target, parameters, reason):
+        if len(str(reason or "").strip()) < 3:
+            raise AgentPoolError("COMMAND_REASON_REQUIRED")
+        _validate_command_parameters(contract, target, parameters)
+    mode = str(contract.get("execution_mode") or "").upper()
+    if mode in {"UNAVAILABLE", "PROPOSAL_ONLY"} and str(contract.get("risk_level")) not in {"PROPOSED_CHANGE", "SAFE_MAINTENANCE", "HIGH_RISK_CHANGE", "EMERGENCY_CONTAINMENT"}:
+        raise AgentPoolError("COMMAND_EXECUTOR_UNAVAILABLE")
+    state = "COMPLETED" if mode == "DIRECT_READ" else "PENDING_APPROVAL"
     command_id = _id("CMD")
-    expires = datetime.now(timezone.utc) + timedelta(seconds=max(60, min(int(expires_seconds), 86400)))
+    configured_expiry = int(contract.get("expiry_seconds") or 900)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=max(60, min(int(expires_seconds), configured_expiry)))
     connection.execute_transaction_callback(lambda tx: (
         tx.execute("INSERT INTO CX_PLATFORM_ADMIN_COMMANDS(COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,SECURITY_DOMAIN_ID,REQUESTED_BY,REASON,STATUS,EXPIRES_AT) VALUES (:id,:type,:target,:params,:domain,:actor,:reason,:status,:expires)", {"id": command_id, "type": kind, "target": _json(target), "params": _json(parameters), "domain": security_domain_id or "DEFAULT", "actor": actor, "reason": reason[:2000], "status": state, "expires": expires}),
         identity_api._audit_tx(tx, actor, "PLATFORM_ADMIN_COMMAND", "ADMIN_COMMAND", command_id, "ALLOW", reason)

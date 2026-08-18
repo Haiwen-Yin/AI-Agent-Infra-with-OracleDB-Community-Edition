@@ -397,11 +397,15 @@ def create_successor(family_id: str, expected_version_id: str, request_value: Ma
     version_id = _id("MV")
     digest = _digest(request.title, request.body, request.memory_type, request.memory_scope, request.classification)
     def commit(tx: Any) -> dict[str, Any]:
-        family = tx.query_one("SELECT FAMILY_ID,CURRENT_VERSION_ID FROM CX_MEMORY_FAMILIES WHERE FAMILY_ID = :family_id", {"family_id": family_id})
+        family = tx.query_one("SELECT FAMILY_ID,CURRENT_VERSION_ID,SECURITY_DOMAIN_ID FROM CX_MEMORY_FAMILIES WHERE FAMILY_ID = :family_id", {"family_id": family_id})
         if not family:
             raise MemoryLifecycleError("NOT_FOUND", "memory family is unavailable")
         if str(family.get("current_version_id")) != str(expected_version_id):
             raise MemoryLifecycleError("VERSION_CONFLICT", "current memory version changed; refresh before retrying")
+        family_domain = str(family.get("security_domain_id") or "")
+        requested_domain = str(request.security_domain_id or "")
+        if family_domain and requested_domain and family_domain != requested_domain:
+            raise MemoryLifecycleError("SCOPE_CHANGE_REQUIRED", "memory Security Domain cannot change in a successor version")
         number = int((tx.query_one("SELECT COALESCE(MAX(VERSION_NUMBER),0) AS VERSION_NUMBER FROM CX_MEMORY_VERSIONS WHERE FAMILY_ID = :family_id", {"family_id": family_id}) or {}).get("version_number") or 0) + 1
         _insert_version(tx, version_id, family_id, number, request, digest, actor, lifecycle_state=next_state)
         _insert_source_representation(tx, version_id, request.body, digest)

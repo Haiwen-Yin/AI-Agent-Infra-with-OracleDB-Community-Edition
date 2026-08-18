@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.7 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v4.4.8 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -72,15 +72,19 @@ def get_pool() -> oracledb.ConnectionPool:
 def get_connection():
     pool = get_pool()
     conn = pool.acquire()
+    had_agent_context = get_current_agent_id() is not None
     try:
         apply_agent_context(conn)
         yield conn
     finally:
         # Context cleanup must never prevent the connection from returning to
         # the pool, otherwise the next authenticated request can starve.
-        try:
-            clear_agent_context(conn)
-        finally:
+        if had_agent_context:
+            try:
+                clear_agent_context(conn)
+            finally:
+                pool.release(conn)
+        else:
             pool.release(conn)
 
 

@@ -30,16 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.7"
+VERSION = "4.4.8"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -1044,6 +1044,7 @@ class MessageBody(BaseModel):
     thread_id: str = Field(default="", max_length=128)
     message_type: str = Field(default="TEXT", max_length=32)
     references: Dict[str, Any] = Field(default_factory=dict)
+    response_language: str = Field(default="", max_length=8)
 
 
 class ThreadBody(BaseModel):
@@ -1265,6 +1266,10 @@ class PlatformAdminCommandBody(BaseModel):
     security_domain_id: str = Field(default="DEFAULT", max_length=128)
     reason: str = Field(min_length=3, max_length=2000)
     expires_seconds: int = Field(default=900, ge=60, le=86400)
+
+
+class PlatformCommandHelpBody(BaseModel):
+    command_key: str = Field(default="", max_length=64)
 
 
 class ManagedNodeBody(BaseModel):
@@ -1615,6 +1620,9 @@ def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optiona
     raw = request.cookies.get(_cookie_name(normalized_scope))
     if not raw:
         return None
+    cached = getattr(request.state, "cx_session_cache", None)
+    if cached is not None:
+        return cached
     with _schema_owner_context():
         policy = _session_policy(normalized_scope)
         session = identity_api.resolve_session(raw, ttl_seconds=int(policy["idle_timeout_seconds"]), absolute_ttl_seconds=int(policy["absolute_timeout_seconds"]), expected_scope=normalized_scope)
@@ -1622,6 +1630,7 @@ def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optiona
         request.state.cx_session = session
         request.state.cx_session_id = raw
         request.state.cx_session_scope = normalized_scope
+        request.state.cx_session_cache = session
     return session
 
 
@@ -1667,6 +1676,29 @@ def require_action(action: str):
         if access["decision"] != "ALLOW":
             raise HTTPException(status_code=403, detail={"error": "permission denied", "access": access})
         return session
+    return dependency
+
+
+def require_action_cached(action: str):
+    """Authorize one mutation with a request-local permission snapshot.
+
+    Unlike the generic dependency, this keeps the bounded authorization cache
+    active while the endpoint executes.  It must only be used by endpoints that
+    do not mutate roles, delegations, overrides, or Principal state during the
+    same request.  Channel message persistence is such a read/write operation:
+    it performs repeated membership and platform-management checks before
+    committing a message and an Agent dispatch.
+    """
+    def dependency(session: Dict[str, Any] = Depends(require_csrf)):
+        with identity_api.cached_authorization():
+            try:
+                with _schema_owner_context():
+                    access = identity_api.effective_access(str(session["principal_id"]), action)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="Authorization service unavailable") from exc
+            if access["decision"] != "ALLOW":
+                raise HTTPException(status_code=403, detail={"error": "permission denied", "access": access})
+            yield session
     return dependency
 
 
@@ -2737,6 +2769,51 @@ def platform_admin_commands(limit: int = 50, session: Dict[str, Any] = Depends(r
         return {"items": platform_agent_pool.list_commands(str(session["principal_id"]), limit)}
     except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/platform/admin-commands/catalog")
+def platform_admin_command_catalog(
+    channel_id: str = "CH_PLATFORM_ADMINISTRATION",
+    query: str = "",
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.list_command_catalog(str(session["principal_id"]), channel_id, query)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/admin-commands/help")
+def platform_admin_command_help(
+    body: PlatformCommandHelpBody,
+    channel_id: str = "CH_PLATFORM_ADMINISTRATION",
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.command_help(str(session["principal_id"]), body.command_key, channel_id)
+    except platform_agent_pool.AgentPoolError as exc:
+        message = str(exc)
+        status = 404 if message == "UNKNOWN_PLATFORM_COMMAND" else 400
+        raise HTTPException(status_code=status, detail=message) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Platform command help denied") from exc
+
+
+@app.get("/api/platform/governance-graph")
+def platform_governance_graph(
+    refresh_interval_seconds: int = 3,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return governance_graph_module.governance_projection(
+            str(session["principal_id"]), refresh_interval_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Platform governance graph denied") from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Platform governance graph is unavailable", identity_status=503) from exc
 
 
 @app.post("/api/platform/admin-commands")
@@ -4575,9 +4652,9 @@ def channel_thread_create(channel_id: str, body: ThreadBody, session: Dict[str, 
 
 
 @app.post("/api/channels/{channel_id}/messages")
-def message(channel_id: str, body: MessageBody, session: Dict[str, Any] = Depends(require_action("channels.write"))) -> Dict[str, Any]:
+def message(channel_id: str, body: MessageBody, session: Dict[str, Any] = Depends(require_action_cached("channels.write"))) -> Dict[str, Any]:
     try:
-        return identity_api.post_channel_message(str(session["principal_id"]), channel_id, body.body, thread_type=body.thread_type, thread_id=body.thread_id, message_type=body.message_type, references=body.references)
+        return identity_api.post_channel_message(str(session["principal_id"]), channel_id, body.body, thread_type=body.thread_type, thread_id=body.thread_id, message_type=body.message_type, references=body.references, response_language=body.response_language)
     except Exception as exc:
         raise _identity_http_error(exc, "Channel message was not accepted") from exc
 

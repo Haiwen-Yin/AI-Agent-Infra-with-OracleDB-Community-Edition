@@ -106,8 +106,12 @@ def test_management_knowledge_uses_immutable_v2_without_rewriting_v1():
 
 def test_completed_legacy_bootstrap_automatically_seeds_management_knowledge(monkeypatch):
     from lib import native_agent_api
+    from lib import platform_agent_pool, isolation_inventory
 
     class Tx:
+        def execute(self, _sql, _params):
+            return 1
+
         def query_one(self, sql, _params):
             if "CX_NATIVE_BOOTSTRAP" in sql:
                 return {"bootstrap_version": "4.3.6", "status": "COMPLETED"}
@@ -124,6 +128,18 @@ def test_completed_legacy_bootstrap_automatically_seeds_management_knowledge(mon
     monkeypatch.setattr(
         native_agent_api, "_verify_management_knowledge",
         lambda _tx: {"status": "VERIFIED", "digest": "a" * 64},
+    )
+    monkeypatch.setattr(
+        native_agent_api, "_ensure_platform_knowledge",
+        lambda _tx: {"status": "MIGRATED", "digest": "a" * 64},
+    )
+    monkeypatch.setattr(
+        platform_agent_pool, "ensure_platform_command_registry",
+        lambda: {"status": "COMPLETED"},
+    )
+    monkeypatch.setattr(
+        isolation_inventory, "ensure_isolation_inventory",
+        lambda: {"status": "COMPLETED"},
     )
     result = native_agent_api.bootstrap_native_agents()
     assert ("platform-admin-knowledge", "MANAGEMENT_KNOWLEDGE") in seeded

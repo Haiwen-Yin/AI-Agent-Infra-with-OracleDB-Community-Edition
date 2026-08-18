@@ -247,6 +247,10 @@ async function api<T = Row>(
         "Platform Administration service is unavailable": ["平台管理服务暂不可用", "Platform Administration service is unavailable"],
         "Platform Embedding activation failed": ["平台 Embedding 自动配置失败，请检查服务日志或联系平台管理员。", "Platform Embedding activation failed"],
         "Platform Embedding is already deployed; redeploy the platform to change the unified Embedding model": ["平台统一 Embedding 已部署；如需更换模型，请通过重新部署完成变更。", "Platform Embedding is already deployed; redeploy the platform to change the unified Embedding model"],
+        UNKNOWN_PLATFORM_COMMAND: ["未知的平台命令。输入 /platform HELP 查看当前可用命令。", "Unknown platform command. Enter /platform HELP to list usable commands."],
+        COMMAND_PARAMETER_REQUIRED: ["命令缺少必填参数。请查看命令帮助中的格式说明。", "A required command parameter is missing. Check the syntax in command help."],
+        COMMAND_REASON_REQUIRED: ["命令原因至少需要三个字符。", "The command reason must contain at least three characters."],
+        COMMAND_EXECUTOR_UNAVAILABLE: ["该命令的执行器当前不可用。", "The command executor is unavailable."],
       };
       const pair = localized[String(message)];
       if (pair) message = pair[lang === "en" ? 1 : 0];
@@ -264,6 +268,10 @@ async function api<T = Row>(
         message = lang === "en"
           ? `The LLM profile is still in use by ${blockers.join(", ")}. Remove or replace those references before retiring it.`
           : `该 LLM 配置仍被${blockers.join("、")}使用。请先解除或替换这些引用，再执行移除。`;
+      }
+      else if (String(message).startsWith("COMMAND_PARAMETER_REQUIRED:")) {
+        const field = String(message).split(":", 2)[1];
+        message = lang === "zh" ? `命令缺少必填参数：${field}。` : `The command is missing required parameter: ${field}.`;
       }
       else if (lang === "zh") {
         message = response.status === 422
@@ -1649,6 +1657,8 @@ function PlatformOperationsPage({
   const [path, setPath] = useState("PLATFORM_DEPLOYED");
   const [trustMode, setTrustMode] = useState("MUTUAL_TRUST");
   const [upgradeFile, setUpgradeFile] = useState<File | null>(null);
+  const [governanceGraph, setGovernanceGraph] = useState<Row>({});
+  const [governanceInterval, setGovernanceInterval] = useState(3);
   const load = async () => {
     setLoading(true);
     try {
@@ -1660,6 +1670,21 @@ function PlatformOperationsPage({
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (tab !== "overview") return;
+    let cancelled = false;
+    const fetchGraph = async () => {
+      try {
+        const value = await api<Row>(`/api/platform/governance-graph?refresh_interval_seconds=${governanceInterval}`);
+        if (!cancelled) setGovernanceGraph(value);
+      } catch (error) {
+        if (!cancelled) onNotice((error as Error).message);
+      }
+    };
+    void fetchGraph();
+    const timer = window.setInterval(() => { void fetchGraph(); }, governanceInterval * 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [tab, governanceInterval]);
   const management = payload || {};
   const group = management.admin_group?.group || {};
   const members = management.admin_group?.members || [];
@@ -1699,7 +1724,7 @@ function PlatformOperationsPage({
   };
   return <section className={embedded ? "page-stack platform-configuration-subpage" : "page-stack"}>{!embedded && <SectionHeading title={text("平台运行", "Platform operations")} subtitle={text("平台级接入、升级和阻断配置独立于能力开关。所有操作均受保护，并保留数据库审计证据。", "Platform admission, upgrade, and containment settings are separate from capability switches. Every operation is protected and retained as database audit evidence.")} text={text} actions={<PageRefresh loading={loading} onRefresh={load} text={text} />} />}
     {loading ? <PageLoading text={text} /> : <>
-      {tab === "overview" && <><InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}><p className="cx-form-hint">{text("仅管理员、平台管理智能体及经审批的 Admin Agent 可加入。聊天仅形成建议；变更必须转换为结构化操作并审计。", "Only administrators, platform management Agents, and approved Admin Agents may join. Chat produces advice only; changes must become structured audited operations.")}</p><div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, management.admin_group?.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong></InfoPanel></div><DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} /></InfoPanel></>}
+      {tab === "overview" && <><InfoPanel title={text("平台管理频道", "Platform Administration Channel")} text={text}><p className="cx-form-hint">{text("仅管理员、平台管理智能体及经审批的 Admin Agent 可加入。聊天仅形成建议；变更必须转换为结构化操作并审计。", "Only administrators, platform management Agents, and approved Admin Agents may join. Chat produces advice only; changes must become structured audited operations.")}</p><div className="metric-grid management-metric-grid"><InfoPanel title={text("频道", "Channel")} text={text}><strong className="metric-value">{management.channel?.channel_name || "-"}</strong></InfoPanel><InfoPanel title={text("高可用状态", "HA readiness")} text={text}><strong className="metric-value">{displayRowValue(lang, management.admin_group?.readiness || "HIGH_AVAILABILITY_NOT_READY")}</strong></InfoPanel><InfoPanel title={text("当前任期", "Current term")} text={text}><strong className="metric-value">{String(group.current_term || 0)}</strong></InfoPanel></div><DataTable headers={[text("成员", "Member"), text("路径", "Path"), text("状态", "State"), text("权重", "Weight"), text("节点", "Node")]} rows={members.map((item: Row) => [item.agent_id, displayRowValue(lang, item.admission_path), displayRowValue(lang, item.status), String(item.weight), item.node_id || "-"])} empty={text("尚无 Admin Agent 成员", "No Admin Agent members")} text={text} /></InfoPanel><InfoPanel title={text("治理影响图", "Governance impact graph")} text={text}><div className="page-toolbar"><label><span>{text("刷新频率", "Refresh interval")}</span><select value={governanceInterval} onChange={(event) => setGovernanceInterval(Number(event.target.value))}><option value={1}>1s</option><option value={3}>3s</option><option value={5}>5s</option><option value={10}>10s</option></select></label><span className="tag">{text("数据时间", "Fresh at")} {String(governanceGraph.fresh_at || "-")}</span></div><div className="metric-grid"><InfoPanel title={text("受管节点", "Managed nodes")} text={text}><strong className="metric-value">{String(governanceGraph.metrics?.managed_nodes ?? "-")}</strong></InfoPanel><InfoPanel title={text("运行任务", "Running executions")} text={text}><strong className="metric-value">{String(governanceGraph.metrics?.runtime_executions ?? "-")}</strong></InfoPanel><InfoPanel title={text("活动 Graph Run", "Active Graph Runs")} text={text}><strong className="metric-value">{String(governanceGraph.metrics?.active_graph_runs ?? "-")}</strong></InfoPanel><InfoPanel title={text("维护任务", "Maintenance tasks")} text={text}><strong className="metric-value">{String(governanceGraph.metrics?.maintenance_tasks ?? "-")}</strong></InfoPanel></div><DataTable headers={[text("依赖", "Dependency"), text("类型", "Type")]} rows={((governanceGraph.nodes || []) as Row[]).map((item) => [item.label, item.group])} empty={text("治理图暂不可用", "Governance graph unavailable")} text={text} /><p className="cx-form-hint">{text("该图是只读影响分析投影，不授予任何执行权限。", "This read-only impact projection never grants execution authority.")}</p></InfoPanel></>}
       {tab === "admin-management" && <AdminAgentStoragePanel lang={lang} text={text} onNotice={onNotice} />}
       {tab === "admission" && <><InfoPanel title={text("登记 Admin Agent 候选", "Register an Admin Agent candidate")} text={text}><p className="cx-form-hint">{text("平台部署由现有 Admin Agent 自动完成身份密钥生成、节点登记和接入验证；外部 Admin 使用独立的密钥/接入包路径，不接收基础设施凭证。", "Platform deployment uses the existing Admin Agent to generate identity material, register the node, and complete admission verification. External Admin uses a separate key/package path and never receives infrastructure credentials.")}</p><form className="configuration-form admin-admission-form" onSubmit={submitEnrollment}><ConfigField label={text("接入路径", "Admission path")} hint={text("选择后展示对应的安全字段。", "Shows the appropriate secure fields for the selected path.")}><select value={path} onChange={(event) => setPath(event.target.value)}><option value="PLATFORM_DEPLOYED">{text("平台部署", "Platform deployed")}</option><option value="EXTERNAL_ADMIN">{text("外部 Admin 接入", "External Admin admission")}</option></select></ConfigField><ConfigField label={text("节点名称或 ID", "Node name or ID")} hint={text("用于成员、故障域和审计关联。", "Used for membership, failure-domain, and audit correlation.")}><input name="node_id" required /></ConfigField>{path === "EXTERNAL_ADMIN" && <ConfigField label={text("Admin Agent 身份公钥", "Admin Agent identity public key")} hint={text("外部 Admin 需要提供其身份公钥；不是服务器 SSH 主机公钥，也不是 API Key。平台只保存公钥摘要。", "External Admin must provide its identity public key. This is not the server SSH host key or an API key. The platform stores only its digest.")} multiline><textarea className="config-textarea" name="public_key" required /></ConfigField>}{path === "PLATFORM_DEPLOYED" && <><ConfigField label={text("主机或 IP", "Host or IP")} hint={text("目标节点的可达地址。", "Reachable address of the target node.")}><input name="host_reference" required /></ConfigField><ConfigField label={text("SSH 端口", "SSH port")} hint={text("填写目标节点的 SSH 端口；留空时服务端按 22 处理。", "Enter the target SSH port; the server uses 22 when omitted.")}><input name="ssh_port" type="number" min="1" max="65535" /></ConfigField><ConfigField label={text("系统用户", "Operating-system user")} hint={text("用于部署与节点验证。", "Used for deployment and node verification.")}><input name="os_user" required /></ConfigField><ConfigField label={text("部署目标", "Deployment target")} hint={text("受管运行时、虚拟机或客户适配器目标。", "Managed runtime, virtual machine, or customer-adapter target.")}><input name="deployment_target" required /></ConfigField><ConfigField label={text("SSH 验证方式", "SSH verification mode")} hint={text("互信不传密码；一次性密码只用于当前验证。", "Mutual trust sends no password; a one-use password is used only for this verification.")}><select value={trustMode} onChange={(event) => setTrustMode(event.target.value)}><option value="MUTUAL_TRUST">{text("已配置 SSH 互信", "SSH mutual trust configured")}</option><option value="ONE_USE_PASSWORD">{text("一次性 SSH 密码", "One-use SSH password")}</option></select></ConfigField>{trustMode === "ONE_USE_PASSWORD" && <ConfigField label={text("一次性 SSH 密码", "One-use SSH password")} hint={text("仅用于本次验证，提交后立即丢弃且永不存储。", "Used only for this verification, discarded after submission, and never stored.")}><input name="ssh_password" type="password" autoComplete="new-password" required /></ConfigField>}<ConfigField label={text("故障域", "Failure domain")} hint={text("用于避免高可用成员集中在同一故障域。", "Prevents high-availability members from concentrating in one failure domain.")}><input name="failure_domain" required /></ConfigField></>}<ConfigField label={text("接入原因", "Admission reason")} hint={text("必须说明新增管理节点的原因。", "Explain why this management node is being added.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("候选需经过身份验证、观察和批准后才加入投票组。", "The candidate must be verified, observed, and approved before joining the voting group.")} action><button className="primary-button" disabled={busy}><UserPlus size={15} />{text("登记候选", "Register candidate")}</button></ConfigField></form></InfoPanel><InfoPanel title={text("候选状态", "Candidate status")} text={text}><DataTable headers={[text("候选", "Candidate"), text("路径", "Path"), text("节点", "Node"), text("状态", "State")]} rows={enrollments.map((item) => [item.agent_id || "-", displayRowValue(lang, item.admission_path), item.node_id || "-", displayRowValue(lang, item.status)])} empty={text("暂无 Admin Agent 候选", "No Admin Agent candidates")} text={text} /></InfoPanel></>}
       {tab === "agent-pool" && <PlatformPoolGovernancePanel lang={lang} text={text} onNotice={onNotice} />}
@@ -2544,6 +2569,15 @@ const valueLabels: Record<string, [string, string]> = {
   PRODUCTION: ["生产", "Production"],
   STAGING: ["预发布", "Staging"],
   LOW: ["低", "Low"],
+  READ: ["只读", "Read"],
+  SAFE_MAINTENANCE: ["安全维护", "Safe maintenance"],
+  PROPOSED_CHANGE: ["变更提案", "Proposed change"],
+  HIGH_RISK_CHANGE: ["高风险变更", "High-risk change"],
+  EMERGENCY_CONTAINMENT: ["应急阻断", "Emergency containment"],
+  DIRECT_READ: ["直接读取", "Direct read"],
+  PROPOSAL_ONLY: ["仅提案", "Proposal only"],
+  GOVERNED_EXECUTOR: ["受治理执行", "Governed executor"],
+  UNAVAILABLE: ["不可用", "Unavailable"],
   STANDARD: ["标准", "Standard"],
   HIGH: ["高", "High"],
   END_USER: ["普通用户", "End user"],
@@ -5035,10 +5069,10 @@ function MonitorPage({
   return (
     <section>
       <SectionHeading
-        title={text("Admin Agent 管理", "Admin Agent management")}
+        title={text("监控", "Monitor")}
         subtitle={text(
-          "统一观察身份、运行状态和数据库持久化边界。当前实例固定使用 Production 基线，稳定能力由版本发布与数据库服务端门禁共同控制。",
-          "Observe identity, runtime state, and database persistence boundaries. This installation is fixed to the Production baseline; stable capabilities are jointly controlled by the release and database-side gates.",
+          "查看智能体、会话、任务计划、循环和停滞实例，并确认当前运行配置。",
+          "Review Agents, sessions, task plans, Loops, and stalled instances, and confirm the current runtime profile.",
         )}
         text={text}
       />
@@ -5835,8 +5869,16 @@ function Channels({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [messageFeedback, setMessageFeedback] = useState("");
+  const [commandCatalog, setCommandCatalog] = useState<Row[]>([]);
+  const [showCommandPanel, setShowCommandPanel] = useState(false);
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(false);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const showTransientFeedback = (value: string, duration = 5000) => {
+    if (feedbackTimerRef.current) window.clearTimeout(feedbackTimerRef.current);
+    setMessageFeedback(value);
+    feedbackTimerRef.current = window.setTimeout(() => setMessageFeedback(""), duration);
+  };
   const load = async (cursor = cursorHistory[cursorHistory.length - 1] || "") => {
     setLoading(true);
     try {
@@ -5872,6 +5914,7 @@ function Channels({
   const selectChannel = (channel: Row | null) => {
     setSelected(channel);
     setSelectedChannelId(channel ? String(channel.channel_id) : "");
+    setCommandCatalog([]);
   };
   const loadSelected = async (channel: Row) => {
     const id = encodeURIComponent(String(channel.channel_id));
@@ -5904,6 +5947,14 @@ function Channels({
     setActions(actionValue.items || []);
     setCandidates(candidateValue.items || []);
     setBridges((await optional("/api/bridges")).items || []);
+    if (String(channel.channel_id) === "CH_PLATFORM_ADMINISTRATION") {
+      try {
+        const commandValue = await api<Row>(`/api/platform/admin-commands/catalog?channel_id=${encodeURIComponent(String(channel.channel_id))}`);
+        setCommandCatalog(commandValue.items || []);
+      } catch {
+        setCommandCatalog([]);
+      }
+    }
   };
   useEffect(() => {
     void load();
@@ -5980,7 +6031,7 @@ function Channels({
       return displayName && body.includes(`@${displayName}`) ? [String(member.principal_id)] : [];
     });
     setSending(true);
-    setMessageFeedback(text("正在发送频道消息...", "Sending Channel message..."));
+    setMessageFeedback("");
     try {
       const result = await api<Row>(
         `/api/channels/${encodeURIComponent(selected.channel_id)}/messages`,
@@ -5994,11 +6045,15 @@ function Channels({
               : "CHANNEL",
             thread_id: threadId,
             references: mentions.length ? { mentions } : {},
+            response_language: lang,
           }),
         },
       );
       setBody("");
-      await loadSelected(selected);
+      // Keep the Channel visible immediately after the durable POST. Refreshing
+      // the full Channel surface can be slower than sending, and the bounded
+      // polling below already picks up Agent responses.
+      void loadSelected(selected);
       const dispatches = Array.isArray(result.agent_dispatches) ? result.agent_dispatches : [];
       const dispatchErrors = Array.isArray(result.agent_dispatch_errors) ? result.agent_dispatch_errors : [];
       const message = dispatches.length
@@ -6008,7 +6063,7 @@ function Channels({
         : mentions.length
         ? text(`消息已发送，已提及 ${mentions.length} 位频道成员。`, `Message sent; mentioned ${mentions.length} Channel member(s).`)
         : text("消息已发送并已写入审计。", "Message sent and recorded in audit.");
-      setMessageFeedback(message);
+      showTransientFeedback(message);
       onNotice(message);
       if (dispatches.length) {
         // A model invocation can legitimately outlive a single HTTP refresh.
@@ -6020,7 +6075,7 @@ function Channels({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : text("发送失败", "Send failed");
-      setMessageFeedback(message); onNotice(message);
+      showTransientFeedback(message, 8000); onNotice(message);
     } finally { setSending(false); }
   };
   const createThread = async (event: FormEvent<HTMLFormElement>) => {
@@ -6328,7 +6383,22 @@ function Channels({
     const name = String(member.display_name || member.principal_id || "").trim();
     if (!name || !mentionMatch) return;
     setBody((value) => value.replace(/(?:^|\s)@([^\s@]*)$/, (matched) => `${matched.startsWith(" ") ? " " : ""}@${name} `));
-    setMessageFeedback(text(`已添加对 @${name} 的提及；发送消息后将写入频道审计。`, `Mention for @${name} added; it will be recorded in Channel audit when sent.`));
+    showTransientFeedback(text(`已添加对 @${name} 的提及；发送消息后将写入频道审计。`, `Mention for @${name} added; it will be recorded in Channel audit when sent.`), 4000);
+  };
+  const isAdministrationChannel = String(selected.channel_id) === "CH_PLATFORM_ADMINISTRATION";
+  const commandPrefixMatch = body === "/" || body.toLowerCase().startsWith("/p") || body.toLowerCase().startsWith("/platform");
+  const commandTokenMatch = body.match(/^\/platform(?:\s+([A-Z0-9_]*))?$/i);
+  const commandQuery = commandTokenMatch ? String(commandTokenMatch[1] || "").toUpperCase() : "";
+  const commandCandidates = isAdministrationChannel && commandPrefixMatch
+    ? (commandCatalog || []).filter((item) => !commandQuery || String(item.command_key).startsWith(commandQuery)).slice(0, 10)
+    : [];
+  const insertCommand = (item: Row) => {
+    setBody(String(item.example || `/platform ${item.command_key}`));
+    showTransientFeedback(text("已插入命令模板。请替换尖括号参数后再发送。", "Command template inserted. Replace angle-bracket placeholders before sending."), 4000);
+  };
+  const insertHelp = () => {
+    setBody("/platform HELP");
+    showTransientFeedback(text("已插入平台命令帮助。", "Platform command help inserted."), 4000);
   };
   return (
     <section>
@@ -6394,6 +6464,33 @@ function Channels({
                 <ShieldCheck size={18} />
               </div>
             </div>
+            {isAdministrationChannel && (
+              <div className="platform-command-toolbar">
+                <button type="button" className="small-button" onClick={() => setShowCommandPanel((value) => !value)}>
+                  <CircleHelp size={14} />{text("平台命令", "Platform commands")}
+                </button>
+                <button type="button" className="small-button" onClick={insertHelp}>
+                  {text("命令帮助", "Command help")}
+                </button>
+              </div>
+            )}
+            <DetailDrawer
+              open={isAdministrationChannel && showCommandPanel}
+              title={text("平台命令", "Platform commands")}
+              onClose={() => setShowCommandPanel(false)}
+              text={text}
+            >
+              <div className="platform-command-panel">
+                <div className="subhead"><b>{text("可用平台命令", "Available platform commands")}</b></div>
+                {(commandCatalog || []).map((item) => (
+                  <button type="button" key={String(item.command_id)} onClick={() => insertCommand(item)}>
+                    <span><b>{item.command_key}</b><small>{String(item.metadata?.[lang === "zh" ? "name_zh" : "name_en"] || "")}</small></span>
+                    <small>{displayRowValue(lang, item.risk_level)} · {displayRowValue(lang, item.execution_mode)}</small>
+                  </button>
+                ))}
+                {!commandCatalog.length && <p className="cx-form-hint">{text("命令注册表暂不可用或当前没有可发现命令。", "The command registry is unavailable or no commands are discoverable.")}</p>}
+              </div>
+            </DetailDrawer>
             <div className="message-stream" ref={messageStreamRef} onScroll={handleMessageScroll}>
               {messages.map((item) => (
                 <article className="message" key={item.message_id}>
@@ -6425,7 +6522,7 @@ function Channels({
               )}
             </div>
             <form className="message-compose" onSubmit={send}>
-              <label className="message-input-field"><span>{text("消息内容", "Message")}</span><textarea value={body} onChange={(event) => { const value = event.target.value; setBody(value); const match = value.match(/(?:^|\s)@([^\s@]*)$/); if (match && match[1].trim() && !members.some((member) => { const name = String(member.display_name || member.principal_id || "").toLowerCase(); const query = match[1].toLowerCase(); const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => query.includes(alias)) && String(member.principal_type || "").toUpperCase() === "AGENT"; return name.includes(query) || agentAlias; })) { setMessageFeedback(text("当前频道没有匹配的可提及成员；提及不会扩大频道或数据访问范围。", "No matching mentionable member exists in this Channel; mentions never expand Channel or data access.")); } else { setMessageFeedback(""); } }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} /><small>{text("按 Enter 发送，Shift+Enter 换行。输入 @ 可提及当前频道成员；提及仅用于消息引用和审计，不会授予任何权限。", "Press Enter to send and Shift+Enter for a new line. Type @ to mention a current Channel member; mentions are only message references and audit data, never permissions.")}</small>{messageFeedback && <small className="operation-feedback" role="status">{messageFeedback}</small>}{mentionCandidates.length > 0 && <div className="mention-menu" role="listbox" aria-label={text("提及成员", "Mention member")}>{mentionCandidates.map((member) => <button type="button" role="option" key={String(member.principal_id)} onClick={() => insertMention(member)}><span>{member.display_name || text("未命名主体", "Unnamed principal")}</span><small>{displayRowValue(lang, member.principal_type)}</small></button>)}</div>}</label>
+              <label className="message-input-field"><span>{text("消息内容", "Message")}</span><textarea value={body} onChange={(event) => { const value = event.target.value; setBody(value); const match = value.match(/(?:^|\s)@([^\s@]*)$/); if (match && match[1].trim() && !members.some((member) => { const name = String(member.display_name || member.principal_id || "").toLowerCase(); const query = match[1].toLowerCase(); const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => query.includes(alias)) && String(member.principal_type || "").toUpperCase() === "AGENT"; return name.includes(query) || agentAlias; })) { setMessageFeedback(text("当前频道没有匹配的可提及成员；提及不会扩大频道或数据访问范围。", "No matching mentionable member exists in this Channel; mentions never expand Channel or data access.")); } else { setMessageFeedback(""); } }} onKeyDown={(event) => { if (event.key === "Escape" && commandCandidates.length) { event.preventDefault(); setBody(""); } else if (commandCandidates.length && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) { event.preventDefault(); if (event.key === "Tab") insertCommand(commandCandidates[0]); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (commandCandidates.length && commandQuery) insertCommand(commandCandidates[0]); else void send(); } }} /><small>{text("按 Enter 发送，Shift+Enter 换行。输入 @ 可提及当前频道成员；在管理频道输入 / 可补全平台命令。提及与命令都不会自动获得额外权限。", "Press Enter to send and Shift+Enter for a new line. Type @ to mention a Channel member or / in the Administration Channel for platform commands. Mentions and commands never add authority by themselves.")}</small>{messageFeedback && <small className="operation-feedback" role="status">{messageFeedback}</small>}{commandCandidates.length > 0 && <div className="mention-menu platform-command-menu" role="listbox" aria-label={text("平台命令", "Platform commands")}>{commandCandidates.map((item) => <button type="button" role="option" key={String(item.command_id)} onClick={() => insertCommand(item)}><span>{item.command_key}<small>{String(item.metadata?.[lang === "zh" ? "name_zh" : "name_en"] || "")}</small></span><small>{displayRowValue(lang, item.risk_level)} · {displayRowValue(lang, item.execution_mode)}</small></button>)}</div>}{mentionCandidates.length > 0 && <div className="mention-menu" role="listbox" aria-label={text("提及成员", "Mention member")}>{mentionCandidates.map((member) => <button type="button" role="option" key={String(member.principal_id)} onClick={() => insertMention(member)}><span>{member.display_name || text("未命名主体", "Unnamed principal")}</span><small>{displayRowValue(lang, member.principal_type)}</small></button>)}</div>}</label>
               <div className="compose-controls">
                 <select
                   value={threadId}

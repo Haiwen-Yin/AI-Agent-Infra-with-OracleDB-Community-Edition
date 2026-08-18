@@ -563,6 +563,13 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         _record_step(journal.run_id, "migration-" + str(result["script"]), index, str(result["checksum"]), "COMPLETED", result)
     from . import native_agent_api
     native = native_agent_api.bootstrap_native_agents()
+    knowledge_state = {
+        "management_knowledge": native.get("management_knowledge") or {},
+        "scoped_knowledge": native.get("scoped_knowledge") or {},
+    }
+    if str((knowledge_state.get("scoped_knowledge") or {}).get("status") or "") != "MIGRATED":
+        raise DeploymentError("scoped platform management knowledge did not pass postflight")
+    _record_evidence(journal.run_id, "PLATFORM_KNOWLEDGE_POSTFLIGHT", knowledge_state)
     models = _configure_models(raw, journal.run_id)
     readiness.update(models)
     readiness["runtime"] = "READY"

@@ -45,6 +45,19 @@ def test_containment_requires_new_signed_generation_and_expiry():
     assert containment.verify_command(command, current_generation=2, current_state="OBSERVE", secret=b"secret")[1] == "STALE_GENERATION"
 
 
+def test_emergency_containment_requires_scope_reason_review_and_audit_contract():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "lib" / "admin_management.py").read_text(encoding="utf-8")
+    containment_block = source.split("def issue_containment", 1)[1].split("def pull_containment_command", 1)[0]
+    assert "_require_manage(actor)" in containment_block
+    assert "state not in containment.STATES" in containment_block
+    assert "containment state and reason are required" in containment_block
+    assert "quarantine_precedes_termination" in containment_block
+    assert "CX_AGENT_INSTANCES" in containment_block and "CX_AGENT_ACCESS_TOKENS" in containment_block
+    assert "identity_api._audit(actor, \"AGENT_CONTAINMENT_\" + state" in containment_block
+
+
 def test_termination_requires_prior_quarantine():
     assert not containment.quarantine_precedes_termination("OBSERVE", "TERMINATE")
     assert containment.quarantine_precedes_termination("QUARANTINE", "TERMINATE")

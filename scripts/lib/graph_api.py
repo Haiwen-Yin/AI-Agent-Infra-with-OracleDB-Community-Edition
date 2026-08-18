@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.7 - Property Graph API
+"""AI Agent Infra v4.4.8 - Property Graph API
 
 Database-neutral relational edge traversal, path finding, community detection,
 and graph analytics over the shared entity graph contract.
@@ -44,7 +44,8 @@ def _entity_id_expr(alias: str) -> str:
     return reference
 
 
-def _relational_neighbors(entity_id, direction, edge_type, min_strength, limit):
+def _relational_neighbors(entity_id, direction, edge_type, min_strength, limit,
+                          principal_id=None):
     results: List[Dict[str, Any]] = []
     if direction in ("outgoing", "both"):
         edge_source = f"{_edge_id_expr('edge', 'SOURCE_ID')} = {_edge_id_bind('eid')}"
@@ -54,6 +55,9 @@ def _relational_neighbors(entity_id, direction, edge_type, min_strength, limit):
         if edge_type:
             conditions.append("edge.EDGE_TYPE = :edge_type")
             params["edge_type"] = edge_type
+        visibility = _target_visibility_clause(principal_id)
+        if visibility:
+            conditions.append(visibility)
         rows = execute_query(f"""
             SELECT target.ENTITY_ID AS NEIGHBOR_ID, target.ENTITY_TYPE AS NEIGHBOR_TYPE,
                    target.TITLE AS NEIGHBOR_TITLE, edge.EDGE_ID, edge.EDGE_TYPE,
@@ -75,6 +79,9 @@ def _relational_neighbors(entity_id, direction, edge_type, min_strength, limit):
         if edge_type:
             conditions.append("edge.EDGE_TYPE = :edge_type")
             params["edge_type"] = edge_type
+        visibility = _target_visibility_clause(principal_id, "source")
+        if visibility:
+            conditions.append(visibility)
         rows = execute_query(f"""
             SELECT source.ENTITY_ID AS NEIGHBOR_ID, source.ENTITY_TYPE AS NEIGHBOR_TYPE,
                    source.TITLE AS NEIGHBOR_TITLE, edge.EDGE_ID, edge.EDGE_TYPE,
@@ -97,8 +104,25 @@ def get_neighbors(
     edge_type: Optional[str] = None,
     min_strength: float = 0.0,
     limit: int = 100,
+    principal_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    return _relational_neighbors(entity_id, direction, edge_type, min_strength, limit)
+    return _relational_neighbors(entity_id, direction, edge_type, min_strength, limit,
+                                 principal_id=principal_id)
+
+
+def _target_visibility_clause(principal_id: Optional[str], alias: str = "target") -> str:
+    """Keep hidden entities invisible in both direct and traversed edges."""
+    if not principal_id:
+        return ""
+    from . import identity_api
+    if identity_api.effective_access(principal_id, "agents.read.all").get("decision") == "ALLOW":
+        return ""
+    visibility = identity_api._agent_visibility_clause(principal_id)
+    return (
+        f"({alias}.VISIBILITY IN ('PUBLIC','SHARED') OR EXISTS (SELECT 1 FROM CX_PRINCIPALS p "
+        f"WHERE p.PRINCIPAL_ID={alias}.OWNED_BY_AGENT AND p.PRINCIPAL_TYPE='AGENT' AND "
+        + visibility + "))"
+    )
 
     results = []
 
@@ -186,6 +210,7 @@ def get_reachable(
     max_hops: int = 3,
     edge_type: Optional[str] = None,
     limit: int = 50,
+    principal_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     frontier = [entity_id]
     visited = {entity_id}
@@ -193,7 +218,8 @@ def get_reachable(
     for _ in range(max(1, min(int(max_hops), 6))):
         next_frontier = []
         for current in frontier:
-            for item in _relational_neighbors(current, "outgoing", edge_type, 0.0, limit):
+            for item in _relational_neighbors(current, "outgoing", edge_type, 0.0, limit,
+                                              principal_id=principal_id):
                 neighbor_id = item.get("neighbor_id")
                 if neighbor_id in visited:
                     continue
@@ -232,13 +258,15 @@ def get_shortest_path(
     source_id: str,
     target_id: str,
     max_hops: int = 5,
+    principal_id: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     frontier = [(source_id, [{"entity_id": source_id}])]
     visited = {source_id}
     for _ in range(max(1, min(int(max_hops), 6))):
         next_frontier = []
         for current, path in frontier:
-            for edge in _relational_neighbors(current, "outgoing", None, 0.0, 100):
+            for edge in _relational_neighbors(current, "outgoing", None, 0.0, 100,
+                                              principal_id=principal_id):
                 neighbor = edge.get("neighbor_id")
                 new_path = path + [{"edge_type": edge.get("edge_type"),
                                     "strength": edge.get("strength")},
@@ -314,8 +342,10 @@ def find_similar_entities(
     entity_id: str,
     max_hops: int = 2,
     limit: int = 20,
+    principal_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    return get_reachable(entity_id, max_hops=max_hops, limit=limit)
+    return get_reachable(entity_id, max_hops=max_hops, limit=limit,
+                         principal_id=principal_id)
 
     sql = f"""
         SELECT gt.ENTITY_ID, gt.TITLE, gt.ENTITY_TYPE,
@@ -336,6 +366,7 @@ def find_similar_entities(
 def get_entity_context(
     entity_id: str,
     depth: int = 1,
+    principal_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     entity = execute_query_one("""
         SELECT ENTITY_ID, ENTITY_TYPE, TITLE, CATEGORY, STATUS,
@@ -350,7 +381,8 @@ def get_entity_context(
 
     result = _row_to_dict(entity)
 
-    neighbors = get_neighbors(entity_id, direction="both", limit=50)
+    neighbors = get_neighbors(entity_id, direction="both", limit=50,
+                              principal_id=principal_id)
     result["neighbors"] = neighbors
     result["neighbor_count"] = len(neighbors)
 

@@ -57,6 +57,31 @@ def test_channel_rechecks_current_security_domain_membership():
     assert "if not domain_member:" in admission
 
 
+def test_channel_domain_membership_revocation_fails_closed(monkeypatch):
+    class Db:
+        def __init__(self, domain_member):
+            self.domain_member = domain_member
+            self.queries = []
+
+        def execute_query_one(self, sql, params):
+            self.queries.append((sql, params))
+            if "FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS m" in sql:
+                return {"channel_id": "CH_1", "security_domain_id": "SD_1",
+                        "classification": "INTERNAL", "status": "ACTIVE", "member_role": "MEMBER"}
+            if "FROM CX_DOMAIN_MEMBERS" in sql:
+                return self.domain_member
+            return {}
+
+    db = Db({"membership_id": "DM_1"})
+    monkeypatch.setattr(identity_api, "connection", db)
+    monkeypatch.setattr(identity_api, "_require", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(identity_api, "effective_access", lambda *_args, **_kwargs: {"decision": "DENY"})
+    assert identity_api._assert_channel_member("user", "CH_1")["channel_id"] == "CH_1"
+    db.domain_member = None
+    with pytest.raises(PermissionError, match="Security Domain"):
+        identity_api._assert_channel_member("user", "CH_1")
+
+
 def test_binding_rejects_second_active_domain_for_one_group(monkeypatch):
     class Tx:
         def query_one(self, sql, params):

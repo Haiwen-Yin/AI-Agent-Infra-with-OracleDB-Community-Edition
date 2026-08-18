@@ -1,4 +1,11 @@
-# API Reference - AI Agent Infra with DB v4.4.7
+# API Reference - AI Agent Infra with DB v4.4.8
+
+## v4.4.8 Platform Command And Knowledge APIs
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/platform/admin-commands/catalog` | GET | Return the database-authoritative command catalog filtered by Principal, Channel, edition, capability, executor, and Security Domain. |
+| `/api/platform/admin-commands/help` | GET | Return deterministic localized help from the command registry without invoking an LLM. |
 
 ## v4.4.7 Maintenance APIs
 

@@ -62,6 +62,25 @@ def test_successor_rejects_stale_expected_current_without_write(monkeypatch):
     assert not tx.writes
 
 
+def test_successor_cannot_silently_change_memory_security_domain(monkeypatch):
+    class Tx:
+        def __init__(self): self.writes = []
+        def query_one(self, sql, _params):
+            if "CX_MEMORY_FAMILIES" in sql:
+                return {"family_id": "MF-1", "current_version_id": "MV-1", "security_domain_id": "SD_A"}
+            return {"version_number": 1}
+        def execute(self, sql, params): self.writes.append((sql, params)); return 1
+    tx = Tx()
+    monkeypatch.setattr(lifecycle, "execute_transaction_callback", lambda callback: callback(tx))
+    with pytest.raises(lifecycle.MemoryLifecycleError) as exc:
+        lifecycle.create_successor(
+            "MF-1", "MV-1", {"title": "moved", "body": "evidence", "security_domain_id": "SD_B"},
+            actor="admin",
+        )
+    assert exc.value.code == "SCOPE_CHANGE_REQUIRED"
+    assert not tx.writes
+
+
 def test_logical_unavailability_requires_reason():
     with pytest.raises(lifecycle.MemoryLifecycleError) as exc:
         lifecycle.mark_unavailable("MF-1", actor="admin", reason="")

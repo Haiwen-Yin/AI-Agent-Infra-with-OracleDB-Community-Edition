@@ -1,4 +1,19 @@
-# Architecture - AI Agent Infra with DB v4.4.7
+# Architecture - AI Agent Infra with DB v4.4.8
+
+## v4.4.8 Platform Control Plane
+
+The Administration Channel resolves command discovery from the database
+registry `CX_PLATFORM_COMMANDS`; the frontend does not own an independent
+command catalog. Maintenance work uses `CX_PLATFORM_MAINTENANCE_TASKS` and
+attempts with leases, fencing, postflight, and evidence. Long-running work may
+bind `GRAPH_RUN_ID` so the existing Graph Run admission and recovery contract
+remains the only durable execution contract.
+
+Compliance remains a proposal-only control plane. `SYSTEM_COMPLIANCE` has only
+`compliance.read` and `compliance.propose`; `SYSTEM_COMPLIANCE_ADMIN_AGENT`
+creates remediation cases and `PLATFORM_COMPLIANCE_REMEDIATION` Action Cards
+without `platform.manage`. Platform and Compliance private runbooks use
+different audience, scope, classification, digest, and signature records.
 
 ## v4.4.3 Governed Collaboration Boundary
 

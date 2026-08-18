@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.7 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.8 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.7"
+VERSION = "4.4.8"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -2564,13 +2564,15 @@ class VisHandler(BaseHTTPRequestHandler):
                 if not entity_id:
                     self._send_error(400, 'entity_id required')
                     return
-                self._send_json(graph_api.get_neighbors(entity_id))
+                self._send_json(graph_api.get_neighbors(entity_id, principal_id=self._graph_actor()))
             elif path == '/api/graph/context':
                 entity_id = qs.get('entity_id', [None])[0]
                 if not entity_id:
                     self._send_error(400, 'entity_id required')
                     return
-                ctx = graph_api.get_entity_context(entity_id)
+                ctx = graph_api.get_entity_context(
+                    entity_id, principal_id=self._graph_actor(),
+                )
                 if ctx is None:
                     self._send_error(404, 'Entity not found')
                     return
@@ -4137,28 +4139,48 @@ class VisHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(self._read_body() or '{}')
             profile_id = str(data.get('profile_id') or '').strip()
-            options = platform_agent_pool.portal_llm_options()
-            allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+            previous_agent_id = connection.get_current_agent_id()
+            try:
+                connection.set_agent_context(None)
+                options = platform_agent_pool.portal_llm_options()
+                allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+            finally:
+                connection.set_agent_context(previous_agent_id)
             if not profile_id or profile_id not in allowed:
                 self._send_json({'success': False, 'error': 'LLM profile is not allowed for Portal'}, 403)
                 return
             sess_data[1]['llm_profile_id'] = profile_id
             actor = sess_data[1].get('principal_id', sess_data[1].get('user_id', ''))
-            connection.execute_transaction_callback(lambda tx: identity_api._audit_tx(tx, actor, 'PORTAL_LLM_SWITCH', 'LLM_PROFILE', profile_id, 'ALLOW', 'Portal user switched to an administrator-allowlisted LLM'))
+            previous_agent_id = connection.get_current_agent_id()
+            try:
+                connection.set_agent_context(None)
+                connection.execute_transaction_callback(lambda tx: identity_api._audit_tx(tx, actor, 'PORTAL_LLM_SWITCH', 'LLM_PROFILE', profile_id, 'ALLOW', 'Portal user switched to an administrator-allowlisted LLM'))
+            finally:
+                connection.set_agent_context(previous_agent_id)
             self._send_json({'success': True, 'profile_id': profile_id})
         except Exception as exc:
             self._send_json({'success': False, 'error': str(exc)}, 400)
 
     def _portal_selected_llm(self, sess):
         profile_id = str(sess.get('llm_profile_id') or '')
-        options = platform_agent_pool.portal_llm_options()
-        allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+        previous_agent_id = connection.get_current_agent_id()
+        try:
+            connection.set_agent_context(None)
+            options = platform_agent_pool.portal_llm_options()
+            allowed = {str(item.get('profile_id')) for item in options.get('items') or []}
+        finally:
+            connection.set_agent_context(previous_agent_id)
         if profile_id not in allowed:
             profile_id = str(options.get('default_profile_id') or '')
         if not profile_id:
             return None
-        return {str(k).lower(): v for k, v in dict(connection.execute_query_one(
-            "SELECT PROFILE_ID,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {'id': profile_id}) or {}).items()}
+        previous_agent_id = connection.get_current_agent_id()
+        try:
+            connection.set_agent_context(None)
+            return {str(k).lower(): v for k, v in dict(connection.execute_query_one(
+                "SELECT PROFILE_ID,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {'id': profile_id}) or {}).items()}
+        finally:
+            connection.set_agent_context(previous_agent_id)
 
     def _handle_portal_chat_send(self):
         try:
@@ -4510,7 +4532,12 @@ class VisHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_json({'error': 'Not authenticated'}, 401)
             elif path == '/portal/api/llm-profiles':
-                self._send_json(platform_agent_pool.portal_llm_options())
+                previous_agent_id = connection.get_current_agent_id()
+                try:
+                    connection.set_agent_context(None)
+                    self._send_json(platform_agent_pool.portal_llm_options())
+                finally:
+                    connection.set_agent_context(previous_agent_id)
             elif path == '/portal/api/agent/status':
                 session_data = _get_session(self)
                 if session_data:
@@ -4854,8 +4881,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.7', VERSION)
-            html = html.replace('2026-08-17', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.8', VERSION)
+            html = html.replace('2026-08-18', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

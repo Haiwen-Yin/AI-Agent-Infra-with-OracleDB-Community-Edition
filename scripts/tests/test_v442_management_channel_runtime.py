@@ -230,3 +230,12 @@ def test_deployment_bootstrap_verifies_the_private_knowledge_seed():
     assert "CONTENT_DIGEST" in native.split("def _verify_management_knowledge", 1)[1].split("def _principal_display_name", 1)[0]
     assert "native_agent_api.bootstrap_native_agents()" in deployment
     assert '_record_evidence(journal.run_id, "POSTFLIGHT"' in deployment
+
+
+def test_deployment_postflight_verifies_scoped_private_knowledge():
+    root = Path(__file__).resolve().parents[1]
+    deployment = (root / "lib" / "deployment_orchestrator.py").read_text(encoding="utf-8")
+    block = deployment.split("native = native_agent_api.bootstrap_native_agents()", 1)[1].split("models = _configure_models", 1)[0]
+    assert '"scoped_knowledge": native.get("scoped_knowledge")' in block
+    assert '!= "MIGRATED"' in block
+    assert '_record_evidence(journal.run_id, "PLATFORM_KNOWLEDGE_POSTFLIGHT"' in block

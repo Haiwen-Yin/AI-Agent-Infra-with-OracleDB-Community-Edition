@@ -1,5 +1,25 @@
 # Changelog
 
+## v4.4.8 - 2026-08-18
+
+- Added a database-authoritative platform command registry, command
+  completion, deterministic help, and governed maintenance-task lifecycle.
+- Added deterministic observation proposals and explicit Graph Run binding for
+  long-running maintenance without a second execution kernel.
+- Kept Compliance Agent proposal-only and isolated Compliance/Admin private
+  knowledge by audience, scope, classification, digest, and signature.
+- Added platform private knowledge, command, maintenance, safe-autonomy, and
+  isolation-inventory migrations for Oracle, PostgreSQL, and YashanDB.
+- Enforced Oracle Data Grants, PostgreSQL forced RLS with trusted role mapping,
+  and YashanDB fail-closed privilege revocation.
+- Restricted Oracle application-context identity to the matching End User and
+  removed PostgreSQL custom-GUC identity fallback for mapped runtime roles.
+- Added cross-domain classification ceilings, LLM management-boundary checks,
+  source-only private-knowledge projection, and focused negative isolation
+  tests.
+- Verified idempotent v4.4.8 migrations and read-only live validation across
+  Oracle, PostgreSQL, and YashanDB Enterprise baselines.
+
 ## v4.4.7 - 2026-08-17
 
 - Hardened LLM Provider Profile save, reference-safe logical retirement,

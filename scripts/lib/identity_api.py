@@ -14,7 +14,9 @@ import json
 import os
 import secrets
 import re
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -23,11 +25,16 @@ from . import connection, governed_contracts, cursor_pagination
 
 REGISTRATION_MODES = {"CLOSED", "APPROVAL", "INVITE_ONLY", "DIRECTORY", "OPEN"}
 USER_STATES = {"PENDING", "ACTIVE", "LOCKED", "DISABLED", "EXPIRED"}
+_authorization_cache_local = threading.local()
 SCOPES = {
     "ALL", "SECURITY_DOMAIN", "ORG_SUBTREE", "DIRECT_REPORTS",
     "RESPONSIBLE_GROUP", "OWNED", "ASSIGNED", "NONE",
 }
 ROLE_FALLBACKS = {
+    "COMPLIANCE_CONTROLLER": {
+        "permissions": {"compliance.read", "compliance.propose"},
+        "scopes": {"SECURITY_DOMAIN"},
+    },
     "END_USER": {
         "permissions": {
             "profile.read", "profile.update", "agents.enroll", "agents.read",
@@ -1941,6 +1948,17 @@ def effective_access(
     resource: Optional[Dict[str, Any]] = None,
     _include_delegations: bool = True,
 ) -> Dict[str, Any]:
+    cache = getattr(_authorization_cache_local, "cache", None)
+    cache_key = (
+        str(principal_id),
+        str(action),
+        _include_delegations,
+        str((resource or {}).get("security_domain_id") or "") if resource else "",
+        str((resource or {}).get("allowed_security_domain_id") or "") if resource else "",
+    )
+    if cache is not None and cache_key in cache:
+        return dict(cache[cache_key])
+
     principal = _row(connection.execute_query_one(
         "SELECT PRINCIPAL_TYPE, STATUS, PERMISSION_VERSION FROM CX_PRINCIPALS "
         "WHERE PRINCIPAL_ID = :principal_id",
@@ -1950,7 +1968,7 @@ def effective_access(
     if not principal or principal_status != "ACTIVE":
         # Never turn an unknown, disabled, expired, or pending identity into
         # a default End User.  This is the first decision in every API path.
-        return {
+        result = {
             "decision": "DENY",
             "action": action,
             "scopes": ["NONE"],
@@ -1958,6 +1976,9 @@ def effective_access(
             "sources": ["principal:inactive-or-unknown"],
             "policy_version": int((principal or {}).get("permission_version") or 0),
         }
+        if cache is not None:
+            cache[cache_key] = dict(result)
+        return result
     roles = _rows(_required_query(
         "SELECT ROLE_CODE FROM CX_USER_ROLES WHERE PRINCIPAL_ID = :principal_id AND STATUS = 'ACTIVE' "
         "AND (VALID_UNTIL IS NULL OR VALID_UNTIL > CURRENT_TIMESTAMP)", {"principal_id": principal_id}
@@ -2037,7 +2058,27 @@ def effective_access(
         allowed_domain = resource.get("allowed_security_domain_id")
         if required_domain and allowed_domain and required_domain != allowed_domain:
             decision = "DENY"
-    return {"decision": decision, "action": action, "scopes": sorted(scopes or {"NONE"}), "roles": [r["role_code"] for r in roles], "sources": sources, "policy_version": _permission_version(principal_id)}
+    result = {"decision": decision, "action": action, "scopes": sorted(scopes or {"NONE"}), "roles": [r["role_code"] for r in roles], "sources": sources, "policy_version": _permission_version(principal_id)}
+    if cache is not None:
+        cache[cache_key] = dict(result)
+    return result
+
+
+@contextmanager
+def cached_authorization() -> Any:
+    """Reuse authorization decisions within one guarded service operation.
+
+    This is intentionally narrower than a global permission cache.  Callers
+    must wrap only a single read/write operation that does not mutate role,
+    permission, delegation, or principal state between authorization checks.
+    A revoked permission is therefore never hidden across operations.
+    """
+    previous = getattr(_authorization_cache_local, "cache", None)
+    _authorization_cache_local.cache = {}
+    try:
+        yield
+    finally:
+        _authorization_cache_local.cache = previous
 
 
 def effective_access_many(principal_id: str, actions: Iterable[str]) -> Dict[str, Dict[str, Any]]:
@@ -2824,6 +2865,10 @@ def create_bridge_transfer(
         ))
         if not bridge or str(bridge.get("status") or "").upper() != "APPROVED":
             raise PermissionError("Bridge is not approved")
+        # The approved Bridge fixes the transfer ceiling. Later domain changes
+        # cannot silently upgrade or downgrade an in-flight transfer.
+        bridge_ceiling = bridge.get("classification") or "INTERNAL"
+        _classification(bridge_ceiling)
         domain_membership = _row(tx.query_one(
             "SELECT MEMBERSHIP_ID FROM CX_DOMAIN_MEMBERS WHERE SECURITY_DOMAIN_ID = :security_domain_id "
             "AND PRINCIPAL_ID = :principal_id AND STATUS = 'ACTIVE' "
@@ -2835,6 +2880,21 @@ def create_bridge_transfer(
         expiry = _timestamp(bridge.get("expires_at"))
         if expiry is None or expiry <= _now():
             raise IdentityError("Bridge has expired")
+        domains = _rows(tx.query(
+            "SELECT SECURITY_DOMAIN_ID, CLASSIFICATION FROM CX_SECURITY_DOMAINS "
+            "WHERE SECURITY_DOMAIN_ID IN (:source_domain_id, :target_domain_id) AND STATUS = 'ACTIVE'",
+            {"source_domain_id": bridge.get("source_domain_id"), "target_domain_id": bridge.get("target_domain_id")},
+        ))
+        by_domain = {str(row.get("security_domain_id") or ""): row for row in domains}
+        source_domain = by_domain.get(str(bridge.get("source_domain_id") or ""))
+        target_domain = by_domain.get(str(bridge.get("target_domain_id") or ""))
+        if not source_domain or not target_domain:
+            raise IdentityError("Bridge Security Domain is unavailable")
+        if (
+            _classification(source_domain.get("classification")) != _classification(bridge_ceiling)
+            or not _classification_meets_minimum(target_domain.get("classification"), bridge_ceiling)
+        ):
+            raise IdentityError("Bridge classification ceiling is invalid")
         if idempotency_key:
             existing = _row(tx.query_one(
                 "SELECT TRANSFER_ID, STATUS FROM CX_BRIDGE_TRANSFERS WHERE BRIDGE_ID = :bridge_id "
@@ -3534,7 +3594,16 @@ def _assert_thread_member(principal_id: str, thread_id: str, action: str = "chan
     return thread
 
 
-def post_channel_message(principal_id: str, channel_id: str, body: str, *, thread_type: str = "CHANNEL", thread_id: str = "", message_type: str = "TEXT", references: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def post_channel_message(principal_id: str, channel_id: str, body: str, *, thread_type: str = "CHANNEL", thread_id: str = "", message_type: str = "TEXT", references: Optional[Dict[str, Any]] = None, response_language: str = "") -> Dict[str, Any]:
+    with cached_authorization():
+        return _post_channel_message_uncached(
+            principal_id, channel_id, body, thread_type=thread_type,
+            thread_id=thread_id, message_type=message_type,
+            references=references, response_language=response_language,
+        )
+
+
+def _post_channel_message_uncached(principal_id: str, channel_id: str, body: str, *, thread_type: str = "CHANNEL", thread_id: str = "", message_type: str = "TEXT", references: Optional[Dict[str, Any]] = None, response_language: str = "") -> Dict[str, Any]:
     channel = _assert_channel_member(principal_id, channel_id, "channels.write")
     if not body or len(body) > 100000:
         raise IdentityError("Message body is invalid")
@@ -3612,10 +3681,13 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
     # Only a human administrator's explicit mention in the protected Channel
     # reaches the native runtime. Replies are AGENT_RESPONSE messages with no
     # mentions, so they cannot recursively invoke an Agent.
-    if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and normalized_mentions:
+    is_administration_channel = str(channel_id) == "CH_PLATFORM_ADMINISTRATION"
+    is_platform_command = str(body or "").strip().lower().startswith("/platform ")
+    if is_administration_channel and (normalized_mentions or is_platform_command):
         from . import native_agent_api
         dispatch_errors: List[Dict[str, str]] = []
-        for mentioned_agent_id in normalized_mentions:
+        command_targets = [native_agent_api.PLATFORM_ADMIN_AGENT_ID] if is_platform_command else []
+        for mentioned_agent_id in sorted(set(normalized_mentions + command_targets)):
             try:
                 if mentioned_agent_id not in {
                     native_agent_api.PLATFORM_ADMIN_AGENT_ID,
@@ -3624,7 +3696,7 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
                     continue
                 dispatches.append(native_agent_api.create_channel_execution(
                     principal_id, channel_id, message_id, body, mentioned_agent_id,
-                    normalized_thread_type, thread_id,
+                    normalized_thread_type, thread_id, response_language=response_language,
                 ))
             except (native_agent_api.NativeAgentError, PermissionError) as exc:
                 # The human message is already durable and auditable. Preserve
@@ -3635,7 +3707,7 @@ def post_channel_message(principal_id: str, channel_id: str, body: str, *, threa
                        "DENY", "explicit management Agent dispatch was not queued")
     return {"message_id": message_id, "channel_id": channel_id, "principal_id": principal_id, "body": body,
             "message_type": message_type, "deliveries_enqueued": int(delivered or 0), "agent_dispatches": dispatches,
-            "agent_dispatch_errors": dispatch_errors if str(channel_id) == "CH_PLATFORM_ADMINISTRATION" and normalized_mentions else []}
+            "agent_dispatch_errors": dispatch_errors if is_administration_channel and (normalized_mentions or is_platform_command) else []}
 
 
 def _channel_agent_response_message_id(channel_id: str, execution_id: str) -> str:

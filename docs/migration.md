@@ -1,4 +1,17 @@
-# Migration Guide - AI Agent Infra with DB v4.4.7
+# Migration Guide - AI Agent Infra with DB v4.4.8
+
+## v4.4.8 Platform Agent Isolation Migration
+
+v4.4.8 changes the database contract. Oracle and YashanDB apply
+`48_v4_4_8_platform_agent_isolation.sql`; PostgreSQL applies that script and
+`49_v4_4_8_security_domain_rls.sql`. The migrations add the command registry,
+maintenance lifecycle, safe-autonomy policy, platform private knowledge, and
+isolation inventory. PostgreSQL installs forced RLS and the strict trusted
+identity function. Oracle installs the End User-constrained context setter.
+
+Run only through the journaled migration runner with a recoverable backup
+manifest. The same scripts are idempotent and are verified against Oracle,
+PostgreSQL, and YashanDB Enterprise baselines.
 
 ## v4.4.7 Maintenance Release
 

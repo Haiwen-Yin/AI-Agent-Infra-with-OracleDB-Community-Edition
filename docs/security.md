@@ -1,4 +1,25 @@
-# Security - AI Agent Infra with DB v4.4.7
+# Security - AI Agent Infra with DB v4.4.8
+
+## v4.4.8 Platform Agent And Database Isolation Boundary
+
+Platform built-in Agents operate on typed database commands rather than model
+authority. `READ`, `SAFE_MAINTENANCE`, `PROPOSED_CHANGE`,
+`HIGH_RISK_CHANGE`, and `EMERGENCY_CONTAINMENT` are persisted command-risk
+classes. Safe autonomy is disabled by default; high-impact change requires a
+final human administrator approval. The Enterprise Compliance Agent can
+propose remediation Action Cards but cannot inherit platform-management
+authority.
+
+Platform private knowledge uses `CX_PLATFORM_KNOWLEDGE`, chunk, grant, and
+isolation-inventory records. Oracle uses End User plus Data Grants, PostgreSQL
+uses dedicated roles plus forced RLS, and YashanDB uses fail-closed privilege
+revocation. PostgreSQL identity comes first from the trusted `agent_db_identity`
+role mapping; a client-set `app.current_agent_id` is no longer authoritative
+when that mapping exists. Oracle's application-context setter requires the
+current Deep Data Security End User unless the deployment Owner is acting as
+the administrative exception. Chunk, vector, full-text, and Graph projections
+remain unavailable until equivalent predicates are implemented; only the
+verified signed source projection is exposed.
 
 ## v4.4.3 Security Domain Boundary
 

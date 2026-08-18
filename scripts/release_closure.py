@@ -15,7 +15,7 @@ from typing import Any, Iterable
 
 
 SCHEMA = "ai-agent-infra-release-closure/v2"
-VERSION = "4.4.7"
+VERSION = "4.4.8"
 PROFILE = "production"
 DEPENDENCY_ORDER = [
     "contracts",

@@ -31,7 +31,8 @@ SEED_PROFILES = (
     ("security-review", "Security Review", {"locked_fields": ["network", "tools", "audit"], "controls": {"network": "isolated", "tools": "allowlist", "audit": "immutable"}}),
 )
 COMPLIANCE_SERVICE_ID = "SYSTEM_COMPLIANCE"
-COMPLIANCE_ADMIN_AGENT_ID = "SYSTEM_COMPLIANCE_ADMIN"
+COMPLIANCE_ADMIN_AGENT_ID = "SYSTEM_COMPLIANCE_ADMIN_AGENT"
+COMPLIANCE_SERVICE_ROLE = "COMPLIANCE_CONTROLLER"
 
 
 class ComplianceError(ValueError):
@@ -349,6 +350,28 @@ def ensure_compliance_admin_agent() -> bool:
                 "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID,PRINCIPAL_TYPE,DISPLAY_NAME,STATUS,PORTAL_ACCESS,APP_ACCESS) "
                 "VALUES (:principal_id,'SERVICE','Compliance Controller Service','ACTIVE','N','N')",
                 {"principal_id": COMPLIANCE_SERVICE_ID},
+            )
+        existing_template = _row(tx.query_one(
+            "SELECT ROLE_CODE FROM CX_ROLE_TEMPLATES WHERE ROLE_CODE=:role FOR UPDATE",
+            {"role": COMPLIANCE_SERVICE_ROLE},
+        ))
+        if not existing_template:
+            tx.execute(
+                "INSERT INTO CX_ROLE_TEMPLATES(ROLE_CODE,DISPLAY_NAME,PERMISSIONS_JSON,DATA_SCOPES_JSON,VERSION,MANAGED) "
+                "VALUES (:role,:display,:permissions,:scopes,1,'Y')",
+                {"role": COMPLIANCE_SERVICE_ROLE, "display": "Compliance Controller",
+                 "permissions": _json(["compliance.read", "compliance.propose"]),
+                 "scopes": _json(["SECURITY_DOMAIN"])},
+            )
+        existing_role = _row(tx.query_one(
+            "SELECT USER_ROLE_ID FROM CX_USER_ROLES WHERE PRINCIPAL_ID=:principal AND ROLE_CODE=:role FOR UPDATE",
+            {"principal": COMPLIANCE_SERVICE_ID, "role": COMPLIANCE_SERVICE_ROLE},
+        ))
+        if not existing_role:
+            tx.execute(
+                "INSERT INTO CX_USER_ROLES(USER_ROLE_ID,PRINCIPAL_ID,ROLE_CODE,SOURCE,STATUS) "
+                "VALUES (:id,:principal,:role,'SYSTEM_BOOTSTRAP','ACTIVE')",
+                {"id": _id("UR"), "principal": COMPLIANCE_SERVICE_ID, "role": COMPLIANCE_SERVICE_ROLE},
             )
         tx.execute(
             "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID,PRINCIPAL_TYPE,DISPLAY_NAME,STATUS,PORTAL_ACCESS,APP_ACCESS) "
@@ -725,7 +748,10 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
                        deadline_at: str = "") -> Dict[str, Any]:
     """Open one idempotent, structured remediation case for an active finding."""
     enterprise_required()
-    _require(actor, "agents.operate")
+    if actor == COMPLIANCE_SERVICE_ID:
+        _require(actor, "compliance.propose")
+    else:
+        _require(actor, "agents.operate")
     if not finding_id or not required_action.strip() or not reason.strip():
         raise ComplianceError("Finding, required action, and reason are required")
     case_id = _id("REM")
