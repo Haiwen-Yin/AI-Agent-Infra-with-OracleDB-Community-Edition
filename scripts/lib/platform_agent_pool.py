@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Optional
 
 from . import connection, identity_api, native_agent_api
+from .execution_evidence import build_execution_evidence
 
 
 class AgentPoolError(ValueError):
@@ -148,6 +149,7 @@ def list_command_catalog(actor: str, channel_id: str = "CH_PLATFORM_ADMINISTRATI
             "risk_level": row.get("risk_level"), "execution_mode": row.get("execution_mode"),
             "executor_state": row.get("executor_state") or "UNAVAILABLE",
             "example": row.get("example_text"), "metadata": metadata,
+            "parameter_schema": _parse(row.get("parameter_schema"), {}),
         })
     return {"channel_id": channel_id, "items": items, "count": len(items)}
 
@@ -377,6 +379,19 @@ def bind_maintenance_graph_run(actor: str, task_id: str, graph_run_id: str, *,
             "graph_version_id": graph_version_id,
             "plan_id": plan_id,
             "admission_evidence": admission_evidence,
+            "execution_evidence": build_execution_evidence(
+                execution_id=task_id,
+                kind="MAINTENANCE",
+                input={"task_id": task_id, "graph_version_id": graph_version_id, "plan_id": plan_id},
+                graph_run_id=graph_run_id,
+                capability_proof={"admission": admission_evidence},
+                budget={"source": "GRAPH_RUN"},
+                attempt={"source": "MAINTENANCE_TASK"},
+                lease={"source": "GRAPH_RUN"},
+                fencing_token=0,
+                side_effect_class="GOVERNED",
+                human_takeover={"available": True},
+            ),
         }
         # Preserve earlier evidence while making the durable admission binding
         # explicit and idempotent.
@@ -699,7 +714,36 @@ def execute_read_command(actor: str, command_id: str) -> Dict[str, Any]:
     if not kind.endswith("_READ"):
         raise AgentPoolError("only read commands can be executed directly")
     if kind == "HEALTH_READ":
-        result = {"status": "ok", "scope": "database_control_plane"}
+        # Keep the health read credential-free, but useful enough to diagnose
+        # the control plane without opening separate dashboard pages.
+        result = {
+            "status": "ok",
+            "scope": "database_control_plane",
+            "managed_nodes": {
+                "total": _count("CX_MANAGED_NODES", "1=1"),
+                "active": _count("CX_MANAGED_NODES", "STATUS IN ('ACTIVE','VALIDATED')"),
+                "pending_validation": _count("CX_MANAGED_NODES", "VALIDATION_STATE='PENDING'"),
+            },
+            "native_agents": {
+                "active": _count("CX_NATIVE_AGENTS", "STATUS='ACTIVE'"),
+                "inactive": _count("CX_NATIVE_AGENTS", "STATUS<>'ACTIVE'"),
+            },
+            "llm_profiles": {
+                "active": _count("CX_LLM_PROVIDER_PROFILES", "STATUS='ACTIVE'"),
+                "healthy": _count("CX_LLM_PROVIDER_PROFILES", "STATUS='ACTIVE' AND HEALTH_STATE IN ('HEALTHY','VERIFIED','READY')"),
+                "degraded": _count("CX_LLM_PROVIDER_PROFILES", "STATUS='ACTIVE' AND HEALTH_STATE='DEGRADED'"),
+            },
+            "embedding": {
+                "profiles": _count("CX_EMBEDDING_PROFILES", "STATUS='ACTIVE'"),
+                "contracts": _count("CX_EMBEDDING_CONTRACTS", "STATUS='ACTIVE'"),
+            },
+            "runtime": {
+                "active_executions": _count("CX_RUNTIME_EXECUTIONS", "STATUS IN ('PENDING','CLAIMED','RUNNING','STREAMING','WAITING')"),
+                "failed_executions": _count("CX_RUNTIME_EXECUTIONS", "STATUS IN ('FAILED','VERIFY_FAILED')"),
+            },
+            "database_dialect": str(getattr(connection, "DATABASE_DIALECT", "unknown")),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
     elif kind == "AGENT_STATUS_READ":
         result = {"active": _count("CX_NATIVE_AGENTS", "STATUS='ACTIVE'"), "inactive": _count("CX_NATIVE_AGENTS", "STATUS<>'ACTIVE'")}
     elif kind == "POOL_STATUS_READ":

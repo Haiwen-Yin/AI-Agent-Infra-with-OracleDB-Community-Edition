@@ -358,12 +358,51 @@ def list_collaboration_groups(actor: str, *, limit: int = 200) -> List[Dict[str,
         "SELECT g.GROUP_ID,g.GROUP_NAME,g.GROUP_TYPE,g.DESCRIPTION,g.COORDINATOR_AGENT_ID,g.SHARING_POLICY,g.STATUS,"
         "(SELECT COUNT(*) FROM COLLAB_GROUP_MEMBERS m WHERE m.GROUP_ID=g.GROUP_ID AND m.STATUS='ACTIVE') AS MEMBER_COUNT,"
         "b.SECURITY_DOMAIN_ID AS BOUND_SECURITY_DOMAIN_ID,b.STATUS AS BINDING_STATUS "
-        "FROM COLLAB_GROUPS g LEFT JOIN CX_DOMAIN_BINDINGS b ON b.BINDING_TYPE='LEGACY_COLLAB_GROUP' "
-        "AND b.TARGET_ID=g.GROUP_ID AND b.STATUS='ACTIVE' WHERE g.STATUS='ACTIVE' "
+        "FROM COLLAB_GROUPS g JOIN CX_DOMAIN_BINDINGS b ON b.BINDING_TYPE='LEGACY_COLLAB_GROUP' "
+        "AND b.TARGET_ID=g.GROUP_ID AND b.STATUS='ACTIVE' "
+        "JOIN COLLAB_GROUP_MEMBERS self_member ON self_member.GROUP_ID=g.GROUP_ID "
+        "AND self_member.AGENT_ID=:actor AND self_member.STATUS='ACTIVE' "
+        "JOIN CX_DOMAIN_MEMBERS domain_member ON domain_member.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
+        "AND domain_member.PRINCIPAL_ID=:actor AND domain_member.STATUS='ACTIVE' "
+        "AND (domain_member.VALID_UNTIL IS NULL OR domain_member.VALID_UNTIL>CURRENT_TIMESTAMP) "
+        "WHERE g.STATUS='ACTIVE' "
         "ORDER BY g.GROUP_NAME,g.GROUP_ID " + _limit_clause(),
-        {"limit": max(1, min(int(limit), 500))},
+        {"actor": actor, "limit": max(1, min(int(limit), 500))},
     )
-    return _rows(rows)
+    result = _rows(rows)
+    for item in result:
+        item["compatibility"] = {
+            "contract": "legacy-collaboration-read/v1",
+            "deprecated": True,
+            "authorization_source": "SECURITY_DOMAIN",
+            "scope": "filtered-current-principal-channel-domain",
+        }
+    return result
+
+
+def list_legacy_collaboration_messages(actor: str, group_id: str, *, channel_id: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+    """Read historical messages only through the current governed scope."""
+    _require(actor)
+    params = {"actor": actor, "group_id": _text(group_id, "group ID", 128, required=True), "limit": max(1, min(int(limit), 500))}
+    channel_filter = ""
+    if channel_id:
+        params["channel_id"] = _text(channel_id, "channel ID", 128, required=True)
+        channel_filter = (
+            " AND EXISTS (SELECT 1 FROM CX_CHANNELS c JOIN CX_CHANNEL_MEMBERS cm "
+            "ON cm.CHANNEL_ID=c.CHANNEL_ID AND cm.PRINCIPAL_ID=:actor AND cm.STATUS='ACTIVE' "
+            "WHERE c.CHANNEL_ID=:channel_id AND c.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID AND c.STATUS='ACTIVE')"
+        )
+    rows = connection.execute_query(
+        "SELECT m.MESSAGE_ID,m.GROUP_ID,m.AGENT_ID,m.MESSAGE_TEXT,m.CREATED_AT "
+        "FROM COLLAB_MESSAGES m JOIN COLLAB_GROUP_MEMBERS gm ON gm.GROUP_ID=m.GROUP_ID AND gm.AGENT_ID=:actor AND gm.STATUS='ACTIVE' "
+        "WHERE m.GROUP_ID=:group_id AND EXISTS (SELECT 1 FROM CX_DOMAIN_BINDINGS b "
+        "JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
+        "AND dm.PRINCIPAL_ID=:actor AND dm.STATUS='ACTIVE' "
+        "AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP) "
+        "WHERE b.BINDING_TYPE='LEGACY_COLLAB_GROUP' AND b.TARGET_ID=m.GROUP_ID AND b.STATUS='ACTIVE'"
+        + channel_filter + ") ORDER BY m.CREATED_AT DESC " + _limit_clause(), params,
+    )
+    return [{**_row(row), "compatibility": {"contract": "legacy-collaboration-read/v1", "deprecated": True, "scope": "principal-channel-domain"}} for row in rows]
 
 
 def create_conversion_draft(actor: str, group_id: str, domain_id: str, domain_name: str, classification: str, purpose: str, owner_principal_id: str, reason: str) -> Dict[str, Any]:

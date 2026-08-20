@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.8 - Community Edition - Embedding API
+"""AI Agent Infra v4.4.9 - Community Edition - Embedding API
 
 Generate, store, and search vector embeddings for entities.
 Uses external Embedding API (OpenAI-compatible) + Oracle TO_VECTOR() for storage.
@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from . import connection
 from .connection import execute, execute_query, execute_query_one
+from . import embedding_governance as _embedding_governance
 from .config import get_config
 
 logger = logging.getLogger(__name__)
@@ -126,12 +127,15 @@ def generate_embedding(
     model = model or cfg["model"]
 
     payload = json.dumps({"model": model, "input": text}).encode("utf-8")
+    endpoint = str(api_url or "").rstrip("/")
+    if not endpoint.endswith("/embeddings"):
+        endpoint += "/embeddings"
 
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = "Bearer " + api_key
     req = urllib.request.Request(
-        api_url,
+        endpoint,
         data=payload,
         headers=headers,
         method="POST",
@@ -148,7 +152,7 @@ def generate_embedding(
             else:
                 raise Exception(f"Unexpected API response format: {list(result.keys())}")
     except urllib.error.URLError as e:
-        raise Exception(f"Embedding API connection error ({api_url}): {e}")
+        raise Exception(f"Embedding API connection error ({endpoint}): {e}")
     except Exception as e:
         raise Exception(f"Error generating embedding: {e}")
 
@@ -191,7 +195,10 @@ def store_embedding(
     try:
         scope = {"space": checked["space"]["space_id"], "profile": checked["profile"]["profile_id"],
                  "contract": checked["contract"]["contract_id"], "source_mode": context["mode"], "digest": _content_digest(text)}
-        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type, **scope})
+        row = execute_query_one(
+            sql_check,
+            {"eid": entity_id, "etype": entity_type, "space": scope["space"]},
+        )
         count = int(list(row.values())[0]) if row else 0
 
         version_col = ""
@@ -210,7 +217,7 @@ def store_embedding(
                 version_update = {"ver": int(embedding_version)}
             sql = f"""
                 UPDATE ENTITY_EMBEDDINGS
-                SET EMBEDDING = TO_VECTOR(:vec),
+                SET EMBEDDING = {_embedding_governance._managed_vector_expression()},
                     EMBEDDING_MODEL = :model,
                     EMBEDDING_DIM = :dim, EMBEDDING_PROFILE_ID=:profile,
                     EMBEDDING_CONTRACT_ID=:contract, CONTENT_DIGEST=:digest,
@@ -220,20 +227,16 @@ def store_embedding(
             execute(sql, {"vec": vec_str, "model": model, "dim": dimension,
                           "eid": entity_id, "etype": entity_type, **scope, **version_update})
         else:
-            from .connection import get_connection
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"""INSERT INTO ENTITY_EMBEDDINGS
-                               (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID, EMBEDDING_CONTRACT_ID,
-                                CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL,
-                                EMBEDDING_DIM, CREATED_AT{version_col})
-                            VALUES (:eid, :etype, :space, :profile, :contract, :digest, :source_mode, 'VERIFIED', TO_VECTOR(:vec), :model, :dim,
-                                    CURRENT_TIMESTAMP{version_val})""",
-                        {"eid": entity_id, "etype": entity_type, "vec": vec_str,
-                         "model": model, "dim": dimension, **scope, **version_param},
-                    )
-                    conn.commit()
+            execute(
+                f"""INSERT INTO ENTITY_EMBEDDINGS
+                       (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID, EMBEDDING_CONTRACT_ID,
+                        CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL,
+                        EMBEDDING_DIM, CREATED_AT{version_col})
+                    VALUES (:eid, :etype, :space, :profile, :contract, :digest, :source_mode, 'VERIFIED', {_embedding_governance._managed_vector_expression()}, :model, :dim,
+                            CURRENT_TIMESTAMP{version_val})""",
+                {"eid": entity_id, "etype": entity_type, "vec": vec_str,
+                 "model": model, "dim": dimension, **scope, **version_param},
+            )
         logger.info(f"Stored embedding for {entity_type}:{entity_id} ({dimension}d, {model})")
         return True
     except Exception as e:
@@ -270,13 +273,16 @@ def store_embedding_vector(
         scope = {"space": checked["space"]["space_id"], "profile": checked["profile"]["profile_id"],
                  "contract": checked["contract"]["contract_id"], "source_mode": source_mode.upper(),
                  "digest": _content_digest(vec_str)}
-        row = execute_query_one(sql_check, {"eid": entity_id, "etype": entity_type, **scope})
+        row = execute_query_one(
+            sql_check,
+            {"eid": entity_id, "etype": entity_type, "space": scope["space"]},
+        )
         count = int(list(row.values())[0]) if row else 0
 
         if count > 0:
-            sql = """
+            sql = f"""
                 UPDATE ENTITY_EMBEDDINGS
-                SET EMBEDDING = TO_VECTOR(:vec),
+                    SET EMBEDDING = {_embedding_governance._managed_vector_expression()},
                     EMBEDDING_MODEL = :model,
                     EMBEDDING_DIM = :dim, EMBEDDING_PROFILE_ID=:profile,
                     EMBEDDING_CONTRACT_ID=:contract, CONTENT_DIGEST=:digest,
@@ -285,15 +291,11 @@ def store_embedding_vector(
             """
             execute(sql, {"vec": vec_str, "model": model, "dim": dimension, "eid": entity_id, "etype": entity_type, **scope})
         else:
-            from .connection import get_connection
-            with get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID,
-                            EMBEDDING_CONTRACT_ID, CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
-                        VALUES (:eid, :etype, :space, :profile, :contract, :digest, :source_mode, 'VERIFIED', TO_VECTOR(:vec), :model, :dim, CURRENT_TIMESTAMP)
-                    """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension, **scope})
-                    conn.commit()
+            execute(f"""
+                INSERT INTO ENTITY_EMBEDDINGS (ENTITY_ID, ENTITY_TYPE, EMBEDDING_SPACE_ID, EMBEDDING_PROFILE_ID,
+                    EMBEDDING_CONTRACT_ID, CONTENT_DIGEST, SOURCE_MODE, VALIDATION_STATUS, EMBEDDING, EMBEDDING_MODEL, EMBEDDING_DIM, CREATED_AT)
+                VALUES (:eid, :etype, :space, :profile, :contract, :digest, :source_mode, 'VERIFIED', {_embedding_governance._managed_vector_expression()}, :model, :dim, CURRENT_TIMESTAMP)
+            """, {"eid": entity_id, "etype": entity_type, "vec": vec_str, "model": model, "dim": dimension, **scope})
         logger.info(f"Stored embedding vector for {entity_type}:{entity_id} ({dimension}d)")
         return True
     except Exception as e:

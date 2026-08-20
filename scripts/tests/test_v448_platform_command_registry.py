@@ -105,10 +105,16 @@ def test_command_contract_rejects_missing_parameters_and_reason(service):
 
 def test_channel_and_api_contracts_exist():
     root = Path(__file__).resolve().parents[2]
-    web = (root / "web_app.py" if (root / "web_app.py").exists() else root / "shared" / "web_app.py").read_text(encoding="utf-8")
+    web_path = root / "web_app.py" if (root / "web_app.py").exists() else root / "shared" / "web_app.py"
+    if not web_path.is_file():
+        web_path = root / "scripts" / "web_app.py"
+    web = web_path.read_text(encoding="utf-8")
     ui = (root / "web" / "src" / "App.tsx" if (root / "web" / "src" / "App.tsx").exists() else root / "shared" / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
-    native = (root / "lib" / "native_agent_api.py" if (root / "lib").is_dir() else root / "shared" / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
-    runtime = (root / "lib" / "native_runtime.py" if (root / "lib").is_dir() else root / "shared" / "lib" / "native_runtime.py").read_text(encoding="utf-8")
+    lib_root = root / "lib" if (root / "lib").is_dir() else root / "shared" / "lib"
+    if not lib_root.is_dir():
+        lib_root = root / "scripts" / "lib"
+    native = (lib_root / "native_agent_api.py").read_text(encoding="utf-8")
+    runtime = (lib_root / "native_runtime.py").read_text(encoding="utf-8")
     assert "/api/platform/admin-commands/catalog" in web
     assert "/api/platform/admin-commands/help" in web
     assert "/platform HELP" in ui

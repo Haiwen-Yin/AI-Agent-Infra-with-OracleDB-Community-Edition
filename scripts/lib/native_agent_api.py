@@ -737,6 +737,18 @@ def is_management_template_request(body: str) -> bool:
     return any(marker in value for marker in markers)
 
 
+def is_management_product_request(body: str) -> bool:
+    """Recognize bounded platform/product overview questions."""
+    value = str(body or "").lower()
+    markers = (
+        "平台介绍", "产品介绍", "介绍一下平台", "介绍一下产品", "平台是做什么", "产品是做什么",
+        "平台能力", "产品能力", "平台功能", "产品功能", "什么是川序", "川序是什么",
+        "platform overview", "product overview", "introduce the platform", "what is chuanxu",
+        "what does the platform do", "platform capabilities", "product capabilities",
+    )
+    return any(marker in value for marker in markers)
+
+
 def list_llm_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
     if identity_api.effective_access(str(actor), "platform.manage").get("decision") != "ALLOW":
         raise PermissionError("platform management permission is required")
@@ -1250,6 +1262,10 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
         from . import platform_agent_pool
         pieces = stripped.split(None, 4)
         command_type = pieces[1].upper() if len(pieces) > 1 else ""
+        # Accept the common transposition in HEALTH_READ while keeping the
+        # persisted command contract and audit vocabulary canonical.
+        if command_type == "HEATH_READ":
+            command_type = "HEALTH_READ"
         command_target: Dict[str, Any] = {}
         command_parameters: Dict[str, Any] = {}
         if command_type == "HELP":
@@ -1276,11 +1292,13 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
     command_result_snapshot = command_notice if command_notice.get("status") == "COMPLETED" and command_notice.get("result") else None
     status_request = is_management_status_request(body)
     template_request = is_management_template_request(body)
+    product_request = is_management_product_request(body)
     deterministic_response = bool(
         command_help_snapshot is not None
         or command_result_snapshot is not None
         or status_request
         or template_request
+        or product_request
     )
 
     def work(tx: Any) -> Dict[str, Any]:
@@ -1355,6 +1373,10 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
             payload["platform_command_result"] = command_result_snapshot
         if template_knowledge is not None:
             payload["management_template_knowledge"] = template_knowledge
+        if product_request:
+            payload["management_product_overview"] = management_template_knowledge(
+                actor, mentioned_agent_id, response_language,
+            )
         input_json = _json(payload)
         tx.execute(
             "INSERT INTO CX_RUNTIME_EXECUTIONS(EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,INPUT_JSON,CONTEXT_DIGEST) "

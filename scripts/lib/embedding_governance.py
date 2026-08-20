@@ -364,7 +364,9 @@ def _physical_dimension(profile: Dict[str, Any]) -> Optional[int]:
     if _dialect() in {"pg", "postgresql"}:
         try:
             row = _row(connection.execute_query_one(
-                "SELECT a.atttypmod - 4 AS DIMENSION FROM pg_attribute a "
+                # pgvector stores the declared vector dimension directly in
+                # atttypmod (unlike variable-length PostgreSQL base types).
+                "SELECT a.atttypmod AS DIMENSION FROM pg_attribute a "
                 "JOIN pg_class c ON c.oid=a.attrelid WHERE c.relname='entity_embeddings' "
                 "AND a.attname='embedding' AND a.attnum>0", {},
             ))

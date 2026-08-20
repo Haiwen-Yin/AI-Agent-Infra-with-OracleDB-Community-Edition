@@ -3873,13 +3873,17 @@ def enqueue_instance_backlog(agent_id: str, instance_id: str, channel_id: str, l
     return inserted
 
 
-def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, before: str = "") -> List[Dict[str, Any]]:
+def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, before: str = "", after: str = "") -> List[Dict[str, Any]]:
     _assert_channel_member(principal_id, channel_id)
     params: Dict[str, Any] = {"channel_id": channel_id, "principal_id": principal_id, "limit": max(1, min(int(limit), 500))}
     cursor = ""
     if before:
         cursor = " AND m.MESSAGE_ID < :before"
         params["before"] = before
+    if after:
+        cursor += " AND m.CREATED_AT > :after"
+        params["after"] = after
+    ordering = " ORDER BY m.CREATED_AT ASC, m.MESSAGE_ID ASC " if after else " ORDER BY m.CREATED_AT DESC, m.MESSAGE_ID DESC "
     return _required_query(
         "SELECT m.MESSAGE_ID, m.CHANNEL_ID, m.THREAD_TYPE, m.THREAD_ID, m.PRINCIPAL_ID, "
         "COALESCE(p.DISPLAY_NAME, m.PRINCIPAL_ID) AS SENDER_DISPLAY_NAME, "
@@ -3892,7 +3896,8 @@ def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, 
         "SELECT 1 FROM CX_CHANNEL_THREAD_MEMBERS tm WHERE tm.THREAD_ID = m.THREAD_ID "
         "AND tm.PRINCIPAL_ID = :principal_id AND tm.STATUS = 'ACTIVE' "
         "AND (tm.VALID_UNTIL IS NULL OR tm.VALID_UNTIL > CURRENT_TIMESTAMP)))"
-        + cursor + " ORDER BY m.CREATED_AT DESC, m.MESSAGE_ID DESC " + _limit_clause(),
+        + cursor + ordering
+        + _limit_clause(),
         params,
     )
 

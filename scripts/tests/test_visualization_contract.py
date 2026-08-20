@@ -178,7 +178,10 @@ def test_portal_login_uses_identity_mfa_and_csrf_session_contract():
 
 def test_monitor_page_uses_monitor_heading_not_admin_management():
     root = Path(__file__).resolve().parents[2]
-    ui = (root / "shared" / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    ui_path = root / "shared" / "web" / "src" / "App.tsx"
+    if not ui_path.is_file():
+        ui_path = root / "web" / "src" / "App.tsx"
+    ui = ui_path.read_text(encoding="utf-8")
     monitor = ui.split("function MonitorPage", 1)[1].split("function Channels", 1)[0]
     assert 'title={text("监控", "Monitor")}' in monitor
     assert 'title={text("Admin Agent 管理", "Admin Agent management")}' not in monitor

@@ -93,6 +93,7 @@ def test_async_forms_do_not_use_react_current_target_after_await():
     assert "LLM_PROFILE_IN_USE:" in source
     assert "def probe_saved_llm_profile" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
     assert "/api/llm-provider-profiles/{profile_id}/probe" in WEB_APP_PATH.read_text(encoding="utf-8")
-    assert "probeSavedProfile" in source
+    profiles = source.split("function LLMProviderProfilesPanel", 1)[1].split("function PlatformOperationsPage", 1)[0]
+    assert "const probe = async" in profiles
     assert "LLM provider returned a different model" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
     assert "refreshProfileHealth" in source

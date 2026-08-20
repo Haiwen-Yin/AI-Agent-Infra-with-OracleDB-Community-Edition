@@ -192,6 +192,11 @@ V446_MIGRATION_SCRIPTS = V445_MIGRATION_SCRIPTS + (
 V448_MIGRATION_SCRIPTS = V446_MIGRATION_SCRIPTS + (
     "48_v4_4_8_platform_agent_isolation.sql",
 )
+V449_MIGRATION_SCRIPTS = V446_MIGRATION_SCRIPTS + (
+    "50_v4_4_9_security_boundary_repair.sql",
+    "52_v4_4_9_local_identity_boundary.sql",
+    "54_v4_4_9_audit_data_contract.sql",
+)
 V448_PLATFORM_AGENT_ISOLATION_TABLES = (
     "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
     "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_MAINTENANCE_ATTEMPTS",
@@ -1420,6 +1425,38 @@ def validate_v448_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v449_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    """Validate the v4.4.9 repair scripts without treating v4.4.8 as a baseline."""
+    selected = {path.name: path for path in scripts}
+    repair = selected.get("50_v4_4_9_security_boundary_repair.sql")
+    identity = selected.get("51_v4_4_9_identity_boundary_repair.sql") if database == "pg" else None
+    runtime_boundary = selected.get("53_v4_4_9_pg_runtime_boundary.sql") if database == "pg" else None
+    audit_contract = selected.get("54_v4_4_9_audit_data_contract.sql")
+    repair_text = repair.read_text(encoding="utf-8").upper() if repair and repair.is_file() else ""
+    identity_text = identity.read_text(encoding="utf-8").upper() if identity and identity.is_file() else ""
+    runtime_boundary_text = runtime_boundary.read_text(encoding="utf-8").upper() if runtime_boundary and runtime_boundary.is_file() else ""
+    audit_contract_text = audit_contract.read_text(encoding="utf-8").upper() if audit_contract and audit_contract.is_file() else ""
+    markers = {"CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_KNOWLEDGE"}
+    if database == "pg":
+        markers.add("FORCE ROW LEVEL SECURITY")
+    identity_markers = {"CURRENT_AGENT_IDENTITY", "AGENT_DB_IDENTITY", "CURRENT_USER"}
+    runtime_boundary_markers = {
+        "SESSION_USER", "REVOKE ALL PRIVILEGES", "CX_PLATFORM_KNOWLEDGE",
+        "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_COMMANDS",
+    }
+    control = {
+        "scripts_required": list(V449_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V449_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "repair_markers_missing": sorted(marker for marker in markers if marker not in repair_text),
+        "identity_markers_missing": sorted(marker for marker in identity_markers if marker not in identity_text) if database == "pg" else [],
+        "runtime_boundary_markers_missing": sorted(marker for marker in runtime_boundary_markers if marker not in runtime_boundary_text) if database == "pg" else [],
+        "audit_contract_markers_missing": sorted(marker for marker in {"CONTEXT_AUDIT_LOG", "RESOLUTION_STATUS", "AUDIT_TYPE"} if marker not in audit_contract_text),
+        "unmapped_identity_fallback_absent": database != "pg" or "WHERE NOT EXISTS (SELECT 1 FROM PUBLIC.AGENT_DB_IDENTITY" not in identity_text,
+    }
+    control["passed"] = not control["scripts_missing"] and not control["repair_markers_missing"] and not control["identity_markers_missing"] and not control["runtime_boundary_markers_missing"] and not control["audit_contract_markers_missing"] and control["unmapped_identity_fallback_absent"]
+    return {"database": database, "v449_security_boundary_repair": control, "passed": bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1958,27 +1995,35 @@ def main() -> int:
     # gate therefore has the same mandatory Graph object contract as the
     # v4.2.x experimental line; otherwise an incomplete v4.3.0 deployment
     # could be reported as ready.
-    requires_graph = target_version.startswith(("4.2.", "4.3.", "4.4."))
-    requires_v43 = target_version.startswith(("4.3.", "4.4."))
-    requires_v431 = target_version.startswith(("4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
-    requires_v432 = target_version.startswith(("4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
-    requires_v433 = target_version.startswith(("4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
-    requires_v434 = target_version.startswith(("4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4."))
-    requires_v435 = target_version.startswith(("4.3.5", "4.3.6", "4.3.7", "4.4."))
-    requires_v436 = target_version.startswith(("4.3.6", "4.3.7", "4.4."))
-    requires_v437 = target_version.startswith(("4.3.7", "4.4."))
-    requires_v440 = target_version.startswith("4.4.")
-    requires_v441 = target_version.startswith(("4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6"))
-    requires_v442 = target_version.startswith(("4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6"))
-    requires_v443 = target_version.startswith(("4.4.3", "4.4.4", "4.4.5", "4.4.6"))
-    requires_v444 = target_version.startswith(("4.4.4", "4.4.5", "4.4.6"))
-    requires_v445 = target_version.startswith(("4.4.5", "4.4.6"))
-    requires_v446 = target_version.startswith("4.4.6")
+    try:
+        target_tuple = tuple(int(part) for part in target_version.split(".")[:3])
+    except ValueError:
+        target_tuple = (0, 0, 0)
+    at_least = lambda version: target_tuple >= version
+    requires_graph = at_least((4, 2, 0))
+    requires_v43 = at_least((4, 3, 0))
+    requires_v431 = at_least((4, 3, 1))
+    requires_v432 = at_least((4, 3, 2))
+    requires_v433 = at_least((4, 3, 3))
+    requires_v434 = at_least((4, 3, 4))
+    requires_v435 = at_least((4, 3, 5))
+    requires_v436 = at_least((4, 3, 6))
+    requires_v437 = at_least((4, 3, 7))
+    requires_v440 = at_least((4, 4, 0))
+    requires_v441 = at_least((4, 4, 1))
+    requires_v442 = at_least((4, 4, 2))
+    requires_v443 = at_least((4, 4, 3))
+    requires_v444 = at_least((4, 4, 4))
+    requires_v445 = at_least((4, 4, 5))
+    requires_v446 = at_least((4, 4, 6))
     requires_v448 = target_version.startswith("4.4.8")
+    requires_v449 = target_version.startswith("4.4.9")
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v448:
+            if requires_v449:
+                migration_scripts, validator = V449_MIGRATION_SCRIPTS, validate_v449_static_contract
+            elif requires_v448:
                 migration_scripts, validator = V448_MIGRATION_SCRIPTS, validate_v448_static_contract
             elif requires_v446:
                 migration_scripts, validator = V446_MIGRATION_SCRIPTS, validate_v446_static_contract
@@ -2016,7 +2061,10 @@ def main() -> int:
                 else (REPO_ROOT / "adapters" / database / "deploy" / name)
                 for name in migration_scripts
             ]
-            if database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in migration_scripts:
+            if database == "pg" and requires_v449 and "51_v4_4_9_identity_boundary_repair.sql" not in migration_scripts:
+                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "51_v4_4_9_identity_boundary_repair.sql")
+                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "53_v4_4_9_pg_runtime_boundary.sql")
+            elif database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in migration_scripts:
                 scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "49_v4_4_8_security_domain_rls.sql")
             static_contracts[database] = validator(database, scripts)
     # v4.3 replaced the pre-v4.3 execution/registration/governance catalog

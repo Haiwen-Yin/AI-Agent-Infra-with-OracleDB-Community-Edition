@@ -10,6 +10,23 @@ import zipfile
 
 
 MANIFEST_NAME = "package-files.sha256"
+FORBIDDEN_PARTS = frozenset({
+    ".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".git",
+    "node_modules", "__pycache__", "runtime", "logs", "cache", "caches",
+})
+FORBIDDEN_NAMES = frozenset({"config.json", "config.local.json", ".env", ".env.local"})
+
+
+def forbidden_package_paths(root: Path) -> list[str]:
+    """Return runtime, secret, and cache paths that must never ship."""
+    errors: list[str] = []
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if any(part in FORBIDDEN_PARTS for part in relative.parts) or path.name in FORBIDDEN_NAMES:
+            errors.append(relative.as_posix())
+        if path.is_file() and (path.suffix in {".log", ".pid", ".sqlite", ".db"} or path.name.endswith(".secret")):
+            errors.append(relative.as_posix())
+    return sorted(set(errors))
 
 
 def iter_package_files(root: Path):
@@ -70,6 +87,7 @@ def verify_manifest(root: Path) -> list[str]:
 def verify_archive(root: Path, archive_path: Path) -> list[str]:
     """Verify that a ZIP is an exact, complete snapshot of a package tree."""
     errors: list[str] = []
+    errors.extend(f"forbidden generated path {item}" for item in forbidden_package_paths(root))
     expected: dict[str, bytes] = {}
     prefix = root.name + "/"
     for path in sorted(root.rglob("*")):

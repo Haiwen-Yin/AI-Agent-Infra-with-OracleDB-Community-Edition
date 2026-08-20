@@ -1,8 +1,8 @@
-# Migration Guide - AI Agent Infra with DB v4.4.8
+# Migration Guide - AI Agent Infra with DB v4.4.9
 
-## v4.4.8 Platform Agent Isolation Migration
+## v4.4.9 Migration From The Approved Baseline
 
-v4.4.8 changes the database contract. Oracle and YashanDB apply
+v4.4.9 changes the repaired database contract. Oracle and YashanDB apply
 `48_v4_4_8_platform_agent_isolation.sql`; PostgreSQL applies that script and
 `49_v4_4_8_security_domain_rls.sql`. The migrations add the command registry,
 maintenance lifecycle, safe-autonomy policy, platform private knowledge, and

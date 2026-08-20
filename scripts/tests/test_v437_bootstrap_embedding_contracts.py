@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from lib import connection_crypto, deployment_orchestrator, embedding_governance
+from lib import connection_crypto, deployment_orchestrator, embedding_api, embedding_governance
 
 
 class _Tx:
@@ -74,6 +74,50 @@ def test_precomputed_import_and_none_do_not_need_platform_provider():
     assert embedding_governance._validated_dimension(0, "NONE") == 0
     with pytest.raises(embedding_governance.EmbeddingGovernanceError):
         embedding_governance._validated_dimension(0, "ENTERPRISE_DIRECT")
+
+
+def test_pgvector_physical_dimension_uses_declared_typmod(monkeypatch):
+    captured = {}
+
+    def query_one(sql, _params):
+        captured["sql"] = sql
+        return {"dimension": 1024}
+
+    monkeypatch.setattr(embedding_governance, "_dialect", lambda: "postgresql")
+    monkeypatch.setattr(embedding_governance.connection, "execute_query_one", query_one)
+
+    assert embedding_governance._physical_dimension({}) == 1024
+    assert "atttypmod AS DIMENSION" in captured["sql"]
+    assert "atttypmod - 4" not in captured["sql"]
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("https://embedding.example/v1", "https://embedding.example/v1/embeddings"),
+        ("https://embedding.example/v1/embeddings", "https://embedding.example/v1/embeddings"),
+    ],
+)
+def test_embedding_generation_uses_embeddings_endpoint(monkeypatch, configured, expected):
+    captured = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"data": [{"embedding": [0.1, 0.2]}]}).encode()
+
+    def urlopen(request, timeout):
+        captured.update(url=request.full_url, timeout=timeout)
+        return _Response()
+
+    monkeypatch.setattr(embedding_api.urllib.request, "urlopen", urlopen)
+    assert embedding_api.generate_embedding("probe", api_url=configured, model="m") == [0.1, 0.2]
+    assert captured["url"] == expected
 
 
 def test_draft_embedding_probe_never_persists_or_returns_api_key(monkeypatch):

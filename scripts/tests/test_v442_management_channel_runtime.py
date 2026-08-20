@@ -153,6 +153,52 @@ def test_status_requests_use_the_database_control_plane_not_model_reconstruction
     assert '"database-control-plane"' in runtime
 
 
+def test_health_read_exposes_bounded_control_plane_summary_and_typo_alias():
+    root = Path(__file__).resolve().parents[1]
+    pool = (root / "lib" / "platform_agent_pool.py").read_text(encoding="utf-8")
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
+    assert '"managed_nodes"' in pool and '"native_agents"' in pool
+    assert '"llm_profiles"' in pool and '"active_executions"' in pool
+    assert 'command_type == "HEATH_READ"' in native
+    assert 'database_dialect' in runtime and 'checked_at' in runtime
+
+
+def test_streaming_refresh_does_not_filter_same_message_by_creation_time():
+    root = Path(__file__).resolve().parents[1]
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    channels = ui.split("function Channels", 1)[1].split("function BarriersPage", 1)[0]
+    assert "refresh the bounded recent window instead" in channels
+    assert "messages?limit=100${after}" not in channels
+
+
+def test_platform_commands_and_product_questions_have_complete_deterministic_feedback():
+    root = Path(__file__).resolve().parents[1]
+    runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    pool = (root / "lib" / "platform_agent_pool.py").read_text(encoding="utf-8")
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "Required parameters" in runtime and "审批信息" in runtime
+    assert "_platform_product_markdown" in runtime
+    assert "is_management_product_request" in native
+    assert '"parameter_schema"' in pool
+    assert "platform-command-summary" in ui and "platform-command-state" in ui
+
+
+def test_compliance_posture_cards_explain_assessment_count_and_enforcement():
+    root = Path(__file__).resolve().parents[1]
+    ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")
+    assert 'text("证据评估结论", "Evidence assessment")' in ui
+    assert 'text("Agent 数量", "Agent count")' in ui
+    assert 'text("平台控制措施", "Platform enforcement")' in ui
+    assert "不等同于违规" in ui and "仅允许恢复流程" in ui
+    assert "健康合规 Agent" in ui and "待评估 Agent" in ui and "已隔离违规 Agent" in ui
+    assert "postureGroupTitle" in ui
+    assert ".compliance-posture-guide" in css
+    assert ".compliance-posture-fields" in css
+
+
 def test_management_template_questions_use_private_control_plane_knowledge():
     root = Path(__file__).resolve().parents[1]
     native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")

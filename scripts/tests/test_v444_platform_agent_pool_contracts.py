@@ -126,7 +126,7 @@ def test_v444_managed_resources_have_governed_retirement_contracts():
 
 def test_llm_profile_form_keeps_a_stable_form_reference_across_await():
     ui = UI_PATH.read_text(encoding="utf-8")
-    submit = ui.split("const submitProfile = async", 1)[1].split("const testProfile = async", 1)[0]
+    submit = ui.split("const saveProfile = async", 1)[1].split("const probe = async", 1)[0]
     assert "const formElement = event.currentTarget" in submit
     assert "formElement.reset()" in submit
     assert "event.currentTarget.reset()" not in submit

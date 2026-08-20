@@ -114,9 +114,10 @@ def test_llm_draft_probe_is_ephemeral_and_dashboard_requires_it_before_save():
     assert "LLM_PROFILE_DRAFT_PROBE" in probe
     assert "API_KEY_CIPHER" not in probe
     assert '@app.post("/api/llm-provider-profiles/probe-draft")' in app
-    native = ui.split("function NativeAgentsPage", 1)[1].split("function MemoryLifecyclePage", 1)[0]
-    assert '"/api/llm-provider-profiles/probe-draft"' in native
-    assert "testedProfileDraftVersion !== profileDraftVersion" in native
+    profiles = ui.split("function LLMProviderProfilesPanel", 1)[1].split("function PlatformOperationsPage", 1)[0]
+    assert '"/api/llm-provider-profiles/probe-draft"' in profiles
+    assert "testedVersion !== draftVersion" in profiles
+    assert 'tab === "llm-providers"' in ui
 
 
 def test_channel_mentions_are_member_bounded_and_message_display_uses_name():

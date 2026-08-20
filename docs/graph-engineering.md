@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.4.8
+# Graph Engineering - AI Agent Infra with DB v4.4.9
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -21,7 +21,7 @@ within the v4.3.x maturity cycle. Capacity baselines, failure-injection/restore 
 Enterprise multi-Scheduler HA, and complete evaluator migration remain
 evidence-gated follow-up work and are not implied by an unverified build.
 
-## v4.4.8 Current Research Boundary
+## v4.4.9 Current Research Boundary
 
 The Production Profile currently exposes Graph Runtime core and authorized
 inspection. The database capability matrix reports manifest draft import, SLO

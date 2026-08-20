@@ -1,11 +1,23 @@
-# API Reference - AI Agent Infra with DB v4.4.8
+# API Reference - AI Agent Infra with DB v4.4.9
 
-## v4.4.8 Platform Command And Knowledge APIs
+## v4.4.9 Platform Command, Graph, Organization And Knowledge APIs
+
+The v4.4.9 API surface includes the restored entity-relationship graph,
+organization people/Agent projections, and compliance posture state summaries.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/api/platform/admin-commands/catalog` | GET | Return the database-authoritative command catalog filtered by Principal, Channel, edition, capability, executor, and Security Domain. |
 | `/api/platform/admin-commands/help` | GET | Return deterministic localized help from the command registry without invoking an LLM. |
+
+The protected management Channel projects the same registry into `/platform`
+help and results. Help includes localized name, summary, syntax, required
+parameters, risk, execution mode, and executor state. Direct reads return only
+credential-free control-plane facts. `HEALTH_READ` includes bounded node,
+Agent, LLM, Embedding, runtime, database-dialect, and check-time fields;
+`HEATH_READ` is accepted only as an input alias and is persisted/audited as
+`HEALTH_READ`. Governed proposals return Action Card and approval state but do
+not claim that a mutation ran.
 
 ## v4.4.7 Maintenance APIs
 
@@ -184,6 +196,13 @@ routes authenticate the calling Agent's current token and instance instead.
 
 Community packages omit the Enterprise compliance workspace, routes, migration
 steps, Controller, Profile automation, exception, and remediation APIs.
+
+`/api/compliance/summary` posture rows are aggregates keyed by
+`(posture_state, control_state)`. The UI presents these as evidence assessment,
+visible Agent count, and platform enforcement, not as three unrelated metrics.
+`UNKNOWN` means evidence is insufficient for a compliant or violation
+conclusion; only deterministic rules with verified evidence may produce
+`NON_COMPLIANT`.
 
 ## v4.3.2 Versioned Memory API
 

@@ -52,8 +52,10 @@ from live_db_validator import (
     V446_IDENTITY_PORTAL_GRAPH_TABLES,
     V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS,
     V448_MIGRATION_SCRIPTS,
+    V449_MIGRATION_SCRIPTS,
     V448_PLATFORM_AGENT_ISOLATION_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS,
+    validate_v449_static_contract,
     V443_SECURITY_DOMAIN_TABLES,
     V443_SECURITY_DOMAIN_REQUIRED_COLUMNS,
     _load_database_config,
@@ -114,8 +116,11 @@ AGENT_POOL_CLOUD_MIGRATION_VERSIONS = frozenset({"4.4.4"})
 GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS = frozenset({"4.4.5"})
 IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
 PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
+RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS = frozenset({"4.4.9"})
+SUPPORTED_V449_BASELINE_VERSION = "4.4.7"
+WITHDRAWN_SCHEMA_VERSION = "4.4.8"
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS | PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS | PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS | RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS
 )
 
 # v4.4.1 was exercised against the retained PostgreSQL and YashanDB test
@@ -569,6 +574,9 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
         else:
             cursor.execute("SELECT USER FROM DUAL")
         identity = cursor.fetchone()
+        withdrawn_schema_detected = (
+            MIGRATION_VERSION == "4.4.9" and _v448_schema_detected(cursor, database)
+        )
         objects_complete = _objects_complete(cursor, database)
         capacity = _capacity_probe(cursor, database, tier)
         capabilities: dict[str, Any] = {}
@@ -646,13 +654,29 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, V446_MIGRATION_SCRIPTS[0]).parent
             full_scripts = [deploy_dir / name for name in V446_MIGRATION_SCRIPTS]
             v43_static_contract = validate_v446_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.9":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, "50_v4_4_9_security_boundary_repair.sql").parent
+            full_scripts = [deploy_dir / name for name in V449_MIGRATION_SCRIPTS]
+            if database == "pg":
+                full_scripts.append(deploy_dir / "51_v4_4_9_identity_boundary_repair.sql")
+                full_scripts.append(deploy_dir / "53_v4_4_9_pg_runtime_boundary.sql")
+            v43_static_contract = validate_v449_static_contract(database, full_scripts)
+    passed = bool(identity) and capabilities.get("apache_age_available", True)
+    if withdrawn_schema_detected:
+        passed = False
     return {"database": database, "identity_present": bool(identity),
             "objects_complete_before": objects_complete,
             "scripts": [{"name": path.name, "checksum": _checksum(path)} for path in scripts],
             "capacity": capacity, "capabilities": capabilities,
             "v43_static_contract": v43_static_contract,
-            "passed": bool(identity) and capabilities.get("apache_age_available", True)
-            and (not v43_static_contract or v43_static_contract.get("passed") is True)}
+            "withdrawn_schema_detected": withdrawn_schema_detected,
+            "error_type": "WithdrawnSchemaDetected" if withdrawn_schema_detected else "",
+            "error_message": (
+                "v4.4.8 schema detected; restore an approved pre-v4.4.8 backup "
+                "or reinitialize before deploying v4.4.9"
+                if withdrawn_schema_detected else ""
+            ),
+            "passed": passed and (not v43_static_contract or v43_static_contract.get("passed") is True)}
 
 
 def _ledger_checksum(cursor: Any, database: str) -> str | None:
@@ -719,6 +743,40 @@ def _schema_columns_complete(cursor: Any, database: str, required: dict[str, fro
         if table not in present or not required_columns <= _schema_columns(cursor, database, table):
             return False
     return True
+
+
+def _v448_schema_detected(cursor: Any, database: str) -> bool:
+    """Detect withdrawn v4.4.8 objects or journal entries."""
+    try:
+        if database == "pg":
+            cursor.execute(
+                "SELECT version FROM ai_schema_migration_steps "
+                "WHERE version IN (%s, %s) AND status IN ('APPLIED', 'RUNNING', 'FAILED')",
+                (WITHDRAWN_SCHEMA_VERSION, "4.4.9"),
+            )
+        else:
+            cursor.execute(
+                "SELECT VERSION FROM AI_SCHEMA_MIGRATION_STEPS "
+                "WHERE VERSION IN (:withdrawn_version, :repair_version) "
+                "AND STATUS IN ('APPLIED', 'RUNNING', 'FAILED')",
+                {"withdrawn_version": WITHDRAWN_SCHEMA_VERSION, "repair_version": "4.4.9"},
+            )
+        versions = {str(row[0]) for row in cursor.fetchall()}
+        if WITHDRAWN_SCHEMA_VERSION in versions:
+            return True
+        if "4.4.9" in versions:
+            return False
+    except Exception:
+        try:
+            if database == "pg" and getattr(cursor, "connection", None) is not None:
+                cursor.connection.rollback()
+        except Exception:
+            pass
+    try:
+        present = _schema_tables(cursor, database)
+    except Exception:
+        return False
+    return bool(present & set(V448_PLATFORM_AGENT_ISOLATION_TABLES))
 
 
 def _v448_pg_security_domain_complete(cursor: Any) -> bool:
@@ -812,7 +870,7 @@ def _memory_lifecycle_complete(cursor: Any, database: str) -> bool:
 
 
 def _objects_complete(cursor: Any, database: str) -> bool:
-    if MIGRATION_VERSION in PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS:
+    if MIGRATION_VERSION in (PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS | RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS):
         present = _schema_tables(cursor, database)
         return set(V448_PLATFORM_AGENT_ISOLATION_TABLES) <= present and _schema_columns_complete(
             cursor, database,
@@ -1209,6 +1267,12 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         return _objects_complete(cursor, database) and (
             database != "oracle" or _v448_oracle_context_setter_complete(cursor)
         )
+    if key in {
+        "50_v4_4_9_security_boundary_repair",
+        "51_v4_4_9_identity_boundary_repair",
+        "53_v4_4_9_pg_runtime_boundary",
+    }:
+        return _objects_complete(cursor, database)
     if key == "49_v4_4_8_security_domain_rls":
         return _v448_pg_security_domain_complete(cursor)
     return True
@@ -1489,6 +1553,22 @@ def _v448_script_names(database: str, config_path: Path, edition: str) -> list[s
         names.append("48_v4_4_8_platform_agent_isolation.sql")
     if database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in names:
         names.append("49_v4_4_8_security_domain_rls.sql")
+    return names
+
+
+def _v449_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    """Select the v4.4.9 repair chain from an approved pre-v4.4.8 baseline."""
+    names = _v446_script_names(database, config_path, edition)
+    if "50_v4_4_9_security_boundary_repair.sql" not in names:
+        names.append("50_v4_4_9_security_boundary_repair.sql")
+    if "52_v4_4_9_local_identity_boundary.sql" not in names:
+        names.append("52_v4_4_9_local_identity_boundary.sql")
+    if "54_v4_4_9_audit_data_contract.sql" not in names:
+        names.append("54_v4_4_9_audit_data_contract.sql")
+    if database == "pg" and "51_v4_4_9_identity_boundary_repair.sql" not in names:
+        names.append("51_v4_4_9_identity_boundary_repair.sql")
+    if database == "pg" and "53_v4_4_9_pg_runtime_boundary.sql" not in names:
+        names.append("53_v4_4_9_pg_runtime_boundary.sql")
     return names
 
 
@@ -1948,7 +2028,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -2020,6 +2100,8 @@ def main() -> int:
             script_names = _v446_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.4.8":
             script_names = _v448_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.9":
+            script_names = _v449_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",
@@ -2058,16 +2140,20 @@ def main() -> int:
                 connection_for_probe.close()
             preflight_results.append(preflight)
             graph_backup_missing = MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS and not backup_verified
-            if args.preflight or args.dry_run or graph_backup_missing:
+            preflight_blocked = not bool(preflight.get("passed"))
+            if args.preflight or args.dry_run or graph_backup_missing or preflight_blocked:
                 warnings = []
                 if graph_backup_missing:
                     warnings.append(backup_message)
+                if preflight.get("error_message"):
+                    warnings.append(str(preflight["error_message"]))
                 results.append(MigrationResult(
                     database=database,
                     passed=bool(preflight.get("passed")) and not graph_backup_missing,
                     script="preflight",
                     mode="dry-run" if args.dry_run else "preflight",
                     checksum=hashlib.sha256("".join(item["checksum"] for item in preflight["scripts"]).encode()).hexdigest(),
+                    error_type=str(preflight.get("error_type") or "") if preflight_blocked else "",
                     ledger_status="ready" if preflight.get("passed") and not graph_backup_missing else "blocked",
                     backup_verified=backup_verified,
                     capacity=preflight.get("capacity"),

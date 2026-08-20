@@ -1,10 +1,11 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.8
+# Deployment Guide - AI Agent Infra with DB v4.4.9
 
-v4.4.8 is a security and platform-control release over the v4.4.7 Production
+v4.4.9 is a security and platform-control release over the v4.4.7 Production
 Profile. It adds the database-authoritative platform command registry,
 governed maintenance lifecycle, Compliance/Admin knowledge isolation, and
 native database isolation for platform private control objects. Apply the
-v4.4.8 migration chain before starting the upgraded service.
+v4.4.9 migration chain before starting the service. v4.4.8 is withdrawn and
+must not be used as an upgrade source.
 
 The current maturity boundary is deliberate. Production includes the stable
 Graph Runtime core and authorized Graph inspection. Manifest draft import,
@@ -78,7 +79,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.8 --database <oracle|pg|yashandb> \
+  --version 4.4.9 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -97,7 +98,7 @@ authorization, and it does not depend on an external Agent calling a Skill.
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py \
-  --version 4.4.8 --database <oracle|pg|yashandb> \
+  --version 4.4.9 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -231,7 +232,7 @@ glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.8`. The current `production`
+through `migration_runner.py --version 4.4.9`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it

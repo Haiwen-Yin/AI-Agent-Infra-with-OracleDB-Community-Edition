@@ -1,4 +1,4 @@
-# Chuanxu Product UI Guidelines v4.4.8
+# Chuanxu Product UI Guidelines v4.4.9
 
 These reusable rules apply to authenticated Dashboard pages in every edition.
 
@@ -38,6 +38,32 @@ After successful password or MFA login, the client persists session and CSRF
 state and reloads the current page shell. The HTML shell and static
 control-plane assets use `Cache-Control: no-store` so a platform upgrade cannot
 leave an older SPA bundle active.
+
+## Streaming message updates
+
+A streaming Channel response owns one stable message row. While its message
+type remains `AGENT_RESPONSE_STREAMING`, the client reloads a bounded recent
+window and merges by message ID; a creation-time cursor alone cannot observe an
+in-place body update. The response expands as chunks arrive, respects manual
+scroll position, pauses while the page is hidden, and stops refreshing after
+the terminal message type.
+
+## Platform command presentation
+
+The command catalog uses the available drawer height and presents each command
+as one scan-friendly item containing name, localized summary, syntax, risk,
+execution mode, and executor state. Command help and result messages preserve
+the same hierarchy. A proposal must visibly distinguish Action Card creation
+from approved execution.
+
+## Compliance posture presentation
+
+Compliance aggregate cards must have a business title and show the underlying
+posture/control pair as secondary state labels. Each card separately explains
+the evidence assessment, visible Agent count, and platform enforcement. Known
+combinations use stable titles such as healthy compliant, awaiting assessment,
+and quarantined non-compliant Agents. Mobile layouts stack these dimensions;
+labels and explanatory text must not overlap or be truncated.
 
 ## Verification and published screenshots
 

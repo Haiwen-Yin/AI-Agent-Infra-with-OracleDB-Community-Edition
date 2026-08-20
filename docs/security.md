@@ -1,6 +1,9 @@
-# Security - AI Agent Infra with DB v4.4.8
+# Security - AI Agent Infra with DB v4.4.9
 
-## v4.4.8 Platform Agent And Database Isolation Boundary
+## v4.4.9 Platform Agent And Database Isolation Boundary
+
+v4.4.8 is withdrawn and is not a supported upgrade source. v4.4.9 must start
+from an approved pre-v4.4.8 baseline or a reinitialized database.
 
 Platform built-in Agents operate on typed database commands rather than model
 authority. `READ`, `SAFE_MAINTENANCE`, `PROPOSED_CHANGE`,
@@ -633,6 +636,21 @@ commands return credential-free control-plane summaries. Mutating commands are
 converted to Action Cards and require the existing separated approval path.
 Neither ordinary prose, prompts, Skills, Tools, nor an LLM response can execute
 a database mutation.
+
+Platform command feedback is deliberately complete but credential-free. Read
+results may expose bounded state counts, database dialect, and evaluation time,
+but never host, DSN, password, token, API key, prompt, or completion content.
+Proposal results expose their Action Card and approval state so an operator can
+distinguish recorded intent from execution. Recognized platform/product
+overview questions are rendered from digest-verified, audience-scoped built-in
+management knowledge rather than allowing an LLM to reconstruct authority or
+capability claims.
+
+Compliance posture and enforcement remain independent. `UNKNOWN` or stale
+evidence does not establish guilt. `NON_COMPLIANT` requires deterministic rules
+and verified evidence; `RESTRICTED`, `QUARANTINED`, or `DISABLED` records the
+separate platform enforcement decision. Aggregate cards never widen the
+caller's Agent visibility scope.
 
 Node draining and retirement are separate from emergency containment.
 `/platform AGENT_DRAIN` is a typed, scope-checked proposal and cannot be

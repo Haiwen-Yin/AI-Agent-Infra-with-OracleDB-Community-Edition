@@ -45,6 +45,10 @@ def test_v448_migrations_exist_for_all_adapters():
 
 def test_v448_migration_selection_and_object_contract(monkeypatch):
     monkeypatch.setattr(migration_runner, "MIGRATION_VERSION", "4.4.8")
+    monkeypatch.setattr(
+        migration_runner, "_v446_script_names",
+        lambda *_args: ["47_v4_4_6_portable_contract_alignment.sql"],
+    )
     names = migration_runner._v448_script_names("pg", Path("config.json"), "enterprise")
     assert names[-2:] == ["48_v4_4_8_platform_agent_isolation.sql", "49_v4_4_8_security_domain_rls.sql"]
     assert migration_runner._v448_script_names("oracle", Path("config.json"), "enterprise")[-1] == "48_v4_4_8_platform_agent_isolation.sql"

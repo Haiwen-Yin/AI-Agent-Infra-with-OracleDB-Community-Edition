@@ -39,7 +39,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.8"
+VERSION = "4.4.9"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -2816,6 +2816,17 @@ def platform_governance_graph(
         raise _identity_http_error(exc, "Platform governance graph is unavailable", identity_status=503) from exc
 
 
+@app.get("/api/collaboration-groups/{group_id}/legacy-messages")
+def legacy_collaboration_messages(group_id: str, channel_id: str = "", limit: int = 100, session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+    try:
+        items = security_domain_api.list_legacy_collaboration_messages(
+            str(session["principal_id"]), group_id, channel_id=channel_id, limit=limit,
+        )
+        return {"items": items, "count": len(items), "deprecated": True, "contract": "legacy-collaboration-read/v1"}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Legacy collaboration messages are unavailable", identity_status=503) from exc
+
+
 @app.post("/api/platform/admin-commands")
 def platform_admin_command(body: PlatformAdminCommandBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
     try:
@@ -4614,9 +4625,12 @@ def memory_candidate_promote(candidate_id: str, body: MemoryPromoteBody, session
 
 
 @app.get("/api/channels/{channel_id}/messages")
-def messages(channel_id: str, session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
+def messages(channel_id: str, limit: int = 100, before: str = "", after: str = "", session: Dict[str, Any] = Depends(require_action("channels.read"))) -> Dict[str, Any]:
     try:
-        items = identity_api.list_channel_messages(str(session["principal_id"]), channel_id)
+        items = identity_api.list_channel_messages(
+            str(session["principal_id"]), channel_id,
+            limit=max(1, min(limit, 500)), before=before, after=after,
+        )
     except Exception as exc:
         raise _identity_http_error(exc, "Channel messages are unavailable", identity_status=503) from exc
     return {"items": items, "count": len(items)}

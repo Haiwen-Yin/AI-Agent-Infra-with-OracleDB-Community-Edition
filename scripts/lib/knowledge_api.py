@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.8 - Community Edition - Knowledge API
+"""AI Agent Infra v4.4.9 - Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.
@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from . import connection
 from .connection import (
     DATABASE_DIALECT, execute, execute_query, execute_query_one,
     execute_insert_returning_id,
@@ -314,32 +315,36 @@ def record_review(entity_id: str) -> bool:
 def add_knowledge_tags(entity_id: str, tag_names: List[str]) -> int:
     added = 0
     for tag_name in tag_names:
-        merge_sql = """
-            MERGE INTO TAGS t
-            USING (SELECT :tag_name AS TAG_NAME) src
-            ON (t.TAG_NAME = src.TAG_NAME)
-            WHEN NOT MATCHED THEN INSERT (TAG_NAME) VALUES (src.TAG_NAME)
-        """
-        execute(merge_sql, {"tag_name": tag_name})
-
         tag_row = execute_query_one(
             "SELECT TAG_ID FROM TAGS WHERE TAG_NAME = :tag_name",
             {"tag_name": tag_name},
         )
         if tag_row is None:
+            try:
+                execute("INSERT INTO TAGS (TAG_NAME) VALUES (:tag_name)", {"tag_name": tag_name})
+            except Exception:
+                pass
+            tag_row = execute_query_one(
+                "SELECT TAG_ID FROM TAGS WHERE TAG_NAME = :tag_name",
+                {"tag_name": tag_name},
+            )
+        if tag_row is None:
             continue
 
         tag_id = tag_row["tag_id"]
-        insert_sql = """
-            INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID)
-            SELECT :eid, 'KNOWLEDGE', :tid
-            WHERE NOT EXISTS (
-                SELECT 1 FROM ENTITY_TAGS
-                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'KNOWLEDGE' AND TAG_ID = :tid
-            )
-        """
-        if execute(insert_sql, {"eid": entity_id, "tid": tag_id}) > 0:
-            added += 1
+        existing = execute_query_one(
+            "SELECT TAG_ID FROM ENTITY_TAGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'KNOWLEDGE' AND TAG_ID = :tid",
+            {"eid": entity_id, "tid": tag_id},
+        )
+        if existing is None:
+            try:
+                execute(
+                    "INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID) VALUES (:eid, 'KNOWLEDGE', :tid)",
+                    {"eid": entity_id, "tid": tag_id},
+                )
+                added += 1
+            except Exception:
+                pass
     return added
 
 

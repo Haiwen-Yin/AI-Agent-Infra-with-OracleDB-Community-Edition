@@ -358,22 +358,73 @@ a {
 .compliance-posture-grid {
   grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
 }
+.compliance-posture-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+.compliance-posture-guide > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+}
+.compliance-posture-guide b { font-size: 11px; }
+.compliance-posture-guide span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
 .compliance-posture-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px minmax(0, 1fr);
-  gap: 10px;
-  min-height: 94px;
-  padding: 13px 14px;
+  gap: 9px;
+  min-height: 180px;
+  padding: 12px 13px;
   border: 1px solid var(--line);
   background: var(--surface-strong);
 }
-.compliance-posture-card > div {
+.compliance-posture-card-title {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.compliance-posture-card-title h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.3;
+}
+.compliance-posture-card-title > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.compliance-posture-card-title span {
+  color: var(--brand-deep);
+  font-size: 10px;
+  font-weight: 700;
+}
+.compliance-posture-card-title i {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+.compliance-posture-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 105px minmax(0, 1fr);
+  gap: 10px;
+}
+.compliance-posture-fields > div {
   display: grid;
   align-content: center;
   gap: 4px;
   min-width: 0;
 }
-.compliance-posture-card > div + div {
+.compliance-posture-fields > div + div {
   padding-left: 10px;
   border-left: 1px solid var(--line);
 }
@@ -385,6 +436,11 @@ a {
   color: var(--brand-deep);
   font-size: 16px;
   overflow-wrap: anywhere;
+}
+.compliance-posture-card span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 .metric {
   min-height: 106px;
@@ -1502,7 +1558,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .channel-main {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
 }
 .channel-management-picker label {
@@ -1519,6 +1575,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   min-width: 0;
 }
 .message-stream {
+  grid-row: 3;
   overflow: auto;
   max-height: 470px;
   padding: 10px 19px;
@@ -1585,6 +1642,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .message-compose {
   display: grid;
+  grid-row: 4;
   grid-template-columns: minmax(0, 1fr) minmax(245px, 30%);
   align-items: start;
   gap: 9px;
@@ -1604,9 +1662,23 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .platform-command-toolbar {
   display: flex;
+  grid-row: 2;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 7px;
   padding: 0 19px 8px;
+}
+.platform-command-toolbar .small-button {
+  min-height: 25px;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+.relationship-network-canvas {
+  height: min(58vh, 560px);
+  min-height: 390px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
 }
 .platform-command-panel {
   display: grid;
@@ -1615,7 +1687,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   padding: 10px;
   border: 1px solid var(--line);
   background: var(--surface);
-  max-height: 260px;
+  max-height: min(56vh, 520px);
   overflow: auto;
 }
 .platform-command-panel > button {
@@ -1623,7 +1695,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 7px 8px;
+  padding: 10px 11px;
   border: 1px solid var(--line);
   background: var(--panel);
   color: var(--ink);
@@ -1636,6 +1708,31 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .platform-command-menu button span,
 .platform-command-panel > button span {
   min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.platform-command-panel > button b {
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+.platform-command-panel > button span small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+.platform-command-panel > button .platform-command-summary {
+  color: var(--ink-soft);
+}
+.platform-command-panel > button code {
+  overflow: hidden;
+  color: var(--brand);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.platform-command-panel > button .platform-command-state {
+  min-width: 155px;
+  color: var(--muted);
+  text-align: right;
 }
 .mention-menu button {
   display: flex;
@@ -2650,6 +2747,24 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   .cx-main {
     padding: 8px 15px 48px;
   }
+  .cx-main > .view-toggle,
+  .cx-main section > .view-toggle,
+  .hierarchical-tabs-row,
+  .platform-config-nav-row {
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .hierarchical-tabs-row > .view-toggle,
+  .platform-config-nav-row > .view-toggle {
+    flex: 0 0 max-content;
+  }
+  .info-panel > table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .section-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -2666,6 +2781,16 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   }
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .compliance-posture-guide,
+  .compliance-posture-fields {
+    grid-template-columns: 1fr;
+  }
+  .compliance-posture-fields > div + div {
+    padding-top: 8px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
   .split-grid,
   .operation-grid,

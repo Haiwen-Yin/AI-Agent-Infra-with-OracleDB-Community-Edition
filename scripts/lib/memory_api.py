@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.8 - Community Edition - Memory API
+"""AI Agent Infra v4.4.9 - Community Edition - Memory API
 
 Unified memory management using oracledb with bind variables.
 Operates on the ENTITIES table (ENTITY_TYPE='MEMORY').
@@ -7,6 +7,7 @@ Operates on the ENTITIES table (ENTITY_TYPE='MEMORY').
 import logging
 from typing import Any, Dict, List, Optional
 
+from . import connection
 from .connection import execute, execute_query, execute_query_one, execute_insert_returning_id
 from . import memory_lifecycle
 
@@ -234,32 +235,37 @@ def count_memories(category: Optional[str] = None) -> int:
 def add_memory_tags(entity_id: str, tag_names: List[str]) -> int:
     added = 0
     for tag_name in tag_names:
-        merge_sql = """
-            MERGE INTO TAGS t
-            USING (SELECT :tag_name AS TAG_NAME) src
-            ON (t.TAG_NAME = src.TAG_NAME)
-            WHEN NOT MATCHED THEN INSERT (TAG_NAME) VALUES (src.TAG_NAME)
-        """
-        execute(merge_sql, {"tag_name": tag_name})
-
         tag_row = execute_query_one(
             "SELECT TAG_ID FROM TAGS WHERE TAG_NAME = :tag_name",
             {"tag_name": tag_name},
         )
         if tag_row is None:
+            try:
+                execute("INSERT INTO TAGS (TAG_NAME) VALUES (:tag_name)", {"tag_name": tag_name})
+            except Exception:
+                # Another worker may have inserted the unique tag concurrently.
+                pass
+            tag_row = execute_query_one(
+                "SELECT TAG_ID FROM TAGS WHERE TAG_NAME = :tag_name",
+                {"tag_name": tag_name},
+            )
+        if tag_row is None:
             continue
 
         tag_id = tag_row["tag_id"]
-        insert_sql = """
-            INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID)
-            SELECT :eid, 'MEMORY', :tid
-            WHERE NOT EXISTS (
-                SELECT 1 FROM ENTITY_TAGS
-                WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'MEMORY' AND TAG_ID = :tid
-            )
-        """
-        if execute(insert_sql, {"eid": entity_id, "tid": tag_id}) > 0:
-            added += 1
+        existing = execute_query_one(
+            "SELECT TAG_ID FROM ENTITY_TAGS WHERE ENTITY_ID = :eid AND ENTITY_TYPE = 'MEMORY' AND TAG_ID = :tid",
+            {"eid": entity_id, "tid": tag_id},
+        )
+        if existing is None:
+            try:
+                execute(
+                    "INSERT INTO ENTITY_TAGS (ENTITY_ID, ENTITY_TYPE, TAG_ID) VALUES (:eid, 'MEMORY', :tid)",
+                    {"eid": entity_id, "tid": tag_id},
+                )
+                added += 1
+            except Exception:
+                pass
     return added
 
 

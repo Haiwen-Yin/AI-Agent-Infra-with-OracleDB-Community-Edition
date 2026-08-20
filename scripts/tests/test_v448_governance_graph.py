@@ -34,6 +34,9 @@ def test_projection_is_permission_checked_and_bounded(monkeypatch):
 def test_web_route_uses_module_alias_instead_of_function_self_reference():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    web = (root / "shared" / "web_app.py").read_text(encoding="utf-8")
+    web_path = root / "shared" / "web_app.py"
+    if not web_path.is_file():
+        web_path = root / "scripts" / "web_app.py"
+    web = web_path.read_text(encoding="utf-8")
     route = web.split("def platform_governance_graph(", 1)[1].split("def platform_capability_configuration", 1)[0]
     assert "governance_graph_module.governance_projection" in route

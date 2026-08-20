@@ -1,6 +1,11 @@
-# Architecture - AI Agent Infra with DB v4.4.8
+# Architecture - AI Agent Infra with DB v4.4.9
 
-## v4.4.8 Platform Control Plane
+## v4.4.9 Platform Control Plane
+
+v4.4.8 is withdrawn history. v4.4.9 is the current public release after the
+approved v4.4.7 baseline and adds runtime security repair, typed evidence,
+restored relationship visualization, governed organization data, and bounded
+compliance posture projections.
 
 The Administration Channel resolves command discovery from the database
 registry `CX_PLATFORM_COMMANDS`; the frontend does not own an independent

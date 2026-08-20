@@ -4,7 +4,7 @@ from pathlib import Path
 import zipfile
 
 from lib.graph_compat import capability_definition
-from package_guard import verify_archive, verify_manifest, write_manifest
+from package_guard import forbidden_package_paths, verify_archive, verify_manifest, write_manifest
 from release_closure import build_manifest
 
 
@@ -47,6 +47,28 @@ def test_generated_archive_guard_detects_missing_or_changed_files(tmp_path: Path
     assert verify_archive(root, archive_path) == []
     (root / "README.md").write_text("edited\n", encoding="utf-8")
     assert any("archive content differs" in item for item in verify_archive(root, archive_path))
+
+
+def test_package_guard_rejects_runtime_and_secret_paths(tmp_path: Path):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "app.log").write_text("runtime\n", encoding="utf-8")
+    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+    assert set(forbidden_package_paths(tmp_path)) == {"config.json", "logs", "logs/app.log"}
+
+
+def test_build_manifest_records_source_commit(tmp_path: Path):
+    import json
+    package_root = Path(__file__).resolve().parents[2]
+    if (package_root / "build.py").is_file():
+        import build
+        build.write_build_manifest(
+            tmp_path, "pg", "PostgreSQL", "Community", "4.4.9", {}, {}, "production"
+        )
+        manifest_path = tmp_path / "build-manifest.json"
+    else:
+        manifest_path = package_root / "build-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+    assert manifest["source_commit"]
 
 
 def test_capability_wrappers_share_one_declarative_graph_shape():

@@ -278,6 +278,8 @@ def _platform_command_help_markdown(help_payload: Dict[str, Any], language: str 
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
         name = str(metadata.get("name_zh" if language == "zh" else "name_en") or item.get("command_key") or "")
         summary = str(metadata.get("summary_zh" if language == "zh" else "summary_en") or "")
+        schema = item.get("parameter_schema") if isinstance(item.get("parameter_schema"), dict) else {}
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
         return "\n".join([
             "## 平台命令帮助" if language == "zh" else "## Platform command help", "",
             f"- **{item.get('command_key')}** · {name}",
@@ -285,6 +287,7 @@ def _platform_command_help_markdown(help_payload: Dict[str, Any], language: str 
             f"- **{'风险等级' if language == 'zh' else 'Risk'}**: {item.get('risk_level')}",
             f"- **{'执行状态' if language == 'zh' else 'Execution'}**: {item.get('execution_mode')} / {item.get('executor_state')}",
             f"- {summary}",
+            f"- **{'必填参数' if language == 'zh' else 'Required parameters'}**: {', '.join(str(value) for value in required) or ('无' if language == 'zh' else 'none')}",
             f"- **{'边界' if language == 'zh' else 'Boundary'}**: " + (
                 "该命令不因聊天文本或模型输出获得额外权限；需要变更时仍以操作卡和审批结果为准。"
                 if language == "zh" else
@@ -346,10 +349,78 @@ def _platform_command_result_markdown(command: Dict[str, Any], language: str = "
             lines.append(f"- 检查通过，范围：{scope_labels.get(scope, scope or '数据库控制平面')}。")
         else:
             lines.append(f"- Check passed, scope: {scope_labels.get(scope, scope or 'database control plane')}.")
-    else:
-        for key, value in result.items():
-            lines.append(f"- `{key}`: `{value}`")
+    def render_value(value: Any) -> str:
+        if isinstance(value, dict):
+            return "; ".join(f"{sub_key}={render_value(sub_value)}" for sub_key, sub_value in value.items())
+        if isinstance(value, list):
+            return ", ".join(render_value(item) for item in value)
+        return str(value)
+
+    action = command.get("action_card") if isinstance(command.get("action_card"), dict) else {}
+    if action:
+        lines.extend([
+            "",
+            f"### {'审批信息' if language == 'zh' else 'Approval'}",
+            f"- **{'操作卡' if language == 'zh' else 'Action Card'}**：`{action.get('action_id') or action.get('id') or 'created'}`",
+            f"- **{'状态' if language == 'zh' else 'Status'}**：`{action.get('status') or 'PENDING'}`",
+            f"- **{'说明' if language == 'zh' else 'Boundary'}**：" + ("变更命令只创建审批卡，不会因聊天或模型输出自动执行。" if language == 'zh' else "The change command creates an approval card only; chat or model output cannot execute it automatically."),
+        ])
+    for key, value in result.items():
+        if key in {"status", "scope"}:
+            continue
+        label = {
+            "managed_nodes": "托管节点" if language == "zh" else "Managed nodes",
+            "native_agents": "原生 Agent" if language == "zh" else "Native Agents",
+            "llm_profiles": "LLM 配置" if language == "zh" else "LLM profiles",
+            "embedding": "Embedding" if language == "zh" else "Embedding",
+            "runtime": "运行时" if language == "zh" else "Runtime",
+            "database_dialect": "数据库方言" if language == "zh" else "Database dialect",
+            "checked_at": "检查时间" if language == "zh" else "Checked at",
+        }.get(key, key)
+        if isinstance(value, dict):
+            details = render_value(value)
+            lines.append(f"- **{label}**：`{details}`")
+        else:
+            lines.append(f"- **{label}**：`{value}`")
     return "\n".join(lines)
+
+
+def _platform_product_markdown(knowledge: Dict[str, Any], language: str = "zh") -> str:
+    """Render a signed platform overview without an LLM call."""
+    options = knowledge.get("business_template_options") if isinstance(knowledge.get("business_template_options"), list) else []
+    if language == "zh":
+        return "\n".join([
+            "## 川序 AI Agent 管理平台", "",
+            "这是一个以 Oracle、PostgreSQL 和 YashanDB 为权威控制面的 AI Agent 管理平台。平台将 Agent 身份、组织、频道、知识、记忆、图关系、任务、Skill、审批、合规和审计纳入数据库治理。",
+            "", "### 当前平台能力",
+            "- 可观测：Agent、运行时、关系图和审计状态可查询。",
+            "- 可调度：持久任务、协作关卡、审批和受治理执行形成闭环。",
+            "- 可运维：三数据库适配、离线部署、独立身份、凭据轮换和故障边界清晰。",
+            "", "### Agent 与安全边界",
+            "- 平台管理 Agent 只处理受保护的平台控制面；业务 Agent 必须经过申请、审批、部署和激活。",
+            "- 聊天文本、提示词、Skill、Tool 或 URL 不会自动授予数据库或平台权限。",
+            "- 高风险变更必须生成操作卡并由授权人员最终审批。",
+            "", "### 可选业务模板",
+            *[f"- **{item.get('key')}**：{item.get('zh')}" for item in options],
+            "", "### 当前限制",
+            str(knowledge.get("missing_capability_answer_zh") or "当前能力以已发布版本和实例授权为准。"),
+        ])
+    return "\n".join([
+        "## Chuanxu AI Agent Management Platform", "",
+        "A database-governed AI Agent management platform for Oracle, PostgreSQL, and YashanDB. Agent identity, organization, Channels, knowledge, memory, graph relationships, tasks, Skills, approvals, compliance, and audit remain under the database control plane.",
+        "", "### Current capabilities",
+        "- Observable: Agent, runtime, graph, and audit state are queryable.",
+        "- Schedulable: durable tasks, collaboration gates, approvals, and governed execution form one lifecycle.",
+        "- Operable: three database adapters, offline deployment, independent identities, credential rotation, and explicit failure boundaries.",
+        "", "### Agent and security boundaries",
+        "- Platform management Agents handle only the protected control plane; Business Agents require request, approval, deployment, and activation.",
+        "- Chat text, prompts, Skills, Tools, and URLs never grant database or platform authority.",
+        "- High-risk changes create an Action Card and require final approval by an authorized human.",
+        "", "### Selectable Business templates",
+        *[f"- **{item.get('key')}**: {item.get('en')}" for item in options],
+        "", "### Current boundary",
+        str(knowledge.get("missing_capability_answer_en") or "Capabilities are bounded by the published release and instance authorization."),
+    ])
 
 
 def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dict[str, Any],
@@ -394,10 +465,11 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         profile = _llm_profile(str(agent.get("llm_profile_id") or ""))
         status_snapshot = input_payload.get("management_status_snapshot") if isinstance(input_payload, dict) else None
         template_knowledge = input_payload.get("management_template_knowledge") if isinstance(input_payload, dict) else None
+        product_overview = input_payload.get("management_product_overview") if isinstance(input_payload, dict) else None
         command_help = input_payload.get("platform_command_help") if isinstance(input_payload, dict) else None
         command_result = input_payload.get("platform_command_result") if isinstance(input_payload, dict) else None
         response_language = "zh" if str(input_payload.get("response_language") or "en") == "zh" else "en"
-        if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict) and not isinstance(command_help, dict) and not isinstance(command_result, dict):
+        if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict) and not isinstance(product_overview, dict) and not isinstance(command_help, dict) and not isinstance(command_result, dict):
             raise RuntimeError("Agent has no active LLM Provider Profile")
         dispatch = _channel_dispatch(input_payload)
         if dispatch:
@@ -408,6 +480,8 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
             )
             if isinstance(template_knowledge, dict):
                 output = {"content": _management_template_markdown(template_knowledge), "model": "database-control-plane"}
+            elif isinstance(product_overview, dict):
+                output = {"content": _platform_product_markdown(product_overview, response_language), "model": "database-control-plane"}
             elif isinstance(command_help, dict):
                 output = {"content": _platform_command_help_markdown(command_help, response_language), "model": "database-control-plane"}
             elif isinstance(command_result, dict):

@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.8 - Rich Test Data Seeder
+"""AI Agent Infra v4.4.9 - Rich Test Data Seeder
 
 Seeds 50+ entities with embeddings, edges, tags, and metadata across MEMORY/KNOWLEDGE/SPEC types.
 Designed to validate multi-signal hybrid search (vector + keyword + relational + graph).
@@ -154,7 +154,6 @@ def seed_edges(entity_map):
 
 
 def seed_tags(entity_map):
-    from lib.connection import get_connection
     tag_data = {
         "partitioning": ["Database Partitioning Strategies", "Reference Partitioning for Child Tables", "Composite Primary Key Design"],
         "vector": ["Oracle VECTOR Data Type", "BGE-M3 Embedding Model", "Vector Similarity Search Optimization", "Hybrid Retrieval: Vector + Keyword"],
@@ -166,23 +165,23 @@ def seed_tags(entity_map):
         "graph": ["SQL Property Graph Queries", "Unified Entity Architecture"],
     }
     tag_count = 0
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            for tag_name, titles in tag_data.items():
-                for title in titles:
-                    entity = entity_map.get(title)
-                    if not entity:
-                        continue
-                    try:
-                        cur.execute("MERGE INTO TAGS t USING (SELECT :tn AS tn FROM dual) s ON (t.TAG_NAME = s.tn) WHEN NOT MATCHED THEN INSERT (TAG_ID, TAG_NAME) VALUES (TAGS_SEQ.NEXTVAL, :tn)", {"tn": tag_name})
-                        cur.execute("SELECT TAG_ID FROM TAGS WHERE TAG_NAME = :tn", {"tn": tag_name})
-                        tid = cur.fetchone()[0]
-                        cur.execute("MERGE INTO ENTITY_TAGS et USING (SELECT :eid AS eid, :tid AS tid, :etype AS etype FROM dual) s ON (et.ENTITY_ID = s.eid AND et.TAG_ID = s.tid AND et.ENTITY_TYPE = s.etype) WHEN NOT MATCHED THEN INSERT (ENTITY_ID, ENTITY_TYPE, TAG_ID) VALUES (:eid, :etype, :tid)", {"eid": entity["id"], "etype": entity["type"], "tid": int(tid)})
-                        conn.commit()
-                        tag_count += 1
-                    except Exception as e:
-                        conn.rollback()
-                        print(f"  Tag error: {tag_name}/{title[:30]}: {e}")
+    # Use the public service APIs so identity columns and adapter-specific
+    # MERGE/INSERT syntax stay centralized for Oracle, PostgreSQL, and YashanDB.
+    for tag_name, titles in tag_data.items():
+        for title in titles:
+            entity = entity_map.get(title)
+            if not entity:
+                continue
+            try:
+                if entity["type"] == "MEMORY":
+                    added = memory_api.add_memory_tags(entity["id"], [tag_name])
+                elif entity["type"] == "KNOWLEDGE":
+                    added = knowledge_api.add_knowledge_tags(entity["id"], [tag_name])
+                else:
+                    added = 0
+                tag_count += int(added or 0)
+            except Exception as e:
+                print(f"  Tag error: {tag_name}/{title[:30]}: {e}")
     print(f"Created {tag_count} tag associations")
 
 
@@ -209,7 +208,7 @@ def seed_embeddings(entity_map):
 
 def main():
     print("=" * 60)
-    print("AI Agent Infra v4.4.8 - Rich Test Data Seeder")
+    print("AI Agent Infra v4.4.9 - Rich Test Data Seeder")
     print("=" * 60)
 
     print("\n--- Phase 1: Create Entities ---")

@@ -15,6 +15,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.version_consistency import validate_version_consistency
+except ModuleNotFoundError:  # direct ``python tools/validate_release_claims.py``
+    from version_consistency import validate_version_consistency
+
 
 REQUIRED_TOP_LEVEL = {
     "schema", "version", "release_date", "source_commit", "archives",
@@ -58,6 +63,7 @@ def validate_manifest(root: Path, manifest_path: Path, *, expected_version: str 
         errors.append("manifest version does not match requested version")
     if not _valid_commit(root, manifest.get("source_commit")):
         errors.append("source_commit is missing or does not exist")
+    errors.extend(validate_version_consistency(root, version, manifest))
 
     archives = manifest.get("archives")
     if not isinstance(archives, list) or not archives:

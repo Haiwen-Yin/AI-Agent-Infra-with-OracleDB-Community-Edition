@@ -1,6 +1,28 @@
 # Changelog
 
-## v4.4.8 - 2026-08-18
+## v4.4.9 - 2026-08-19
+
+- First public release after v4.4.7; v4.4.8 is withdrawn and retained only
+  as historical evidence.
+- Adds fail-closed v4.4.8 schema detection so v4.4.9 cannot be applied to a
+  withdrawn-version database.
+- Repairs database identity and row-security boundaries across Oracle,
+  PostgreSQL, and YashanDB, including filtered legacy collaboration reads.
+- Prevents PostgreSQL Agent provisioning from restoring control-plane table
+  grants and resolves SECURITY DEFINER identity from the authenticated login.
+- Adds typed Agent and Graph execution evidence, package/source-commit
+  integrity checks, incremental Channel delivery, and frontend vendor
+  splitting, a dynamic Graph route, and bounded slow-database, long-history,
+  and terminal-stream browser gates.
+- Restores or reinitializes all validation targets from approved pre-v4.4.8
+  baselines and retains publication as an evidence-consistency decision.
+- Fixes in-place management Channel streaming updates so intermediate content
+  remains visible instead of appearing only with the terminal response.
+- Expands platform command help/results, adds verified deterministic product
+  overview responses, and clarifies titled compliance posture/enforcement
+  combinations in the Enterprise overview.
+
+## v4.4.8 - 2026-08-18 (withdrawn)
 
 - Added a database-authoritative platform command registry, command
   completion, deterministic help, and governed maintenance-task lifecycle.
