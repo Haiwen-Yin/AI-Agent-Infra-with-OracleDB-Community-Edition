@@ -138,6 +138,14 @@ template isolation level, a deployment target, a classification, and a
 reason. Activation requires an active LLM Provider Profile and does not grant
 any database privilege.
 
+For a fresh v4.4.10 deployment, the schema's administrator row is deliberately
+an inert, non-login seed. The package initializer requires a deployment-
+specific password through a protected interactive prompt or a current-user-
+owned `0600` regular file, applies the existing 12-character policy, stores
+only Argon2id, and adopts the account into the Human Principal model. The
+plaintext is excluded from configuration, arguments, journals, audits, and
+evidence. A predictable default password is never a supported bootstrap path.
+
 LLM prompts, responses, Skills, Tools, API descriptions, and remote adapter
 callbacks are untrusted inputs. Database authorization, Gateway admission,
 short-lived credentials, execution isolation, approval, and audit remain the

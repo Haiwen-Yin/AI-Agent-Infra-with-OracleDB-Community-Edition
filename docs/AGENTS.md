@@ -12,7 +12,7 @@
 ## v4.4.10 Fresh Baseline And Current Product Boundaries
 
 v4.4.10 is the current fresh-deployment baseline. Use each adapter's
-`deploy/baseline_v4_4_10.json` ordered chain through migration 58; earlier
+`deploy/baseline_v4_4_10.json` ordered chain through migration 59; earlier
 numbered scripts remain for journal/checksum reproducibility, not as a customer
 upgrade promise. v4.4.8 is withdrawn.
 
@@ -289,8 +289,14 @@ the package root; never commit that file or include it in a release archive.
 
 ```bash
 cd build_output/AI-Agent-Infra-with-OracleDB-Enterprise-Edition
-"$PYTHON_BIN" -m pytest scripts/tests/ -q --tb=no
+PYTHONPATH="$PWD/scripts" "$PYTHON_BIN" -m pytest scripts/tests/ -q --tb=no
 ```
+
+The package root is a release-test isolation boundary. Do not launch this
+command from the unified repository root with a package test path: Python can
+then import `shared.lib` from the source checkout and combine it with the
+generated package's edition metadata. Treat any such mixed-module result as
+invalid evidence and rerun it from the generated package root.
 
 The release bar is defined in `test-requirements/spec.md`: zero failures and
 the test count must meet or exceed the edition's minimum.

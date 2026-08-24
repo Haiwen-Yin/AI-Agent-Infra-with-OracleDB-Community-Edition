@@ -5,7 +5,7 @@
 v4.4.10 is delivered as a new-install baseline for Oracle, PostgreSQL, and
 YashanDB. Select the adapter's `deploy/baseline_v4_4_10.json`; the journaled
 runner executes the retained, checksum-bound ordered chain through
-`58_v4_4_10_knowledge_scope.sql`. Historical numbered scripts remain visible
+`59_v4_4_10_knowledge_graph_context.sql`. Historical numbered scripts remain visible
 for reproducibility and source audit, but no earlier v4.4.x package is presented
 as a supported customer upgrade source.
 
@@ -14,15 +14,21 @@ facts. Step 57 adds quota reservation, encrypted replay, Provider financial
 evidence, allocation, signed external observations, versioned wallboard
 definitions, and uniform correlation. Step 58 adds database-authoritative
 company, organization-subtree, organization-level, and Principal-private
-knowledge policies. Applied checksums must never be edited.
+knowledge policies. Step 59 records the Agent's creation-time organization
+chain and governed group context in the relational and Property Graph knowledge
+projection. Applied checksums must never be edited.
 
-Run the complete baseline through the journaled runner with a recoverable
-deployment boundary backup:
+Run a new installation through the package-local Bootstrap Deployment Agent
+with a recoverable deployment boundary backup. The command selects the
+baseline manifest, prompts securely for the first administrator password, runs
+the complete journaled migration chain, creates the Human Admin and native
+management Agent identities, verifies migration 59, encrypts configuration,
+and retires its temporary identity:
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
+bash scripts/install_platform.sh initialize --version 4.4.10 \
   --database <oracle|pg|yashandb> --edition <community|enterprise> \
-  --<adapter>-config config.json \
+  --config config.json \
   --backup-evidence release_evidence/backup.json
 ```
 
@@ -192,7 +198,8 @@ PDB.
 
 For a prepared new target, use `scripts/install_platform.sh initialize` with
 the selected adapter and edition. It validates the package manifest and target
-prerequisites before running the migration chain. For an existing target, use
+prerequisites, recoverable backup evidence, terminal migration, and protected
+initial administrator before running the migration chain. For an existing target, use
 `upgrade`; `status`, `verify`, and `resume` retain the same manifest and
 evidence boundary. Do not use the installer to create Oracle/YashanDB PDBs,
 tablespaces, or privileged infrastructure.
@@ -882,6 +889,6 @@ and closure validator, never by editing checksums.
 
 New installations use the adapter `deploy/baseline_v4_4_10.json` manifest and the
 migration runner's ordered chain,
-ending at `58_v4_4_10_knowledge_scope.sql`. The v4.4.8 chain is withdrawn and
+ending at `59_v4_4_10_knowledge_graph_context.sql`. The v4.4.8 chain is withdrawn and
 is not an upgrade source. Numbered historical scripts remain in source control
 for audit and reproducibility; they are not a customer upgrade promise.

@@ -1,4 +1,4 @@
-"""Deterministic v4.3.7 Bootstrap Deployment Agent orchestration.
+"""Deterministic release-bound Bootstrap Deployment Agent orchestration.
 
 The orchestrator is deliberately local to a release package.  It coordinates
 only checksummed package scripts and never executes LLM output, remote callback
@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 
-BOOTSTRAP_VERSION = "4.3.7"
 RUN_MODES = frozenset({"INITIALIZE", "UPGRADE", "RESUME", "STATUS", "VERIFY"})
 TERMINAL_STATES = frozenset({"COMPLETED", "RETIRED", "FAILED_MANUAL_ACTION_REQUIRED"})
 
@@ -129,6 +128,34 @@ def _package_deploy_dir(database: str, root: Path = PACKAGE_ROOT) -> Path:
     if packaged.is_dir():
         return packaged
     return root / "adapters" / database / "deploy"
+
+
+def release_baseline(database: str, root: Path = PACKAGE_ROOT) -> Dict[str, Any]:
+    """Load the sole adapter baseline and validate its executable boundary."""
+    deploy = _package_deploy_dir(database, root)
+    manifests = sorted(deploy.glob("baseline_v*.json"))
+    if len(manifests) != 1:
+        raise DeploymentError("package must contain exactly one deployment baseline manifest")
+    try:
+        baseline = json.loads(manifests[0].read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DeploymentError("deployment baseline manifest is unreadable") from exc
+    version = str(baseline.get("version") or "").strip()
+    terminal = str(baseline.get("required_terminal_migration") or "").strip()
+    if not version or str(baseline.get("database") or "").lower() != database:
+        raise DeploymentError("deployment baseline manifest does not match the selected database")
+    if not terminal or not (deploy / terminal).is_file():
+        raise DeploymentError("deployment baseline terminal migration is missing")
+    return baseline
+
+
+def release_version(database: str, root: Path = PACKAGE_ROOT, requested: str = "") -> str:
+    """Resolve and verify the version declared by the packaged baseline."""
+    version = str(release_baseline(database, root).get("version") or "").strip()
+    requested = str(requested or "").strip()
+    if requested and requested != version:
+        raise DeploymentError("requested version does not match the packaged deployment baseline")
+    return version
 
 
 def _tool_path(database: str, root: Path = PACKAGE_ROOT) -> Path:
@@ -345,7 +372,8 @@ def _activate_runtime_config(config_path: Path) -> None:
         pass
 
 
-def _migration_apply(database: str, edition: str, config_path: Path, config: Dict[str, Any], root: Path) -> List[Dict[str, Any]]:
+def _migration_apply(target_version: str, database: str, edition: str, config_path: Path,
+                     config: Dict[str, Any], root: Path) -> List[Dict[str, Any]]:
     import sys
     scripts_root = root / "scripts"
     if scripts_root.is_dir() and str(scripts_root) not in sys.path:
@@ -354,9 +382,12 @@ def _migration_apply(database: str, edition: str, config_path: Path, config: Dic
         import migration_runner as runner
     except ImportError as exc:
         raise DeploymentError("migration runner is unavailable in this package") from exc
-    runner.MIGRATION_VERSION = BOOTSTRAP_VERSION
+    runner.MIGRATION_VERSION = target_version
     runner.MIGRATION_EDITION = edition.lower()
-    names = runner._v437_script_names(database, config_path, edition.lower())
+    try:
+        names = runner.release_script_names(target_version, database, config_path, edition.lower())
+    except ValueError as exc:
+        raise DeploymentError(str(exc)) from exc
     deploy = _package_deploy_dir(database, root)
     apply = {"oracle": runner._apply_oracle, "pg": runner._apply_pg, "yashandb": runner._apply_yashandb}[database]
     results = []
@@ -369,14 +400,29 @@ def _migration_apply(database: str, edition: str, config_path: Path, config: Dic
     return results
 
 
-def _database_record(run_id: str, mode: str, database: str, edition: str, plan_digest: str,
+def _verify_backup_evidence(path: Optional[Path], root: Path) -> Dict[str, Any]:
+    import sys
+    scripts_root = root / "scripts"
+    if scripts_root.is_dir() and str(scripts_root) not in sys.path:
+        sys.path.insert(0, str(scripts_root))
+    try:
+        import migration_runner as runner
+    except ImportError as exc:
+        raise DeploymentError("migration runner is unavailable in this package") from exc
+    passed, message = runner.verify_backup_evidence(path)
+    if not passed:
+        raise DeploymentError(message)
+    return {"status": "VERIFIED", "reference": str(path.name if path else "")}
+
+
+def _database_record(run_id: str, mode: str, database: str, edition: str, target_version: str, plan_digest: str,
                      journal_digest: str, status: str, readiness: Dict[str, Any], current_step: str = "") -> None:
     from . import connection, native_agent_api
     agent_id = "BOOTSTRAP_DEPLOYMENT_AGENT:" + run_id
     def work(tx: Any) -> None:
         native_agent_api._ensure_principal(tx, agent_id)
         existing = tx.query_one("SELECT RUN_ID FROM CX_DEPLOYMENT_RUNS WHERE RUN_ID=:id FOR UPDATE", {"id": run_id})
-        params = {"id": run_id, "run_mode": mode, "database": database, "edition": edition.upper(), "version": BOOTSTRAP_VERSION,
+        params = {"id": run_id, "run_mode": mode, "database": database, "edition": edition.upper(), "version": target_version,
                   "status": status, "readiness": json.dumps(_safe(readiness), ensure_ascii=True), "plan": plan_digest,
                   "journal": journal_digest, "agent": agent_id, "step": current_step or None}
         if existing:
@@ -476,6 +522,65 @@ def _retire_run(run_id: str) -> None:
     connection.execute("UPDATE CX_PRINCIPALS SET STATUS='RETIRED',PERMISSION_VERSION=PERMISSION_VERSION+1 WHERE PRINCIPAL_ID=:id", {"id": agent_id})
 
 
+def _bootstrap_admin_hash(password: str) -> str:
+    if not password:
+        raise DeploymentError("initial administrator password is required")
+    try:
+        from .identity_api import hash_password_argon2id
+        return hash_password_argon2id(password)
+    except Exception as exc:
+        raise DeploymentError("initial administrator password does not meet policy") from exc
+
+
+def _set_bootstrap_admin(database: str, config: Dict[str, Any], password: str, password_hash: str) -> None:
+    """Replace the inert schema seed with a one-installation Argon2id hash."""
+    conn = _connect(database, config)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT PASSWORD_HASH FROM SYSTEM_USERS WHERE USERNAME='admin' AND ROLE='ADMIN'")
+            row = cursor.fetchone()
+            current_hash = str(row[0] or "") if row else ""
+            if current_hash and current_hash != "SHA256:placeholder_change_me":
+                from .identity_api import verify_password_hash
+                if verify_password_hash(password, current_hash)[0]:
+                    return
+                raise DeploymentError("initial administrator is already configured with a different password")
+            if database == "pg":
+                cursor.execute(
+                    "UPDATE system_users SET password_hash=%(password_hash)s, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE username='admin' AND role='ADMIN' AND password_hash='SHA256:placeholder_change_me'",
+                    {"password_hash": password_hash},
+                )
+            else:
+                cursor.execute(
+                    "UPDATE SYSTEM_USERS SET PASSWORD_HASH=:password_hash, UPDATED_AT=CURRENT_TIMESTAMP "
+                    "WHERE USERNAME='admin' AND ROLE='ADMIN' AND PASSWORD_HASH='SHA256:placeholder_change_me'",
+                    {"password_hash": password_hash},
+                )
+            if int(cursor.rowcount or 0) != 1:
+                raise DeploymentError("initial administrator seed is missing or already configured")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _adopt_bootstrap_admin() -> Dict[str, Any]:
+    from . import connection, identity_api
+    identity_api.bootstrap_existing_admins()
+    row = connection.execute_query_one(
+        "SELECT i.PRINCIPAL_ID,i.STATUS FROM CX_HUMAN_IDENTITIES i "
+        "JOIN CX_USER_ROLES r ON r.PRINCIPAL_ID=i.PRINCIPAL_ID "
+        "WHERE i.USERNAME='admin' AND i.STATUS='ACTIVE' AND r.ROLE_CODE='SYSTEM_ADMIN' AND r.STATUS='ACTIVE'"
+    )
+    if not row:
+        raise DeploymentError("initial administrator principal was not created")
+    value = dict(row)
+    return {"principal_id": str(value.get("principal_id") or value.get("PRINCIPAL_ID") or ""), "status": "ACTIVE"}
+
+
 def _configure_models(raw: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     from . import embedding_governance, native_agent_api
     actor = "BOOTSTRAP_DEPLOYMENT_AGENT:" + run_id
@@ -518,30 +623,41 @@ def _configure_models(raw: Dict[str, Any], run_id: str) -> Dict[str, Any]:
 
 
 def run(mode: str, *, database: str, edition: str, config_path: Path,
-        root: Path = PACKAGE_ROOT, run_id: str = "") -> Dict[str, Any]:
+        root: Path = PACKAGE_ROOT, run_id: str = "", target_version: str = "",
+        bootstrap_admin_password: str = "", backup_evidence: Optional[Path] = None) -> Dict[str, Any]:
     mode = str(mode or "").upper()
     database = str(database or "").lower()
     edition = str(edition or "").lower()
     if mode not in RUN_MODES or database not in {"oracle", "pg", "yashandb"} or edition not in {"community", "enterprise"}:
         raise DeploymentError("unsupported deployment mode, database, or edition")
+    baseline = release_baseline(database, root)
+    target_version = release_version(database, root, target_version)
+    terminal_migration = str(baseline["required_terminal_migration"])
     raw = _resolve_sensitive_config(_read_config(config_path))
     config = _database_config(raw, database)
     _activate_runtime_config(config_path)
     journal = DeploymentJournal(root, run_id)
     if mode in {"STATUS", "VERIFY"}:
         durable = _deployment_database_status(database, config, run_id)
-        return {"run_id": journal.run_id, "mode": mode, "preflight": preflight(database, config, require_empty=False),
+        return {"run_id": journal.run_id, "mode": mode, "version": target_version,
+                "terminal_migration": terminal_migration, "preflight": preflight(database, config, require_empty=False),
                 "deployment": durable}
-    if mode == "RESUME":
+    resuming = mode == "RESUME"
+    if resuming:
         prior = journal.load()
-        if str(prior.get("database") or "") != database or str(prior.get("edition") or "") != edition:
+        if (str(prior.get("database") or "") != database or str(prior.get("edition") or "") != edition
+                or str(prior.get("target_version") or target_version) != target_version):
             raise DeploymentError("deployment journal does not match the requested target")
         mode = str(prior.get("mode") or "INITIALIZE")
+    admin_hash = _bootstrap_admin_hash(bootstrap_admin_password) if mode == "INITIALIZE" else ""
+    backup = _verify_backup_evidence(backup_evidence, root)
     plan = manifest(database, edition, root)
     plan_digest = _digest([{"key": action.key, "digest": action.digest, "authority": action.authority} for action in plan])
-    state = {"run_id": journal.run_id, "mode": mode, "database": database, "edition": edition, "plan_digest": plan_digest, "updated_at": _now()}
+    state = {"run_id": journal.run_id, "mode": mode, "database": database, "edition": edition,
+             "target_version": target_version, "terminal_migration": terminal_migration,
+             "plan_digest": plan_digest, "updated_at": _now()}
     journal_digest = journal.save(state)
-    first = preflight(database, config, require_empty=mode == "INITIALIZE")
+    first = preflight(database, config, require_empty=mode == "INITIALIZE" and not resuming)
     if not first["passed"]:
         state["status"] = "FAILED_MANUAL_ACTION_REQUIRED"
         state["preflight"] = first
@@ -552,15 +668,20 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
             state["current_step"] = action.key
             journal_digest = journal.save(state)
             _execute_action(database, config, action, root)
-    migrations = _migration_apply(database, edition, config_path, config, root)
+        _set_bootstrap_admin(database, config, bootstrap_admin_password, admin_hash)
+    migrations = _migration_apply(target_version, database, edition, config_path, config, root)
+    if not migrations or str(migrations[-1].get("script") or "") != terminal_migration:
+        raise DeploymentError("migration chain did not reach the packaged terminal migration")
     readiness = {"database": "READY", "control_plane": "READY", "llm": "UNCONFIGURED", "embedding": "UNCONFIGURED", "runtime": "PENDING", "enrollment": "BLOCKED"}
-    _database_record(journal.run_id, mode, database, edition, plan_digest, journal_digest, "NATIVE_HANDOFF", readiness, "native-handoff")
-    _record_evidence(journal.run_id, "PREFLIGHT", first)
+    _database_record(journal.run_id, mode, database, edition, target_version, plan_digest, journal_digest, "NATIVE_HANDOFF", readiness, "native-handoff")
+    _record_evidence(journal.run_id, "PREFLIGHT", {"target": first, "backup": backup})
     _record_evidence(journal.run_id, "MIGRATION_RESULTS", {"migrations": migrations, "manifest_digest": plan_digest})
     for index, action in enumerate(plan, start=1):
         _record_step(journal.run_id, action.key, index, action.digest, "COMPLETED", {"phase": action.phase, "path": action.path.name})
     for index, result in enumerate(migrations, start=len(plan) + 1):
         _record_step(journal.run_id, "migration-" + str(result["script"]), index, str(result["checksum"]), "COMPLETED", result)
+    admin = _adopt_bootstrap_admin()
+    _record_evidence(journal.run_id, "INITIAL_ADMIN", admin)
     from . import native_agent_api
     native = native_agent_api.bootstrap_native_agents()
     knowledge_state = {
@@ -575,8 +696,9 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     readiness["runtime"] = "READY"
     readiness["enrollment"] = "READY" if models.get("embedding") in {"VERIFIED", "DISABLED", "UNCONFIGURED"} else "BLOCKED"
     journal_digest = journal.save({**state, "status": "POSTFLIGHT_PASSED", "readiness": readiness, "migrations": migrations})
-    _database_record(journal.run_id, mode, database, edition, plan_digest, journal_digest, "COMPLETED", readiness, "postflight")
-    _record_evidence(journal.run_id, "POSTFLIGHT", {"readiness": readiness, "native_agents": native, "models": models})
+    _database_record(journal.run_id, mode, database, edition, target_version, plan_digest, journal_digest, "COMPLETED", readiness, "postflight")
+    _record_evidence(journal.run_id, "POSTFLIGHT", {"readiness": readiness, "initial_admin": admin,
+                                                     "native_agents": native, "models": models})
     _retire_run(journal.run_id)
     journal.retire()
     try:
@@ -584,5 +706,6 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         auto_encrypt_config(config_path)
     except Exception as exc:
         raise DeploymentError("deployment completed but configuration encryption failed") from exc
-    return {"run_id": journal.run_id, "status": "RETIRED", "preflight": first, "migrations": migrations,
+    return {"run_id": journal.run_id, "status": "RETIRED", "version": target_version,
+            "preflight": first, "migrations": migrations, "initial_admin": admin,
             "native_agents": native, "readiness": readiness}

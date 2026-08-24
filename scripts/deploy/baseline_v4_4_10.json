@@ -1,1 +1,1 @@
-{"version":"4.4.10","database":"oracle","fresh_install":true,"deployment":"migration_runner-selected-ordered-chain","required_terminal_migration":"58_v4_4_10_knowledge_scope.sql","historical_chain":"retained-for-audit","withdrawn_upgrade_sources":["4.4.8"]}
+{"version":"4.4.10","database":"oracle","fresh_install":true,"deployment":"bootstrap-deployment-agent","required_terminal_migration":"59_v4_4_10_knowledge_graph_context.sql","historical_chain":"retained-for-audit","withdrawn_upgrade_sources":["4.4.8"]}

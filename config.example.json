@@ -28,7 +28,7 @@
     "security": {
         "admin_username": "admin",
         "session_timeout": 300,
-        "secret_key": "oracle-community-v4.4.10"
+        "secret_key": "<SESSION_SECRET>"
     },
     "agent": {
         "mode": "standalone"

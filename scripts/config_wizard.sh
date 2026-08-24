@@ -92,10 +92,12 @@ fi
 
 echo ""
 echo -e "${BLUE}[llm]${NC}"
-read -r -p "  LLM API URL: " LLM_URL
-LLM_URL="${LLM_URL:-<LLM_API_URL>}"
-read -r -p "  LLM model name: " LLM_MODEL
-LLM_MODEL="${LLM_MODEL:-<LLM_MODEL_NAME>}"
+read -r -p "  LLM API URL (leave empty to configure after bootstrap): " LLM_URL
+if [ -n "$LLM_URL" ]; then
+    read -r -p "  LLM model name: " LLM_MODEL
+else
+    LLM_MODEL=""
+fi
 read -r -s -p "  LLM API key (leave empty if none): " LLM_KEY
 echo
 
@@ -164,7 +166,7 @@ if ! PY_BIN="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
 fi
 cx_prepare_python_environment "$PY_BIN"
 "$PY_BIN" <<'PYEOF'
-import json, os
+import json, os, secrets
 
 cfg_path = os.environ["CONFIG_FILE"]
 with open(cfg_path) as f:
@@ -183,6 +185,10 @@ c.setdefault("llm", {})
 c["llm"]["api_url"] = os.environ["LLM_URL"]
 c["llm"]["model"] = os.environ["LLM_MODEL"]
 c["llm"]["api_key"] = os.environ["LLM_KEY"]
+
+c.setdefault("security", {})
+if not c["security"].get("secret_key") or str(c["security"]["secret_key"]).startswith("<"):
+    c["security"]["secret_key"] = secrets.token_urlsafe(48)
 
 c.setdefault("embedding", {})
 c["embedding"]["api_url"] = os.environ["EMB_URL"]

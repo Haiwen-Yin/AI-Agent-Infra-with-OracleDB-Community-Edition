@@ -323,8 +323,14 @@ Environment variables override `config.json` values (see `config.py`).
 ### Database schema
 
 ```bash
-bash scripts/install_platform.sh initialize --database oracle --edition <community|enterprise> --config config.json
+bash scripts/install_platform.sh initialize --version v4.4.10 --database oracle --edition <community|enterprise> --config config.json --backup-evidence release_evidence/backup.json
 ```
+
+The interactive command prompts twice for a deployment-specific initial
+`admin` password and requires recoverable backup evidence. Automation uses
+`--admin-password-file` with a current-user-owned regular file at mode `0600`
+or stricter. The plaintext password is never stored in configuration,
+deployment journals, or evidence.
 
 This runs the deploy scripts in `scripts/deploy/`:
 `1_schema.sql` → `7_v4_0_1_migration.sql` → `2_api.sql` → `3_jobs.sql` →
@@ -350,8 +356,8 @@ PYTHONPATH=scripts "$PYTHON_BIN" -m uvicorn web_app:app --host 0.0.0.0 --port 80
 ```
 
 The Chuanxu application is served at `http://<host>:8001/app/monitor`.
-There is no universal default password. Create or approve the first
-administrator through the deployment bootstrap procedure, then use the
+There is no universal default password. The deployment bootstrap creates the
+first administrator from the securely prompted password, then use the
 registration and role workflow documented in `docs/api-reference.md`.
 
 ## 5. Using the package

@@ -673,11 +673,16 @@ For a prepared target, run the package-local Bootstrap Deployment Agent:
 
 ```bash
 bash scripts/install_platform.sh initialize --database oracle \
-  --edition <community|enterprise> --config config.json
+  --edition <community|enterprise> --version 4.4.10 --config config.json \
+  --backup-evidence release_evidence/backup.json
 ```
 
 It verifies a checksum-bound package manifest, executes only packaged SQL, and
-records sanitized deployment evidence before retiring its temporary identity.
+executes through the manifest's terminal migration. Interactive initialization
+prompts twice for the first `admin` password; automation must use a current-user-
+owned `0600` regular file with `--admin-password-file`. Only the Argon2id hash
+is stored. The command records sanitized deployment evidence before retiring
+its temporary identity.
 It does not create PDBs, tablespaces, or privileged Oracle infrastructure.
 Use `status`, `verify`, `resume`, or `upgrade` with the same command wrapper.
 Embedding Profiles, immutable Contracts, Spaces, and bindings govern every

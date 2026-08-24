@@ -3,7 +3,7 @@
 v4.4.10 adds optional model forwarding, usage/cost accounting, per-profile
 routing, and an authenticated read-only executive wallboard. It is the clean
 deployment baseline for new installations. Apply the
-migration-runner selected chain through migration 58;
+migration-runner selected chain through migration 59;
 the adapter `deploy/baseline_v4_4_10.json` is the authoritative package manifest.
 v4.4.8 is withdrawn and must not be used as an upgrade source. Existing historical
 SQL remains retained for audit/reference, while fresh deployment uses the ordered
@@ -102,7 +102,8 @@ export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
   --version 4.4.10 --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --<adapter>-config config.json
+  --edition <community|enterprise> --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
 ```
 
 The preflight result is an auditable deployment record. It contains redacted
@@ -118,11 +119,30 @@ supports resume and status; and retires after handing control to the platform
 management layer. It does not interpret arbitrary LLM output as SQL or
 authorization, and it does not depend on an external Agent calling a Skill.
 
+For an interactive installation, the command securely prompts twice for the
+initial `admin` password. The password must contain at least 12 characters. It
+is never placed in an argument, configuration file, journal, or evidence; only
+an Argon2id hash is stored.
+
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py \
+bash scripts/install_platform.sh initialize \
   --version 4.4.10 --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --<adapter>-config config.json \
+  --edition <community|enterprise> --config config.json \
   --backup-evidence release_evidence/backup.json
+```
+
+Non-interactive automation must provide an operator-owned regular password
+file with mode `0600` or stricter. A symlink, a file owned by another user, an
+empty file, or group/other permissions fails closed. Remove the plaintext
+secret file after successful initialization according to the deployment
+environment's secret-handling policy.
+
+```bash
+bash scripts/install_platform.sh initialize \
+  --version 4.4.10 --database <oracle|pg|yashandb> \
+  --edition <community|enterprise> --config config.json \
+  --backup-evidence release_evidence/backup.json \
+  --admin-password-file /run/secrets/chuanxu-initial-admin
 ```
 
 The runner verifies the final schema, API packages, indexes, jobs, property
@@ -149,7 +169,9 @@ identity, authorization, or audit controls.
 
 ### 5. Activate native management identities
 
-The first platform bootstrap creates the human `admin` account and the native
+The first platform bootstrap replaces the inert database seed with the
+operator-supplied Argon2id password hash, creates the human `admin` Principal,
+and creates the native
 Platform Admin Agent as separate principals. Enterprise also creates the
 restricted Compliance Admin Agent when that edition is enabled. The protected
 Platform Administration Channel is created with the administrator and enabled
@@ -731,7 +753,8 @@ Agent instead of an external Skill runtime:
 
 ```bash
 bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --config config.json
+  --edition <community|enterprise> --version 4.4.10 --config config.json \
+  --backup-evidence release_evidence/backup.json
 ```
 
 The command verifies its package manifest and records sanitized deployment
@@ -760,7 +783,7 @@ Set `CX_PUBLIC_BASE_URL` to the reachable HTTPS base before gateway
 distribution; the completion path is appended automatically. Direct and
 gateway routing remain independently selectable. Install with Python 3.14,
 deploy the adapter's `baseline_v4_4_10.json` ordered chain through terminal
-migration 58, and require `/api/ready` before traffic admission.
+migration 59, and require `/api/ready` before traffic admission.
 
 From a source checkout run `tools/v410_full_flow_gate.py`; from a generated
 package use `scripts/tools/v410_full_flow_gate.py`. Then run the corresponding

@@ -1640,6 +1640,23 @@ def _v410_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def release_script_names(version: str, database: str, config_path: Path, edition: str) -> list[str]:
+    """Return the complete ordered migration chain for a package bootstrap.
+
+    The package-local Bootstrap Deployment Agent uses this public selector so
+    it cannot silently remain pinned to the release that first introduced the
+    bootstrap implementation.
+    """
+    selectors = {
+        "4.3.7": _v437_script_names,
+        "4.4.10": _v410_script_names,
+    }
+    selector = selectors.get(str(version or "").strip())
+    if selector is None:
+        raise ValueError(f"unsupported package bootstrap version: {version}")
+    return selector(database, config_path, edition)
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
