@@ -1,4 +1,4 @@
-# Chuanxu Product UI Guidelines v4.4.9
+# Chuanxu Product UI Guidelines v4.4.10
 
 These reusable rules apply to authenticated Dashboard pages in every edition.
 
@@ -65,6 +65,23 @@ combinations use stable titles such as healthy compliant, awaiting assessment,
 and quarantined non-compliant Agents. Mobile layouts stack these dimensions;
 labels and explanatory text must not overlap or be truncated.
 
+## Model routing presentation
+
+Model routing belongs on the corresponding LLM Provider Profile row. Direct
+and platform-gateway choices use compact independent checkboxes because both
+may be enabled. The confirmation action stays on the same row, is gray and
+disabled when unchanged, and becomes highlighted when a draft differs. Saving
+requires a compliance reason. The platform-generated forwarding address is
+read-only and must remain legible without expanding the table unpredictably.
+
+## Executive wallboard presentation
+
+The wallboard is an operational overview, not a Token table. It combines stable
+runtime metrics with separate 14-day Token and cost curves, bounded usage
+detail, coverage, and freshness. It contains no mutation controls. Loading,
+empty, stale, error, and current states keep the same layout dimensions so
+refresh cannot shift or overlap surrounding content.
+
 ## Verification and published screenshots
 
 Release verification covers Chinese and English, light and dark, desktop and
@@ -72,3 +89,13 @@ mobile layouts. Screenshots and bounding-box assertions verify headings,
 actions, and metric cards. Website and presentation screenshots are captured
 from the final package of the current release after loading completes; old
 versions, loading placeholders, errors, and overlaps are rejected.
+
+## Governed record details
+
+Normal detail drawers use up to 640 CSS pixels. Dense governed details such as
+Knowledge visibility and Branch relationships use the 960-pixel wide treatment
+on desktop. At 780 pixels or below, drawers use the available viewport width,
+multi-field rows collapse to one column, and content scrolls vertically.
+Inputs, selects, textareas, buttons, panels, and structured output must remain
+inside the drawer; hiding horizontal overflow is not sufficient evidence.
+Browser gates assert both drawer `scrollWidth` and every control bounding box.

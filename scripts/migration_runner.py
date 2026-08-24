@@ -53,6 +53,8 @@ from live_db_validator import (
     V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS,
     V448_MIGRATION_SCRIPTS,
     V449_MIGRATION_SCRIPTS,
+    V410_MIGRATION_SCRIPTS,
+    V410_MODEL_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS,
     validate_v449_static_contract,
@@ -117,10 +119,11 @@ GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS = frozenset({"4.4.5"})
 IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
 PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
 RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS = frozenset({"4.4.9"})
+MODEL_USAGE_WALLBOARD_MIGRATION_VERSIONS = frozenset({"4.4.10"})
 SUPPORTED_V449_BASELINE_VERSION = "4.4.7"
 WITHDRAWN_SCHEMA_VERSION = "4.4.8"
 JOURNALED_MIGRATION_VERSIONS = (
-    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS | PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS | RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS
+    GRAPH_MIGRATION_VERSIONS | CHANNEL_MIGRATION_VERSIONS | ORGANIZATION_MIGRATION_VERSIONS | MEMORY_LIFECYCLE_MIGRATION_VERSIONS | GRAPH_ASSURANCE_MIGRATION_VERSIONS | COMPLIANCE_MIGRATION_VERSIONS | PLATFORM_CAPABILITY_MIGRATION_VERSIONS | NATIVE_AGENT_MIGRATION_VERSIONS | BOOTSTRAP_EMBEDDING_MIGRATION_VERSIONS | NATIVE_SDD_MIGRATION_VERSIONS | ADMIN_HA_MIGRATION_VERSIONS | GRAPH_OPERATIONS_MIGRATION_VERSIONS | SECURITY_DOMAIN_BINDING_MIGRATION_VERSIONS | AGENT_POOL_CLOUD_MIGRATION_VERSIONS | GRAPH_RUN_CONTRACT_MIGRATION_VERSIONS | IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS | PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS | RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS | MODEL_USAGE_WALLBOARD_MIGRATION_VERSIONS
 )
 
 # v4.4.1 was exercised against the retained PostgreSQL and YashanDB test
@@ -575,7 +578,7 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             cursor.execute("SELECT USER FROM DUAL")
         identity = cursor.fetchone()
         withdrawn_schema_detected = (
-            MIGRATION_VERSION == "4.4.9" and _v448_schema_detected(cursor, database)
+            MIGRATION_VERSION in {"4.4.9", "4.4.10"} and _v448_schema_detected(cursor, database)
         )
         objects_complete = _objects_complete(cursor, database)
         capacity = _capacity_probe(cursor, database, tier)
@@ -661,6 +664,11 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
                 full_scripts.append(deploy_dir / "51_v4_4_9_identity_boundary_repair.sql")
                 full_scripts.append(deploy_dir / "53_v4_4_9_pg_runtime_boundary.sql")
             v43_static_contract = validate_v449_static_contract(database, full_scripts)
+        elif MIGRATION_VERSION == "4.4.10":
+            deploy_dir = scripts[0].parent if scripts else _deployment_script(database, "55_v4_4_10_model_usage_wallboard.sql").parent
+            full_scripts = [deploy_dir / name for name in V410_MIGRATION_SCRIPTS]
+            missing = [name for name in V410_MIGRATION_SCRIPTS if not (deploy_dir / name).is_file()]
+            v43_static_contract = {"database": database, "v410_model_usage_wallboard": {"scripts_required": list(V410_MIGRATION_SCRIPTS), "scripts_missing": missing, "passed": not missing}, "passed": not missing}
     passed = bool(identity) and capabilities.get("apache_age_available", True)
     if withdrawn_schema_detected:
         passed = False
@@ -1273,6 +1281,33 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         "53_v4_4_9_pg_runtime_boundary",
     }:
         return _objects_complete(cursor, database)
+    if key == "55_v4_4_10_model_usage_wallboard":
+        return {
+            "CX_MODEL_GATEWAY_CREDENTIALS", "CX_MODEL_REQUESTS", "CX_MODEL_PRICING",
+            "CX_MODEL_USAGE", "CX_WALLBOARD_DEFINITIONS", "CX_MODEL_ROUTING_POLICIES",
+        } <= _schema_tables(cursor, database)
+    if key == "56_v4_4_10_runtime_repair":
+        present = _schema_tables(cursor, database)
+        if "CX_PLATFORM_CAPABILITIES" not in present or "CX_ROLE_TEMPLATES" not in present:
+            return False
+        if "GATEWAY_URL" not in _schema_columns(cursor, database, "CX_MODEL_ROUTING_POLICIES"):
+            return False
+        if database == "pg":
+            cursor.execute("SELECT enabled FROM cx_platform_capabilities WHERE capability_key=%s", ("wallboard",))
+            capability = cursor.fetchone()
+            cursor.execute("SELECT permissions_json FROM cx_role_templates WHERE role_code=%s", ("AUDITOR",))
+        else:
+            cursor.execute("SELECT ENABLED FROM CX_PLATFORM_CAPABILITIES WHERE CAPABILITY_KEY=:key", {"key": "wallboard"})
+            capability = cursor.fetchone()
+            cursor.execute("SELECT PERMISSIONS_JSON FROM CX_ROLE_TEMPLATES WHERE ROLE_CODE=:role", {"role": "AUDITOR"})
+        role = cursor.fetchone()
+        permissions = str(role[0].read() if role and hasattr(role[0], "read") else (role[0] if role else ""))
+        return bool(capability) and "wallboard.read" in permissions and "model_usage.read" in permissions
+    if key == "57_v4_4_10_complete_model_governance":
+        present = _schema_tables(cursor, database)
+        return set(V410_MODEL_TABLES) <= present and {
+            "CORRELATION_ID", "CREDENTIAL_ID",
+        } <= _schema_columns(cursor, database, "CX_MODEL_REQUESTS")
     if key == "49_v4_4_8_security_domain_rls":
         return _v448_pg_security_domain_complete(cursor)
     return True
@@ -1572,6 +1607,39 @@ def _v449_script_names(database: str, config_path: Path, edition: str) -> list[s
     return names
 
 
+def _v410_script_names(database: str, config_path: Path, edition: str) -> list[str]:
+    base_tables = {
+        "CX_MODEL_GATEWAY_CREDENTIALS", "CX_MODEL_REQUESTS", "CX_MODEL_PRICING",
+        "CX_MODEL_USAGE", "CX_WALLBOARD_DEFINITIONS", "CX_MODEL_ROUTING_POLICIES",
+    }
+    established_v410 = False
+    try:
+        config = _load_database_config(config_path)
+        probe = _connect_for_preflight(database, config)
+        try:
+            with probe.cursor() as cursor:
+                established_v410 = base_tables <= _schema_tables(cursor, database)
+        finally:
+            probe.close()
+    except Exception:
+        established_v410 = False
+    # Some retained v4.4.10 baselines predate the per-step journal. Replaying
+    # the complete historical chain would widen the deployment unnecessarily;
+    # the six migration-55 tables prove that only the v4.4.10 closure remains.
+    names = [] if established_v410 else _v449_script_names(database, config_path, edition)
+    if "55_v4_4_10_model_usage_wallboard.sql" not in names:
+        names.append("55_v4_4_10_model_usage_wallboard.sql")
+    if "56_v4_4_10_runtime_repair.sql" not in names:
+        names.append("56_v4_4_10_runtime_repair.sql")
+    if "57_v4_4_10_complete_model_governance.sql" not in names:
+        names.append("57_v4_4_10_complete_model_governance.sql")
+    if "58_v4_4_10_knowledge_scope.sql" not in names:
+        names.append("58_v4_4_10_knowledge_scope.sql")
+    if "59_v4_4_10_knowledge_graph_context.sql" not in names:
+        names.append("59_v4_4_10_knowledge_graph_context.sql")
+    return names
+
+
 def _prepare_migration(conn: Any, database: str, script: Path) -> MigrationResult | None:
     checksum = _checksum(script)
     with conn.cursor() as cursor:
@@ -1686,10 +1754,10 @@ def _statements(path: Path) -> list[str]:
             in_block = True
         if not in_block and stripped.endswith(";"):
             flush()
-        elif in_block and (upper == "$$;" or upper == "END;" or upper == "END $$;" or upper == "END /"):
+        elif in_block and (upper == "$$;" or upper.endswith(" END;") or upper == "END;" or upper == "END $$;" or upper == "END /"):
             # A slash line is preferred for Oracle; this fallback handles
             # drivers/files that omit it after a single top-level block.
-            if upper in {"$$;", "END $$;"}:
+            if upper in {"$$;", "END $$;"} or upper == "END;" or upper.endswith(" END;"):
                 flush()
     flush()
     return statements
@@ -1805,15 +1873,23 @@ def _apply_statement_migration(
                             result.ledger_status = "checksum_mismatch"
                             return result
                     step_complete = _step_objects_complete(cursor, database, script)
-                    if existing["checksum"] == result.checksum and existing["status"] == "APPLIED" and step_complete:
+                    if existing["checksum"] == result.checksum and step_complete and (
+                        existing["status"] == "APPLIED" or _script_key(script) == "56_v4_4_10_runtime_repair"
+                    ):
                         permission_repair = (
                             database == "pg"
                             and _script_key(script) == "17_v4_3_0_governance_lifecycle"
                             and not _pg_thread_runtime_permissions_complete(cursor)
                         )
                         if not permission_repair:
+                            if existing["status"] != "APPLIED":
+                                _upsert_step_row(
+                                    cursor, database, script, result.checksum, "APPLIED",
+                                    existing["statements_executed"], existing["failed_statement"],
+                                )
+                                conn.commit()
                             result.passed = True
-                            result.ledger_status = "already_applied"
+                            result.ledger_status = "already_applied" if existing["status"] == "APPLIED" else "adopted_completed_retry"
                             result.statements_executed = existing["statements_executed"]
                             return result
                 _upsert_step_row(cursor, database, script, result.checksum, "RUNNING")
@@ -1962,9 +2038,14 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
                             result.ledger_status = "checksum_mismatch"
                             return result
                     step_complete = _step_objects_complete(cursor, "pg", script)
-                    if existing["checksum"] == result.checksum and existing["status"] == "APPLIED" and step_complete:
+                    if existing["checksum"] == result.checksum and step_complete and (
+                        existing["status"] == "APPLIED" or _script_key(script) == "56_v4_4_10_runtime_repair"
+                    ):
+                        if existing["status"] != "APPLIED":
+                            _upsert_step_row(cursor, "pg", script, result.checksum, "APPLIED", existing["statements_executed"])
+                            conn.commit()
                         result.passed = True
-                        result.ledger_status = "already_applied"
+                        result.ledger_status = "already_applied" if existing["status"] == "APPLIED" else "adopted_completed_retry"
                         result.statements_executed = existing["statements_executed"]
                         return result
                 _upsert_step_row(cursor, "pg", script, result.checksum, "RUNNING")
@@ -2028,7 +2109,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -2102,6 +2183,8 @@ def main() -> int:
             script_names = _v448_script_names(database, paths[database], MIGRATION_EDITION)
         elif MIGRATION_VERSION == "4.4.9":
             script_names = _v449_script_names(database, paths[database], MIGRATION_EDITION)
+        elif MIGRATION_VERSION == "4.4.10":
+            script_names = _v410_script_names(database, paths[database], MIGRATION_EDITION)
         else:
             script_names = [
                 "9_v4_2_0_graph_engineering.sql", "10_v4_2_0_graph_runtime.sql",

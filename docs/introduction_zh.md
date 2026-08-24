@@ -1,10 +1,12 @@
-# AI Agent Infra with OracleDB — 社区版 v4.4.9
+# AI Agent Infra with OracleDB — 社区版 v4.4.10
 
-**版本**: v4.4.9 | **日期**: 2026-08-18 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.4.10 | **日期**: 2026-08-24 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.cn**
 
 ---
+
+> v4.4.10 全新部署基线：可选模型网关支持直连与平台网关并行，并提供硬/软配额、加密幂等重放、供应商账单对账、Enterprise 成本分摊和签名外部证据；登录后只读管理大屏汇总平台运行态与 Token/成本趋势。知识可见范围由数据库按全公司、组织子树、组织层级或 Human/Agent 私有策略实时判断。安全域与频道是产品授权模型，旧协作组仅保留为内部兼容执行关系。v4.4.8 已撤回。
 
 > v4.3.1 身份与组织规则：除受保护的内置 `admin` 系统账号外，一个平台账号、一个 Human Principal 与一个组织人员表示同一主体。注册审批必须选择主组织，并在同一事务中激活账号和主组织归属；没有有效登录身份的 Principal 不能加入组织架构。
 
@@ -50,7 +52,7 @@
 | 能力域 | 说明 |
 |--------|------|
 | 记忆与知识 | 多模数据混合检索实现、向量嵌入、知识图谱、记忆融合 |
-| Agent 管理 | 弹性池化管理、会话生命周期、凭证加密、协作组 |
+| Agent 管理与协作 | 弹性池化管理、会话生命周期、凭证加密、安全域与频道；旧协作组仅作内部兼容执行关系 |
 | 工作空间 | 上下文连续性、Agent 交接、会话恢复 |
 | 上下文分支 | fork/merge/abandon/resume 分支、冲突检测、学习提取 |
 | 规格驱动 | Spec 文档管理、计划关联、验证与派生 |
@@ -126,7 +128,7 @@ v3.1.0 推出社区版与企业版双版本策略，满足开源社区与企业�
 
 - **许可证**：Apache License 2.0
 - **定位**：开源社区、个人研究、非生产环境
-- **包含**：完整的记忆与知识系统、多模数据混合检索、Agent 管理、工作空间、上下文分支、规格驱动开发、协作组、Harness 模板、Web 可视化、Portal 用户系统（系统用户模式）
+- **包含**：完整的记忆与知识系统、多模数据混合检索、Agent 管理、工作空间、上下文分支、规格驱动开发、安全域、频道、内部兼容执行关系、Harness 模板、Web 可视化、Portal 用户系统（系统用户模式）
 
 ### 企业版（Enterprise Edition）
 
@@ -155,7 +157,7 @@ v3.1.0 推出社区版与企业版双版本策略，满足开源社区与企业�
 | 多模数据混合检索实现 | ✓ | ✓ |
 | 规格驱动开发 | ✓ | ✓ |
 | Agent 弹性管理 | ✓ | ✓ |
-| 协作组 | ✓ | ✓ |
+| 安全域与频道（旧协作组仅内部兼容） | ✓ | ✓ |
 | 工作空间与上下文连续性 | ✓ | ✓ |
 | 上下文分支（Context Branching） | ✓ | ✓ |
 | 属性图 API | ✓ | ✓ |
@@ -348,7 +350,7 @@ FETCH FIRST :topk ROWS ONLY
 
 ### 5.2 Agent 弹性管理
 
-Agent 弹性管理系统提供智能体的完整生命周期管理，包括注册、池化分配、会话管理、凭证加密和协作组。
+Agent 弹性管理系统提供智能体的完整生命周期管理，包括注册、池化分配、会话管理、凭证加密、安全域和频道。历史 `COLLAB_GROUPS` 仅为内部兼容执行关系，不是客户授权或知识共享对象。
 
 #### Agent 池化状态机
 
@@ -395,7 +397,9 @@ Portal 用户可通过 `/portal/api/agent/release` 主动释放当前 Agent，�
 - `issue_credential()` / `verify_credential()` 使用 `encrypt_section()` / `decrypt_section()`
 - 修复了此前 ReversibleEncryption 使用随机密钥导致不可逆的缺陷
 
-#### 协作组
+#### 内部兼容执行关系（历史 `COLLAB_GROUPS`）
+
+以下模式用于解释既有执行记录和兼容 API。当前产品协作以安全域定义授权边界、频道承载互动与证据；这些组模式和共享策略不能授予权限或决定知识范围。
 
 - Mode C：组级共享工作空间 + LEAD/CONTRIBUTOR 个人工作空间
 - OBSERVER 角色无个人工作空间
@@ -1523,9 +1527,16 @@ Graph 条件必须使用受管的 typed AST。缺少 operand、非 AST 子项、
 校验节点/边身份、端点、父版本以及动态来源 Run/Checkpoint 的同图关系。
 
 v4.3.0 的生产 profile 已通过数据库、浏览器、容量、故障恢复、清洁部署和
-长时间运行证据门禁，生产部署使用 v4.4.7 Production Profile。当前 Graph
+长时间运行证据门禁，生产部署使用 v4.4.10 Production Profile。当前 Graph
 能力以数据库权威矩阵为准：Graph Runtime 核心与授权检查为 Production；
 Manifest Draft Import、SLO 只读和 Checkpoint Fork 为 `CONTROLLED`；Replay、
 Dynamic Graph Migration、Framework Adapter Execution、A2A 与 OTLP 为
 `DISABLED`。Channel、Barrier 和 Gateway 仍通过数据库权限显式控制；Channel
 不能扩大数据库、API、Skill、Tool、模型、记忆、Artifact 或导出权限。
+
+
+## v4.4.10 完整模型治理
+
+模型网关保持可选，直连与平台网关可以并行。平台网关提供硬配额和软预算、原子预留与结算、AES-GCM 有界响应重放、统一错误关联标识；模型用量账、供应商账单、追加式纠正/对账和 Enterprise 内部分摊保持为相互可追溯但不混淆的事实层。
+
+可信外部适配器以 Ed25519 签名、版本化密钥、吊销、顺序号和 nonce 上报证据。平台不声称自动发现未经过网关且没有签名证据的模型调用。管理大屏支持 allowlist 定义版本、发布和回滚，但 Viewer 仍为登录后只读。v4.4.10 使用 `baseline_v4_4_10.json` 进行全新部署并执行到迁移 58；历史脚本继续保持 journal 和 checksum 完整，但不作为旧包原地升级承诺。v4.4.8 已撤回。

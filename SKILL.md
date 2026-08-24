@@ -1,6 +1,6 @@
 # SKILL.md - AI Agent Infra with OracleDB
 
-> **Version:** 4.4.8 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.4.10 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -176,7 +176,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.8.md   # this release's notes
+├── RELEASE_NOTES_v4.4.10.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -257,7 +257,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.8.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.10.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -376,9 +376,9 @@ Use the checksum-journaled migration runner for every additive release step;
 do not select or reorder individual migration files manually:
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.8 \
+"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.10 \
   --database oracle --edition <community|enterprise> --oracle-config config.json
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.8 \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
   --database oracle --edition <community|enterprise> --oracle-config config.json \
   --backup-evidence release_evidence/backup.json
 ```

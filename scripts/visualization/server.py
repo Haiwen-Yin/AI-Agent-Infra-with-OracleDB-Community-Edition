@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.9 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.10 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.9"
+VERSION = "4.4.10"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -2784,8 +2784,10 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(403, str(exc))
         except ValueError as exc:
             self._send_error(422, str(exc))
+        except PermissionError as e:
+            self._send_error(403, str(e))
         except Exception as e:
-            self._send_error(500, str(e))
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _handle_execution_job_get(self, path):
         from lib import execution_control
@@ -2964,21 +2966,20 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(422, str(exc))
 
     def _api_collab(self):
-        groups = connection.execute_query(
-            "SELECT g.group_id, g.group_name, g.group_type, g.description, "
-            "g.workspace_id, g.coordinator_agent_id, g.sharing_policy, g.status, "
-            "g.metadata, g.created_at, g.updated_at, g.branch_id, g.spec_id, "
-            "(SELECT COUNT(*) FROM collab_group_members cgm WHERE cgm.group_id = g.group_id AND cgm.status = 'ACTIVE') AS member_count "
-            "FROM collab_groups g ORDER BY g.updated_at DESC"
-        )
-        for g in groups:
-            members = connection.execute_query(
-                "SELECT member_id, agent_id, role, personal_workspace_id, joined_at, status "
-                "FROM collab_group_members WHERE group_id = :gid ORDER BY joined_at",
-                {"gid": g['group_id']}
-            )
-            g['members'] = [_clean_row(m) for m in members]
-        self._send_json({'groups': [_clean_row(g) for g in groups]})
+        try:
+            from lib import security_domain_api
+            actor = self._authenticated_principal()['actor_id']
+            groups = security_domain_api.list_execution_groups(actor)
+            self._send_json({
+                'groups': [_clean_row(g) for g in groups],
+                'deprecated': True,
+                'contract': 'execution-group-scope/v1',
+                'replacement': '/api/security-domains/collaboration-groups',
+            })
+        except PermissionError as exc:
+            self._send_error(403, str(exc))
+        except Exception as exc:
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _api_skills(self):
         from lib import skill_api
@@ -3461,8 +3462,10 @@ class VisHandler(BaseHTTPRequestHandler):
                 {'vbid': branch_id}
             )
             self._send_json([_clean_row(r) for r in specs])
+        except PermissionError as e:
+            self._send_error(403, str(e))
         except Exception as e:
-            self._send_error(500, str(e))
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _api_branch_plans(self, path):
         if self._require_auth() is None:
@@ -3539,12 +3542,15 @@ class VisHandler(BaseHTTPRequestHandler):
         if self._require_auth() is None:
             return
         try:
+            from lib import security_domain_api
             from lib import collab_api
             if path.endswith('group-branches'):
                 group_id = qs.get('group_id', [None])[0]
                 if not group_id:
                     self._send_error(400, 'group_id required')
                     return
+                actor = self._authenticated_principal()['actor_id']
+                security_domain_api.assert_execution_group_access(actor, group_id)
                 result = collab_api.get_member_branches(group_id)
                 self._send_json([_clean_row(r) for r in result])
             elif path.endswith('group-spec-validation'):
@@ -3553,10 +3559,14 @@ class VisHandler(BaseHTTPRequestHandler):
                 if not group_id:
                     self._send_error(400, 'group_id required')
                     return
+                actor = self._authenticated_principal()['actor_id']
+                security_domain_api.assert_execution_group_access(actor, group_id)
                 result = collab_api.validate_group_against_spec(group_id, spec_id)
                 self._send_json(result)
-        except Exception as e:
-            self._send_error(500, str(e))
+        except PermissionError as e:
+            self._send_error(403, str(e))
+        except Exception:
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _api_branch_fork_parallel(self):
         if self._require_auth() is None:
@@ -3614,14 +3624,19 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(400, 'Invalid JSON')
             return
         try:
+            from lib import security_domain_api
             from lib import task_plan_api
+            actor = self._authenticated_principal()['actor_id']
+            security_domain_api.assert_execution_group_access(actor, data.get('group_id'), write=True)
             result = task_plan_api.distribute_plan_to_group(
                 plan_id=data.get('plan_id'),
                 group_id=data.get('group_id'),
             )
             self._send_json(result)
-        except Exception as e:
-            self._send_error(500, str(e))
+        except PermissionError as e:
+            self._send_error(403, str(e))
+        except Exception:
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _api_collab_sync_context(self):
         if self._require_auth() is None:
@@ -3633,11 +3648,16 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_error(400, 'Invalid JSON')
             return
         try:
+            from lib import security_domain_api
             from lib import collab_api
+            actor = self._authenticated_principal()['actor_id']
+            security_domain_api.assert_execution_group_access(actor, data.get('group_id'), write=True)
             result = collab_api.sync_group_context(data.get('group_id'))
             self._send_json(result)
-        except Exception as e:
-            self._send_error(500, str(e))
+        except PermissionError as e:
+            self._send_error(403, str(e))
+        except Exception:
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _handle_portal_register(self):
         try:
@@ -4783,11 +4803,21 @@ class VisHandler(BaseHTTPRequestHandler):
         self._send_json(binding or {})
 
     def _api_collab_loop(self, path):
-        from lib.collab_api import create_group_loop
-        group_id = path.split('/')[3]
-        data = json.loads(self._read_body())
-        loop_id = create_group_loop(group_id, data['title'], data['goal_definition'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('title','goal_definition','agent_id')})
-        self._send_json({'success': True, 'loop_id': loop_id})
+        try:
+            actor = self._authenticated_principal()['actor_id']
+            from lib import security_domain_api
+            from lib.collab_api import create_group_loop
+            group_id = path.split('/')[3]
+            security_domain_api.assert_execution_group_access(actor, group_id, write=True)
+            data = json.loads(self._read_body())
+            loop_id = create_group_loop(group_id, data['title'], data['goal_definition'], data['agent_id'], **{k:v for k,v in data.items() if k not in ('title','goal_definition','agent_id')})
+            self._send_json({'success': True, 'loop_id': loop_id})
+        except PermissionError as exc:
+            self._send_error(403, str(exc))
+        except (KeyError, json.JSONDecodeError) as exc:
+            self._send_error(400, 'Invalid execution-group loop request')
+        except Exception:
+            self._send_error(503, 'Execution group scope is unavailable')
 
     def _api_audit_list(self, qs):
         from lib import audit_api
@@ -4881,8 +4911,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.9', VERSION)
-            html = html.replace('2026-08-18', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.10', VERSION)
+            html = html.replace('2026-08-24', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

@@ -6,7 +6,20 @@ import pytest
 
 from lib import identity_api, security_domain_api
 
+ROOT = Path(__file__).resolve().parents[2]
+GENERATED_COMMUNITY = False
+if (ROOT / "build-manifest.json").is_file():
+    import json
 
+    GENERATED_COMMUNITY = json.loads(
+        (ROOT / "build-manifest.json").read_text(encoding="utf-8")
+    ).get("edition") == "Community"
+
+
+@pytest.mark.skipif(
+    GENERATED_COMMUNITY,
+    reason="the historical full-chain validator requires Enterprise-only governance migrations",
+)
 def test_v443_static_contract_is_complete_for_all_adapters():
     import json
     import live_db_validator

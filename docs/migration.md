@@ -1,4 +1,40 @@
-# Migration Guide - AI Agent Infra with DB v4.4.9
+# Migration Guide - AI Agent Infra with DB v4.4.10
+
+## v4.4.10 Fresh Deployment Baseline
+
+v4.4.10 is delivered as a new-install baseline for Oracle, PostgreSQL, and
+YashanDB. Select the adapter's `deploy/baseline_v4_4_10.json`; the journaled
+runner executes the retained, checksum-bound ordered chain through
+`58_v4_4_10_knowledge_scope.sql`. Historical numbered scripts remain visible
+for reproducibility and source audit, but no earlier v4.4.x package is presented
+as a supported customer upgrade source.
+
+Steps 55 and 56 establish model usage, wallboard, routing, and runtime-repair
+facts. Step 57 adds quota reservation, encrypted replay, Provider financial
+evidence, allocation, signed external observations, versioned wallboard
+definitions, and uniform correlation. Step 58 adds database-authoritative
+company, organization-subtree, organization-level, and Principal-private
+knowledge policies. Applied checksums must never be edited.
+
+Run the complete baseline through the journaled runner with a recoverable
+deployment boundary backup:
+
+```bash
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
+  --database <oracle|pg|yashandb> --edition <community|enterprise> \
+  --<adapter>-config config.json \
+  --backup-evidence release_evidence/backup.json
+```
+
+After migration, start with direct mode enabled and gateway mode disabled.
+Configure `CX_PUBLIC_BASE_URL` when necessary, then enable gateway routing only
+on selected LLM Provider Profile rows and record a compliance reason. Direct
+and gateway modes may coexist. Retain request and usage facts if routing is
+later disabled; they are accounting and audit evidence.
+
+v4.4.8 is withdrawn and must not be used as a deployment or migration source.
+Unknown or partial schemas fail closed; initialize a prepared empty target with
+the v4.4.10 baseline instead of attempting an undocumented in-place conversion.
 
 ## v4.4.9 Migration From The Approved Baseline
 
@@ -822,3 +858,30 @@ read-only no-op. Existing local, LDAP, and OIDC identities and pending
 registration requests are retained. Application rollback uses the coordinated
 pre-upgrade backup and previous application package; no destructive schema
 downgrade is attempted.
+
+## v4.4.10 Complete Governance Baseline Detail
+
+v4.4.10 is the fresh-deployment baseline. v4.4.8 is withdrawn and rejected as
+a source. Steps 55/56 establish model usage, wallboard, and runtime repairs. Step
+57 adds quota/reservation/replay, Provider invoice/correction,
+reconciliation/allocation, external evidence adapter/batch, wallboard
+version/publication, and request correlation/credential references. Historical
+55/56 checksums must not be changed.
+
+Before step 57, source checkouts use `tools/v410_pre57_backup.py`; generated
+packages use `scripts/tools/v410_pre57_backup.py`. The tool produces a permission-restricted
+logical boundary snapshot, rollback SQL, restore procedure, and evidence
+digest. It is not a vendor physical full-backup claim. The runner validates the
+55/56/57 closure and adopts only a complete step. PostgreSQL acceptance also
+requires enabled and forced RLS plus policies on every new governance table.
+
+Effective dates default to database `CURRENT_TIMESTAMP`, not host time. A
+successful rerun is read-only; partial failure is retried through the journal
+and closure validator, never by editing checksums.
+## Baseline Manifest And Terminal Step
+
+New installations use the adapter `deploy/baseline_v4_4_10.json` manifest and the
+migration runner's ordered chain,
+ending at `58_v4_4_10_knowledge_scope.sql`. The v4.4.8 chain is withdrawn and
+is not an upgrade source. Numbered historical scripts remain in source control
+for audit and reproducibility; they are not a customer upgrade promise.

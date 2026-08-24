@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.3.1 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.10 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -15,31 +15,34 @@ import io
 import logging
 import os
 import queue
+import secrets
 import socket
 import sys
 import threading
 from email.parser import BytesParser
 from email.policy import HTTP
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import urlsplit
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
-    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.9"
+VERSION = "4.4.10"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -107,6 +110,58 @@ def _runtime_profile() -> str:
 app = FastAPI(title="Chuanxu AI Agent Management Platform", version=VERSION)
 
 
+def _correlation_id(request: Request) -> str:
+    current = str(getattr(request.state, "correlation_id", "") or "")
+    if current:
+        return current
+    supplied = str(request.headers.get("X-Correlation-ID") or "").strip()
+    if 8 <= len(supplied) <= 128 and all(character.isalnum() or character in "-_.:" for character in supplied):
+        current = supplied
+    else:
+        current = "cx_" + secrets.token_hex(16)
+    request.state.correlation_id = current
+    return current
+
+
+def _error_response(request: Request, status: int, code: str, message: str, retryable: Optional[bool] = None) -> JSONResponse:
+    correlation = _correlation_id(request)
+    safe_message = str(message or "Request failed")[:500]
+    body = {
+        "code": str(code or "REQUEST_FAILED")[:96],
+        "message": safe_message,
+        "correlation_id": correlation,
+        "retryable": status in {408, 429, 502, 503, 504} if retryable is None else bool(retryable),
+        "detail": safe_message,
+    }
+    return JSONResponse(body, status_code=status, headers={"X-Correlation-ID": correlation})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def governed_http_error(request: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    code = "HTTP_" + str(exc.status_code)
+    message = "Request failed"
+    retryable = None
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or code)
+        message = str(detail.get("message") or detail.get("detail") or message)
+        retryable = detail.get("retryable")
+    else:
+        message = str(detail or message)
+    return _error_response(request, int(exc.status_code), code, message, retryable)
+
+
+@app.exception_handler(RequestValidationError)
+async def governed_validation_error(request: Request, _exc: RequestValidationError):
+    return _error_response(request, 422, "VALIDATION_ERROR", "Request validation failed", False)
+
+
+@app.exception_handler(Exception)
+async def governed_unhandled_error(request: Request, exc: Exception):
+    logger.exception("Unhandled request failure correlation_id=%s", _correlation_id(request), exc_info=exc)
+    return _error_response(request, 500, "INTERNAL_ERROR", "Internal request failed", False)
+
+
 def _path_capability(path: str) -> Optional[str]:
     """Map every product entry point to one installation capability."""
     normalized = "/" + str(path or "").lstrip("/")
@@ -123,12 +178,16 @@ def _path_capability(path: str) -> Optional[str]:
             "compliance": "compliance", "audit": "audit_view", "users": "users",
             "organization": "organization", "security-domains": "security_domains", "platform": "platform_config",
             "native-agents": "agent_provisioning", "deployment": "deployment_governance",
+            "wallboard": "wallboard",
         }.get(page)
     if normalized.startswith("/api/agents/") and any(part in normalized for part in ("/posture", "/activate", "/compliance-")):
         return "compliance"
     rules = (
-        (("/api/platform",), "platform_config"),
+        (("/api/platform", "/api/model-gateway"), "platform_config"),
         (("/api/monitor",), "monitor"),
+        (("/api/wallboard", "/api/model-usage"), "wallboard"),
+        (("/api/model-finance",), "model_finance"),
+        (("/api/model-evidence",), "external_model_evidence"),
         (("/api/agents/",), "agents"),
         (("/api/tasks", "/api/execution", "/ap/v1/agent/tasks"), "tasks"),
         (("/api/workspaces",), "workspaces"),
@@ -189,7 +248,7 @@ async def enforce_platform_capability(request: Request, call_next):
     if capability:
         try:
             enabled = platform_capabilities.is_enabled(capability)
-        except platform_capabilities.CapabilityServiceUnavailable:
+        except (platform_capabilities.CapabilityServiceUnavailable, platform_capabilities.CapabilityError):
             return JSONResponse(
                 {"detail": {"code": "CAPABILITY_SERVICE_UNAVAILABLE", "capability": capability}},
                 status_code=503,
@@ -260,6 +319,14 @@ async def clear_agent_database_context(request: Request, call_next):
         clear_context = getattr(connection, "set_agent_context", None)
         if callable(clear_context):
             clear_context(None)
+
+
+@app.middleware("http")
+async def attach_correlation_id(request: Request, call_next):
+    correlation = _correlation_id(request)
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation
+    return response
 
 
 def _local_node_id() -> str:
@@ -918,6 +985,118 @@ class ComplianceViolationBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
     evidence_id: str = Field(default="", max_length=128)
     automatic: bool = False
+
+
+class ModelForwardBody(BaseModel):
+    provider_profile_id: str = Field(min_length=1, max_length=128)
+    messages: List[Dict[str, Any]] = Field(min_length=1, max_length=100)
+    agent_id: str = Field(default="", max_length=128)
+    stream: bool = False
+    idempotency_key: str = Field(default="", max_length=160)
+
+
+class GatewayCredentialBody(BaseModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    scopes: List[str] = Field(default_factory=list, max_length=50)
+    expires_at: str = Field(default="", max_length=64)
+
+
+class GatewayRevokeBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ModelRoutingPolicyBody(BaseModel):
+    agent_id: str = Field(default="", max_length=128)
+    profile_id: str = Field(default="", max_length=128)
+    gateway_enabled: bool = False
+    direct_allowed: bool = True
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ModelQuotaPolicyBody(BaseModel):
+    policy_key: str = Field(min_length=1, max_length=128)
+    scope_type: str = Field(default="GLOBAL", max_length=32)
+    scope_id: str = Field(default="", max_length=128)
+    metric: str = Field(default="TOKEN", max_length=16)
+    limit_value: str = Field(min_length=1, max_length=64)
+    currency: str = Field(default="", max_length=12)
+    enforcement: str = Field(default="HARD", max_length=16)
+    window_type: str = Field(default="MONTHLY", max_length=16)
+    reservation_value: str = Field(default="0", max_length=64)
+    incomplete_policy: str = Field(default="CHARGE_RESERVED", max_length=24)
+    effective_from: str = Field(default="", max_length=64)
+    effective_to: str = Field(default="", max_length=64)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ProviderInvoiceBody(BaseModel):
+    provider_key: str = Field(min_length=1, max_length=128)
+    external_invoice_id: str = Field(min_length=1, max_length=160)
+    currency: str = Field(min_length=1, max_length=12)
+    period_start: str = Field(min_length=1, max_length=64)
+    period_end: str = Field(min_length=1, max_length=64)
+    total_amount: str = Field(min_length=1, max_length=64)
+    lines: List[Dict[str, Any]] = Field(default_factory=list, max_length=1000)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ReconciliationBody(BaseModel):
+    usage_id: str = Field(default="", max_length=128)
+    rule_version: str = Field(min_length=1, max_length=64)
+    confidence: str = Field(default="1", max_length=32)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class InvoiceCorrectionBody(BaseModel):
+    amount_delta: str = Field(min_length=1, max_length=32)
+    prior_correction_id: str = Field(default="", max_length=128)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AllocationRuleBody(BaseModel):
+    rule_key: str = Field(min_length=1, max_length=128)
+    target_type: str = Field(default="", max_length=32)
+    target_id: str = Field(default="", max_length=128)
+    percentage: str = Field(default="", max_length=32)
+    targets: List[Dict[str, Any]] = Field(default_factory=list, max_length=100)
+    currency: str = Field(default="", max_length=12)
+    effective_from: str = Field(default="", max_length=64)
+    effective_to: str = Field(default="", max_length=64)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AllocationRequestBody(BaseModel):
+    rule_key: str = Field(min_length=1, max_length=128)
+
+
+class EvidenceAdapterBody(BaseModel):
+    adapter_id: str = Field(default="", max_length=128)
+    display_name: str = Field(min_length=1, max_length=160)
+    verification_key: str = Field(min_length=1, max_length=512)
+    scopes: List[str] = Field(default_factory=list, max_length=100)
+
+
+class ExternalEvidenceBody(BaseModel):
+    adapter_id: str = Field(min_length=1, max_length=128)
+    key_version: int = Field(ge=1)
+    sequence_no: int = Field(ge=0)
+    nonce: str = Field(min_length=8, max_length=128)
+    observed_from: str = Field(min_length=1, max_length=64)
+    observed_to: str = Field(min_length=1, max_length=64)
+    facts: Dict[str, Any] = Field(default_factory=dict)
+    signature: str = Field(min_length=1, max_length=512)
+
+
+class WallboardDefinitionBody(BaseModel):
+    definition_id: str = Field(default="", max_length=128)
+    display_name: str = Field(min_length=1, max_length=160)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    scope: Dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class GovernedReasonBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class ComplianceRemediationBody(BaseModel):
@@ -1711,6 +1890,10 @@ def _identity_http_error(exc: Exception, detail: str, *, identity_status: int = 
         return HTTPException(status_code=409, detail=str(exc) or detail)
     if isinstance(exc, security_domain_api.SecurityDomainError):
         return HTTPException(status_code=400, detail=str(exc) or detail)
+    if isinstance(exc, model_governance_api.QuotaExceeded):
+        return HTTPException(status_code=429, detail={"code": exc.code, "message": str(exc) or detail, "retryable": False})
+    if isinstance(exc, model_governance_api.ModelGovernanceError):
+        return HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc) or detail, "retryable": bool(exc.retryable)})
     if isinstance(exc, PermissionError):
         return HTTPException(status_code=403, detail=detail)
     if isinstance(exc, identity_api.IdentityError):
@@ -1752,6 +1935,7 @@ def _shell() -> FileResponse:
 @app.get("/health")
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
+    """Process liveness only; database readiness is exposed separately."""
     return {
         "status": "ok",
         "product": "Chuanxu",
@@ -1761,6 +1945,37 @@ def health() -> Dict[str, Any]:
         "version": VERSION,
         "profile": _runtime_profile(),
         "database": os.environ.get("CX_DATABASE", "adapter"),
+    }
+
+
+@app.get("/ready")
+@app.get("/api/ready")
+def readiness(response: Response) -> Dict[str, Any]:
+    """Fail closed until the database and current control-plane schema respond."""
+    try:
+        suffix = str(connection.merge_scalar_suffix())
+        with _schema_owner_context():
+            probe = connection.execute_query_one("SELECT 1 AS READY" + suffix, {})
+            required = connection.execute_query_one(
+                "SELECT COUNT(*) AS CNT FROM CX_PLATFORM_CAPABILITIES "
+                "WHERE CAPABILITY_KEY IN ('identity','authorization','wallboard','model_finance','external_model_evidence')",
+                {},
+            )
+        probe_row = {str(key).lower(): value for key, value in dict(probe or {}).items()}
+        required_row = {str(key).lower(): value for key, value in dict(required or {}).items()}
+        if int(probe_row.get("ready") or 0) != 1 or int(required_row.get("cnt") or 0) != 5:
+            raise RuntimeError("required control-plane capabilities are incomplete")
+    except Exception:
+        response.status_code = 503
+        return {
+            "status": "not_ready",
+            "version": VERSION,
+            "checks": {"database": "unavailable", "control_plane": "unavailable"},
+        }
+    return {
+        "status": "ready",
+        "version": VERSION,
+        "checks": {"database": "ready", "control_plane": "ready"},
     }
 
 
@@ -2054,7 +2269,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "organization": "organizations.read",
         "security-domains": "domains.manage",
         "platform": "platform.manage", "platform-operations": "platform.manage", "deployment": "platform.manage",
-        "native-agents": "platform.manage",
+        "native-agents": "platform.manage", "wallboard": "wallboard.read",
     }
     feature_map = {
         "approvals": "approvals", "audit": "audit", "compliance": "compliance",
@@ -2076,7 +2291,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "organizations.reporting.manage", "organizations.sync.manage",
         "organizations.emergency", "organizations.export",
         "domains.manage",
-        "platform.manage",
+        "platform.manage", "model_usage.read", "model_usage.manage", "model_gateway.manage", "wallboard.read", "wallboard.manage",
     }
     features = _edition_features()
     try:
@@ -2525,6 +2740,48 @@ def knowledge_inventory(
         raise _identity_http_error(exc, "Knowledge inventory is unavailable") from exc
 
 
+@app.get("/api/knowledge/{entity_id}/access-policy")
+def knowledge_access_policy(entity_id: str, session: Dict[str, Any] = Depends(require_action("knowledge.read"))) -> Dict[str, Any]:
+    try:
+        return {"policy": knowledge_api.get_access_policy(entity_id)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Knowledge access policy is unavailable") from exc
+
+
+@app.get("/api/knowledge/access-options")
+def knowledge_access_options(limit: int = 500, session: Dict[str, Any] = Depends(require_action("knowledge.read"))) -> Dict[str, Any]:
+    """Return organization targets visible to the actor for knowledge grouping."""
+    try:
+        rows = organization_api.list_options(str(session["principal_id"]), limit=max(1, min(limit, 500)))
+        return {"items": rows, "count": len(rows)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Knowledge access options are unavailable") from exc
+
+
+@app.get("/api/knowledge/organization-groups/{organization_id}")
+def knowledge_organization_group(organization_id: str, limit: int = 100, session: Dict[str, Any] = Depends(require_action("knowledge.read"))) -> Dict[str, Any]:
+    try:
+        rows = knowledge_api.list_organization_policies(organization_id, limit=limit)
+        return {"organization_id": organization_id, "knowledge": rows, "count": len(rows)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Organization knowledge group is unavailable") from exc
+
+
+@app.put("/api/knowledge/{entity_id}/access-policy")
+def update_knowledge_access_policy(entity_id: str, body: Dict[str, Any], session: Dict[str, Any] = Depends(require_action("knowledge.write"))) -> Dict[str, Any]:
+    try:
+        policy = knowledge_api.set_access_policy(
+            entity_id, str(body.get("scope_type") or ""), str(session["principal_id"]),
+            organization_id=body.get("organization_id"), principal_id=body.get("principal_id"),
+            hierarchy_depth=body.get("hierarchy_depth"), reason=str(body.get("reason") or ""),
+        )
+        return {"policy": policy}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Knowledge access policy update failed") from exc
+
+
 @app.get("/api/knowledge")
 def knowledge_graph(
     limit: int = 100,
@@ -2566,7 +2823,29 @@ def knowledge_graph(
                     "label": str(edge.get("edge_type") or "RELATED"),
                     "strength": edge.get("strength"), "confidence": edge.get("confidence"),
                 }
-        return {"nodes": nodes, "edges": list(edges.values()), "count": len(nodes)}
+            context = knowledge_api.get_knowledge_context(entity_id)
+            if context:
+                chain = context.get("organization_chain") or []
+                for org in chain:
+                    org_id = str(org.get("organization_id") or "")
+                    if not org_id:
+                        continue
+                    nodes.append({"id": org_id, "label": str(org.get("organization_name") or org_id),
+                                  "title": "Organization scope", "entity_type": "ORGANIZATION", "status": "ACTIVE"})
+                    edge_id = f"{entity_id}:ORGANIZATION_SCOPE:{org_id}"
+                    edges[edge_id] = {"id": edge_id, "from": entity_id, "to": org_id,
+                                      "label": "ORGANIZATION_SCOPE", "strength": 1, "confidence": 1}
+                for group in [*(context.get("responsible_groups") or []), *(context.get("execution_groups") or [])]:
+                    group_id = str(group.get("group_id") or "")
+                    if not group_id:
+                        continue
+                    nodes.append({"id": group_id, "label": str(group.get("group_name") or group_id),
+                                  "title": "Agent group context", "entity_type": "GROUP", "status": "ACTIVE"})
+                    edge_id = f"{entity_id}:GROUP_CONTEXT:{group_id}"
+                    edges[edge_id] = {"id": edge_id, "from": entity_id, "to": group_id,
+                                      "label": "GROUP_CONTEXT", "strength": 1, "confidence": 1}
+        unique_nodes = {str(node["id"]): node for node in nodes}
+        return {"nodes": list(unique_nodes.values()), "edges": list(edges.values()), "count": len(unique_nodes)}
     except Exception as exc:
         raise _identity_http_error(exc, "Knowledge graph is unavailable") from exc
 
@@ -2690,6 +2969,262 @@ def llm_provider_profiles(
         return {"items": items, "count": len(items)}
     except Exception as exc:
         raise _identity_http_error(exc, "LLM Provider Profiles are unavailable") from exc
+
+
+def model_forward_authorization(request: Request) -> Dict[str, Any]:
+    authorization = request.headers.get("Authorization", "")
+    raw_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if raw_token.startswith("cxgw_"):
+        return {"actor": "", "gateway_token": raw_token}
+    session = require_csrf(request, principal(request))
+    try:
+        with _schema_owner_context():
+            access = identity_api.effective_access(str(session["principal_id"]), "model_gateway.forward")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Authorization service unavailable") from exc
+    if access.get("decision") != "ALLOW":
+        raise HTTPException(status_code=403, detail="Model gateway forwarding permission is required")
+    return {"actor": str(session["principal_id"]), "gateway_token": ""}
+
+
+@app.post("/api/model-gateway/completions")
+def model_gateway_completion(request: Request, body: ModelForwardBody, authorization: Dict[str, Any] = Depends(model_forward_authorization)) -> Dict[str, Any]:
+    try:
+        if body.stream:
+            return StreamingResponse(model_usage_api.stream_forward(str(authorization["actor"]), body.provider_profile_id, body.messages, agent_id=body.agent_id, idempotency_key=body.idempotency_key, gateway_token=str(authorization["gateway_token"]), correlation_id=_correlation_id(request)), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Correlation-ID": _correlation_id(request)})
+        return model_usage_api.forward(str(authorization["actor"]), body.provider_profile_id, body.messages, agent_id=body.agent_id, stream=body.stream, idempotency_key=body.idempotency_key, gateway_token=str(authorization["gateway_token"]), correlation_id=_correlation_id(request))
+    except PermissionError as exc:
+        raise HTTPException(status_code=401 if authorization.get("gateway_token") else 403, detail=str(exc)) from exc
+    except model_usage_api.ModelUsageConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except model_usage_api.ModelUsageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except model_governance_api.QuotaExceeded as exc:
+        raise HTTPException(status_code=429, detail={"code": exc.code, "message": str(exc), "retryable": False}) from exc
+    except model_governance_api.ReplayUnavailable as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc), "retryable": False}) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model gateway request failed", identity_status=503) from exc
+
+
+@app.get("/api/model-usage/summary")
+def model_usage_summary(limit: int = 30, session: Dict[str, Any] = Depends(require_action("model_usage.read"))) -> Dict[str, Any]:
+    try:
+        return model_usage_api.usage_summary(str(session["principal_id"]), limit)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model usage is unavailable", identity_status=503) from exc
+
+
+@app.post("/api/model-gateway/credentials")
+def model_gateway_credential(body: GatewayCredentialBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return model_usage_api.issue_gateway_credential(str(session["principal_id"]), body.display_name, body.scopes, body.expires_at)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Gateway credential could not be issued") from exc
+
+
+@app.post("/api/model-gateway/credentials/{credential_id}/revoke")
+def model_gateway_credential_revoke(credential_id: str, body: GatewayRevokeBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return model_usage_api.revoke_gateway_credential(str(session["principal_id"]), credential_id, body.reason)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Gateway credential could not be revoked") from exc
+
+
+def _gateway_distribution_url(request: Request) -> str:
+    base = str(os.environ.get("CX_PUBLIC_BASE_URL") or request.base_url).strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        raise ValueError("platform public URL must use http or https")
+    return base + "/api/model-gateway/completions"
+
+
+@app.get("/api/model-gateway/routing")
+def model_gateway_routing(request: Request, agent_id: str = "", profile_id: str = "", session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        result = model_usage_api.routing_policy(str(session["principal_id"]), agent_id, profile_id)
+        result["gateway_url"] = _gateway_distribution_url(request)
+        return result
+    except PermissionError as exc: raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc: raise _identity_http_error(exc, "Model routing policy is unavailable") from exc
+
+
+@app.put("/api/model-gateway/routing")
+def model_gateway_routing_update(body: ModelRoutingPolicyBody, request: Request, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try: return model_usage_api.set_routing_policy(str(session["principal_id"]), body.agent_id, body.profile_id, body.gateway_enabled, body.direct_allowed, body.reason, _gateway_distribution_url(request))
+    except PermissionError as exc: raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc: raise _identity_http_error(exc, "Model routing policy could not be saved") from exc
+
+
+@app.get("/api/model-gateway/quotas")
+def model_quota_list(limit: int = 100, session: Dict[str, Any] = Depends(require_action("model_gateway.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.list_quota_policies(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model quota policies are unavailable") from exc
+
+
+@app.post("/api/model-gateway/quotas")
+def model_quota_create(body: ModelQuotaPolicyBody, session: Dict[str, Any] = Depends(require_action("model_gateway.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.create_quota_policy(str(session["principal_id"]), body.model_dump())
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model quota policy could not be created") from exc
+
+
+@app.get("/api/model-gateway/quota-status")
+def model_quota_status(limit: int = 100, session: Dict[str, Any] = Depends(require_action("model_gateway.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.quota_status(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model quota status is unavailable") from exc
+
+
+@app.get("/api/model-finance/invoices")
+def model_invoice_list(limit: int = 100, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.list_invoices(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Provider invoices are unavailable") from exc
+
+
+@app.get("/api/model-finance/overview")
+def model_finance_overview(limit: int = 100, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.financial_overview(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Model financial accounting is unavailable") from exc
+
+
+@app.post("/api/model-finance/invoices")
+def model_invoice_import(body: ProviderInvoiceBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.import_invoice(str(session["principal_id"]), body.model_dump())
+    except Exception as exc:
+        raise _identity_http_error(exc, "Provider invoice could not be imported") from exc
+
+
+@app.post("/api/model-finance/invoice-lines/{line_id}/reconcile")
+def model_invoice_reconcile(line_id: str, body: ReconciliationBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.reconcile_invoice_line(str(session["principal_id"]), line_id, body.usage_id, body.rule_version, body.confidence, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Provider invoice line could not be reconciled") from exc
+
+
+@app.post("/api/model-finance/invoice-lines/{line_id}/corrections")
+def model_invoice_correct(line_id: str, body: InvoiceCorrectionBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.correct_invoice_line(str(session["principal_id"]), line_id, body.amount_delta, body.prior_correction_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Provider invoice correction could not be appended") from exc
+
+
+@app.post("/api/model-finance/allocation-rules")
+def model_allocation_rule_create(body: AllocationRuleBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.create_allocation_rule(str(session["principal_id"]), body.model_dump())
+    except Exception as exc:
+        raise _identity_http_error(exc, "Allocation rule could not be created") from exc
+
+
+@app.post("/api/model-finance/{source_type}/{source_id}/allocate")
+def model_allocate(source_type: str, source_id: str, body: AllocationRequestBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.allocate_source(str(session["principal_id"]), source_type, source_id, body.rule_key)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Internal allocation could not be completed") from exc
+
+
+@app.post("/api/model-evidence/adapters")
+def model_evidence_adapter_create(body: EvidenceAdapterBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.register_evidence_adapter(str(session["principal_id"]), body.model_dump())
+    except Exception as exc:
+        raise _identity_http_error(exc, "External evidence adapter could not be registered") from exc
+
+
+@app.get("/api/model-evidence/adapters")
+def model_evidence_adapter_list(limit: int = 100, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.list_evidence_adapters(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "External evidence adapters are unavailable") from exc
+
+
+@app.post("/api/model-evidence/adapters/{adapter_id}/revoke")
+def model_evidence_adapter_revoke(adapter_id: str, body: GovernedReasonBody, session: Dict[str, Any] = Depends(require_action("model_usage.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.revoke_evidence_adapter(str(session["principal_id"]), adapter_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "External evidence adapter could not be revoked") from exc
+
+
+@app.post("/api/model-evidence/ingest")
+def model_evidence_ingest(request: Request, body: ExternalEvidenceBody) -> Dict[str, Any]:
+    try:
+        return model_governance_api.ingest_external_evidence(body.model_dump(), _correlation_id(request))
+    except model_governance_api.EvidenceRejected as exc:
+        raise HTTPException(status_code=401, detail={"code": exc.code, "message": str(exc), "retryable": False}) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "External model evidence could not be ingested") from exc
+
+
+@app.get("/api/model-evidence/coverage")
+def model_evidence_coverage(session: Dict[str, Any] = Depends(require_action("model_usage.read"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.external_coverage(str(session["principal_id"]))
+    except Exception as exc:
+        raise _identity_http_error(exc, "External model evidence coverage is unavailable") from exc
+
+
+@app.get("/api/wallboard/definitions")
+def wallboard_definition_list(session: Dict[str, Any] = Depends(require_action("wallboard.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.list_wallboard_definitions(str(session["principal_id"]))
+    except Exception as exc:
+        raise _identity_http_error(exc, "Wallboard definitions are unavailable") from exc
+
+
+@app.post("/api/wallboard/definitions")
+def wallboard_definition_create(body: WallboardDefinitionBody, session: Dict[str, Any] = Depends(require_action("wallboard.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.create_wallboard_definition(str(session["principal_id"]), body.definition_id, body.display_name, body.config, body.scope, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Wallboard definition could not be created") from exc
+
+
+@app.post("/api/wallboard/definitions/{version_id}/publish")
+def wallboard_definition_publish(version_id: str, body: GovernedReasonBody, session: Dict[str, Any] = Depends(require_action("wallboard.manage"))) -> Dict[str, Any]:
+    try:
+        return model_governance_api.publish_wallboard_definition(str(session["principal_id"]), version_id, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Wallboard definition could not be published") from exc
+
+
+@app.post("/api/wallboard/definitions/{version_id}/rollback")
+def wallboard_definition_rollback(version_id: str, body: GovernedReasonBody, session: Dict[str, Any] = Depends(require_action("wallboard.manage"))) -> Dict[str, Any]:
+    try:
+        result = model_governance_api.publish_wallboard_definition(str(session["principal_id"]), version_id, body.reason)
+        result["operation"] = "ROLLBACK"
+        return result
+    except Exception as exc:
+        raise _identity_http_error(exc, "Wallboard definition could not be rolled back") from exc
+
+
+@app.get("/api/wallboard")
+def executive_wallboard(definition_id: str = "", session: Dict[str, Any] = Depends(require_action("wallboard.read"))) -> Dict[str, Any]:
+    try:
+        return model_usage_api.wallboard(str(session["principal_id"]), definition_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc, "Executive wallboard is unavailable", identity_status=503) from exc
 
 
 @app.post("/api/llm-provider-profiles")

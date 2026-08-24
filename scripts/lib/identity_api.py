@@ -86,7 +86,7 @@ ROLE_FALLBACKS = {
         },
         "scopes": {"ORG_SUBTREE"},
     },
-    "AUDITOR": {"permissions": {"audit.read", "audit.export", "users.read", "profile.update"}, "scopes": {"SECURITY_DOMAIN"}},
+    "AUDITOR": {"permissions": {"audit.read", "audit.export", "users.read", "profile.update", "wallboard.read", "model_usage.read"}, "scopes": {"SECURITY_DOMAIN"}},
     "APPROVER": {"permissions": {"approvals.read", "approvals.decide", "channels.actions.decide", "barriers.release", "barriers.recover", "memory.review", "profile.update"}, "scopes": {"ASSIGNED"}},
     "OPERATOR": {"permissions": {"agents.read", "agents.operate", "channels.write", "barriers.arrive", "profile.update"}, "scopes": {"ASSIGNED"}},
     "DEVELOPER": {"permissions": {"skills.read", "tools.read", "graphs.read", "barriers.create", "profile.update"}, "scopes": {"OWNED"}},

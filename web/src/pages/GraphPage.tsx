@@ -8,7 +8,7 @@ type Props = {
   text: (zh: string, en: string) => string;
   onNotice: (value: string) => void;
 };
-type VisNetwork = { destroy: () => void; fit: (options?: Row) => void; on: (event: string, handler: (params: Row) => void) => void };
+type VisNetwork = { destroy: () => void; fit: (options?: Row) => void; getPositions: (nodeIds?: string[]) => Record<string, { x: number; y: number }>; on: (event: string, handler: (params: Row) => void) => void };
 
 declare global {
   interface Window {
@@ -53,9 +53,8 @@ function RelationshipGraph({ nodes, edges, text, onSelect }: { nodes: Row[]; edg
         font: { color: dark ? "#e7eff0" : "#182936", size: 12, strokeWidth: 4, strokeColor: dark ? "#172228" : "#f0f2f2" },
       }));
       const graphEdges = edges.filter((edge) => known.has(String(edge.from)) && known.has(String(edge.to))).map((edge, index) => ({
-        ...edge, id: edge.id || `relationship-${index}`, from: String(edge.from), to: String(edge.to), arrows: edge.arrows || "to",
+        ...edge, label: undefined, title: undefined, id: edge.id || `relationship-${index}`, from: String(edge.from), to: String(edge.to), arrows: edge.arrows || "to",
         color: edge.color || { color: dark ? "#8ba3a8" : "#647a80" },
-        font: { color: dark ? "#d4e1e2" : "#263b45", size: 10, strokeWidth: 4, strokeColor: dark ? "#172228" : "#f0f2f2" },
       }));
       const instance = new window.vis.Network(container.current, { nodes: new window.vis.DataSet(graphNodes), edges: new window.vis.DataSet(graphEdges) }, {
         autoResize: true,
@@ -157,7 +156,7 @@ export default function GraphPage({ lang, text, onNotice }: Props) {
       {view === "definitions" && <section className="info-panel"><div className="panel-title"><h2>{text("图定义", "Graph definitions")}</h2></div>{table(["ID", text("名称", "Name"), text("类型", "Type"), text("状态", "Status")], graphs.map((row) => [detailButton(row, field(row, ["graph_id", "definition_id", "id"])), display(field(row, ["name", "title"])), display(field(row, ["kind", "type", "graph_type"])), display(field(row, ["status"]))]), text("暂无图定义", "No Graph definitions"))}</section>}
       {view === "types" && <section className="info-panel"><div className="panel-title"><h2>{text("图类型", "Graph types")}</h2></div>{table([text("类型", "Type"), text("名称", "Name"), text("状态", "Status")], types.map((row) => [display(field(row, ["kind", "type", "graph_type"])), display(field(row, ["name", "title"])), display(field(row, ["status"]))]), text("暂无图类型", "No Graph types"))}</section>}
       {view === "runs" && <section className="info-panel"><div className="panel-title"><h2>{text("运行记录", "Graph runs")}</h2></div>{table(["ID", text("图", "Graph"), text("状态", "Status"), text("更新时间", "Updated")], runs.map((row) => [detailButton(row, field(row, ["run_id", "id"])), String(field(row, ["graph_id", "definition_id"])), display(field(row, ["status"])), String(field(row, ["updated_at", "created_at"]))]), text("暂无运行记录", "No runs"))}</section>}
-      {view === "relationships" && <><section className="info-panel"><div className="panel-title"><h2>{text("实体关系图", "Entity relationship graph")}</h2><span>{(relations.nodes || []).length} {text("节点", "nodes")} · {(relations.edges || []).length} {text("关系", "relationships")}</span></div><RelationshipGraph nodes={relations.nodes || []} edges={relations.edges || []} text={text} onSelect={setDetail} /></section><section className="info-panel"><div className="panel-title"><h2>{text("关系明细", "Relationship details")}</h2></div>{table([text("来源", "Source"), text("关系", "Relationship"), text("目标", "Target")], (relations.edges || []).map((row: Row) => [String(field(row, ["from", "source", "source_id"])), display(field(row, ["label", "type", "edge_type"])), String(field(row, ["to", "target", "target_id"]))]), text("暂无实体关系", "No relationships"))}</section></>}
+      {view === "relationships" && <section className="info-panel"><div className="panel-title"><h2>{text("实体关系图", "Entity relationship graph")}</h2><span>{(relations.nodes || []).length} {text("节点", "nodes")} · {(relations.edges || []).length} {text("关系", "relationships")}</span></div><RelationshipGraph nodes={relations.nodes || []} edges={relations.edges || []} text={text} onSelect={setDetail} /></section>}
     </>}
     {detail && <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}><aside className="detail-drawer" role="dialog" aria-modal="true"><div className="subhead"><h2>{text("图数据详情", "Graph data detail")}</h2><button className="icon-button" onClick={() => setDetail(null)} aria-label={text("关闭", "Close")}><X size={16} /></button></div><pre>{JSON.stringify(detail, null, 2)}</pre></aside></div>}
   </section>;

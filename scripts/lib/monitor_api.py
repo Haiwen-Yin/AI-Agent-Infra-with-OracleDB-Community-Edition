@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.9 - Community Edition - Monitoring & Observability
+"""AI Agent Infra v4.4.10 - Community Edition - Monitoring & Observability
 
 Agent health dashboard, system overview, stalled detection,
 performance metrics, and drift detection.
@@ -93,11 +93,13 @@ def get_agent_health_cursor(principal_id: str, *, page_size: int = 20, cursor: s
         from . import identity_api
         all_access = identity_api.effective_access(principal_id, "agents.read.all").get("decision") == "ALLOW"
         if not all_access:
+            visibility = identity_api._agent_visibility_clause(principal_id)
             conditions.append(
                 "EXISTS (SELECT 1 FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_ID=a.AGENT_ID "
-                "AND p.PRINCIPAL_TYPE='AGENT' AND " + identity_api._agent_visibility_clause(principal_id) + ")"
+                "AND p.PRINCIPAL_TYPE='AGENT' AND " + visibility + ")"
             )
-            params["principal_id"] = principal_id
+            if ":principal_id" in visibility:
+                params["principal_id"] = principal_id
     except Exception:
         # A scope-service error must fail closed for delegated users.
         conditions.append("1=0")
@@ -119,19 +121,72 @@ def get_agent_health_cursor(principal_id: str, *, page_size: int = 20, cursor: s
     return result
 
 
-def get_system_overview() -> Dict[str, Any]:
-    total = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY")
-    online = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE'")
+def _overview_agent_scope(principal_id: Optional[str], alias: str = "a", resource_scope: Optional[Dict[str, Any]] = None) -> tuple[str, Dict[str, Any]]:
+    """Return one fail-closed Agent population for every overview metric."""
+    if not principal_id:
+        return "", {}
     try:
-        busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND LAST_ACTIVE_AT > CURRENT_TIMESTAMP - INTERVAL '5 minutes'")
+        from . import identity_api
+        visibility = identity_api._agent_visibility_clause(principal_id)
+        clause = (
+            "EXISTS (SELECT 1 FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_ID="
+            + alias + ".AGENT_ID AND p.PRINCIPAL_TYPE='AGENT' AND " + visibility + ")"
+        )
+        params: Dict[str, Any] = {"principal_id": principal_id} if ":principal_id" in visibility else {}
+        scope = resource_scope or {}
+        if scope.get("security_domain_id"):
+            clause += " AND EXISTS (SELECT 1 FROM CX_DOMAIN_MEMBERS wdm WHERE wdm.PRINCIPAL_ID=" + alias + ".AGENT_ID AND wdm.SECURITY_DOMAIN_ID=:wallboard_domain AND wdm.STATUS='ACTIVE' AND (wdm.VALID_UNTIL IS NULL OR wdm.VALID_UNTIL>CURRENT_TIMESTAMP))"
+            params["wallboard_domain"] = str(scope["security_domain_id"])
+        if scope.get("organization_id"):
+            clause += (
+                " AND EXISTS (SELECT 1 FROM CX_AGENT_RELATIONSHIPS war "
+                "JOIN CX_ORGANIZATION_MEMBERS wom ON wom.PRINCIPAL_ID=war.PRINCIPAL_ID "
+                "WHERE war.AGENT_ID=" + alias + ".AGENT_ID AND war.RELATIONSHIP_ROLE='PRIMARY_OWNER' "
+                "AND war.STATUS='ACTIVE' AND wom.STATUS='ACTIVE' "
+                "AND (wom.VALID_UNTIL IS NULL OR wom.VALID_UNTIL>CURRENT_TIMESTAMP) "
+                "AND EXISTS (SELECT 1 FROM CX_ORGANIZATION_CLOSURE woc "
+                "WHERE woc.ANCESTOR_ID=:wallboard_org AND woc.DESCENDANT_ID=wom.ORGANIZATION_ID))"
+            )
+            params["wallboard_org"] = str(scope["organization_id"])
+        return clause, params
     except Exception:
-        busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'ACTIVE' AND LAST_ACTIVE_AT > CURRENT_TIMESTAMP - INTERVAL '5' MINUTE")
-    pool = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'POOL'")
-    dormant = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY WHERE STATUS = 'DORMANT'")
-    active_sessions = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_SESSION WHERE IS_ACTIVE = 'Y'")
-    running_plans = execute_query_one("SELECT COUNT(*) AS CNT FROM TASK_PLANS WHERE STATUS = 'RUNNING'")
-    running_loops = execute_query_one("SELECT COUNT(*) AS CNT FROM LOOP_RUNS WHERE STATUS = 'RUNNING'")
-    stalled = get_stalled_agents(10)
+        return "1=0", {}
+
+
+def get_system_overview(principal_id: Optional[str] = None, resource_scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    scope, params = _overview_agent_scope(principal_id, resource_scope=resource_scope)
+    where = " WHERE " + scope if scope else ""
+    and_scope = " AND " + scope if scope else ""
+    total = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a" + where, params)
+    online = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'ACTIVE'" + and_scope, params)
+    try:
+        busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'ACTIVE' AND a.LAST_ACTIVE_AT > CURRENT_TIMESTAMP - INTERVAL '5 minutes'" + and_scope, params)
+    except Exception:
+        busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'ACTIVE' AND a.LAST_ACTIVE_AT > CURRENT_TIMESTAMP - INTERVAL '5' MINUTE" + and_scope, params)
+    pool = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'POOL'" + and_scope, params)
+    dormant = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'DORMANT'" + and_scope, params)
+    active_sessions = execute_query_one(
+        "SELECT COUNT(*) AS CNT FROM AGENT_SESSION s WHERE s.IS_ACTIVE = 'Y'"
+        + (" AND EXISTS (SELECT 1 FROM AGENT_REGISTRY a WHERE a.AGENT_ID=s.AGENT_ID AND " + scope + ")" if scope else ""), params,
+    )
+    running_plans = execute_query_one(
+        "SELECT COUNT(*) AS CNT FROM TASK_PLANS t WHERE t.STATUS = 'RUNNING'"
+        + (" AND EXISTS (SELECT 1 FROM AGENT_REGISTRY a WHERE a.AGENT_ID=t.AGENT_ID AND " + scope + ")" if scope else ""), params,
+    )
+    running_loops = execute_query_one(
+        "SELECT COUNT(*) AS CNT FROM LOOP_RUNS l WHERE l.STATUS = 'RUNNING'"
+        + (" AND EXISTS (SELECT 1 FROM AGENT_REGISTRY a WHERE a.AGENT_ID=l.AGENT_ID AND " + scope + ")" if scope else ""), params,
+    )
+    try:
+        stalled = execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS='ACTIVE' "
+            "AND a.LAST_ACTIVE_AT < CURRENT_TIMESTAMP - INTERVAL '10 minutes'" + and_scope, params,
+        )
+    except Exception:
+        stalled = execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS='ACTIVE' "
+            "AND a.LAST_ACTIVE_AT < CURRENT_TIMESTAMP - INTERVAL '10' MINUTE" + and_scope, params,
+        )
 
     return {
         "agents": {
@@ -148,7 +203,7 @@ def get_system_overview() -> Dict[str, Any]:
             "running_plans": running_plans.get("cnt", 0) if running_plans else 0,
             "running_loops": running_loops.get("cnt", 0) if running_loops else 0,
         },
-        "stalled_count": len(stalled),
+        "stalled_count": stalled.get("cnt", 0) if stalled else 0,
     }
 
 

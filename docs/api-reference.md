@@ -1,4 +1,27 @@
-# API Reference - AI Agent Infra with DB v4.4.9
+# API Reference - AI Agent Infra with DB v4.4.10
+
+## v4.4.10 Model Usage And Wallboard APIs
+
+All routes require an authenticated scoped session. The forwarding route uses
+the selected database-backed LLM Provider Profile; callers cannot override its
+provider URL. Usage and wallboard responses omit prompts, generated content,
+provider keys, gateway secrets, and raw audit payloads.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/model-gateway/completions` | POST | Forward a bounded streaming or non-streaming chat completion and record safe usage metadata. |
+| `/api/model-gateway/routing` | GET | Read effective direct/gateway selections and the platform-generated distribution address for a Provider Profile. |
+| `/api/model-gateway/routing` | PUT | Persist independent direct/gateway selections with a required compliance reason; the server ignores client relay addresses. |
+| `/api/model-gateway/credentials` | POST | Issue a scoped gateway credential; plaintext is returned once and only its digest is retained. |
+| `/api/model-gateway/credentials/{credential_id}/revoke` | POST | Revoke a gateway credential with an audit reason. |
+| `/api/model-usage/summary` | GET | Return bounded authorized provider/model Token, provenance, cost, and last-seen aggregates. |
+| `/api/wallboard` | GET | Return the read-only executive projection with runtime totals and 14-day Token/cost trends. |
+
+Set `CX_PUBLIC_BASE_URL` when the externally reachable base differs from the
+request base. The server appends `/api/model-gateway/completions`; routing UI
+displays the resulting address read-only. Direct and gateway modes may both be
+true. Calls made directly to providers remain unobserved unless trusted usage
+evidence is imported through a verified adapter.
 
 ## v4.4.9 Platform Command, Graph, Organization And Knowledge APIs
 
@@ -403,6 +426,22 @@ remove_memory_tag(entity_id, tag_id) -> bool
 - Added: `summary`, `source_agent`, `retrieval_count` fields on return dicts
 
 ### knowledge_api.py
+
+The authenticated web surface applies the v4.4.10 organization-aware policy
+before returning Knowledge inventory, a single record, graph nodes/edges, or
+retrieval results:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/knowledge/{entity_id}/access-policy` | GET | Inspect the current database policy for an already-authorized record. |
+| `/api/knowledge/{entity_id}/access-policy` | PUT | Set company, organization-subtree, organization-level, or Principal-private scope with an audit reason. |
+| `/api/knowledge/access-options` | GET | Return organization targets visible to the current actor; this is not an authorization bypass. |
+| `/api/knowledge/organization-groups/{organization_id}` | GET | Return governed knowledge policies associated with one authorized organization. |
+
+`ORGANIZATION_SUBTREE` and `ORGANIZATION_LEVEL` evaluate current organization
+closure on every read. `PRINCIPAL_PRIVATE` accepts one Human or Agent Principal.
+Unknown scope, missing required references, stale organization membership, or
+an unauthorized item fails closed.
 
 ```python
 create_knowledge(title, content, domain, topic, difficulty, category, importance, summary, owned_by_agent, visibility) -> str
@@ -965,3 +1004,23 @@ Administrative identity controls are exposed separately from public login:
   provider-neutral external identity profile. `POST .../{provider_id}/test`
   returns an unavailable posture until a separately validated adapter is
   installed. Disabled profiles with no active bindings can be deleted.
+
+## v4.4.10 Model Governance APIs
+
+`POST /api/model-gateway/completions` supports bounded JSON and SSE
+forwarding. Browser calls require CSRF and `model_gateway.forward`; external
+calls use a revocable `cxgw_` Bearer with `model.forward` and optional
+profile/Agent scopes. Quota endpoints manage effective-dated hard or warn-only
+Token/cost policies. An exact successful non-streaming retry replays its
+encrypted snapshot without another Provider dispatch.
+
+`/api/model-finance/*` provides invoice import, reconciliation, append-only
+correction, allocation rules, and idempotent balanced allocation. Chargeback
+requires Enterprise. `/api/model-evidence/*` manages Ed25519 adapter keys and
+accepts signed, ordered, nonce-protected external usage facts.
+
+`/api/wallboard/definitions` manages immutable allow-listed versions. Publish
+and rollback require `wallboard.manage`; `GET /api/wallboard` is read-only and
+returns only the authorized current publication. Every v4.4.10 error contains
+`code`, `message`, `correlation_id`, and `retryable` plus a matching
+`X-Correlation-ID` header.

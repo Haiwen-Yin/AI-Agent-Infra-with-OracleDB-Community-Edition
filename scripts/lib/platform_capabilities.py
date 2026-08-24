@@ -34,6 +34,9 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
     "agent_provisioning": {"zh": "业务智能体配置", "en": "Business Agent provisioning", "mandatory": False, "page": "native-agents"},
     "portal": {"zh": "门户", "en": "Portal", "mandatory": False, "page": ""},
     "monitor": {"zh": "监控", "en": "Monitor", "mandatory": False, "page": "monitor"},
+    "wallboard": {"zh": "管理大屏", "en": "Executive wallboard", "mandatory": False, "page": "wallboard"},
+    "model_finance": {"zh": "模型财务治理", "en": "Model financial governance", "mandatory": False, "page": ""},
+    "external_model_evidence": {"zh": "外部模型证据", "en": "External model evidence", "mandatory": False, "page": ""},
     "tasks": {"zh": "任务", "en": "Tasks", "mandatory": False, "page": "tasks"},
     "workspaces": {"zh": "工作区", "en": "Workspaces", "mandatory": False, "page": "workspaces"},
     "knowledge": {"zh": "知识", "en": "Knowledge", "mandatory": False, "page": "knowledge"},
@@ -59,6 +62,8 @@ REGISTRY: Dict[str, Dict[str, Any]] = {
 
 DEPENDENCIES = {
     "deployment_governance": ("audit_write",),
+    "model_finance": ("audit_write",),
+    "external_model_evidence": ("audit_write",),
     "embedding_governance": ("agents", "audit_write"),
     "embedding_managed_worker": ("embedding_governance",),
     "agent_provisioning": ("agents", "audit_write"),

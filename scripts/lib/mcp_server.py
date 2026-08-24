@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.9 - MCP Server
+"""AI Agent Infra v4.4.10 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
@@ -267,6 +267,9 @@ async def list_tools() -> List[Tool]:
                     "importance": {"type": "integer", "default": 5},
                     "owned_by_agent": {"type": "string"},
                     "visibility": {"type": "string", "default": "SHARED"},
+                    "sharing_scope": {"type": "string", "enum": ["PUBLIC_COMPANY", "ORGANIZATION_SUBTREE", "ORGANIZATION_LEVEL", "PRINCIPAL_PRIVATE"], "default": "ORGANIZATION_SUBTREE"},
+                    "organization_id": {"type": "string"},
+                    "reason": {"type": "string"},
                 },
                 "required": ["title", "content", "owned_by_agent"],
             },
@@ -576,6 +579,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 importance=arguments.get("importance", 5),
                 owned_by_agent=authenticated_agent,
                 visibility=arguments.get("visibility", "SHARED"),
+                sharing_scope=arguments.get("sharing_scope", "ORGANIZATION_SUBTREE"),
+                organization_id=arguments.get("organization_id"),
+                creation_reason=arguments.get("reason", "Agent knowledge creation"),
             )
             return [TextContent(type="text", text=json.dumps({"knowledge_id": kid, "success": bool(kid)}))]
 

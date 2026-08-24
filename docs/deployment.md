@@ -1,11 +1,33 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.9
+# Deployment Guide - AI Agent Infra with DB v4.4.10
 
-v4.4.9 is a security and platform-control release over the v4.4.7 Production
-Profile. It adds the database-authoritative platform command registry,
-governed maintenance lifecycle, Compliance/Admin knowledge isolation, and
-native database isolation for platform private control objects. Apply the
-v4.4.9 migration chain before starting the service. v4.4.8 is withdrawn and
-must not be used as an upgrade source.
+v4.4.10 adds optional model forwarding, usage/cost accounting, per-profile
+routing, and an authenticated read-only executive wallboard. It is the clean
+deployment baseline for new installations. Apply the
+migration-runner selected chain through migration 58;
+the adapter `deploy/baseline_v4_4_10.json` is the authoritative package manifest.
+v4.4.8 is withdrawn and must not be used as an upgrade source. Existing historical
+SQL remains retained for audit/reference, while fresh deployment uses the ordered
+manifest and does not require customer upgrade compatibility. v4.4.8 is
+withdrawn and must not be used as an upgrade source.
+
+For the shared development environment, use the single connection catalog at
+`docs/development-database-catalog.md`. It is the canonical reference for the
+three test database configuration paths and service endpoints.
+
+Approved Enterprise demonstration databases may be populated with
+`scripts/tools/seed_v410_enterprise_demo_data.py`. The idempotent utility keeps
+Principal ownership, organization, `AGENT_REGISTRY`, active Sessions, running
+Task Plans, and running Loops coherent so wallboard acceptance tests do not
+mistake disconnected fixtures for an empty platform. Never use demo data as a
+production initialization step.
+
+Set `CX_PUBLIC_BASE_URL=https://platform.example.com` when the service is behind
+a reverse proxy or its externally reachable address differs from the incoming
+request base URL. The platform appends `/api/model-gateway/completions` and
+distributes that address read-only in the LLM Provider Profile table. Do not
+configure a user-supplied relay URL. Existing profiles start with direct mode
+enabled and gateway mode disabled; an administrator may enable either or both
+and must provide a compliance reason when confirming the change.
 
 The current maturity boundary is deliberate. Production includes the stable
 Graph Runtime core and authorized Graph inspection. Manifest draft import,
@@ -79,7 +101,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.9 --database <oracle|pg|yashandb> \
+  --version 4.4.10 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -98,7 +120,7 @@ authorization, and it does not depend on an external Agent calling a Skill.
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py \
-  --version 4.4.9 --database <oracle|pg|yashandb> \
+  --version 4.4.10 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json \
   --backup-evidence release_evidence/backup.json
 ```
@@ -232,7 +254,7 @@ glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
 compatible wheel is available.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.9`. The current `production`
+through `migration_runner.py --version 4.4.10`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
@@ -731,3 +753,21 @@ Only verified writable Spaces using `PLATFORM_MANAGED` or `ENTERPRISE_PROXY`
 Profiles can be processed by that worker. `ENTERPRISE_DIRECT` must be verified
 and written by the external Agent; `PRECOMPUTED_IMPORT` accepts governed
 vectors supplied by the enterprise; `NONE` disables vector work.
+
+## v4.4.10 Model Governance Verification
+
+Set `CX_PUBLIC_BASE_URL` to the reachable HTTPS base before gateway
+distribution; the completion path is appended automatically. Direct and
+gateway routing remain independently selectable. Install with Python 3.14,
+deploy the adapter's `baseline_v4_4_10.json` ordered chain through terminal
+migration 58, and require `/api/ready` before traffic admission.
+
+From a source checkout run `tools/v410_full_flow_gate.py`; from a generated
+package use `scripts/tools/v410_full_flow_gate.py`. Then run the corresponding
+`v410_model_governance_benchmark.py` at the approved customer volume and
+concurrency. Evidence must omit DSNs, passwords, keys, gateway tokens, prompts,
+and model output. Repository results are a bounded baseline, not a substitute
+for load balancers/Ingress, failover, backup, and restore certification. The run
+must also verify the Security Domain ->
+Channel -> execution-group relationship and cross-domain negative cases; a
+legacy collaboration group alone is never sufficient admission evidence.

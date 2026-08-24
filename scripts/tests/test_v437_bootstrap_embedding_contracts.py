@@ -63,8 +63,14 @@ def test_profile_persists_model_fingerprint_and_never_returns_cipher(monkeypatch
 
 def test_manifest_has_deterministic_base_actions_for_all_databases():
     root = Path(__file__).resolve().parents[2]
-    for database in ("oracle", "pg", "yashandb"):
-        actions = deployment_orchestrator.manifest(database, "enterprise", root)
+    package_manifest = root / "build-manifest.json"
+    if package_manifest.is_file():
+        package = json.loads(package_manifest.read_text(encoding="utf-8"))
+        targets = ((str(package["database"]["key"]), str(package["edition"]).lower()),)
+    else:
+        targets = tuple((database, "enterprise") for database in ("oracle", "pg", "yashandb"))
+    for database, edition in targets:
+        actions = deployment_orchestrator.manifest(database, edition, root)
         assert actions and all(item.path.is_file() for item in actions)
         assert [item.key for item in actions] == sorted(item.key for item in actions)
 

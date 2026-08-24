@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra with DB v4.4.9
+# Web Visualization - AI Agent Infra with DB v4.4.10
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -17,14 +17,31 @@
 | Agent Collaboration | `/agents` | 3-tab dashboard: Agent Registry, Active Sessions, Collaboration Requests |
 | Task Plans | `/tasks` | Status filter, keyword search, accordion plan list with expandable step tables |
 | Property Graph | `/graph` | Graph API explorer for entity context, paths, and communities |
+| Executive Wallboard | `/app/wallboard` | Authenticated read-only platform operating picture with 14-day Token and cost curves |
+| Platform Configuration | `/app/platform` | Platform runtime and inline LLM Provider Profile routing controls |
 
 All pages share: bilingual UI (zh/en), session auth with auto-logout timer, `/api/stats` sidebar.
+
+The v4.4.10 executive wallboard combines Agent totals and online/busy/stalled
+state, active Sessions, running Task Plans and Loops, model usage, gateway
+coverage, freshness, and 14-day Token and cost curves. It contains no mutation
+controls. In Platform Configuration, direct and platform-gateway checkboxes are
+independent; a changed row highlights `Confirm`, then requires a compliance
+reason. The platform-generated forwarding address is read-only.
+
+Knowledge uses the same list/graph switch but applies one database-authoritative
+visibility policy to both projections. Opening a Knowledge item exposes the
+company, organization-subtree, organization-level, and Principal-private
+configuration in a wide governed detail drawer. Organization choices come from
+the current organization hierarchy. On narrow screens the operation form
+collapses to one column; no input or action may overflow the drawer.
 
 ## API Routes
 
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/health` | GET | Health check (no auth required) |
+| `/api/ready` | GET | Database/control-plane readiness; returns 503 until the current schema is usable |
 | `/api/knowledge` | GET | Knowledge graph JSON (nodes + edges) |
 | `/api/knowledge/refresh` | GET | Force refresh knowledge cache |
 | `/api/memory` | GET | Memory graph JSON (nodes + edges) |
@@ -175,3 +192,16 @@ as every other page. A Channel does not grant access to data, Skills, Tools,
 models, memory, or exports. Barrier detail shows the participant snapshot,
 arrivals, missing roles, timeout, and one-winner decision; waiting does not
 hold a Worker lease.
+
+## v4.4.10 Model Governance Views
+
+Platform Runtime contains LLM Provider rows, independent direct/gateway
+switches, the generated read-only address, pending-change state, and
+reason-confirmed mutation. Governed panels expose quota status, invoice and
+allocation work, evidence adapters, and wallboard definition publication.
+
+`/app/wallboard` remains read-only. It renders the published allow-listed
+projection, 14-day Token/cost curves, runtime, coverage, budget risk, and
+freshness without configure, approval, export, or invoke controls. Definition
+versions are integers across all adapters. Empty, stale, unavailable,
+scoped-zero, and partial states must not reuse prior authorized data.

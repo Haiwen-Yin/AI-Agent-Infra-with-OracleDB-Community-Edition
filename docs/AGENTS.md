@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.9 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.10 Unified Repository Guide
 
-> **v4.4.9** - The unified single-source repository that generates all 6 release
+> **v4.4.10** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -9,13 +9,35 @@
 
 ## 1. Repository Layout
 
+## v4.4.10 Fresh Baseline And Current Product Boundaries
+
+v4.4.10 is the current fresh-deployment baseline. Use each adapter's
+`deploy/baseline_v4_4_10.json` ordered chain through migration 58; earlier
+numbered scripts remain for journal/checksum reproducibility, not as a customer
+upgrade promise. v4.4.8 is withdrawn.
+
+The model gateway is optional. Direct and gateway routes can coexist per LLM
+Provider Profile. The gateway provides bounded streaming/non-streaming
+forwarding, atomic hard/warn quotas, encrypted non-streaming replay, immutable
+usage/pricing facts, Provider invoice reconciliation, Enterprise allocation,
+signed external evidence, and a versioned authenticated read-only wallboard.
+Never claim visibility for unobserved direct traffic or retain model payloads in
+the usage ledger.
+
+Knowledge is company-public, organization-subtree, organization-level, or
+Human/Agent-private. Database policy and current organization closure govern
+inventory, item, graph, and retrieval reads. Security Domains and Channels are
+the product-facing collaboration model. Legacy collaboration groups are
+internal execution compatibility records and never grant authorization or
+knowledge scope.
+
 ## v4.4.3 Governed Security Domains
 
-The durable collaboration order is **Security Domain -> Channel -> legacy
-collaboration group**. `CX_SECURITY_DOMAINS` and `CX_DOMAIN_MEMBERS` are the
-only authorization records. `CX_DOMAIN_GOVERNANCE` adds accountable ownership,
+The durable product collaboration order is **Security Domain -> Channel**.
+`CX_SECURITY_DOMAINS` and `CX_DOMAIN_MEMBERS` are the only authorization
+records. `CX_DOMAIN_GOVERNANCE` adds accountable ownership,
 purpose, classification, and reason, while `CX_DOMAIN_BINDINGS` records
-traceable Channel and group relationships without granting access.
+traceable Channel and internal execution relationships without granting access.
 
 When adapting an existing collaboration group, create a conversion draft. Its
 active Agents remain pending candidates and its `SHARING_POLICY` is review
@@ -363,7 +385,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.9`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.10`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

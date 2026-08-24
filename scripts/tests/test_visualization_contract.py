@@ -285,7 +285,7 @@ def test_react_dashboard_exposes_switchable_views_and_dismissible_details():
     if is_source:
         assert '["knowledge", "memory"]' in ui
         assert "branchDetailVisualization(detail, items, text)" in ui
-        assert "hierarchical" in ui and 'wide={page === "branches"}' in ui
+        assert "hierarchical" in ui and 'wide={["branches", "knowledge"].includes(page)}' in ui
         assert "event.target === event.currentTarget" in ui
     else:
         assert "Knowledge graph" in ui and "Memory graph" in ui

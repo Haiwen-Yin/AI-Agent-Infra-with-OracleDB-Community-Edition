@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.9 - Unified Hybrid Search Tests
+"""AI Agent Infra v4.4.10 - Unified Hybrid Search Tests
 
 Tests multimodal data hybrid retrieval: vector + fulltext (Oracle Text) + relational metadata + graph proximity.
 Uses seeded test data with 50+ entities, embeddings, edges, and tags.

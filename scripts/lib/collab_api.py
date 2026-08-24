@@ -1,7 +1,11 @@
-"""AI Agent Infra v4.4.9 - Community Edition - Collaboration Group API
+"""AI Agent Infra v4.4.10 - Community Edition - Legacy execution-group API.
 
 Collaboration group lifecycle, membership management,
 shared/personal workspaces, and group memory sharing.
+
+New external callers must use ``security_domain_api`` first. This module is
+retained for internal execution compatibility and historical data operations;
+it is not an authorization boundary and must not be used to grant scope.
 """
 
 import json

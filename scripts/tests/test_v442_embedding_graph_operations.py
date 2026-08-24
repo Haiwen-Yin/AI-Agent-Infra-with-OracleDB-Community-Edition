@@ -6,6 +6,15 @@ import pytest
 import live_db_validator
 from lib import graph_production_profile, knowledge_api
 
+ROOT = Path(__file__).resolve().parents[2]
+GENERATED_COMMUNITY = False
+if (ROOT / "build-manifest.json").is_file():
+    import json
+
+    GENERATED_COMMUNITY = json.loads(
+        (ROOT / "build-manifest.json").read_text(encoding="utf-8")
+    ).get("edition") == "Community"
+
 
 def _adapter_scripts(names: tuple[str, ...] | list[str]):
     root = Path(__file__).resolve().parents[2]
@@ -22,6 +31,10 @@ def _adapter_scripts(names: tuple[str, ...] | list[str]):
     return [(database, [root / "scripts" / "deploy" / name for name in names])]
 
 
+@pytest.mark.skipif(
+    GENERATED_COMMUNITY,
+    reason="the historical full-chain validator requires Enterprise-only governance migrations",
+)
 def test_v442_static_contract_is_complete_for_all_adapters():
     for database, scripts in _adapter_scripts(live_db_validator.V442_MIGRATION_SCRIPTS):
         result = live_db_validator.validate_v442_static_contract(database, scripts)

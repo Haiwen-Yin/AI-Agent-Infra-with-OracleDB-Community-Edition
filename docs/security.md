@@ -1,9 +1,37 @@
-# Security - AI Agent Infra with DB v4.4.9
+# Security - AI Agent Infra with DB v4.4.10
 
-## v4.4.9 Platform Agent And Database Isolation Boundary
+## v4.4.10 Model Usage Boundary
 
-v4.4.8 is withdrawn and is not a supported upgrade source. v4.4.9 must start
-from an approved pre-v4.4.8 baseline or a reinitialized database.
+The model gateway is optional. Enabling it improves attributable Token and cost
+evidence but does not prove that all model traffic passed through the platform.
+Direct provider activity is `UNOBSERVED` unless a verified adapter supplies
+evidence. Gateway evidence supplements deterministic authorization and
+compliance controls; it never grants access, approves an exception, or expands
+an Agent's Security Domain.
+
+Provider keys remain encrypted server-side. Gateway credential digests,
+request metadata, input digests, usage dimensions, provenance, cost, and
+latency may be retained, but prompts, generated responses, authorization
+headers, plaintext credentials, and raw provider payloads are excluded from
+the usage ledger and wallboard. The forwarding address is server-derived;
+route configuration cannot inject an arbitrary upstream URL.
+
+The executive wallboard requires login and scoped read authority. Its API is
+GET-only and exposes bounded aggregates; it contains no approval,
+acknowledgement, export, configuration, provider-test, or Agent-invocation path.
+
+Knowledge access is enforced from current database policy and organization
+closure, not from a frontend filter. Company-public, organization-subtree,
+organization-level, and Principal-private policies apply consistently to list,
+single-item, graph, and retrieval routes. Missing, expired, or inconsistent
+policy fails closed. Department grouping reuses the governed organization tree;
+it does not create a second client-side authorization hierarchy.
+
+## v4.4.9 Historical Platform Agent And Database Isolation Boundary
+
+v4.4.8 is withdrawn and is not a supported source. The repaired v4.4.9
+isolation behavior is retained as historical context inside the v4.4.10 fresh
+baseline; it is not presented as a customer upgrade procedure.
 
 Platform built-in Agents operate on typed database commands rather than model
 authority. `READ`, `SAFE_MAINTENANCE`, `PROPOSED_CHANGE`,
@@ -29,7 +57,9 @@ verified signed source projection is exposed.
 `CX_SECURITY_DOMAINS` and `CX_DOMAIN_MEMBERS` are the authorization facts for
 project collaboration. `CX_DOMAIN_GOVERNANCE` records the accountable Human
 owner, purpose, classification, reason, and administrative change context.
-Channels and legacy `COLLAB_GROUPS` are collaboration surfaces only. A message,
+Channels and legacy `COLLAB_GROUPS` are collaboration surfaces only. The latter
+is now treated as an execution-group compatibility record and is accepted only
+through an active `CX_DOMAIN_BINDINGS` row plus current membership checks. A message,
 prompt, thread, workspace, graph relation, Skill, Tool, API declaration, or
 historic group member never grants or expands Security Domain access.
 
@@ -696,3 +726,21 @@ page-instance digests. A reused Session cannot mutate through chat, streaming,
 bulk, keyboard, hidden-menu, or direct API paths while another page owns the
 lease. Provider claims and QR/OIDC metadata are identity evidence only; role,
 scope, organization, entry access, MFA, and approval remain separate checks.
+
+## v4.4.10 Model And Wallboard Security
+
+Gateway credentials store digests and may be restricted by Provider Profile
+and Agent. Provider secrets remain encrypted server-side. Hard quota checks
+lock state and reject before dispatch; warn policies retain evidence while
+continuing. AES-GCM replay snapshots have bounded size/lifetime and bind to the
+original request and input digest.
+
+External observation uses versioned Ed25519 keys, rotation/revocation,
+freshness, scopes, ordered sequence numbers, and nonce replay protection. It is
+evidence, not authorization or proof that all direct calls were observed.
+
+PostgreSQL forces RLS on all migration-57 tables. Oracle and YashanDB retain
+owner separation and service scope. Effective-date defaults use the database
+clock, preventing host/database timezone drift from delaying policy activation.
+Wallboard validation rejects unknown fields, unsafe scope IDs, and oversized
+or non-allow-listed configuration.

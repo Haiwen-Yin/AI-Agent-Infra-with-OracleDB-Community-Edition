@@ -85,6 +85,13 @@ def _limit_clause() -> str:
     return "LIMIT :limit" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"postgresql", "pg"} else "FETCH FIRST :limit ROWS ONLY"
 
 
+def _execution_group_binding(group_expression: str, binding_expression: str = "b.TARGET_ID") -> str:
+    """Compare legacy numeric PostgreSQL group IDs with portable text bindings."""
+    if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"postgresql", "pg"}:
+        return f"{binding_expression}=CAST({group_expression} AS VARCHAR(128))"
+    return f"{binding_expression}={group_expression}"
+
+
 def _domain_row(domain_id: str, *, active_only: bool = False) -> Optional[Dict[str, Any]]:
     suffix = " AND d.STATUS = 'ACTIVE'" if active_only else ""
     return _row(connection.execute_query_one(
@@ -359,7 +366,7 @@ def list_collaboration_groups(actor: str, *, limit: int = 200) -> List[Dict[str,
         "(SELECT COUNT(*) FROM COLLAB_GROUP_MEMBERS m WHERE m.GROUP_ID=g.GROUP_ID AND m.STATUS='ACTIVE') AS MEMBER_COUNT,"
         "b.SECURITY_DOMAIN_ID AS BOUND_SECURITY_DOMAIN_ID,b.STATUS AS BINDING_STATUS "
         "FROM COLLAB_GROUPS g JOIN CX_DOMAIN_BINDINGS b ON b.BINDING_TYPE='LEGACY_COLLAB_GROUP' "
-        "AND b.TARGET_ID=g.GROUP_ID AND b.STATUS='ACTIVE' "
+        "AND " + _execution_group_binding("g.GROUP_ID") + " AND b.STATUS='ACTIVE' "
         "JOIN COLLAB_GROUP_MEMBERS self_member ON self_member.GROUP_ID=g.GROUP_ID "
         "AND self_member.AGENT_ID=:actor AND self_member.STATUS='ACTIVE' "
         "JOIN CX_DOMAIN_MEMBERS domain_member ON domain_member.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
@@ -378,6 +385,70 @@ def list_collaboration_groups(actor: str, *, limit: int = 200) -> List[Dict[str,
             "scope": "filtered-current-principal-channel-domain",
         }
     return result
+
+
+def list_execution_groups(actor: str, *, limit: int = 200) -> List[Dict[str, Any]]:
+    """List execution groups inside the caller's current Security Domains.
+
+    Collaboration groups are retained for execution coordination, but this is
+    the only supported external read shape. Humans need active Domain
+    membership; Agents additionally need active membership in the group.
+    """
+    _require(actor, "collab.read")
+    rows = connection.execute_query(
+        "SELECT g.GROUP_ID,g.GROUP_NAME,g.GROUP_TYPE,g.DESCRIPTION,g.WORKSPACE_ID,"
+        "g.COORDINATOR_AGENT_ID,g.SHARING_POLICY,g.STATUS,"
+        "(SELECT COUNT(*) FROM COLLAB_GROUP_MEMBERS m WHERE m.GROUP_ID=g.GROUP_ID AND m.STATUS='ACTIVE') AS MEMBER_COUNT,"
+        "b.SECURITY_DOMAIN_ID AS SECURITY_DOMAIN_ID,b.STATUS AS BINDING_STATUS,"
+        "p.PRINCIPAL_TYPE AS ACTOR_TYPE "
+        "FROM COLLAB_GROUPS g JOIN CX_DOMAIN_BINDINGS b ON b.BINDING_TYPE='LEGACY_COLLAB_GROUP' "
+        "AND " + _execution_group_binding("g.GROUP_ID") + " AND b.STATUS='ACTIVE' "
+        "JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
+        "AND dm.PRINCIPAL_ID=:actor AND dm.STATUS='ACTIVE' "
+        "AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP) "
+        "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=:actor "
+        "LEFT JOIN COLLAB_GROUP_MEMBERS self_member ON self_member.GROUP_ID=g.GROUP_ID "
+        "AND self_member.AGENT_ID=:actor AND self_member.STATUS='ACTIVE' "
+        "WHERE g.STATUS='ACTIVE' AND (p.PRINCIPAL_TYPE='HUMAN' OR self_member.AGENT_ID IS NOT NULL) "
+        "ORDER BY g.GROUP_NAME,g.GROUP_ID " + _limit_clause(),
+        {"actor": actor, "limit": max(1, min(int(limit), 500))},
+    )
+    result = _rows(rows)
+    for item in result:
+        item["execution_group"] = True
+        item["authorization_source"] = "SECURITY_DOMAIN_AND_GROUP_MEMBERSHIP"
+        item["compatibility"] = {
+            "contract": "execution-group-scope/v1",
+            "deprecated_legacy_group": True,
+            "sharing_policy_authoritative": False,
+        }
+    return result
+
+
+def assert_execution_group_access(actor: str, group_id: str, *, write: bool = False) -> Dict[str, Any]:
+    """Fail closed unless actor has current Domain and execution-group scope."""
+    _require(actor, "collab.write" if write else "collab.read")
+    group_id = _text(group_id, "execution group", 128, required=True)
+    row = _row(connection.execute_query_one(
+        "SELECT g.GROUP_ID,g.GROUP_NAME,g.WORKSPACE_ID,g.SPEC_ID,g.STATUS,"
+        "b.SECURITY_DOMAIN_ID,p.PRINCIPAL_TYPE "
+        "FROM COLLAB_GROUPS g JOIN CX_DOMAIN_BINDINGS b ON b.BINDING_TYPE='LEGACY_COLLAB_GROUP' "
+        "AND " + _execution_group_binding("g.GROUP_ID") + " AND b.STATUS='ACTIVE' "
+        "JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
+        "AND dm.PRINCIPAL_ID=:actor AND dm.STATUS='ACTIVE' "
+        "AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP) "
+        "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=:actor "
+        "LEFT JOIN COLLAB_GROUP_MEMBERS gm ON gm.GROUP_ID=g.GROUP_ID "
+        "AND gm.AGENT_ID=:actor AND gm.STATUS='ACTIVE' "
+        "WHERE g.GROUP_ID=:group_id AND g.STATUS='ACTIVE' "
+        "AND (p.PRINCIPAL_TYPE='HUMAN' OR gm.AGENT_ID IS NOT NULL)",
+        {"actor": actor, "group_id": group_id},
+    ))
+    if not row:
+        raise PermissionError("Execution group is outside the current Security Domain or membership scope")
+    row["execution_group"] = True
+    row["authorization_source"] = "SECURITY_DOMAIN_AND_GROUP_MEMBERSHIP"
+    return row
 
 
 def list_legacy_collaboration_messages(actor: str, group_id: str, *, channel_id: str = "", limit: int = 100) -> List[Dict[str, Any]]:
@@ -399,7 +470,7 @@ def list_legacy_collaboration_messages(actor: str, group_id: str, *, channel_id:
         "JOIN CX_DOMAIN_MEMBERS dm ON dm.SECURITY_DOMAIN_ID=b.SECURITY_DOMAIN_ID "
         "AND dm.PRINCIPAL_ID=:actor AND dm.STATUS='ACTIVE' "
         "AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP) "
-        "WHERE b.BINDING_TYPE='LEGACY_COLLAB_GROUP' AND b.TARGET_ID=m.GROUP_ID AND b.STATUS='ACTIVE'"
+        "WHERE b.BINDING_TYPE='LEGACY_COLLAB_GROUP' AND " + _execution_group_binding("m.GROUP_ID") + " AND b.STATUS='ACTIVE'"
         + channel_filter + ") ORDER BY m.CREATED_AT DESC " + _limit_clause(), params,
     )
     return [{**_row(row), "compatibility": {"contract": "legacy-collaboration-read/v1", "deprecated": True, "scope": "principal-channel-domain"}} for row in rows]

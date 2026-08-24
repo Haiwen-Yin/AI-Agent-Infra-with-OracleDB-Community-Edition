@@ -197,6 +197,24 @@ V449_MIGRATION_SCRIPTS = V446_MIGRATION_SCRIPTS + (
     "52_v4_4_9_local_identity_boundary.sql",
     "54_v4_4_9_audit_data_contract.sql",
 )
+V410_MIGRATION_SCRIPTS = V449_MIGRATION_SCRIPTS + (
+    "55_v4_4_10_model_usage_wallboard.sql",
+    "56_v4_4_10_runtime_repair.sql",
+    "57_v4_4_10_complete_model_governance.sql",
+    "58_v4_4_10_knowledge_scope.sql",
+    "59_v4_4_10_knowledge_graph_context.sql",
+)
+V410_MODEL_TABLES = (
+    "CX_MODEL_GATEWAY_CREDENTIALS", "CX_MODEL_REQUESTS", "CX_MODEL_PRICING",
+    "CX_MODEL_USAGE", "CX_WALLBOARD_DEFINITIONS", "CX_MODEL_ROUTING_POLICIES",
+    "CX_MODEL_QUOTA_POLICIES", "CX_MODEL_QUOTA_RESERVATIONS",
+    "CX_MODEL_REPLAY_SNAPSHOTS", "CX_PROVIDER_INVOICE_BATCHES",
+    "CX_PROVIDER_INVOICE_LINES", "CX_MODEL_RECONCILIATIONS",
+    "CX_PROVIDER_INVOICE_CORRECTIONS",
+    "CX_MODEL_ALLOCATION_RULES", "CX_MODEL_ALLOCATIONS",
+    "CX_MODEL_EVIDENCE_ADAPTERS", "CX_MODEL_EVIDENCE_BATCHES",
+    "CX_WALLBOARD_DEF_VERSIONS", "CX_WALLBOARD_PUBLICATIONS",
+)
 V448_PLATFORM_AGENT_ISOLATION_TABLES = (
     "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
     "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_MAINTENANCE_ATTEMPTS",
@@ -1457,6 +1475,33 @@ def validate_v449_static_contract(database: str, scripts: Sequence[Path]) -> dic
     return {"database": database, "v449_security_boundary_repair": control, "passed": bool(control["passed"])}
 
 
+def validate_v410_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+    base = validate_v449_static_contract(database, scripts)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("55_v4_4_10_model_usage_wallboard.sql")
+    repair = selected.get("56_v4_4_10_runtime_repair.sql")
+    completion = selected.get("57_v4_4_10_complete_model_governance.sql")
+    knowledge_scope = selected.get("58_v4_4_10_knowledge_scope.sql")
+    graph_context = selected.get("59_v4_4_10_knowledge_graph_context.sql")
+    source = "\n".join(
+        item.read_text(encoding="utf-8").upper()
+        for item in (migration, repair, completion, knowledge_scope, graph_context) if item and item.is_file()
+    )
+    repair_source = repair.read_text(encoding="utf-8").upper() if repair and repair.is_file() else ""
+    markers = set(V410_MODEL_TABLES) | {"CX_PLATFORM_CAPABILITIES", "WALLBOARD", "IDEMPOTENCY_KEY", "IDX_MODEL_ROUTE_SCOPE_UQ", "CX_KNOWLEDGE_CONTEXTS", "ORGANIZATION_CHAIN_JSON", "GRAPH_SNAPSHOT_DIGEST"}
+    if database == "pg":
+        markers |= {"FORCE ROW LEVEL SECURITY", "PUBLIC.CURRENT_AGENT_IDENTITY()", "CX_MODEL_CREDENTIALS_OWNER"}
+    control = {
+        "scripts_required": list(V410_MIGRATION_SCRIPTS),
+        "scripts_missing": [name for name in V410_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
+        "obsolete_pg_principal_guc_absent": database != "pg" or "APP.CURRENT_PRINCIPAL_ID" not in repair_source,
+    }
+    control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"] and control["obsolete_pg_principal_guc_absent"]
+    return {"database": database, "v449": base, "v410_model_usage_wallboard": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1602,6 +1647,7 @@ class ProbeResult:
     v444_agent_pool_contract: dict[str, Any] = field(default_factory=dict)
     v445_graph_run_contract: dict[str, Any] = field(default_factory=dict)
     v446_identity_portal_graph_contract: dict[str, Any] = field(default_factory=dict)
+    v410_model_usage_wallboard_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1612,6 +1658,10 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
         database, snapshot, require_runtime_permissions=database == "pg",
     )
     result.v43_partial_schema = v43_partial_schema_incomplete(snapshot)
+    result.v410_model_usage_wallboard_contract = {
+        "tables_missing": sorted(set(V410_MODEL_TABLES) - set(snapshot["tables"])),
+    }
+    result.v410_model_usage_wallboard_contract["passed"] = not result.v410_model_usage_wallboard_contract["tables_missing"]
     result.v431_organization_contract = _capture_v431_organization(cursor, database)
     result.v434_compliance_contract = {
         "tables_missing": sorted(set(V434_COMPLIANCE_TABLES) - set(snapshot["tables"])),
@@ -2018,10 +2068,13 @@ def main() -> int:
     requires_v446 = at_least((4, 4, 6))
     requires_v448 = target_version.startswith("4.4.8")
     requires_v449 = target_version.startswith("4.4.9")
+    requires_v410 = at_least((4, 4, 10))
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v449:
+            if requires_v410:
+                migration_scripts, validator = V410_MIGRATION_SCRIPTS, validate_v410_static_contract
+            elif requires_v449:
                 migration_scripts, validator = V449_MIGRATION_SCRIPTS, validate_v449_static_contract
             elif requires_v448:
                 migration_scripts, validator = V448_MIGRATION_SCRIPTS, validate_v448_static_contract
@@ -2061,7 +2114,7 @@ def main() -> int:
                 else (REPO_ROOT / "adapters" / database / "deploy" / name)
                 for name in migration_scripts
             ]
-            if database == "pg" and requires_v449 and "51_v4_4_9_identity_boundary_repair.sql" not in migration_scripts:
+            if database == "pg" and (requires_v449 or requires_v410) and "51_v4_4_9_identity_boundary_repair.sql" not in migration_scripts:
                 scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "51_v4_4_9_identity_boundary_repair.sql")
                 scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "53_v4_4_9_pg_runtime_boundary.sql")
             elif database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in migration_scripts:
@@ -2126,6 +2179,7 @@ def main() -> int:
                 and (not requires_v444 or result.v444_agent_pool_contract.get("passed") is True)
                 and (not requires_v445 or result.v445_graph_run_contract.get("passed") is True)
                 and (not requires_v446 or result.v446_identity_portal_graph_contract.get("passed") is True)
+                and (not requires_v410 or result.v410_model_usage_wallboard_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

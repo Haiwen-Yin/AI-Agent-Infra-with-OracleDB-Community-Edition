@@ -1,5 +1,5 @@
 PROMPT ============================================================
-PROMPT AI Agent Infra v4.4.9 - Schema Deployment
+PROMPT AI Agent Infra v4.4.10 - Schema Deployment
 PROMPT ============================================================
 
 WHENEVER SQLERROR CONTINUE
@@ -1952,5 +1952,5 @@ DROP PROCEDURE IF EXISTS safe_ddl;
 DROP PROCEDURE IF EXISTS safe_idx;
 
 PROMPT ============================================================
-PROMPT AI Agent Infra v4.4.9 - Schema Deployment Complete
+PROMPT AI Agent Infra v4.4.10 - Schema Deployment Complete
 PROMPT ============================================================

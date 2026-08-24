@@ -1,11 +1,37 @@
-# Architecture - AI Agent Infra with DB v4.4.9
+# Architecture - AI Agent Infra with DB v4.4.10
 
-## v4.4.9 Platform Control Plane
+## v4.4.10 Model Usage And Executive Visibility Plane
 
-v4.4.8 is withdrawn history. v4.4.9 is the current public release after the
-approved v4.4.7 baseline and adds runtime security repair, typed evidence,
+v4.4.10 adds an optional model forwarding path without making the gateway an
+authorization shortcut or a mandatory network choke point. Each LLM Provider
+Profile independently records whether direct and platform-gateway routes are
+allowed; both may coexist during adoption. A routing change is confirmed with
+a compliance reason. The platform derives the read-only distribution address
+from `CX_PUBLIC_BASE_URL` or its request base URL.
+
+The gateway forwards streaming and non-streaming chat completions, keeps
+provider credentials server-side, and stores request metadata, Token dimensions,
+usage provenance, decimal cost, and latency without storing prompt or response
+bodies. Calls outside the gateway are not silently counted: they remain
+unobserved unless a verified adapter supplies evidence.
+
+The authenticated `/app/wallboard` view is a read-only management projection.
+It combines Agent, Session, Task Plan, Loop, and stalled-runtime state with
+14-day Token and cost trends, bounded model usage, coverage, and freshness. It
+does not approve, acknowledge, invoke, export, or change platform state.
+
+Knowledge policy is another database-authoritative projection. A knowledge
+record is company-public, restricted to an organization subtree or hierarchy
+depth, or private to one Human/Agent Principal. Current organization closure is
+evaluated for list, item, graph, and retrieval paths. Security Domains and
+Channels govern collaboration; legacy collaboration groups are compatibility
+execution relations and are not knowledge-sharing policy.
+
+## v4.4.9 Historical Platform Control Plane
+
+v4.4.8 is withdrawn history. v4.4.9 records the runtime security repair, typed evidence,
 restored relationship visualization, governed organization data, and bounded
-compliance posture projections.
+compliance posture projections that were carried into the v4.4.10 fresh baseline.
 
 The Administration Channel resolves command discovery from the database
 registry `CX_PLATFORM_COMMANDS`; the frontend does not own an independent
@@ -36,6 +62,14 @@ new Domain, writes only confirmed members, and creates one active group binding
 in one transaction. Runtime authorization continues to resolve current Domain
 membership, so a later suspension or revocation closes future Channel and
 Gateway access without rewriting retained collaboration history.
+
+For v4.4.10, the legacy group is explicitly an **execution group** rather than
+an authorization object. New work follows `Security Domain -> Channel ->
+optional execution group`. The compatibility API uses
+`execution-group-scope/v1`; an active Domain binding, current Domain membership,
+and (for an Agent) active group membership are required before branch, plan,
+context, or Loop operations. `SHARING_POLICY` remains descriptive coordination
+metadata and is never an access grant.
 
 ## v4.4.1 Platform Administration And Availability Plane
 
@@ -733,3 +767,22 @@ framework-adapter execution, A2A, and OTLP remain `DISABLED`. The stable
 v4.1.x line remains the prior compatibility baseline.
 Profiles do not weaken database, API, Skill, Tool, model, memory, Artifact, or
 export authorization, and there is no long-lived source fork.
+
+## v4.4.10 Model Governance Architecture
+
+Model forwarding is an optional edge, not a second execution kernel. An atomic
+quota reservation precedes Provider dispatch. Provider usage settles the
+reservation and creates an immutable fact. For non-streaming calls, the
+encrypted bounded replay snapshot and terminal request state commit together.
+Prompt and response bodies are not part of the usage ledger.
+
+Platform pricing, Provider invoices, correction/reconciliation evidence, and
+internal allocation are separate fact layers. A calculated cost is never an
+invoice; corrections append links; allocation facts balance to their source
+and are not rewritten by later rules.
+
+Wallboard configuration belongs to the authenticated management plane and the
+published projection to the read-only viewer. Widget/dimension registries are
+allowlists, versions are immutable, and scope is pushed into aggregates.
+External activity is observable only through gateway facts or a trusted signed
+adapter; unknown direct activity remains unknown.

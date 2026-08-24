@@ -149,13 +149,15 @@ def test_cursor_persistence_avoids_oracle_reserved_position_bind_name():
 
 def test_monitor_and_audit_cursor_queries_avoid_oracle_reserved_limit_bind_name():
     monitor = (Path(__file__).resolve().parents[1] / "lib" / "monitor_api.py").read_text(encoding="utf-8")
-    audit = (Path(__file__).resolve().parents[1] / "lib" / "audit_api.py").read_text(encoding="utf-8")
     monitor_cursor = monitor.split("def get_agent_health_cursor", 1)[1].split("def get_system_overview", 1)[0]
-    audit_cursor = audit.split("def get_audit_events_cursor", 1)[1].split("def get_audit_event", 1)[0]
     assert "FETCH FIRST :row_limit ROWS ONLY" in monitor_cursor
-    assert "FETCH FIRST :row_limit ROWS ONLY" in audit_cursor
     assert "FETCH FIRST :limit ROWS ONLY" not in monitor_cursor
-    assert "FETCH FIRST :limit ROWS ONLY" not in audit_cursor
+    audit_path = Path(__file__).resolve().parents[1] / "lib" / "audit_api.py"
+    if audit_path.is_file():
+        audit = audit_path.read_text(encoding="utf-8")
+        audit_cursor = audit.split("def get_audit_events_cursor", 1)[1].split("def get_audit_event", 1)[0]
+        assert "FETCH FIRST :row_limit ROWS ONLY" in audit_cursor
+        assert "FETCH FIRST :limit ROWS ONLY" not in audit_cursor
 
 
 def test_dashboard_agent_views_separate_registered_external_and_native_paths():

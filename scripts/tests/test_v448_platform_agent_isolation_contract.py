@@ -11,6 +11,10 @@ DATABASE_KEY = (
     str(json.loads((ROOT / "build-manifest.json").read_text(encoding="ascii"))["database"]["key"])
     if PACKAGE_MODE else None
 )
+PACKAGE_EDITION = (
+    str(json.loads((ROOT / "build-manifest.json").read_text(encoding="ascii"))["edition"])
+    if PACKAGE_MODE else None
+)
 
 
 def _migration_dir(adapter: str) -> Path:
@@ -55,6 +59,10 @@ def test_v448_migration_selection_and_object_contract(monkeypatch):
     assert "4.4.8" in migration_runner.JOURNALED_MIGRATION_VERSIONS
 
 
+@pytest.mark.skipif(
+    PACKAGE_EDITION == "Community",
+    reason="the withdrawn v4.4.8 full-chain validator requires Enterprise-only governance migrations",
+)
 def test_v448_static_contract_accepts_current_source():
     from live_db_validator import V448_MIGRATION_SCRIPTS, validate_v448_static_contract
 
