@@ -976,7 +976,7 @@ def approve_registration(
     organization_scopes = {str(item).upper() for item in organization_access.get("scopes", [])}
     def work(tx: Any) -> Dict[str, Any]:
         scope_clause = ""
-        params = {"organization_id": organization_id, "actor_principal_id": actor_principal_id}
+        params = {"organization_id": organization_id}
         if "ALL" not in organization_scopes:
             scope_clause = (
                 " AND EXISTS (SELECT 1 FROM CX_ORGANIZATION_MEMBERS actor_org "
@@ -985,6 +985,7 @@ def approve_registration(
                 "AND actor_org.MEMBERSHIP_KIND = 'PRIMARY' AND actor_org.STATUS = 'ACTIVE' "
                 "AND path.DESCENDANT_ID = CX_ORGANIZATIONS.ORGANIZATION_ID)"
             )
+            params["actor_principal_id"] = actor_principal_id
         organization = _row(tx.query_one(
             "SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS "
             "WHERE ORGANIZATION_ID = :organization_id AND STATUS = 'ACTIVE'" + scope_clause + " FOR UPDATE",
@@ -2299,7 +2300,7 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
             raise IdentityError("Enrollment node binding failed")
         if row.get("public_key_constraint") and row["public_key_constraint"] != public_key:
             raise IdentityError("Enrollment key binding failed")
-        if row.get("grant_runtime") and runtime and row["grant_runtime"] != runtime:
+        if row.get("grant_runtime") and str(row["grant_runtime"]).upper() != "UNSPECIFIED" and runtime and row["grant_runtime"] != runtime:
             raise IdentityError("Enrollment runtime binding failed")
         if row.get("grant_environment") and environment and row["grant_environment"] != environment:
             raise IdentityError("Enrollment environment binding failed")
@@ -2340,6 +2341,18 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
         return {"agent_id": generated_agent_id, "status": status, "owner_principal_id": row["owner_principal_id"], "sponsor_principal_id": row["sponsor_principal_id"], "responsible_group_id": row.get("responsible_group_id"), "credential_type": cred_type, "credential": secret if cred_type == "CLIENT_SECRET" else None, "security_domain_id": row.get("security_domain_id"), "environment": environment or row.get("grant_environment"), "runtime": runtime or row.get("grant_runtime")}
 
     result = connection.execute_transaction_callback(work)
+    # Enrollment is also the database identity boundary. External Agents must
+    # never become usable through the Gateway while sharing the Schema Owner
+    # connection. Each adapter provisions and verifies its least-privilege
+    # login here so the Skill-first registration flow is complete by default.
+    try:
+        from . import agent_api
+        ensure_identity = getattr(agent_api, "ensure_external_agent_identity", None)
+        if not callable(ensure_identity):
+            raise RuntimeError("database adapter does not provide external Agent identity provisioning")
+        ensure_identity(result["agent_id"])
+    except Exception as exc:
+        raise IdentityError("Agent database identity provisioning failed") from exc
     _audit(result["owner_principal_id"], "AGENT_ENROLLMENT_REDEEM", "AGENT", result["agent_id"], "ALLOW", "one-time token consumed")
     return result
 
@@ -2948,13 +2961,14 @@ def enqueue_notification(
         return {**normalized, "notification_id": existing.get("notification_id"), "idempotent": True}
     notification_id = _id("NT")
     encoded = {"level": normalized["level"], "required_action": normalized["required_action"], **normalized["payload"]}
+    database_deadline = _timestamp(deadline_at) if deadline_at else None
     connection.execute(
         "INSERT INTO CX_NOTIFICATIONS(NOTIFICATION_ID, PRINCIPAL_ID, NOTIFICATION_TYPE, DEDUPE_KEY, "
         "PAYLOAD_JSON, NOTIFICATION_LEVEL, DEADLINE_AT) VALUES (:notification_id, :principal_id, :notification_type, "
-        ":dedupe_key, :payload, :level, :deadline_at)",
+        ":dedupe_key, :payload, :notification_level, :deadline_at)",
         {"notification_id": notification_id, "principal_id": principal_id,
          "notification_type": normalized["notification_type"], "dedupe_key": normalized["dedupe_key"],
-         "payload": _json(encoded), "level": normalized["level"], "deadline_at": deadline_at},
+         "payload": _json(encoded), "notification_level": normalized["level"], "deadline_at": database_deadline},
     )
     return {**normalized, "notification_id": notification_id, "idempotent": False}
 

@@ -19,6 +19,40 @@ from .connection import execute, execute_query, execute_query_one, sanitize_row
 
 ACTIVE_STATUSES = {"ACTIVE"}
 INACTIVE_STATUSES = {"DISABLED", "REVOKED", "EXPIRED", "DUPLICATE_CONFLICT"}
+EMBEDDING_MODES = {"PLATFORM_MANAGED", "AGENT_MANAGED"}
+
+
+def embedding_contract_advertisement() -> Dict[str, Any]:
+    """Return non-secret Contract metadata for external Agent configuration."""
+    try:
+        from . import embedding_governance
+        effective = embedding_governance.effective_binding()
+        profile = effective.get("profile") or {}
+        contract = effective.get("contract") or {}
+        return {
+            "ready": bool(effective.get("ready")),
+            "model_id": profile.get("model_id"),
+            "profile_key": profile.get("profile_key"),
+            "model_fingerprint": contract.get("model_fingerprint") or profile.get("model_fingerprint"),
+            "dimension": contract.get("dimension") or profile.get("dimension"),
+            "distance_metric": contract.get("distance_metric") or profile.get("distance_metric") or "COSINE",
+            "normalize_vectors": contract.get("normalize_vectors") or profile.get("normalize_vectors") or "Y",
+        }
+    except Exception:
+        return {"ready": False}
+
+
+def validate_embedding_declaration(mode: str = "PLATFORM_MANAGED", *, model_id: str = "",
+                                   fingerprint: str = "", dimension: Optional[int] = None,
+                                   distance_metric: str = "COSINE", normalize: bool = True) -> str:
+    normalized = _normalise(mode).upper() or "PLATFORM_MANAGED"
+    if normalized not in EMBEDDING_MODES:
+        raise ValueError("embedding_mode must be PLATFORM_MANAGED or AGENT_MANAGED")
+    if normalized == "AGENT_MANAGED":
+        _validate_agent_embedding_contract(model_id, fingerprint, dimension, distance_metric, normalize)
+    elif dimension is not None or model_id or fingerprint:
+        raise ValueError("platform-managed registration must not provide Agent Embedding metadata")
+    return normalized
 
 
 def _now() -> datetime:
@@ -71,6 +105,8 @@ def get_registration(agent_id: str) -> Optional[Dict[str, Any]]:
         row = execute_query_one(
             """SELECT AGENT_ID, OWNER_REF, RUNTIME, ENVIRONMENT, NODE_ID,
                       CAPABILITIES_JSON, CREDENTIAL_VERSION, STATUS,
+                      EMBEDDING_MODE, EMBEDDING_MODEL_ID, EMBEDDING_FINGERPRINT,
+                      EMBEDDING_DIMENSION, EMBEDDING_DISTANCE_METRIC, EMBEDDING_NORMALIZE,
                       REGISTERED_AT, LAST_SEEN_AT, EXPIRES_AT, IDEMPOTENCY_KEY,
                       CREATED_BY, UPDATED_AT
                  FROM AGENT_REGISTRATIONS WHERE AGENT_ID = :agent_id""",
@@ -93,6 +129,12 @@ def register_agent(
     expires_at: Optional[datetime] = None,
     idempotency_key: Optional[str] = None,
     created_by: str = "administrator",
+    embedding_mode: str = "PLATFORM_MANAGED",
+    embedding_model_id: str = "",
+    embedding_fingerprint: str = "",
+    embedding_dimension: Optional[int] = None,
+    embedding_distance_metric: str = "COSINE",
+    embedding_normalize: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """Create or idempotently refresh a registered Agent.
 
@@ -104,12 +146,19 @@ def register_agent(
         raise ValueError("agent_id is required and must be at most 128 characters")
     if not _normalise(owner_ref):
         raise ValueError("owner_ref is required")
+    embedding_mode = validate_embedding_declaration(
+        embedding_mode, model_id=embedding_model_id, fingerprint=embedding_fingerprint,
+        dimension=embedding_dimension, distance_metric=embedding_distance_metric,
+        normalize=embedding_normalize,
+    )
     idempotency_key = _normalise(idempotency_key) or f"reg-{uuid.uuid4().hex}"
     credential = credential or f"agt_{secrets.token_urlsafe(32)}"
     existing = get_registration(agent_id)
     if existing:
         same_key = _normalise(existing.get("idempotency_key")) == idempotency_key
         if same_key:
+            if _normalise(existing.get("embedding_mode") or "PLATFORM_MANAGED").upper() != embedding_mode:
+                raise ValueError("idempotent registration Embedding mode differs from the existing registration")
             result = dict(existing)
             result["idempotent"] = True
             return result
@@ -131,6 +180,12 @@ def register_agent(
         "expires_at": expires_at,
         "idempotency_key": idempotency_key[:160],
         "created_by": created_by[:256],
+        "embedding_mode": embedding_mode,
+        "embedding_model_id": _normalise(embedding_model_id)[:256] or None,
+        "embedding_fingerprint": _normalise(embedding_fingerprint)[:256] or None,
+        "embedding_dimension": int(embedding_dimension) if embedding_dimension is not None else None,
+        "embedding_distance_metric": _normalise(embedding_distance_metric).upper()[:32] or "COSINE",
+        "embedding_normalize": "Y" if embedding_normalize else "N",
     }
     try:
         if existing:
@@ -145,6 +200,9 @@ def register_agent(
                           CREDENTIAL_HASH = :credential_hash, STATUS = :status,
                           EXPIRES_AT = :expires_at,
                           IDEMPOTENCY_KEY = :idempotency_key,
+                          EMBEDDING_MODE = :embedding_mode, EMBEDDING_MODEL_ID = :embedding_model_id,
+                          EMBEDDING_FINGERPRINT = :embedding_fingerprint, EMBEDDING_DIMENSION = :embedding_dimension,
+                          EMBEDDING_DISTANCE_METRIC = :embedding_distance_metric, EMBEDDING_NORMALIZE = :embedding_normalize,
                           UPDATED_AT = CURRENT_TIMESTAMP
                     WHERE AGENT_ID = :agent_id""",
                 update_params,
@@ -155,12 +213,16 @@ def register_agent(
                     (AGENT_ID, OWNER_REF, RUNTIME, ENVIRONMENT, NODE_ID,
                      CAPABILITIES_JSON, CREDENTIAL_VERSION, CREDENTIAL_HASH,
                      STATUS, REGISTERED_AT, LAST_SEEN_AT, EXPIRES_AT,
-                     IDEMPOTENCY_KEY, CREATED_BY, UPDATED_AT)
+                     IDEMPOTENCY_KEY, CREATED_BY, UPDATED_AT, EMBEDDING_MODE,
+                     EMBEDDING_MODEL_ID, EMBEDDING_FINGERPRINT, EMBEDDING_DIMENSION,
+                     EMBEDDING_DISTANCE_METRIC, EMBEDDING_NORMALIZE)
                          VALUES (:agent_id, :owner_ref, :runtime, :environment, :node_id,
                          :capabilities, :credential_version, :credential_hash,
                          :status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
                          :expires_at, :idempotency_key, :created_by,
-                         CURRENT_TIMESTAMP)""",
+                         CURRENT_TIMESTAMP, :embedding_mode, :embedding_model_id,
+                         :embedding_fingerprint, :embedding_dimension,
+                         :embedding_distance_metric, :embedding_normalize)""",
                 params,
             )
     except Exception:
@@ -173,6 +235,39 @@ def register_agent(
     result["credential"] = credential
     result["idempotent"] = False
     return result
+
+
+def _validate_agent_embedding_contract(model_id: str, fingerprint: str, dimension: Optional[int], metric: str, normalize: bool) -> None:
+    """Validate Agent-owned vectors against the database-authoritative Contract."""
+    if not _normalise(model_id) or not dimension:
+        raise ValueError("Agent-managed Embedding requires model_id and dimension")
+    if int(dimension) <= 0 or int(dimension) > 65536:
+        raise ValueError("Agent-managed Embedding dimension is invalid")
+    metric = _normalise(metric).upper() or "COSINE"
+    if metric not in {"COSINE", "EUCLIDEAN", "DOT_PRODUCT"}:
+        raise ValueError("Agent-managed Embedding distance metric is invalid")
+    try:
+        from . import embedding_governance
+        effective = embedding_governance.effective_binding()
+        profile = effective.get("profile") or {}
+        contract = effective.get("contract") or {}
+    except Exception as exc:
+        raise ValueError("platform Embedding Contract is unavailable") from exc
+    if not effective.get("ready") or not profile:
+        raise ValueError("platform Embedding Contract is not ready")
+    expected_fp = _normalise(contract.get("model_fingerprint") or profile.get("model_fingerprint"))
+    if expected_fp:
+        if not _normalise(fingerprint) or _normalise(fingerprint) != expected_fp:
+            raise ValueError("Agent Embedding fingerprint does not match the platform Contract")
+    elif _normalise(model_id) != _normalise(profile.get("model_id")):
+        raise ValueError("Agent Embedding model does not match the platform Contract")
+    if int(dimension) != int(contract.get("dimension") or profile.get("dimension") or 0):
+        raise ValueError("Agent Embedding dimension does not match the platform Contract")
+    if metric != _normalise(contract.get("distance_metric") or profile.get("distance_metric") or "COSINE").upper():
+        raise ValueError("Agent Embedding distance metric does not match the platform Contract")
+    expected_norm = _normalise(contract.get("normalize_vectors") or profile.get("normalize_vectors") or "Y").upper()
+    if ("Y" if normalize else "N") != expected_norm:
+        raise ValueError("Agent Embedding normalization does not match the platform Contract")
 
 
 def adopt_legacy_agent(agent_id: str, created_by: str = "legacy-confirmation") -> Optional[Dict[str, Any]]:

@@ -1,7 +1,72 @@
 # Changelog
 
-## v4.4.10 - 2026-08-24
+## v4.4.10 - 2026-08-27
 
+- Validates all three Enterprise editions from dedicated zero-object targets:
+  Oracle and YashanDB PDBs plus a PostgreSQL database reach migration 65,
+  native management-Agent bootstrap, scoped Knowledge, and `verify`.
+- Adds bounded PostgreSQL AGE and Agent-role prerequisites and closes trusted
+  actual-owner policies on forced-RLS tables without granting SUPERUSER.
+
+- Completes the real external-Agent full-capability gate on Oracle,
+  PostgreSQL, and YashanDB Enterprise, including Memory Candidate submission,
+  Human promotion, Agent-private Knowledge write/read, and company-wide
+  publication denial. The redacted combined result contains no reusable
+  credential.
+- Adds `memory.propose`, `knowledge.read`, and `knowledge.write` Gateway scopes
+  and routes. Agent knowledge is owned by the producing Agent, defaults to
+  private visibility, and resolves organization scope from the authoritative
+  owner hierarchy.
+- Adds migration 65 to close external-Agent Security Domain context, including
+  forced PostgreSQL Agent-self RLS. Also fixes SSE native timestamp encoding,
+  reusable-thread Agent-context cleanup, Oracle bind naming, Oracle/YashanDB
+  native timestamp binds, and service-name preservation in external endpoint
+  discovery.
+
+- Added direct Oracle `CREATE TRIGGER` to the consolidated owner prerequisite
+  and blocking preflight contract, preventing migration 22 from failing after
+  partial schema creation with `ORA-01031`.
+
+- Closes organization application governance end to end: submission creates a
+  unique unified approval item; self-decision is denied; approval atomically
+  publishes facts, closure, typed history, subtree authority invalidation and
+  audit; rejection atomically terminates both records. Migration 60 carries the
+  portable database contract.
+- Makes unified STEP approval apply its paused-plan effect in the same
+  transaction and makes confirmed platform Action Cards recoverable after an
+  interrupted command handoff.
+- Blocks Oracle initialization unless the active Oracle Home proves that
+  Partitioning is enabled. The Oracle fresh baseline no longer compiles against
+  a not-yet-created table, calls an unavailable configuration function, or
+  creates a duplicate index; foundational execution stops at the first genuine
+  SQL failure instead of continuing into dependent ORA errors.
+- Keeps Oracle/YashanDB anonymous blocks with local functions or procedures
+  intact through their slash terminator so lifecycle migrations cannot be
+  truncated at an inner `END;`.
+- Passes a real Oracle Enterprise empty-schema initialization through terminal
+  migration 59, native Agent postflight, `RETIRED`, and `verify`; first-line
+  local procedure declarations are no longer split from their outer block.
+- Removes pre-grant `DBMS_CRYPTO` dependency from Oracle Memory adoption,
+  removes active-migration `AIADMIN` hard-coding, validates the complete Deep
+  Data Security owner privilege set, and creates the administrative Data Role
+  idempotently.
+- Uses exact Oracle bind sets for isolation-inventory and deployment-state
+  writes while preserving both derived shape and inheritance semantics.
+- Removes the client-side backup-manifest requirement from verified empty-target
+  initialization. The bootstrap records a database-managed, no-pre-existing-data
+  recovery boundary. Existing-target upgrades explain the database-managed
+  recovery boundary and require interactive `UPGRADE` confirmation, or
+  `--confirm-database-backup` for automation; the journal explicitly records
+  that backup state is not client-verifiable.
+- Adds explicit listen-address and Web-port prompts to the first-run wizard,
+  validates the port range, persists the resolved binding, and reports it at
+  completion without exposing secrets.
+- Always displays the LLM model ID in the first-run wizard and rejects partial
+  LLM configuration where only the API URL or only the model ID is supplied.
+  A bounded one-Token probe must verify the returned model identity before the
+  wizard persists configured LLM values. Stable aliases may resolve to the same
+  model basename with a bounded numeric/date version suffix, while arbitrary
+  suffixes remain rejected.
 - Repairs executive-wallboard runtime integrity by using one coherent Agent
   identity across ownership, registry, Session, Task Plan, and Loop facts.
 - Runtime-source failures now produce degraded partial responses with

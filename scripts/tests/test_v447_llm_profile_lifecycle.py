@@ -82,6 +82,9 @@ def test_retire_unreferenced_llm_profile_revokes_secret(monkeypatch):
 
 def test_llm_probe_accepts_provider_namespace_but_rejects_wrong_model():
     assert native_agent_api._llm_model_matches("qwen3.8-27b", "qwen/qwen3.8-27b")
+    assert native_agent_api._llm_model_matches("deepseek-v4-flash", "deepseek-v4-flash-0731")
+    assert native_agent_api._llm_model_matches("vendor/deepseek-v4-flash", "deepseek/deepseek-v4-flash-2026-07-31")
+    assert not native_agent_api._llm_model_matches("deepseek-v4-flash", "deepseek-v4-flash-other")
     assert not native_agent_api._llm_model_matches("qwen3.6-35b-a3b-claude-4.6-opus-reasoning-distilled", "qwen/qwen3.8-27b")
     assert not native_agent_api._llm_model_matches("qwen3.8-27b", "")
     assert "LLM provider probe failed" in (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")

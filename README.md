@@ -284,6 +284,7 @@ On first run, the script detects unresolved `<PLACEHOLDER>` tokens in
 for:
 
 - **database**: `user`, `password`, `dsn`
+- **server**: listen address and Web port, using the package defaults
 - **llm**: `api_url`, `model`, `api_key`
 - **embedding**: `api_url`, `model`, `dimension`
 
@@ -291,6 +292,10 @@ You can also run the wizard standalone:
 ```bash
 bash scripts/config_wizard.sh
 ```
+
+The wizard validates the Web port as an integer from `1` through `65535`,
+persists both server values, and prints the final binding without printing
+credentials or API keys.
 
 ### Path B — Manual edit
 
@@ -323,14 +328,21 @@ Environment variables override `config.json` values (see `config.py`).
 ### Database schema
 
 ```bash
-bash scripts/install_platform.sh initialize --version v4.4.10 --database oracle --edition <community|enterprise> --config config.json --backup-evidence release_evidence/backup.json
+bash scripts/install_platform.sh initialize --version v4.4.10 --database oracle --edition <community|enterprise> --config config.json
 ```
 
 The interactive command prompts twice for a deployment-specific initial
-`admin` password and requires recoverable backup evidence. Automation uses
+`admin` password. It first verifies an empty target and records a
+database-managed `NO_PREEXISTING_PLATFORM_DATA` boundary; no backup manifest
+is required on the client machine. Automation uses
 `--admin-password-file` with a current-user-owned regular file at mode `0600`
 or stricter. The plaintext password is never stored in configuration,
 deployment journals, or evidence.
+
+For an existing recognized target, `upgrade` explains that backup and recovery
+are database-managed and requires the operator to type `UPGRADE`. Automation
+uses `--confirm-database-backup`. The accepted responsibility is journaled as
+not client-verifiable; no client-side backup manifest is required.
 
 This runs the deploy scripts in `scripts/deploy/`:
 `1_schema.sql` → `7_v4_0_1_migration.sql` → `2_api.sql` → `3_jobs.sql` →
@@ -347,7 +359,7 @@ scripts for Community and ten for Enterprise in this migration tail.
 ### Start the server
 
 ```bash
-./start_web_server.sh
+./start_web_server.sh start
 # or, after selecting any Python 3.14+ runtime
 source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"

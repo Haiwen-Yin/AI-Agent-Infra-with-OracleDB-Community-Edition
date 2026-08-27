@@ -16,7 +16,6 @@ Environment overrides:
 """
 
 import os
-import base64
 import json
 import socket
 import sys
@@ -109,11 +108,8 @@ def _apply_config_file(name: str) -> None:
     encrypted = section.pop("_encrypted", None)
     section.pop("_key_source", None)
     if encrypted:
-        from lib.connection_crypto import decrypt_section
-        key = base64.b64decode(
-            (Path.home() / ".oracle-infra" / "master.key").read_text(encoding="ascii").strip()
-        )
-        section.update(decrypt_section(encrypted, key))
+        from lib.connection_crypto import decrypt_section, get_master_key
+        section.update(decrypt_section(encrypted, get_master_key()))
     DB_CONFIGS[name].update(section)
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from . import connection, identity_api, cursor_pagination
@@ -754,6 +754,14 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
         _require(actor, "agents.operate")
     if not finding_id or not required_action.strip() or not reason.strip():
         raise ComplianceError("Finding, required action, and reason are required")
+    effective_deadline = deadline_at or (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    try:
+        database_deadline = datetime.fromisoformat(effective_deadline.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ComplianceError("Remediation deadline is invalid") from exc
+    if database_deadline.tzinfo is None:
+        database_deadline = database_deadline.replace(tzinfo=timezone.utc)
+    effective_deadline = database_deadline.isoformat()
     case_id = _id("REM")
     def work(tx: Any) -> Dict[str, Any]:
         finding = _row(tx.query_one(
@@ -773,7 +781,7 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
             "INSERT INTO CX_COMPLIANCE_REMEDIATION_CASES(CASE_ID,FINDING_ID,AGENT_ID,REQUIRED_ACTION,RESPONSE_SCHEMA_JSON,STATUS,DEADLINE_AT,CREATED_BY) "
             "VALUES (:case_id,:finding_id,:agent_id,:required_action,:schema,'OPEN',:deadline_at,:actor)",
             {"case_id": case_id, "finding_id": finding_id, "agent_id": finding["agent_id"],
-             "required_action": required_action[:128], "schema": _json(schema), "deadline_at": deadline_at or None, "actor": actor})
+             "required_action": required_action[:128], "schema": _json(schema), "deadline_at": database_deadline, "actor": actor})
         tx.execute("UPDATE CX_COMPLIANCE_FINDINGS SET STATUS='REMEDIATING',UPDATED_AT=CURRENT_TIMESTAMP WHERE FINDING_ID=:finding_id", {"finding_id": finding_id})
         _audit_tx(tx, actor, "COMPLIANCE_REMEDIATION_CREATE", "COMPLIANCE_FINDING", finding_id, "ALLOW", reason)
         return {"case_id": case_id, "agent_id": finding["agent_id"], "status": "OPEN", "idempotent": False}
@@ -785,7 +793,7 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
             str(result["agent_id"]), "COMPLIANCE_REMEDIATION", "ACTION_REQUIRED",
             "compliance-remediation:" + str(result["case_id"]),
             {"case_id": result["case_id"], "finding_id": finding_id, "required_action": required_action[:128]},
-            deadline_at=deadline_at or None,
+            deadline_at=effective_deadline,
         )
     return result
 

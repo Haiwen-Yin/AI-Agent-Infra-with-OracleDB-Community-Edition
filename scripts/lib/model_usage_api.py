@@ -413,11 +413,9 @@ def wallboard(actor: str, definition_id: str = "") -> Dict[str, Any]:
         # genuine, successfully queried zero.
         runtime_error = True
         runtime = {"agents": {"total": None, "online": None, "busy": None, "idle": None, "dormant": None}, "sessions": {"active": None}, "tasks": {"running_plans": None, "running_loops": None}, "stalled_count": None}
-    native_scope, native_params = monitor_api._overview_agent_scope(actor, "a", definition["scope"])
     native_agents = _row(connection.execute_query_one(
         "SELECT COUNT(*) AS TOTAL, SUM(CASE WHEN n.STATUS='ACTIVE' THEN 1 ELSE 0 END) AS ACTIVE "
-        "FROM CX_NATIVE_AGENTS n JOIN AGENT_REGISTRY a ON a.AGENT_ID=n.AGENT_ID"
-        + (" WHERE " + native_scope if native_scope else ""), native_params,
+        "FROM CX_NATIVE_AGENTS n", {},
     ))
     runtime_agents = _row(runtime.get("agents") or {})
     quota_scope, quota_params = _usage_scope(actor, "r", definition["scope"])

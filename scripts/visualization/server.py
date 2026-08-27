@@ -100,7 +100,6 @@ PAGE_ROUTES = {
     '/workspaces': 'workspaces.html',
     '/graph': 'graph.html',
     '/specs': 'specs.html',
-    '/collab': 'collab.html',
     '/skills': 'skills.html',
     '/branches': 'branches.html',
     '/loops': 'loops.html',
@@ -2058,6 +2057,12 @@ class VisHandler(BaseHTTPRequestHandler):
                 environment=data.get('environment', 'managed'), node_id=data.get('node_id', ''),
                 capabilities=data.get('capabilities') or [], credential_version=data.get('credential_version', '1'),
                 expires_at=None, idempotency_key=data.get('idempotency_key'), created_by='admin-token',
+                embedding_mode=data.get('embedding_mode') or 'PLATFORM_MANAGED',
+                embedding_model_id=data.get('embedding_model_id') or '',
+                embedding_fingerprint=data.get('embedding_fingerprint') or '',
+                embedding_dimension=data.get('embedding_dimension'),
+                embedding_distance_metric=data.get('embedding_distance_metric') or 'COSINE',
+                embedding_normalize=data.get('embedding_normalize', True),
             )
             if not result:
                 self._send_json({'error': 'v4.1.0 governance migration is not installed'}, 503)
@@ -2065,6 +2070,8 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({
                 'agent_id': result.get('agent_id'), 'status': result.get('status'),
                 'credential': result.get('credential'), 'credential_version': result.get('credential_version'),
+                'embedding_mode': result.get('embedding_mode') or data.get('embedding_mode') or 'PLATFORM_MANAGED',
+                'embedding_contract': agent_registration.embedding_contract_advertisement(),
                 'idempotent': result.get('idempotent', False),
             }, 201 if not result.get('idempotent') else 200)
         except ValueError as exc:
@@ -3880,6 +3887,14 @@ class VisHandler(BaseHTTPRequestHandler):
             self._send_json({'error': 'agent_id, agent_name, and admin_token are required'}, 400)
             return
         try:
+            agent_registration.validate_embedding_declaration(
+                data.get('embedding_mode') or 'PLATFORM_MANAGED',
+                model_id=data.get('embedding_model_id') or '',
+                fingerprint=data.get('embedding_fingerprint') or '',
+                dimension=data.get('embedding_dimension'),
+                distance_metric=data.get('embedding_distance_metric') or 'COSINE',
+                normalize=data.get('embedding_normalize', True),
+            )
             result = agent_api.register_agent_via_admin(
                 agent_id=agent_id,
                 agent_name=agent_name,
@@ -3903,6 +3918,12 @@ class VisHandler(BaseHTTPRequestHandler):
                         capabilities=data.get('capabilities') or [],
                         credential_version='1', created_by='admin-token',
                         idempotency_key=data.get('idempotency_key'),
+                        embedding_mode=data.get('embedding_mode') or 'PLATFORM_MANAGED',
+                        embedding_model_id=data.get('embedding_model_id') or '',
+                        embedding_fingerprint=data.get('embedding_fingerprint') or '',
+                        embedding_dimension=data.get('embedding_dimension'),
+                        embedding_distance_metric=data.get('embedding_distance_metric') or 'COSINE',
+                        embedding_normalize=data.get('embedding_normalize', True),
                     )
                     if registration:
                         result['platform_registration'] = {
@@ -3910,9 +3931,13 @@ class VisHandler(BaseHTTPRequestHandler):
                             'status': registration.get('status'),
                             'credential': registration.get('credential'),
                             'credential_version': registration.get('credential_version'),
+                            'embedding_mode': registration.get('embedding_mode') or data.get('embedding_mode') or 'PLATFORM_MANAGED',
+                            'embedding_contract': agent_registration.embedding_contract_advertisement(),
                         }
                 except Exception as registration_error:
-                    logger.warning('Platform Agent registration was not persisted: %s', registration_error)
+                    logger.error('Platform Agent registration was not persisted: %s', registration_error)
+                    self._send_json({'error': str(registration_error)}, 409)
+                    return
             self._send_json(result)
         except Exception as e:
             self._send_json({'error': str(e)}, 500)
@@ -4912,7 +4937,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 html = f.read()
             timeout = _session_timeout()
             html = html.replace('4.4.10', VERSION)
-            html = html.replace('2026-08-24', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('2026-08-27', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(
@@ -5365,6 +5390,10 @@ def main():
     except Exception:
         pass
 
+    # Keep legacy handlers on the actual bound port.  This prevents their
+    # port-scoped session cookie from diverging when callers choose a custom
+    # listener port without exporting MEMORY_SERVER_PORT.
+    os.environ['MEMORY_SERVER_PORT'] = str(port)
     server = ThreadingHTTPServer((host, port), VisHandler)
     print("[server] AI Agent Infra v{} Community Edition visualization server".format(VERSION))
     print("[server] Listening on http://{}:{}".format(host, port))

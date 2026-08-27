@@ -249,3 +249,13 @@ def test_v410_public_error_contract_and_routes_are_present():
     source = (ROOT / "shared" / "web_app.py").read_text(encoding="utf-8")
     for marker in ("correlation_id", "retryable", "X-Correlation-ID", "/api/model-gateway/quotas", "/api/model-finance/overview", "/api/model-evidence/ingest", "/api/wallboard/definitions"):
         assert marker in source
+
+
+@pytest.mark.skipif(GENERATED, reason="frontend source inspection is a unified-source gate")
+def test_model_governance_forms_have_responsive_non_overlapping_layout():
+    css = (ROOT / "shared" / "web" / "src" / "app.css").read_text(encoding="utf-8")
+    assert ".model-governance-panel .config-field.config-multiline" in css
+    assert "grid-template-rows: 16px auto minmax(22px, auto)" in css
+    assert ".governance-action-forms > .compact-configuration-form" in css
+    assert "@media (max-width: 1180px) { .governance-action-forms { grid-template-columns: 1fr; } }" in css
+    assert "@media (max-width: 520px)" in css

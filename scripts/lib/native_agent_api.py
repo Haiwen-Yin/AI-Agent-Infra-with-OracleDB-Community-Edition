@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import time
 import urllib.error
@@ -90,12 +91,20 @@ def _digest(value: Any) -> str:
 
 
 def _llm_model_matches(expected: Any, observed: Any) -> bool:
-    """Accept provider namespaces, but never silently accept another model."""
+    """Accept provider namespaces and bounded numeric alias resolutions."""
     expected_name = _text(expected, 256).lower()
     observed_name = _text(observed, 256).lower()
     if not expected_name or not observed_name:
         return False
-    return observed_name == expected_name or observed_name.rsplit("/", 1)[-1] == expected_name.rsplit("/", 1)[-1]
+    expected_base = expected_name.rsplit("/", 1)[-1]
+    observed_base = observed_name.rsplit("/", 1)[-1]
+    if observed_name == expected_name or observed_base == expected_base:
+        return True
+    prefix = expected_base + "-"
+    if not observed_base.startswith(prefix):
+        return False
+    version = observed_base[len(prefix):]
+    return re.fullmatch(r"(?:\d{3,8}|\d{4}-\d{2}-\d{2})", version) is not None
 
 
 def _enterprise() -> bool:
@@ -828,17 +837,25 @@ def upsert_llm_profile(actor: str, profile_key: str, provider_url: str, model_id
             # encrypted secret; callers can clear it explicitly through the
             # dedicated rotation/revocation operation.
             if cipher:
+                update_params = {
+                    key: params[key]
+                    for key in ("id", "url", "model", "cipher", "secret", "approved", "actor", "reason")
+                }
                 tx.execute(
                     "UPDATE CX_LLM_PROVIDER_PROFILES SET PROVIDER_URL=:url,MODEL_ID=:model,API_KEY_CIPHER=:cipher,"
                     "SECRET_PRESENT=:secret,APPROVED_FOR_JSON=:approved,VERSION=VERSION+1,UPDATED_BY=:actor,"
                     "UPDATE_REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:id",
-                    params,
+                    update_params,
                 )
             else:
+                update_params = {
+                    key: params[key]
+                    for key in ("id", "url", "model", "approved", "actor", "reason")
+                }
                 tx.execute(
                     "UPDATE CX_LLM_PROVIDER_PROFILES SET PROVIDER_URL=:url,MODEL_ID=:model,APPROVED_FOR_JSON=:approved,"
                     "VERSION=VERSION+1,UPDATED_BY=:actor,UPDATE_REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:id",
-                    params,
+                    update_params,
                 )
         else:
             tx.execute(

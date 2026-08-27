@@ -235,6 +235,46 @@ def test_registration_approval_atomically_assigns_primary_organization():
     assert "execute_transaction_callback(work)" in function
 
 
+@pytest.mark.parametrize(
+    ("scopes", "expected_params", "expects_scope_clause"),
+    [
+        (["ALL"], {"organization_id": "org-1"}, False),
+        (["ORG_SUBTREE"], {"organization_id": "org-1", "actor_principal_id": "approver-1"}, True),
+    ],
+)
+def test_registration_approval_sends_only_sql_bind_parameters(
+    monkeypatch, scopes, expected_params, expects_scope_clause,
+):
+    captured = {}
+
+    class StopAfterOrganizationQuery(Exception):
+        pass
+
+    class Transaction:
+        @staticmethod
+        def query_one(sql, params):
+            captured.update({"sql": sql, "params": params})
+            raise StopAfterOrganizationQuery
+
+    monkeypatch.setattr(identity_api, "_require", lambda *_args: None)
+    monkeypatch.setattr(
+        identity_api,
+        "effective_access",
+        lambda *_args: {"decision": "ALLOW", "scopes": scopes},
+    )
+    monkeypatch.setattr(
+        identity_api.connection,
+        "execute_transaction_callback",
+        lambda callback: callback(Transaction()),
+    )
+
+    with pytest.raises(StopAfterOrganizationQuery):
+        identity_api.approve_registration("request-1", "approver-1", "reviewed", "org-1")
+
+    assert captured["params"] == expected_params
+    assert (":actor_principal_id" in captured["sql"]) is expects_scope_clause
+
+
 def test_ordinary_entry_access_requires_primary_organization(monkeypatch):
     monkeypatch.setattr(identity_api.connection, "execute_query_one", lambda *_args, **_kwargs: {
         "status": "ACTIVE", "portal_access": "Y", "app_access": "Y",

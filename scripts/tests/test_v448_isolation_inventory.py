@@ -30,6 +30,9 @@ def test_isolation_inventory_is_idempotent_and_non_overwriting():
     try:
         first = isolation_inventory.ensure_isolation_inventory()
         assert first["inserted"] == len(isolation_inventory.INVENTORY)
+        assert "derived" not in db.inserted[0]
+        assert db.inserted[0]["inheritance"] == "SOURCE:NONE"
+        assert db.inserted[0]["reason"] == "v4.4.10 database-authoritative isolation baseline"
         second = isolation_inventory.ensure_isolation_inventory()
         assert second["inserted"] == 0
     finally:

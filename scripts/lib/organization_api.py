@@ -12,6 +12,8 @@ import csv
 import hashlib
 import io
 import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from . import connection, identity_api
@@ -24,6 +26,7 @@ ANOMALY_ACTION = "organizations.anomalies.read"
 CHANGE_ACTION = "organizations.changes.write"
 CREATE_ACTION = "organizations.changes.create"
 SUBMIT_ACTION = "organizations.changes.submit"
+APPROVE_ACTION = "organizations.changes.approve"
 PUBLISH_ACTION = "organizations.changes.publish"
 HISTORY_ACTION = "organizations.history.read"
 SYNC_ACTION = "organizations.sync.manage"
@@ -31,7 +34,7 @@ SYNC_ACTION = "organizations.sync.manage"
 MEMBERSHIP_KINDS = {"PRIMARY", "SECONDARY"}
 REPORTING_TYPES = {"DIRECT", "DOTTED", "PROJECT_LEAD"}
 AGENT_ROLES = {"PRIMARY_OWNER", "SPONSOR", "OPERATOR", "VIEWER"}
-CHANGE_STATUSES = {"DRAFT", "VALIDATED", "PENDING_APPROVAL", "SCHEDULED", "PUBLISHED", "CANCELLED", "REJECTED"}
+CHANGE_STATUSES = {"DRAFT", "VALIDATED", "PENDING_APPROVAL", "APPROVED", "PUBLISHING", "SCHEDULED", "PUBLISHED", "CANCELLED", "REJECTED"}
 OPERATION_TYPES = {
     "CREATE_ORGANIZATION", "RENAME_ORGANIZATION", "UPDATE_ORGANIZATION",
     "MOVE_ORGANIZATION", "RETIRE_ORGANIZATION", "ADD_MEMBERSHIP",
@@ -66,7 +69,16 @@ def _rows(values: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    def encode(item: Any) -> Any:
+        if isinstance(item, (datetime, date)):
+            return item.isoformat()
+        if isinstance(item, Decimal):
+            return str(item)
+        if isinstance(item, (bytes, bytearray)):
+            return bytes(item).hex()
+        raise TypeError(f"unsupported organization JSON value: {type(item).__name__}")
+
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=encode)
 
 
 def _load_json(value: Any, default: Any) -> Any:
@@ -576,6 +588,54 @@ def _change_for_actor(change_id: str, actor: str, *, lock: bool = False, executo
     return row
 
 
+def _change_for_decision(change_id: str, actor: str, *, executor: Any) -> Dict[str, Any]:
+    """Load a submitted change only after the caller's approval authority is checked."""
+    access = _access(actor, APPROVE_ACTION)
+    row = _row(executor.query_one(
+        "SELECT CHANGE_SET_ID, STATUS, BASE_VERSION_ID, AUTHOR_PRINCIPAL_ID, REASON, RISK_LEVEL, "
+        "SCHEDULED_FOR, ROW_VERSION FROM CX_ORG_CHANGESETS WHERE CHANGE_SET_ID = :change_id FOR UPDATE",
+        {"change_id": _text(change_id, "change_id", 256, required=True)},
+    ))
+    if not row:
+        raise OrganizationError("organization change is unavailable")
+    if "ALL" not in {str(item).upper() for item in access.get("scopes", [])}:
+        for item in _operations(change_id, executor):
+            payload = item.get("payload") or {}
+            target_type = str(item.get("target_type") or "ORGANIZATION").upper()
+            organization_id = ""
+            if str(item.get("operation_type") or "") == "CREATE_ORGANIZATION":
+                organization_id = str(payload.get("parent_id") or "")
+            elif target_type == "ORGANIZATION":
+                organization_id = str(item.get("target_id") or "")
+            elif target_type == "MEMBERSHIP":
+                organization_id = str(payload.get("organization_id") or "")
+                if not organization_id:
+                    existing = _row(executor.query_one(
+                        "SELECT ORGANIZATION_ID FROM CX_ORGANIZATION_MEMBERS WHERE MEMBERSHIP_ID = :target_id",
+                        {"target_id": item.get("target_id")},
+                    )) or {}
+                    organization_id = str(existing.get("organization_id") or "")
+            elif target_type == "REPORTING":
+                principal_id = str(payload.get("principal_id") or "")
+                if not principal_id:
+                    existing = _operation_snapshot_tx(executor, item)
+                    principal_id = str(existing.get("principal_id") or "")
+                membership = _row(executor.query_one(
+                    "SELECT ORGANIZATION_ID FROM CX_ORGANIZATION_MEMBERS WHERE PRINCIPAL_ID = :principal_id "
+                    "AND MEMBERSHIP_KIND = 'PRIMARY' AND STATUS = 'ACTIVE' " + _limit("one_row"),
+                    {"principal_id": principal_id, "one_row": 1},
+                )) or {}
+                organization_id = str(membership.get("organization_id") or "")
+            elif target_type == "AGENT_RELATIONSHIP":
+                organization_id = str(payload.get("responsible_organization_id") or "")
+                if not organization_id:
+                    existing = _operation_snapshot_tx(executor, item)
+                    organization_id = str(existing.get("responsible_organization_id") or "")
+            if not organization_id or not _visible_organization(actor, organization_id, APPROVE_ACTION):
+                raise PermissionError("organization approval target is outside the approver scope")
+    return row
+
+
 def _operations(change_id: str, executor: Any = None) -> List[Dict[str, Any]]:
     executor = executor or connection
     query = getattr(executor, "query", None) or executor.execute_query
@@ -670,12 +730,39 @@ def append_operation(
     normalized_target_type = str(target_type or "").upper()
     if normalized_target_type not in {"ORGANIZATION", "MEMBERSHIP", "REPORTING", "AGENT_RELATIONSHIP"}:
         raise OrganizationError("operation target type is invalid")
+    auto_organization_id = (
+        str(operation_type or "").upper() == "CREATE_ORGANIZATION"
+        and not str((command or {}).get("organization_id") or "").strip()
+    )
     operation = _canonical_operation(operation_type, target_id, command, expected_row_version)
     operation["target_type"] = normalized_target_type
+    existing = _operations(change_id)
     if operation["operation_type"] == "CREATE_ORGANIZATION":
         if normalized_target_type != "ORGANIZATION":
             raise OrganizationError("operation target type is invalid")
+        pending_ids = {
+            str((item.get("payload") or {}).get("organization_id") or item.get("target_id") or "")
+            for item in existing
+            if str(item.get("operation_type") or "").upper() == "CREATE_ORGANIZATION"
+        }
+        organization_id = str(operation["payload"]["organization_id"])
+        for _ in range(5):
+            persisted = _query_one(
+                "SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS WHERE ORGANIZATION_ID = :organization_id",
+                {"organization_id": organization_id},
+            )
+            if not persisted and organization_id not in pending_ids:
+                break
+            if not auto_organization_id:
+                raise OrganizationConflict("organization ID already exists")
+            organization_id = _id("ORG")
+            operation["payload"]["organization_id"] = organization_id
+            operation["target_id"] = organization_id
+        else:
+            raise OrganizationConflict("unique organization ID could not be generated")
         parent_id = str(operation["payload"].get("parent_id") or "")
+        if parent_id and parent_id == organization_id:
+            raise OrganizationError("organization cannot be its own parent")
         if parent_id:
             _require_visible(actor_principal_id, parent_id, CHANGE_ACTION)
     elif normalized_target_type == "ORGANIZATION":
@@ -705,7 +792,6 @@ def append_operation(
         agent_id = str(operation["payload"].get("agent_id") or "")
         if not agent_id or not identity_api._agent_visible_to(actor_principal_id, agent_id):
             raise OrganizationError("operation target is unavailable")
-    existing = _operations(change_id)
     if len(existing) >= MAX_DRAFT_OPERATIONS:
         raise OrganizationError("organization change operation limit exceeded")
     operation_id = _id("OCO")
@@ -745,7 +831,7 @@ def _proposed_parents(operations: Sequence[Mapping[str, Any]], executor: Any = N
         target = str(item.get("target_id") or "")
         if kind == "CREATE_ORGANIZATION":
             if target in parents:
-                raise OrganizationConflict("organization version conflict")
+                raise OrganizationConflict("organization ID already exists")
             parent = payload.get("parent_id")
             parents[target] = str(parent) if parent else None
             versions[target] = 0
@@ -892,22 +978,137 @@ def redo_operation(actor_principal_id: str, change_id: str) -> Dict[str, Any]:
     return get_change_set(actor_principal_id, change_id)
 
 
-def submit_change_set(actor_principal_id: str, change_id: str) -> Dict[str, Any]:
-    """Freeze a validated draft for approval; publication remains a separate action."""
-    _access(actor_principal_id, SUBMIT_ACTION)
+def cancel_change_set(actor_principal_id: str, change_id: str, reason: str) -> Dict[str, Any]:
+    """Cancel an unpublished draft while retaining its operations as audit evidence."""
+    _access(actor_principal_id, CHANGE_ACTION)
     change = _change_for_actor(change_id, actor_principal_id)
-    if str(change.get("status") or "").upper() != "VALIDATED":
-        raise OrganizationConflict("organization change must be validated before submission")
+    if (
+        str(change.get("author_principal_id") or "") != actor_principal_id
+        and not identity_api._protected_bootstrap_admin(actor_principal_id)
+    ):
+        raise PermissionError("only the organization requester can cancel this change")
+    status = str(change.get("status") or "").upper()
+    if status not in {"DRAFT", "VALIDATED"}:
+        raise OrganizationConflict("organization change cannot be cancelled")
+    clean_reason = _text(reason, "reason", 2000, required=True)
     changed = connection.execute(
-        "UPDATE CX_ORG_CHANGESETS SET STATUS = 'PENDING_APPROVAL', SUBMITTED_AT = CURRENT_TIMESTAMP, "
+        "UPDATE CX_ORG_CHANGESETS SET STATUS = 'CANCELLED', OUTCOME_JSON = :outcome_json, "
         "ROW_VERSION = ROW_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
-        "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'VALIDATED'",
-        {"change_id": change_id},
+        "WHERE CHANGE_SET_ID = :change_id AND STATUS IN ('DRAFT','VALIDATED')",
+        {
+            "change_id": change_id,
+            "outcome_json": _json({"cancelled_by": actor_principal_id, "reason": clean_reason}),
+        },
     )
     if changed != 1:
-        raise OrganizationConflict("organization change was submitted concurrently")
-    identity_api._audit(actor_principal_id, "ORG_CHANGESET_SUBMIT", "ORG_CHANGESET", change_id, "ALLOW", str(change.get("reason") or "approval requested"))
+        raise OrganizationConflict("organization change was updated concurrently")
+    identity_api._audit(
+        actor_principal_id,
+        "ORG_CHANGESET_CANCEL",
+        "ORG_CHANGESET",
+        change_id,
+        "ALLOW",
+        clean_reason,
+    )
     return get_change_set(actor_principal_id, change_id)
+
+
+def submit_change_set(actor_principal_id: str, change_id: str) -> Dict[str, Any]:
+    """Freeze a validated draft and atomically enqueue its approval request."""
+    _access(actor_principal_id, SUBMIT_ACTION)
+    approval_id = _id("APR")
+
+    def work(tx: Any) -> Dict[str, Any]:
+        change = _change_for_actor(change_id, actor_principal_id, lock=True, executor=tx)
+        status = str(change.get("status") or "").upper()
+        if status == "PENDING_APPROVAL":
+            existing = _row(tx.query_one(
+                "SELECT APPROVAL_ID FROM APPROVAL_REQUESTS WHERE ENTITY_TYPE = 'ORGANIZATION_CHANGE' "
+                "AND ENTITY_ID = :change_id AND APPROVAL_STATUS = 'PENDING' ORDER BY CREATED_AT DESC " + _limit("one_row"),
+                {"change_id": change_id, "one_row": 1},
+            ))
+            if not existing:
+                raise OrganizationConflict("organization approval request is missing")
+            return {"change_id": change_id, "status": status, "approval_id": existing["approval_id"], "idempotent": True}
+        if status != "VALIDATED":
+            raise OrganizationConflict("organization change must be validated before submission")
+        operations = _operations(change_id, tx)
+        if not operations:
+            raise OrganizationConflict("organization change has no operations")
+        current = _current_version(tx, lock=True)
+        if str(change.get("base_version_id") or "") != current["version_id"]:
+            raise OrganizationConflict("organization version changed")
+        changed = tx.execute(
+            "UPDATE CX_ORG_CHANGESETS SET STATUS = 'PENDING_APPROVAL', SUBMITTED_AT = CURRENT_TIMESTAMP, "
+            "ROW_VERSION = ROW_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'VALIDATED'",
+            {"change_id": change_id},
+        )
+        if changed != 1:
+            raise OrganizationConflict("organization change was submitted concurrently")
+        tx.execute(
+            "INSERT INTO APPROVAL_REQUESTS(APPROVAL_ID, ENTITY_TYPE, ENTITY_ID, REQUESTED_BY) "
+            "VALUES (:approval_id, 'ORGANIZATION_CHANGE', :change_id, :requested_by)",
+            {"approval_id": approval_id, "change_id": change_id, "requested_by": actor_principal_id},
+        )
+        identity_api._audit_tx(tx, actor_principal_id, "ORG_CHANGESET_SUBMIT", "ORG_CHANGESET", change_id, "ALLOW", str(change.get("reason") or "approval requested"))
+        return {"change_id": change_id, "status": "PENDING_APPROVAL", "approval_id": approval_id, "idempotent": False}
+
+    submitted = connection.execute_transaction_callback(work)
+    result = get_change_set(actor_principal_id, change_id)
+    result.update({key: submitted[key] for key in ("approval_id", "idempotent")})
+    return result
+
+
+def withdraw_change_set(actor_principal_id: str, change_id: str, reason: str) -> Dict[str, Any]:
+    """Withdraw the author's pending request and restore its validated snapshot."""
+    _access(actor_principal_id, SUBMIT_ACTION)
+    reason = _text(reason, "reason", 500, required=True)
+
+    def work(tx: Any) -> Dict[str, Any]:
+        change = _change_for_actor(change_id, actor_principal_id, lock=True, executor=tx)
+        if str(change.get("author_principal_id") or "") != actor_principal_id:
+            raise PermissionError("only the organization requester can withdraw their change")
+        if str(change.get("status") or "").upper() != "PENDING_APPROVAL":
+            raise OrganizationConflict("organization change is not awaiting approval")
+        request = _row(tx.query_one(
+            "SELECT APPROVAL_ID, APPROVAL_STATUS FROM APPROVAL_REQUESTS "
+            "WHERE ENTITY_TYPE = 'ORGANIZATION_CHANGE' AND ENTITY_ID = :change_id "
+            "AND APPROVAL_STATUS = 'PENDING' FOR UPDATE",
+            {"change_id": change_id},
+        ))
+        approval_id = str((request or {}).get("approval_id") or "")
+        decided = 1
+        if request:
+            withdrawn_reason = "WITHDRAWN: " + reason
+            decided = tx.execute(
+                "UPDATE APPROVAL_REQUESTS SET APPROVAL_STATUS = 'REJECTED', APPROVED_BY = NULL, "
+                "APPROVED_AT = CURRENT_TIMESTAMP, REJECT_REASON = :reason WHERE APPROVAL_ID = :approval_id "
+                "AND APPROVAL_STATUS = 'PENDING'",
+                {"reason": withdrawn_reason, "approval_id": approval_id},
+            )
+        changed = tx.execute(
+            "UPDATE CX_ORG_CHANGESETS SET STATUS = 'VALIDATED', SUBMITTED_AT = NULL, OUTCOME_JSON = NULL, "
+            "ROW_VERSION = ROW_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'PENDING_APPROVAL'",
+            {"change_id": change_id},
+        )
+        if decided != 1 or changed != 1:
+            raise OrganizationConflict("organization withdrawal was decided concurrently")
+        identity_api._audit_tx(
+            tx, actor_principal_id,
+            "ORG_CHANGESET_WITHDRAW" if request else "ORG_CHANGESET_WITHDRAW_ORPHAN_RECOVERY",
+            "ORG_CHANGESET",
+            change_id, "ALLOW", reason,
+        )
+        return {"approval_id": approval_id or None, "change_id": change_id, "status": "VALIDATED",
+                "orphan_recovered": not bool(request)}
+
+    withdrawn = connection.execute_transaction_callback(work)
+    result = get_change_set(actor_principal_id, change_id)
+    result["withdrawn_approval_id"] = withdrawn["approval_id"]
+    result["orphan_recovered"] = withdrawn["orphan_recovered"]
+    return result
 
 
 def _snapshot_tx(tx: Any, organization_id: str) -> Dict[str, Any]:
@@ -934,10 +1135,26 @@ def _operation_snapshot_tx(tx: Any, item: Mapping[str, Any]) -> Dict[str, Any]:
             "WHERE MEMBERSHIP_ID = :membership_id",
             {"membership_id": membership_id},
         )) or {}
+    if target_type == "REPORTING":
+        relationship_id = str(payload.get("relationship_id") or target)
+        return _row(tx.query_one(
+            "SELECT RELATIONSHIP_ID, PRINCIPAL_ID, MANAGER_PRINCIPAL_ID, RELATIONSHIP_TYPE, VALID_FROM, "
+            "VALID_UNTIL, SOURCE_TYPE, STATUS, ROW_VERSION FROM CX_REPORTING_RELATIONSHIPS "
+            "WHERE RELATIONSHIP_ID = :relationship_id",
+            {"relationship_id": relationship_id},
+        )) or {}
+    if target_type == "AGENT_RELATIONSHIP":
+        relationship_id = str(payload.get("relationship_id") or target)
+        return _row(tx.query_one(
+            "SELECT RELATIONSHIP_ID, AGENT_ID, PRINCIPAL_ID, RELATIONSHIP_ROLE, RESPONSIBLE_GROUP_ID, "
+            "RESPONSIBLE_ORGANIZATION_ID, STATUS, CREATED_AT, ENDED_AT FROM CX_AGENT_RELATIONSHIPS "
+            "WHERE RELATIONSHIP_ID = :relationship_id",
+            {"relationship_id": relationship_id},
+        )) or {}
     return {}
 
 
-def _apply_low_risk_tx(tx: Any, item: Mapping[str, Any], actor: str) -> tuple[Dict[str, Any], Dict[str, Any], List[str], bool, str]:
+def _apply_operation_tx(tx: Any, item: Mapping[str, Any], actor: str) -> tuple[Dict[str, Any], Dict[str, Any], List[str], bool, str]:
     kind, target, payload = str(item["operation_type"]), str(item["target_id"]), dict(item.get("payload") or {})
     before = _operation_snapshot_tx(tx, item)
     affected: List[str] = []
@@ -974,7 +1191,8 @@ def _apply_low_risk_tx(tx: Any, item: Mapping[str, Any], actor: str) -> tuple[Di
         params: Dict[str, Any] = {"organization_id": target, "updated_by": actor,
                                   "expected_version": int(item.get("expected_version") if item.get("expected_version") is not None else before.get("row_version") or 0)}
         columns = {"organization_code": "ORGANIZATION_CODE", "organization_type": "ORGANIZATION_TYPE",
-                   "sort_order": "SORT_ORDER", "responsible_principal_id": "RESPONSIBLE_PRINCIPAL_ID"}
+                   "sort_order": "SORT_ORDER", "responsible_principal_id": "RESPONSIBLE_PRINCIPAL_ID",
+                   "security_domain_id": "SECURITY_DOMAIN_ID"}
         for field, column in columns.items():
             if field in payload:
                 assignments.append(column + " = :" + field)
@@ -988,35 +1206,116 @@ def _apply_low_risk_tx(tx: Any, item: Mapping[str, Any], actor: str) -> tuple[Di
         )
         if changed != 1:
             raise OrganizationConflict("organization row changed concurrently")
+    elif kind == "MOVE_ORGANIZATION":
+        changed = tx.execute(
+            "UPDATE CX_ORGANIZATIONS SET PARENT_ID = :parent_id, ROW_VERSION = ROW_VERSION + 1, "
+            "UPDATED_BY = :updated_by, UPDATED_AT = CURRENT_TIMESTAMP WHERE ORGANIZATION_ID = :organization_id "
+            "AND ROW_VERSION = :expected_version AND STATUS <> 'DELETED'",
+            {"parent_id": payload.get("parent_id"), "updated_by": actor, "organization_id": target,
+             "expected_version": int(item.get("expected_version") if item.get("expected_version") is not None else before.get("row_version") or 0)},
+        )
+        if changed != 1:
+            raise OrganizationConflict("organization row changed concurrently")
+        structural = True
+    elif kind == "RETIRE_ORGANIZATION":
+        changed = tx.execute(
+            "UPDATE CX_ORGANIZATIONS SET STATUS = 'RETIRED', VALID_UNTIL = CURRENT_TIMESTAMP, "
+            "ROW_VERSION = ROW_VERSION + 1, UPDATED_BY = :updated_by, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE ORGANIZATION_ID = :organization_id AND ROW_VERSION = :expected_version AND STATUS = 'ACTIVE'",
+            {"updated_by": actor, "organization_id": target,
+             "expected_version": int(item.get("expected_version") if item.get("expected_version") is not None else before.get("row_version") or 0)},
+        )
+        if changed != 1:
+            raise OrganizationConflict("organization row changed concurrently")
+        structural = True
     elif kind == "ADD_MEMBERSHIP":
-        if str(payload.get("membership_kind") or "").upper() != "SECONDARY":
-            raise OrganizationError("primary membership requires approval")
+        membership_kind = str(payload.get("membership_kind") or "SECONDARY").upper()
         membership_id = str(payload.get("membership_id") or _id("OM"))
         affected.append(_text(payload.get("principal_id"), "principal_id", 256, required=True))
+        if membership_kind == "PRIMARY" and tx.query_one(
+            "SELECT MEMBERSHIP_ID FROM CX_ORGANIZATION_MEMBERS WHERE PRINCIPAL_ID = :principal_id "
+            "AND MEMBERSHIP_KIND = 'PRIMARY' AND STATUS = 'ACTIVE' " + _limit("one_row"),
+            {"principal_id": affected[-1], "one_row": 1},
+        ):
+            raise OrganizationConflict("principal already has an active primary organization")
         tx.execute(
             "INSERT INTO CX_ORGANIZATION_MEMBERS(MEMBERSHIP_ID, ORGANIZATION_ID, PRINCIPAL_ID, MEMBERSHIP_KIND, "
             "MEMBERSHIP_ROLE, VALID_FROM, VALID_UNTIL, SOURCE_TYPE, STATUS, ROW_VERSION) "
-            "VALUES (:membership_id, :organization_id, :principal_id, 'SECONDARY', :membership_role, "
+            "VALUES (:membership_id, :organization_id, :principal_id, :membership_kind, :membership_role, "
             ":valid_from, :valid_until, :source_type, 'ACTIVE', 1)",
             {"membership_id": membership_id, "organization_id": payload.get("organization_id") or target,
-             "principal_id": affected[-1], "membership_role": payload.get("membership_role"),
-             "valid_from": payload.get("valid_from"), "valid_until": payload.get("valid_until"),
+             "principal_id": affected[-1], "membership_kind": membership_kind, "membership_role": payload.get("membership_role"),
+             "valid_from": payload.get("valid_from") or identity_api._now(), "valid_until": payload.get("valid_until"),
              "source_type": payload.get("source_type") or "MANUAL"},
         )
     elif kind == "END_MEMBERSHIP":
-        if str(payload.get("membership_kind") or "").upper() != "SECONDARY":
-            raise OrganizationError("primary membership requires approval")
+        membership_kind = str(payload.get("membership_kind") or "SECONDARY").upper()
         affected.append(_text(payload.get("principal_id"), "principal_id", 256, required=True))
         changed = tx.execute(
             "UPDATE CX_ORGANIZATION_MEMBERS SET STATUS = 'ENDED', VALID_UNTIL = CURRENT_TIMESTAMP, "
             "ROW_VERSION = ROW_VERSION + 1 WHERE MEMBERSHIP_ID = :membership_id AND PRINCIPAL_ID = :principal_id "
-            "AND MEMBERSHIP_KIND = 'SECONDARY' AND STATUS = 'ACTIVE'",
-            {"membership_id": payload.get("membership_id") or target, "principal_id": affected[-1]},
+            "AND MEMBERSHIP_KIND = :membership_kind AND STATUS = 'ACTIVE'",
+            {"membership_id": payload.get("membership_id") or target, "principal_id": affected[-1],
+             "membership_kind": membership_kind},
         )
         if changed != 1:
             raise OrganizationConflict("organization membership changed concurrently")
+    elif kind == "SET_REPORTING":
+        relationship_id = str(payload.get("relationship_id") or target)
+        affected.extend([_text(payload.get("principal_id"), "principal_id", 256, required=True),
+                         _text(payload.get("manager_principal_id"), "manager_principal_id", 256, required=True)])
+        tx.execute(
+            "INSERT INTO CX_REPORTING_RELATIONSHIPS(RELATIONSHIP_ID, PRINCIPAL_ID, MANAGER_PRINCIPAL_ID, "
+            "RELATIONSHIP_TYPE, VALID_FROM, VALID_UNTIL, SOURCE_TYPE, STATUS, ROW_VERSION, UPDATED_BY) "
+            "VALUES (:relationship_id, :principal_id, :manager_principal_id, :relationship_type, "
+            ":valid_from, :valid_until, :source_type, 'ACTIVE', 1, :updated_by)",
+            {"relationship_id": relationship_id, "principal_id": affected[-2], "manager_principal_id": affected[-1],
+             "relationship_type": payload.get("relationship_type"), "valid_from": payload.get("valid_from") or identity_api._now(),
+             "valid_until": payload.get("valid_until"), "source_type": payload.get("source_type") or "MANUAL",
+             "updated_by": actor},
+        )
+        scope_organization_id = str((_row(tx.query_one(
+            "SELECT ORGANIZATION_ID FROM CX_ORGANIZATION_MEMBERS WHERE PRINCIPAL_ID = :principal_id "
+            "AND MEMBERSHIP_KIND = 'PRIMARY' AND STATUS = 'ACTIVE' " + _limit("one_row"),
+            {"principal_id": affected[-2], "one_row": 1},
+        )) or {}).get("organization_id") or "")
+    elif kind == "END_REPORTING":
+        relationship_id = str(payload.get("relationship_id") or target)
+        if before.get("principal_id"):
+            affected.append(str(before["principal_id"]))
+        changed = tx.execute(
+            "UPDATE CX_REPORTING_RELATIONSHIPS SET STATUS = 'ENDED', VALID_UNTIL = CURRENT_TIMESTAMP, "
+            "ROW_VERSION = ROW_VERSION + 1, UPDATED_BY = :updated_by, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE RELATIONSHIP_ID = :relationship_id AND STATUS = 'ACTIVE'",
+            {"relationship_id": relationship_id, "updated_by": actor},
+        )
+        if changed != 1:
+            raise OrganizationConflict("reporting relationship changed concurrently")
+    elif kind == "SET_AGENT_RELATIONSHIP":
+        relationship_id = str(payload.get("relationship_id") or target)
+        affected.append(_text(payload.get("principal_id"), "principal_id", 256, required=True))
+        tx.execute(
+            "INSERT INTO CX_AGENT_RELATIONSHIPS(RELATIONSHIP_ID, AGENT_ID, PRINCIPAL_ID, RELATIONSHIP_ROLE, "
+            "RESPONSIBLE_GROUP_ID, RESPONSIBLE_ORGANIZATION_ID, STATUS) VALUES (:relationship_id, :agent_id, "
+            ":principal_id, :relationship_role, :responsible_group_id, :responsible_organization_id, 'ACTIVE')",
+            {"relationship_id": relationship_id, "agent_id": payload.get("agent_id"), "principal_id": affected[-1],
+             "relationship_role": payload.get("relationship_role"), "responsible_group_id": payload.get("responsible_group_id"),
+             "responsible_organization_id": payload.get("responsible_organization_id")},
+        )
+        scope_organization_id = str(payload.get("responsible_organization_id") or "")
+    elif kind == "END_AGENT_RELATIONSHIP":
+        relationship_id = str(payload.get("relationship_id") or target)
+        if before.get("principal_id"):
+            affected.append(str(before["principal_id"]))
+        changed = tx.execute(
+            "UPDATE CX_AGENT_RELATIONSHIPS SET STATUS = 'ENDED', ENDED_AT = CURRENT_TIMESTAMP "
+            "WHERE RELATIONSHIP_ID = :relationship_id AND STATUS = 'ACTIVE'",
+            {"relationship_id": relationship_id},
+        )
+        if changed != 1:
+            raise OrganizationConflict("Agent relationship changed concurrently")
     else:
-        raise OrganizationError("organization change requires approval")
+        raise OrganizationError("organization operation is unsupported")
     return before, _operation_snapshot_tx(tx, item), affected, structural, scope_organization_id
 
 
@@ -1046,26 +1345,70 @@ def _rebuild_closure_tx(tx: Any) -> int:
     return len(closure)
 
 
-def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Dict[str, Any]:
-    _access(actor_principal_id, PUBLISH_ACTION)
+def _publish_change(
+    actor_principal_id: str,
+    change_id: str,
+    reason: str,
+    *,
+    expected_status: str,
+    low_risk_only: bool,
+    approval_id: str = "",
+) -> Dict[str, Any]:
     reason = _text(reason, "reason", 2000, required=True)
+    expected_status = str(expected_status).upper()
+    if expected_status not in {"VALIDATED", "PENDING_APPROVAL"}:
+        raise OrganizationError("organization publication state is invalid")
 
     def work(tx: Any) -> Dict[str, Any]:
-        change = _change_for_actor(change_id, actor_principal_id, lock=True, executor=tx)
-        if str(change.get("status") or "").upper() != "VALIDATED":
+        change = (_change_for_decision(change_id, actor_principal_id, executor=tx) if approval_id
+                  else _change_for_actor(change_id, actor_principal_id, lock=True, executor=tx))
+        emergency_admin = identity_api._protected_bootstrap_admin(actor_principal_id)
+        if (approval_id and str(change.get("author_principal_id") or "") == actor_principal_id
+                and not emergency_admin):
+            raise PermissionError("organization requester cannot approve their own change")
+        if str(change.get("status") or "").upper() != expected_status:
             raise OrganizationConflict("organization change is not ready for publication")
         operations = _operations(change_id, tx)
-        if _risk_for(operations) != "LOW":
+        if low_risk_only and _risk_for(operations) != "LOW":
             raise OrganizationError("organization change requires approval")
         current_version = _current_version(tx, lock=True)
         if str(change.get("base_version_id") or "") != current_version["version_id"]:
             raise OrganizationConflict("organization version changed")
+        moved = tx.execute(
+            "UPDATE CX_ORG_CHANGESETS SET STATUS = 'PUBLISHING', ROW_VERSION = ROW_VERSION + 1, "
+            "UPDATED_AT = CURRENT_TIMESTAMP WHERE CHANGE_SET_ID = :change_id AND STATUS = :expected_status",
+            {"change_id": change_id, "expected_status": expected_status},
+        )
+        if moved != 1:
+            raise OrganizationConflict("organization change was decided concurrently")
         affected: set[str] = set()
+        affected_agents: set[str] = set()
         structural = False
         history: List[tuple[Mapping[str, Any], Dict[str, Any], Dict[str, Any], str]] = []
         for item in operations:
-            before, after, principals, changed_structure, scope_organization_id = _apply_low_risk_tx(tx, item, actor_principal_id)
+            kind = str(item.get("operation_type") or "")
+            target_type = str(item.get("target_type") or "ORGANIZATION").upper()
+            payload = item.get("payload") or {}
+            if target_type == "ORGANIZATION" and kind in {"MOVE_ORGANIZATION", "RETIRE_ORGANIZATION", "UPDATE_ORGANIZATION"}:
+                if kind != "UPDATE_ORGANIZATION" or "security_domain_id" in payload:
+                    affected.update(str(row["principal_id"]) for row in tx.query(
+                        "SELECT DISTINCT m.PRINCIPAL_ID FROM CX_ORGANIZATION_MEMBERS m "
+                        "JOIN CX_ORGANIZATION_CLOSURE c ON c.DESCENDANT_ID = m.ORGANIZATION_ID "
+                        "WHERE c.ANCESTOR_ID = :organization_id AND m.STATUS = 'ACTIVE'",
+                        {"organization_id": item.get("target_id")},
+                    ))
+                    affected_agents.update(str(row["agent_id"]) for row in tx.query(
+                        "SELECT DISTINCT ar.AGENT_ID FROM CX_AGENT_RELATIONSHIPS ar "
+                        "JOIN CX_ORGANIZATION_CLOSURE c ON c.DESCENDANT_ID = ar.RESPONSIBLE_ORGANIZATION_ID "
+                        "WHERE c.ANCESTOR_ID = :organization_id AND ar.STATUS = 'ACTIVE'",
+                        {"organization_id": item.get("target_id")},
+                    ))
+            before, after, principals, changed_structure, scope_organization_id = _apply_operation_tx(tx, item, actor_principal_id)
             affected.update(principals)
+            if (item.get("payload") or {}).get("agent_id"):
+                affected_agents.add(str((item.get("payload") or {})["agent_id"]))
+            if before.get("agent_id"):
+                affected_agents.add(str(before["agent_id"]))
             structural = structural or changed_structure
             history.append((item, before, after, scope_organization_id))
         closure_rows = _rebuild_closure_tx(tx) if structural else 0
@@ -1094,7 +1437,8 @@ def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Di
             target_type = str(item.get("target_type") or "ORGANIZATION").upper()
             fact = after or before
             if target_type == "ORGANIZATION":
-                operation = "INSERT" if item["operation_type"] == "CREATE_ORGANIZATION" else "UPDATE"
+                operation = ("INSERT" if item["operation_type"] == "CREATE_ORGANIZATION" else
+                             "RETIRE" if item["operation_type"] == "RETIRE_ORGANIZATION" else "UPDATE")
                 tx.execute(
                     "INSERT INTO CX_ORGANIZATION_UNIT_HISTORY(HISTORY_ID, VERSION_ID, ORGANIZATION_ID, OPERATION, "
                     "VALID_FROM, VALID_UNTIL, FACT_JSON, FACT_DIGEST, ACTOR_PRINCIPAL_ID, REASON) "
@@ -1119,11 +1463,52 @@ def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Di
                      "valid_until": fact.get("valid_until"), "fact_json": _json(fact), "fact_digest": _digest(fact),
                      "actor": actor_principal_id, "reason": reason},
                 )
+            elif target_type == "REPORTING":
+                operation = "END" if item["operation_type"] == "END_REPORTING" else "INSERT"
+                tx.execute(
+                    "INSERT INTO CX_REPORTING_HISTORY(HISTORY_ID, VERSION_ID, RELATIONSHIP_ID, PRINCIPAL_ID, "
+                    "MANAGER_PRINCIPAL_ID, OPERATION, VALID_FROM, VALID_UNTIL, FACT_JSON, FACT_DIGEST, "
+                    "ACTOR_PRINCIPAL_ID, REASON) VALUES (:history_id, :version_id, :relationship_id, "
+                    ":principal_id, :manager_principal_id, :operation, :valid_from, :valid_until, :fact_json, "
+                    ":fact_digest, :actor, :reason)",
+                    {"history_id": _id("ORH"), "version_id": version_id,
+                     "relationship_id": fact.get("relationship_id") or item["target_id"],
+                     "principal_id": fact.get("principal_id"), "manager_principal_id": fact.get("manager_principal_id"),
+                     "operation": operation, "valid_from": fact.get("valid_from") or identity_api._now(),
+                     "valid_until": fact.get("valid_until"), "fact_json": _json(fact), "fact_digest": _digest(fact),
+                     "actor": actor_principal_id, "reason": reason},
+                )
+            elif target_type == "AGENT_RELATIONSHIP":
+                operation = "END" if item["operation_type"] == "END_AGENT_RELATIONSHIP" else "INSERT"
+                tx.execute(
+                    "INSERT INTO CX_AGENT_RELATIONSHIP_HISTORY(HISTORY_ID, VERSION_ID, RELATIONSHIP_ID, AGENT_ID, "
+                    "PRINCIPAL_ID, RELATIONSHIP_ROLE, RESPONSIBLE_ORGANIZATION_ID, OPERATION, FACT_JSON, "
+                    "FACT_DIGEST, ACTOR_PRINCIPAL_ID, REASON) VALUES (:history_id, :version_id, :relationship_id, "
+                    ":agent_id, :principal_id, :relationship_role, :responsible_organization_id, :operation, "
+                    ":fact_json, :fact_digest, :actor, :reason)",
+                    {"history_id": _id("OAH"), "version_id": version_id,
+                     "relationship_id": fact.get("relationship_id") or item["target_id"],
+                     "agent_id": fact.get("agent_id"), "principal_id": fact.get("principal_id"),
+                     "relationship_role": fact.get("relationship_role"),
+                     "responsible_organization_id": fact.get("responsible_organization_id"), "operation": operation,
+                     "fact_json": _json(fact), "fact_digest": _digest(fact), "actor": actor_principal_id, "reason": reason},
+                )
         for principal_id in sorted(affected):
             tx.execute(
                 "UPDATE CX_PRINCIPALS SET PERMISSION_VERSION = PERMISSION_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
                 "WHERE PRINCIPAL_ID = :principal_id",
                 {"principal_id": principal_id},
+            )
+        for agent_id in sorted(affected_agents):
+            tx.execute(
+                "UPDATE CX_PRINCIPALS SET PERMISSION_VERSION = PERMISSION_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
+                "WHERE PRINCIPAL_ID = :agent_id AND PRINCIPAL_TYPE = 'AGENT'",
+                {"agent_id": agent_id},
+            )
+            tx.execute(
+                "UPDATE CX_AGENT_ACCESS_TOKENS SET REVOKED_AT = CURRENT_TIMESTAMP "
+                "WHERE AGENT_ID = :agent_id AND REVOKED_AT IS NULL",
+                {"agent_id": agent_id},
             )
             tx.execute(
                 "UPDATE CX_WEB_SESSIONS SET REVOKED_AT = CURRENT_TIMESTAMP, REVOKE_REASON = :reason "
@@ -1139,19 +1524,141 @@ def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Di
         changed = tx.execute(
             "UPDATE CX_ORG_CHANGESETS SET STATUS = 'PUBLISHED', PUBLISHED_AT = CURRENT_TIMESTAMP, "
             "OUTCOME_JSON = :outcome_json, UPDATED_AT = CURRENT_TIMESTAMP "
-            "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'VALIDATED'",
+            "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'PUBLISHING'",
             {"outcome_json": _json({"version_id": version_id, "version_number": published_version,
                                     "published_by": actor_principal_id}), "change_id": change_id},
         )
         if changed != 1:
             raise OrganizationConflict("organization change was published concurrently")
+        if approval_id:
+            approved = tx.execute(
+                "UPDATE APPROVAL_REQUESTS SET APPROVAL_STATUS = 'APPROVED', APPROVED_BY = :approver, "
+                "APPROVED_AT = CURRENT_TIMESTAMP WHERE APPROVAL_ID = :approval_id "
+                "AND ENTITY_TYPE = 'ORGANIZATION_CHANGE' AND ENTITY_ID = :change_id "
+                "AND APPROVAL_STATUS = 'PENDING'",
+                {"approver": actor_principal_id, "approval_id": approval_id, "change_id": change_id},
+            )
+            if approved != 1:
+                raise OrganizationConflict("organization approval was decided concurrently")
+            identity_api._audit_tx(tx, actor_principal_id, "ORG_CHANGESET_APPROVE", "APPROVAL_REQUEST", approval_id, "ALLOW", reason)
+            if emergency_admin and str(change.get("author_principal_id") or "") == actor_principal_id:
+                identity_api._audit_tx(
+                    tx, actor_principal_id, "ORG_CHANGESET_EMERGENCY_SELF_APPROVE",
+                    "APPROVAL_REQUEST", approval_id, "ALLOW", reason,
+                )
         identity_api._audit_tx(tx, actor_principal_id, "ORG_CHANGESET_PUBLISH", "ORG_CHANGESET", change_id, "ALLOW", reason)
         return {"change_id": change_id, "status": "PUBLISHED", "published_version_id": version_id,
                 "published_version": published_version,
                 "operation_count": len(operations), "invalidated_principal_count": len(affected),
+                "invalidated_agent_count": len(affected_agents),
                 "closure_row_count": closure_rows}
 
     return connection.execute_transaction_callback(work)
+
+
+def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Dict[str, Any]:
+    """Publish a validated low-risk change without placing it in the approval queue."""
+    _access(actor_principal_id, PUBLISH_ACTION)
+    return _publish_change(actor_principal_id, change_id, reason, expected_status="VALIDATED", low_risk_only=True)
+
+
+def approve_change(actor_principal_id: str, approval_id: str, reason: str) -> Dict[str, Any]:
+    """Approve and publish one organization request as a single transaction."""
+    _access(actor_principal_id, APPROVE_ACTION)
+    reason = _text(reason, "reason", 500, required=True)
+    request = _row(connection.execute_query_one(
+        "SELECT APPROVAL_ID, ENTITY_ID, REQUESTED_BY, APPROVAL_STATUS FROM APPROVAL_REQUESTS "
+        "WHERE APPROVAL_ID = :approval_id AND ENTITY_TYPE = 'ORGANIZATION_CHANGE'",
+        {"approval_id": _text(approval_id, "approval_id", 256, required=True)},
+    ))
+    if not request:
+        raise OrganizationError("organization approval is unavailable")
+    if str(request.get("approval_status") or "").upper() != "PENDING":
+        raise OrganizationConflict("organization approval is already decided")
+    if (str(request.get("requested_by") or "") == actor_principal_id
+            and not identity_api._protected_bootstrap_admin(actor_principal_id)):
+        raise PermissionError("organization requester cannot approve their own change")
+    return _publish_change(
+        actor_principal_id, str(request["entity_id"]), reason,
+        expected_status="PENDING_APPROVAL", low_risk_only=False, approval_id=str(request["approval_id"]),
+    )
+
+
+def reject_change(actor_principal_id: str, approval_id: str, reason: str) -> Dict[str, Any]:
+    """Reject a submitted organization change and its queue item atomically."""
+    _access(actor_principal_id, APPROVE_ACTION)
+    reason = _text(reason, "reason", 500, required=True)
+
+    def work(tx: Any) -> Dict[str, Any]:
+        request = _row(tx.query_one(
+            "SELECT APPROVAL_ID, ENTITY_ID, REQUESTED_BY, APPROVAL_STATUS FROM APPROVAL_REQUESTS "
+            "WHERE APPROVAL_ID = :approval_id AND ENTITY_TYPE = 'ORGANIZATION_CHANGE' FOR UPDATE",
+            {"approval_id": _text(approval_id, "approval_id", 256, required=True)},
+        ))
+        if not request:
+            raise OrganizationError("organization approval is unavailable")
+        if str(request.get("approval_status") or "").upper() != "PENDING":
+            raise OrganizationConflict("organization approval is already decided")
+        emergency_admin = identity_api._protected_bootstrap_admin(actor_principal_id)
+        if (str(request.get("requested_by") or "") == actor_principal_id
+                and not emergency_admin):
+            raise PermissionError("organization requester cannot reject their own change")
+        change_id = str(request["entity_id"])
+        change = _change_for_decision(change_id, actor_principal_id, executor=tx)
+        if str(change.get("status") or "").upper() != "PENDING_APPROVAL":
+            raise OrganizationConflict("organization change is not awaiting approval")
+        decided = tx.execute(
+            "UPDATE APPROVAL_REQUESTS SET APPROVAL_STATUS = 'REJECTED', APPROVED_BY = :approver, "
+            "APPROVED_AT = CURRENT_TIMESTAMP, REJECT_REASON = :reason WHERE APPROVAL_ID = :approval_id "
+            "AND APPROVAL_STATUS = 'PENDING'",
+            {"approver": actor_principal_id, "reason": reason, "approval_id": approval_id},
+        )
+        changed = tx.execute(
+            "UPDATE CX_ORG_CHANGESETS SET STATUS = 'REJECTED', OUTCOME_JSON = :outcome_json, "
+            "ROW_VERSION = ROW_VERSION + 1, UPDATED_AT = CURRENT_TIMESTAMP "
+            "WHERE CHANGE_SET_ID = :change_id AND STATUS = 'PENDING_APPROVAL'",
+            {"outcome_json": _json({"decision": "REJECTED", "decided_by": actor_principal_id, "reason": reason}),
+             "change_id": change_id},
+        )
+        if decided != 1 or changed != 1:
+            raise OrganizationConflict("organization approval was decided concurrently")
+        identity_api._audit_tx(tx, actor_principal_id, "ORG_CHANGESET_REJECT", "APPROVAL_REQUEST", approval_id, "DENY", reason)
+        if emergency_admin and str(request.get("requested_by") or "") == actor_principal_id:
+            identity_api._audit_tx(
+                tx, actor_principal_id, "ORG_CHANGESET_EMERGENCY_SELF_REJECT",
+                "APPROVAL_REQUEST", approval_id, "DENY", reason,
+            )
+        return {"approval_id": approval_id, "change_id": change_id, "status": "REJECTED"}
+
+    return connection.execute_transaction_callback(work)
+
+
+def approval_summary(actor_principal_id: str, change_id: str) -> Dict[str, Any]:
+    """Return the bounded, secret-free organization review payload."""
+    _access(actor_principal_id, APPROVE_ACTION)
+    change = _row(connection.execute_query_one(
+        "SELECT CHANGE_SET_ID, STATUS, BASE_VERSION_ID, AUTHOR_PRINCIPAL_ID, REASON, RISK_LEVEL, "
+        "VALIDATION_JSON, IMPACT_JSON, CREATED_AT, SUBMITTED_AT FROM CX_ORG_CHANGESETS "
+        "WHERE CHANGE_SET_ID = :change_id",
+        {"change_id": _text(change_id, "change_id", 256, required=True)},
+    ))
+    if not change:
+        raise OrganizationError("organization change is unavailable")
+    operations = _operations(change_id)[:100]
+    return {
+        "change_id": change_id,
+        "status": change.get("status"),
+        "author_principal_id": change.get("author_principal_id"),
+        "reason": change.get("reason"),
+        "risk_level": change.get("risk_level"),
+        "validation": _load_json(change.get("validation_json"), {}),
+        "impact": _load_json(change.get("impact_json"), {}),
+        "operations": [{"operation_type": item.get("operation_type"), "target_type": item.get("target_type"),
+                        "target_id": item.get("target_id"), "after": item.get("payload")} for item in operations],
+        "operation_count": len(operations),
+        "created_at": change.get("created_at"),
+        "submitted_at": change.get("submitted_at"),
+    }
 
 
 def list_changes(actor_principal_id: str, limit: int = 100, *, status: str = "") -> List[Dict[str, Any]]:

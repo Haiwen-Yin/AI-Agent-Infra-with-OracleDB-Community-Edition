@@ -21,7 +21,7 @@ within the v4.3.x maturity cycle. Capacity baselines, failure-injection/restore 
 Enterprise multi-Scheduler HA, and complete evaluator migration remain
 evidence-gated follow-up work and are not implied by an unverified build.
 
-## v4.4.9 Current Research Boundary
+## v4.4.10 Current Research Boundary
 
 The Production Profile currently exposes Graph Runtime core and authorized
 inspection. The database capability matrix reports manifest draft import, SLO
@@ -76,6 +76,19 @@ and budget utilization. These metrics are evidence inputs, not universal
 industry benchmarks.
 
 ## Database Strategy
+
+## v4.4.10 Graph Explorer Fixture
+
+The Enterprise demonstration-data entry point also seeds the Graph Explorer
+with four coherent, database-backed execution graphs: Agent admission,
+knowledge release, model governance, and security incident response. Each has
+a published version, registered built-in node types, a compiled plan, and
+linked runs covering `SUCCEEDED`, `RUNNING`, `WAITING`, `REVIEW_REQUIRED`, and
+`FAILED`. The idempotent helper is
+`tools/seed_v410_graph_exploration_data.py`; it must be run with the selected
+Enterprise adapter and is safe to repeat after initialization. This fixture is
+separate from the `ENTITIES`/`ENTITY_EDGES` relationship graph, so both
+exploration surfaces remain independently testable.
 
 The same relational runtime contract is implemented on all three databases.
 Native Property Graph projections provide graph traversal and inspection:

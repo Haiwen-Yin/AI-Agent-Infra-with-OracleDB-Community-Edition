@@ -90,9 +90,12 @@ scope. It shows:
 - bounded provider/model usage and provenance;
 - gateway coverage, generation time, freshness, and stale/error states.
 
-Total, online, and busy use the same authorized `AGENT_REGISTRY` population.
-The API may also return `native_total` and `native_active` as a platform-native
-breakdown; those values are not the overall Agent total.
+Business Agent totals, online, and busy use the authorized `AGENT_REGISTRY`
+population. Platform-native control-plane Agents from `CX_NATIVE_AGENTS` are
+always included in the platform-wide total and online count (and are exposed
+as `native_total` / `native_active`). Native records without activity
+timestamps are not classified as busy. Business organization/security-domain
+filters must not make platform health appear as zero.
 
 Organization-scoped definitions resolve an Agent through its active primary
 Human owner and that Human's current organization membership/closure. Do not

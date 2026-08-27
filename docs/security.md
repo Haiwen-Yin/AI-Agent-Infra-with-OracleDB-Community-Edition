@@ -27,7 +27,7 @@ single-item, graph, and retrieval routes. Missing, expired, or inconsistent
 policy fails closed. Department grouping reuses the governed organization tree;
 it does not create a second client-side authorization hierarchy.
 
-## v4.4.9 Historical Platform Agent And Database Isolation Boundary
+## v4.4.10 Platform Agent And Database Isolation Boundary
 
 v4.4.8 is withdrawn and is not a supported source. The repaired v4.4.9
 isolation behavior is retained as historical context inside the v4.4.10 fresh
@@ -51,6 +51,15 @@ current Deep Data Security End User unless the deployment Owner is acting as
 the administrative exception. Chunk, vector, full-text, and Graph projections
 remain unavailable until equivalent predicates are implemented; only the
 verified signed source projection is exposed.
+
+PostgreSQL uses a non-superuser Schema Owner as the trusted control-plane
+identity. `FORCE ROW LEVEL SECURITY` governs that Owner too, so migration 50
+creates an Owner-only control-plane policy before its default seed and terminal
+migration 65 converges `cx_trusted_schema_owner` on every forced-RLS table.
+The target role is resolved from each relation's actual owner rather than a
+hard-coded username. Dedicated Business Agent LOGIN roles are not members of
+the Owner and cannot use this policy; their RLS predicates and the independent
+`agent_db_identity` mapping remain authoritative.
 
 ## v4.4.3 Security Domain Boundary
 
@@ -127,6 +136,21 @@ mode, and scoped Agent binding. Different Contract versions never enter the
 same similarity or multi-modal fusion calculation. `LEGACY_DEFAULT` is
 read-only until an authorized migration validates a separate Space and
 performs explicit read/write cutover.
+
+External Agents never receive the platform-managed Embedding provider URL or
+credential. They exchange their registered credential for a short-lived
+instance token scoped to `embedding.generate` and call the platform gateway.
+Registration and activation do not grant model use: an external Agent must
+also match an active database grant scoped to its Agent identity, published
+template, organization, or security domain. Explicit denial wins, an absent
+grant fails closed, and grant changes revoke affected short-lived tokens.
+The gateway rechecks compliance posture and the effective Agent/Template/
+Platform Binding, rejects model and provider overrides, bounds input and
+response sizes, verifies vector dimension and finite values, normalizes the
+result, and records only request digests, usage, latency, quota, and audit
+metadata. Plaintext input and vector output are not written to the accounting
+or audit tables. Internet-facing deployments must terminate TLS and must not
+expose an unauthenticated native provider port.
 
 ## v4.3.6 Native Agent Boundary
 
@@ -306,6 +330,12 @@ membership. Registration approval selects that organization and commits the
 account and membership together. Organization changes reject Principals that
 do not have an active login identity; the database membership trigger repeats
 that check against direct writes.
+
+Registration approval evaluates the selected primary organization inside the
+same transaction. Global administrators use the unscoped organization query;
+scoped approvers use the database-side organization-subtree predicate. Runtime
+SQL parameter maps contain only binds present in the selected query so strict
+Oracle-compatible drivers cannot reject an otherwise authorized decision.
 
 The protected bootstrap `admin` is the sole exception. It is a system-recovery
 account, not a natural person, and cannot be assigned to the organization
@@ -639,6 +669,22 @@ Agent registration uses a one-time Enrollment Token bound to owner, sponsor,
 runtime, environment, risk tier, quota, and Security Domain. Token digests and
 credential digests are stored instead of reusable plaintext secrets.
 
+Enrollment redemption is also the database-identity boundary. It creates or
+reuses an adapter-native dedicated login and verifies that credential before
+returning success; PostgreSQL also synchronizes the runtime registry required
+by `agent_db_identity`. Gateway identity uses request-scoped `ContextVar`
+state, not reusable worker-thread local state, preventing an Agent context from
+contaminating a later administrator or different-Agent request. Synchronous
+Gateway handlers additionally bind and clear the verified Agent context inside
+a route decorator with `finally`, because thread-pool workers are reusable.
+Agent-owned direct database work uses the verified dedicated identity. Shared
+Channel, Event, Barrier, compliance, Embedding, containment, Memory, and
+Knowledge control-plane facts may be committed by a control-plane transaction
+only after token, Agent, instance, membership, scope, expiry, and fencing
+checks; the platform does not grant broad shared-table writes to the dedicated
+Agent role as a substitute for those checks. SSE payloads are fully encoded,
+including native database timestamps, before response headers are committed.
+
 Channel membership is deliberately weaker than data authorization. A Channel
 can show attributable collaboration messages and structured control cards, but
 it never expands database, API, Skill, Tool, model, memory, Artifact, or export
@@ -646,6 +692,14 @@ scope. Every Channel, Barrier, and Gateway query rechecks active membership,
 validity, classification, Principal status, instance fencing, and token expiry.
 PostgreSQL RLS applies the same Channel membership predicate to Barrier arrivals
 so an Agent cannot read an arrival merely because it is the arrival's author.
+
+An external Agent may submit a pending Channel Memory Candidate with
+`memory.propose`; only an authorized Human may promote it to a durable Memory
+Artifact. Knowledge writes require `knowledge.write`, are owned by the verified
+Agent, default to `PRINCIPAL_PRIVATE`, and derive organization scope from the
+owner's active organization closure. Direct Agent publication to
+`PUBLIC_COMPANY` is denied. `knowledge.read` applies the same database-backed
+visibility predicate as Human list, item, retrieval, and graph views.
 
 Administrative registration policy changes use optimistic version checks and
 require an authenticated reason. Provider profiles store only a secret-manager

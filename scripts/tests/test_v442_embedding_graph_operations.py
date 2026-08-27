@@ -178,7 +178,9 @@ def test_frontend_localizes_fastapi_validation_and_unknown_api_errors():
     assert 'reason: ["变更原因", "change reason"]' in ui
     assert '"请填写变更原因。"' in ui
     assert '"请求内容不符合要求，请检查必填项和格式。"' in ui
-    assert '"操作未完成，请检查填写内容、当前权限和服务状态。"' in ui
+    assert '"当前账号没有执行此操作的权限。"' in ui
+    assert '"当前版本未提供该功能接口。"' in ui
+    assert '"用户名或密码错误，或账号暂时锁定。"' in ui
 
 
 def test_v442_dashboard_removes_manual_embedding_operations_and_keeps_forms_labeled():
@@ -247,7 +249,8 @@ def test_v442_dashboard_grant_is_named_and_never_binds_runtime():
     route = web_app.split('@app.post("/api/enrollment/grants")', 1)[1].split('@app.post("/api/enrollment/redeem")', 1)[0]
     assert 'agent_name: str = Field(min_length=1' in grant
     assert 'runtime:' not in grant
-    assert 'runtime=""' in route
+    assert 'runtime="UNSPECIFIED"' in route
+    assert "actual runtime during token redemption" in route
 
 
 def test_v442_external_registration_policy_is_controlled_after_async_load():

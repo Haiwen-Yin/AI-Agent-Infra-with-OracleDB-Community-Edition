@@ -105,7 +105,7 @@ Run the journaled upgrade with a recoverable backup record:
 ```bash
 python3.14 scripts/migration_runner.py --version 4.3.2 --edition enterprise \
   --database <oracle|pg|yashandb> --<database>-config config.json \
-  --backup-evidence backup-evidence.json
+  --confirm-database-backup
 ```
 
 Step `23_v4_3_2_memory_lifecycle.sql` adopts existing `MEMORY` entities as

@@ -4,45 +4,359 @@ import pytest
 import migration_runner
 import live_db_validator
 try:
-    from shared.lib import identity_api, model_usage_api, monitor_api
+    from shared.lib import agent_registration, compliance_api, embedding_governance, identity_api, model_usage_api, monitor_api
 except ModuleNotFoundError:  # generated edition
-    from lib import identity_api, model_usage_api, monitor_api
+    from lib import agent_registration, compliance_api, embedding_governance, identity_api, model_usage_api, monitor_api
 
 
 ROOT = Path(__file__).resolve().parents[2]
 GENERATED = (ROOT / "build-manifest.json").is_file()
+if GENERATED:
+    _manifest = __import__("json").loads((ROOT / "build-manifest.json").read_text(encoding="utf-8"))
+    GENERATED_DATABASE = str((_manifest.get("database") or {}).get("key") or "")
+    WEB_APP_SOURCE = ROOT / "scripts" / "web_app.py"
+    LIB_SOURCE = ROOT / "scripts" / "lib"
+    RUNNER_SOURCE = ROOT / "scripts" / "migration_runner.py"
+    DEPLOY_SOURCE = ROOT / "scripts" / "deploy"
+else:
+    GENERATED_DATABASE = ""
+    WEB_APP_SOURCE = ROOT / "shared" / "web_app.py"
+    LIB_SOURCE = ROOT / "shared" / "lib"
+    RUNNER_SOURCE = ROOT / "migration_runner.py"
+    DEPLOY_SOURCE = None
 
 
 @pytest.mark.skipif(GENERATED, reason="cross-adapter script selection is a unified-source gate")
 def test_v410_scripts_are_selected_for_all_adapters():
     for database in ("oracle", "pg", "yashandb"):
         names = migration_runner._v410_script_names(database, ROOT / "config.json", "enterprise")
-        assert names[-5:] == [
+        assert names[-11:] == [
             "55_v4_4_10_model_usage_wallboard.sql",
             "56_v4_4_10_runtime_repair.sql",
             "57_v4_4_10_complete_model_governance.sql",
             "58_v4_4_10_knowledge_scope.sql",
             "59_v4_4_10_knowledge_graph_context.sql",
+            "60_v4_4_10_organization_approval_closure.sql",
+            "61_v4_4_10_external_embedding_authorization.sql",
+            "62_v4_4_10_agent_embedding_contract.sql",
+            "63_v4_4_10_external_agent_gateway_grants.sql",
+            "64_v4_4_10_external_agent_context_repair.sql",
+            "65_v4_4_10_external_agent_domain_context.sql",
         ]
         assert (ROOT / "adapters" / database / "deploy" / names[-1]).is_file()
 
 
+@pytest.mark.skipif(GENERATED, reason="cross-adapter identity implementation is a unified-source gate")
+def test_external_enrollment_provisions_identity_and_uses_request_scoped_context():
+    identity_source = (ROOT / "shared" / "lib" / "identity_api.py").read_text(encoding="utf-8")
+    assert "ensure_external_agent_identity" in identity_source
+    for database in ("oracle", "pg", "yashandb"):
+        agent_source = (ROOT / "adapters" / database / "agent_api.py").read_text(encoding="utf-8")
+        connection_source = (ROOT / "adapters" / database / "connection.py").read_text(encoding="utf-8")
+        assert "def ensure_external_agent_identity" in agent_source
+        assert "ContextVar" in connection_source
+        assert "threading.local()" not in connection_source
+
+
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "pg", reason="PostgreSQL package contract")
+def test_pg_gateway_context_repair_is_agent_scoped():
+    deploy = DEPLOY_SOURCE if GENERATED else ROOT / "adapters" / "pg" / "deploy"
+    sql = (deploy / "64_v4_4_10_external_agent_context_repair.sql").read_text(encoding="utf-8").upper()
+    assert "FORCE ROW LEVEL SECURITY" in sql
+    assert "AGENT_ID = PUBLIC.CURRENT_AGENT_IDENTITY()" in sql
+    assert "PRINCIPAL_ID = PUBLIC.CURRENT_AGENT_IDENTITY()" in sql
+
+
+def test_gateway_token_can_request_every_scope_used_by_external_agent_routes():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    token_route = source.split('def gateway_token(', 1)[1].split('@app.get("/api/gateway/database-endpoint")', 1)[0]
+    for scope in (
+        "channels.read", "channels.write", "barriers.arrive", "actions.propose",
+        "events.read", "compliance.evidence", "compliance.remediation",
+        "embedding.probe", "embedding.generate", "database.endpoint", "skills.read",
+        "memory.propose", "knowledge.read", "knowledge.write",
+    ):
+        assert f'"{scope}"' in token_route
+
+
+def test_external_agent_memory_and_knowledge_routes_are_governed():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    assert '@app.post("/api/gateway/channels/{channel_id}/memory-candidates")' in source
+    assert 'request, "memory.propose"' in source
+    assert 'identity_api.propose_memory_candidate(' in source
+    assert '@app.post("/api/gateway/knowledge")' in source
+    assert '@app.get("/api/gateway/knowledge/{entity_id}")' in source
+    assert 'request, "knowledge.write"' in source
+    assert 'request, "knowledge.read"' in source
+    assert 'scope == "PUBLIC_COMPANY"' in source
+    assert "requires Human publication approval" in source
+
+
+def test_external_agent_event_stream_encodes_database_native_values_before_streaming():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    route = source.split("def gateway_event_stream", 1)[1].split("def gateway_claim", 1)[0]
+    assert 'jsonable_encoder(items)' in route
+    assert 'event_payload = json.dumps' in route
+    assert 'yield "data: " + event_payload' in route
+    assert "attach_agent_database_context=False" in route
+
+
+def test_barrier_arrival_keeps_shared_state_update_in_control_plane_context():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    route = source.split("def gateway_arrival", 1)[1].split("def gateway_action", 1)[0]
+    assert 'request, "barriers.arrive", operation="barriers.arrive"' in route
+    assert "attach_agent_database_context=False" in route
+    assert "agent_gateway_api.submit_arrival" in route
+
+
+def test_external_agent_instance_creation_is_a_control_plane_transaction():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    route = source.split("def gateway_instance", 1)[1].split("def gateway_events", 1)[0]
+    assert 'operation="instances.create"' in route
+    assert "attach_agent_database_context=False" in route
+    assert "agent_gateway_api.create_instance" in route
+
+
+def test_gateway_heartbeat_projects_lease_and_posture_in_control_plane():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    route = source.split("def gateway_heartbeat", 1)[1].split("def gateway_containment", 1)[0]
+    assert 'operation="heartbeat"' in route
+    assert "attach_agent_database_context=False" in route
+
+
+def test_shared_gateway_mutations_do_not_expand_dedicated_login_table_writes():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    for function, successor in (
+        ("gateway_embedding_probe", "gateway_embeddings"),
+        ("gateway_message", "gateway_memory_candidate"),
+        ("gateway_action", "runtime_profile"),
+    ):
+        route = source.split(f"def {function}", 1)[1].split(f"def {successor}", 1)[0]
+        assert "attach_agent_database_context=False" in route
+
+
+def test_agent_management_gateway_uses_fenced_control_plane_tables():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    for function, successor in (
+        ("gateway_containment", "gateway_containment_ack"),
+        ("gateway_containment_ack", "gateway_upgrade_vote"),
+        ("gateway_upgrade_vote", "gateway_upgrade_node"),
+        ("gateway_upgrade_node", "gateway_pending_upgrade_skills"),
+        ("gateway_pending_upgrade_skills", "gateway_upgrade_skill_ack"),
+        ("gateway_upgrade_skill_ack", "gateway_management_artifact_receipt"),
+        ("gateway_management_artifact_receipt", "gateway_evidence"),
+    ):
+        route = source.split(f"def {function}", 1)[1].split(f"def {successor}", 1)[0]
+        assert "attach_agent_database_context=False" in route
+
+
+def test_human_and_gateway_request_entries_clear_reused_worker_agent_context():
+    source = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    principal_route = source.split("def principal(", 1)[1].split("def require_csrf", 1)[0]
+    gateway_context = source.split("def _gateway_context(", 1)[1].split("def _gateway_activation_credential", 1)[0]
+    assert 'getattr(connection, "set_agent_context", None)' in principal_route
+    assert "clear_context(None)" in principal_route
+    assert 'getattr(connection, "set_agent_context", None)' in gateway_context
+    assert "clear_context(None)" in gateway_context
+    assert "finally:" in source.split("def _gateway_request_context", 1)[1].split("def _reclaim_local_agents", 1)[0]
+    gateway_definitions = source.count("\ndef gateway_")
+    decorated_gateways = source.count("\n@_gateway_request_context\ndef gateway_")
+    assert decorated_gateways == gateway_definitions
+
+
+def test_remediation_without_operator_deadline_uses_one_consistent_default():
+    source = (LIB_SOURCE / "compliance_api.py").read_text(encoding="utf-8")
+    function = source.split("def create_remediation", 1)[1].split("def respond_remediation", 1)[0]
+    assert "effective_deadline = deadline_at or" in function
+    assert "database_deadline = datetime.fromisoformat" in function
+    assert '"deadline_at": database_deadline' in function
+    assert "deadline_at=effective_deadline" in function
+
+
+def test_notification_deadline_binds_as_cross_adapter_datetime():
+    source = (LIB_SOURCE / "identity_api.py").read_text(encoding="utf-8")
+    function = source.split("def enqueue_notification", 1)[1].split("def list_notifications", 1)[0]
+    assert "database_deadline = _timestamp(deadline_at)" in function
+    assert '"deadline_at": database_deadline' in function
+    assert ":notification_level" in function
+    assert '"notification_level": normalized["level"]' in function
+    assert ":level" not in function
+
+
+def test_containment_signs_iso_but_binds_native_expiry():
+    source = (LIB_SOURCE / "admin_management.py").read_text(encoding="utf-8")
+    function = source.split("def issue_containment", 1)[1].split("def pull_containment_command", 1)[0]
+    assert "expiry_at = datetime.now(timezone.utc)" in function
+    assert "expiry = expiry_at.isoformat()" in function
+    assert '"expires": expiry_at' in function
+
+
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "pg", reason="PostgreSQL package contract")
+def test_pg_external_agent_domain_context_is_database_scoped():
+    deploy = DEPLOY_SOURCE if GENERATED else ROOT / "adapters" / "pg" / "deploy"
+    sql = (deploy / "65_v4_4_10_external_agent_domain_context.sql").read_text(encoding="utf-8").upper()
+    assert "FORCE ROW LEVEL SECURITY" in sql
+    assert "CX_DOMAIN_MEMBERS_AGENT_SELF" in sql
+    assert "PRINCIPAL_ID = PUBLIC.CURRENT_AGENT_IDENTITY()" in sql
+    assert "CX_SECURITY_DOMAINS_AGENT_MEMBER" in sql
+
+
+@pytest.mark.skipif(GENERATED, reason="cross-adapter authorization migration is a unified-source gate")
+def test_external_embedding_authorization_is_declared_for_all_adapters():
+    markers = {
+        "CX_EMBEDDING_ACCESS_GRANTS", "AGENT", "TEMPLATE", "ORGANIZATION",
+        "SECURITY_DOMAIN", "ALLOW", "DENY",
+    }
+    for database in ("oracle", "pg", "yashandb"):
+        source = (ROOT / "adapters" / database / "deploy" / "61_v4_4_10_external_embedding_authorization.sql").read_text(encoding="utf-8").upper()
+        assert markers <= {marker for marker in markers if marker in source}
+
+
+@pytest.mark.skipif(GENERATED, reason="cross-adapter registration migration is a unified-source gate")
+def test_agent_embedding_registration_contract_is_declared_for_all_adapters():
+    required = {"EMBEDDING_MODE", "EMBEDDING_MODEL_ID", "EMBEDDING_FINGERPRINT", "EMBEDDING_DIMENSION", "EMBEDDING_DISTANCE_METRIC", "EMBEDDING_NORMALIZE"}
+    for database in ("oracle", "pg", "yashandb"):
+        source = (ROOT / "adapters" / database / "deploy" / "62_v4_4_10_agent_embedding_contract.sql").read_text(encoding="utf-8").upper()
+        assert required <= {marker for marker in required if marker in source}
+
+
+def test_agent_managed_embedding_allows_different_name_with_matching_fingerprint(monkeypatch):
+    monkeypatch.setattr(embedding_governance, "effective_binding", lambda: {
+        "ready": True,
+        "profile": {"model_id": "provider-bge-m3", "dimension": 1024, "distance_metric": "COSINE", "normalize_vectors": "Y"},
+        "contract": {"model_fingerprint": "sha256:approved", "dimension": 1024, "distance_metric": "COSINE", "normalize_vectors": "Y"},
+    })
+    assert agent_registration.validate_embedding_declaration(
+        "AGENT_MANAGED", model_id="local-bge-m3", fingerprint="sha256:approved",
+        dimension=1024, distance_metric="COSINE", normalize=True,
+    ) == "AGENT_MANAGED"
+    with pytest.raises(ValueError, match="fingerprint"):
+        agent_registration.validate_embedding_declaration(
+            "AGENT_MANAGED", model_id="local-bge-m3", fingerprint="sha256:different",
+            dimension=1024, distance_metric="COSINE", normalize=True,
+        )
+
+
+@pytest.mark.skipif(GENERATED, reason="source route inspection is a unified-source gate")
+def test_embedding_token_issuance_and_calls_recheck_database_authorization():
+    app = (ROOT / "shared" / "web_app.py").read_text(encoding="utf-8")
+    governance = (ROOT / "shared" / "lib" / "embedding_governance.py").read_text(encoding="utf-8")
+    token_route = app.split('def gateway_token(body: GatewayTokenBody)', 1)[1].split('@app.post("/api/gateway/instances")', 1)[0]
+    gateway = governance.split("def gateway_embeddings(", 1)[1].split("def validate_vector_write", 1)[0]
+    mutations = governance.split("def upsert_access_grant(", 1)[1].split("def _run_managed_job", 1)[0]
+    assert 'if "embedding.generate" in requested:' in token_route
+    assert "require_embedding_gateway_access(body.agent_id)" in token_route
+    assert "require_embedding_gateway_access(actor)" in gateway
+    assert "UPDATE CX_AGENT_ACCESS_TOKENS SET REVOKED_AT=CURRENT_TIMESTAMP" in governance
+    assert mutations.count("_revoke_subject_tokens(") >= 2
+
+
+@pytest.mark.skipif(GENERATED, reason="source/package static path inspection is a unified-source gate")
+def test_generated_package_brand_asset_is_resolved_from_scripts_directory():
+    source = (ROOT / "shared" / "web_app.py").read_text(encoding="utf-8")
+    assert 'Path(__file__).resolve().parent / "scripts" / "visualization" / "static" / file_path' in source
+
+
+@pytest.mark.skipif(GENERATED, reason="source UI inspection is a unified-source gate")
+def test_external_registration_panel_exposes_external_database_endpoint_form():
+    source = (ROOT / "shared" / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    panel = source.split("function ExternalRegistrationPolicyPanel(", 1)[1].split("function AdminAgentStoragePanel(", 1)[0]
+    assert "External Agent database endpoint" in panel
+    assert "/api/platform/external-db-endpoints" in panel
+    assert 'name="host_reference"' in panel
+    assert 'name="tls_required"' in panel
+    assert "database passwords or keys" in panel
+
+
+@pytest.mark.skipif(GENERATED, reason="source/package static path inspection is a unified-source gate")
+def test_external_agent_token_distributes_scoped_database_endpoint():
+    source = (ROOT / "shared" / "web_app.py").read_text(encoding="utf-8")
+    token_route = source.split("def gateway_token", 1)[1].split("def gateway_database_endpoint", 1)[0]
+    assert 'issued["database_endpoint"] = platform_agent_pool.discover_agent_endpoint(body.agent_id)' in token_route
+    assert '"database.endpoint"' in token_route
+    assert 'def gateway_database_endpoint' in source
+    endpoint_route = source.split("def gateway_database_endpoint", 1)[1].split("def gateway_instance", 1)[0]
+    assert "attach_agent_database_context=False" in endpoint_route
+    assert '"Database passwords, keys, and other connection secrets' not in source
+
+
+@pytest.mark.skipif(GENERATED, reason="source/package static path inspection is a unified-source gate")
+def test_external_endpoint_defaults_to_platform_public_target_and_keeps_service_name():
+    source = (ROOT / "shared" / "lib" / "platform_agent_pool.py").read_text(encoding="utf-8")
+    discovery = source.split("def discover_agent_endpoint", 1)[1].split("def register_endpoint", 1)[0]
+    assert "EXTERNAL_GLOBAL" in discovery
+    assert "ORDER BY CREATED_AT DESC" in discovery
+    assert '"service_name"' in discovery
+    assert "_configured_database_endpoint()" in discovery
+
+
+def test_oracle_and_yashandb_dsn_metadata_is_preserved_for_external_agents(monkeypatch):
+    try:
+        from shared.lib import platform_agent_pool
+    except ModuleNotFoundError:
+        from lib import platform_agent_pool
+
+    class Database:
+        dsn = "<DB_HOST>:1688/ai_agent"
+
+    class Config:
+        database = Database()
+
+    import importlib
+    config_module = importlib.import_module(platform_agent_pool.__package__ + ".config")
+    monkeypatch.setattr(config_module, "get_config", lambda: Config())
+    endpoint = platform_agent_pool._configured_database_endpoint()
+    assert endpoint["host"].casefold() == Database.dsn.split(":", 1)[0].casefold()
+    assert endpoint["port"] == 1688
+    assert endpoint["service_name"] == "ai_agent"
+    assert endpoint["dbname"] == "ai_agent"
+
+
+def test_embedding_grant_insert_uses_exact_oracle_bind_set(monkeypatch):
+    class Tx:
+        def __init__(self):
+            self.executed = []
+
+        def query_one(self, sql, _params):
+            if "CX_PRINCIPALS" in sql:
+                return {"principal_id": "AGENT_1"}
+            if "CX_EMBEDDING_ACCESS_GRANTS" in sql:
+                return None
+            return None
+
+        def execute(self, sql, params):
+            self.executed.append((sql, dict(params)))
+            return 1
+
+    tx = Tx()
+    try:
+        from shared.lib import embedding_governance
+    except ModuleNotFoundError:
+        from lib import embedding_governance
+    monkeypatch.setattr(embedding_governance.connection, "execute_transaction_callback", lambda work: work(tx))
+    monkeypatch.setattr(embedding_governance.identity_api, "_audit_tx", lambda *_args: None)
+    result = embedding_governance.upsert_access_grant(
+        "ADMIN", subject_type="AGENT", subject_id="AGENT_1", effect="ALLOW",
+        max_batch_size=2, max_input_chars=8000, reason="approved external embedding",
+    )
+    import re
+    sql, params = next(item for item in tx.executed if "INSERT INTO CX_EMBEDDING_ACCESS_GRANTS" in item[0])
+    assert set(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", sql)) == set(params)
+    assert result["effect"] == "ALLOW"
+    assert any("CX_AGENT_ACCESS_TOKENS" in sql for sql, _params in tx.executed)
+
+
 @pytest.mark.skipif(GENERATED, reason="source release-gate inspection is a unified-source gate")
-def test_pre57_backup_keeps_dialects_isolated_and_validator_allowlist_narrow():
+def test_client_backup_tool_is_not_part_of_the_release_contract():
     import re
 
-    backup = (ROOT / "tools" / "v410_pre57_backup.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.py").read_text(encoding="utf-8")
     validator = (ROOT / "spec_validator.py").read_text(encoding="utf-8")
 
-    assert 'database == "pg"' in backup
-    assert "ON CONFLICT(version) DO UPDATE" in backup
-    assert "MERGE INTO AI_SCHEMA_MIGRATIONS" in backup
-    assert "FROM" + " DUAL" in backup
+    assert not (ROOT / "tools" / "v410_pre57_backup.py").exists()
+    assert '"v410_pre57_backup.py"' not in build
     allowlist = validator.split("dialect_boundary_dual_files = {", 1)[1].split("}", 1)[0]
-    assert set(re.findall(r'\"([^\"]+\.py)\"', allowlist)) == {
-        "migration_runner.py",
-        "v410_pre57_backup.py",
-    }
+    assert set(re.findall(r'\"([^\"]+\.py)\"', allowlist)) == {"migration_runner.py"}
 
 
 @pytest.mark.skipif(GENERATED, reason="cross-adapter validator closure is a unified-source gate")
@@ -54,6 +368,17 @@ def test_live_validator_selects_and_checks_the_v410_contract():
             scripts.extend([deploy / "51_v4_4_9_identity_boundary_repair.sql", deploy / "53_v4_4_9_pg_runtime_boundary.sql"])
         result = live_db_validator.validate_v410_static_contract(database, scripts)
         assert result["passed"] is True, result
+
+
+def test_v410_live_contract_requires_external_embedding_authorization_table():
+    assert "CX_EMBEDDING_ACCESS_GRANTS" in live_db_validator.V410_MODEL_TABLES
+    source = RUNNER_SOURCE.read_text(encoding="utf-8")
+    completeness = source.split('if key == "61_v4_4_10_external_embedding_authorization":', 1)[1].split("if key ==", 1)[0]
+    assert "CX_EMBEDDING_ACCESS_GRANTS" in completeness
+    assert "MAX_BATCH_SIZE" in completeness
+    assert "MAX_INPUT_CHARS" in completeness
+    step_57 = source.split('if key == "57_v4_4_10_complete_model_governance":', 1)[1].split("if key ==", 1)[0]
+    assert '- {"CX_EMBEDDING_ACCESS_GRANTS"}' in step_57
 
 
 @pytest.mark.skipif(GENERATED, reason="source module inspection is a unified-source gate")

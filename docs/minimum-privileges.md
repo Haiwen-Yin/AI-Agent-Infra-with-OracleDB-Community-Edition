@@ -23,6 +23,48 @@ Business Agents use independent identities and cannot fall back to the owner.
 
 ## Required System Privileges
 
+### PostgreSQL 18 deployment owner
+
+Run `deploy/0_pg_database_prerequisites.sql` as the PostgreSQL administrator in
+the dedicated application database with `schema_owner` set to the configured
+non-superuser Owner. The script requires `vector` and `age` to be installed and
+applies only these additional privileges:
+
+| Privilege | Reason |
+|-----------|--------|
+| `USAGE` on `ag_catalog` | Resolve AGE types and graph functions |
+| DML on `ag_catalog.ag_graph` and `ag_label` | Create and maintain the adapter graph namespace |
+| `USAGE, SELECT` on AGE sequences | Allocate AGE catalog identifiers |
+| `EXECUTE` on AGE functions | Invoke the installed AGE API without `LOAD` or SUPERUSER |
+| `CREATE` on the target database | Let AGE create the isolated graph schema |
+| `CREATEROLE` on the Schema Owner | Create one bounded LOGIN per Business Agent |
+| `ADMIN OPTION` on `ai_agent_runtime` | Attach and converge the shared NOLOGIN runtime role |
+
+The prerequisite creates `ai_agent_runtime` as `NOLOGIN NOSUPERUSER NOCREATEDB
+NOCREATEROLE NOINHERIT NOBYPASSRLS` when absent. It never grants SUPERUSER,
+CREATEDB, or BYPASSRLS to the Schema Owner or an Agent. Preflight must report
+both `PG_AGE_OWNER_PRIVILEGES=PASS` and `PG_AGENT_ROLE_ADMIN=PASS` before an
+empty-target initialization starts.
+
+When creating a per-Agent LOGIN, the Admin Agent applies transaction-local
+`createrole_self_grant='set, inherit'`. PostgreSQL therefore grants the bounded
+Schema Owner `ADMIN OPTION` on only the role it just created, allowing later
+password rotation without SUPERUSER, CREATEDB, or BYPASSRLS. Existing Agent
+roles created outside this path require a DBA to grant that role back to the
+Schema Owner with `ADMIN OPTION` before they can be rotated.
+
+### YashanDB 23.5 deployment owner
+
+Run `deploy/0_yashandb_database_prerequisites.sql` as the database
+administrator in the dedicated application PDB. In addition to the schema DDL
+privileges, the bounded Owner requires `CREATE USER` and `ALTER USER` so the
+Admin Agent can provision an independent login and later rotate its password.
+The prerequisite also creates `DEEP_SEC_SESSION_ROLE` with `CREATE SESSION`
+only and grants the Owner `ADMIN OPTION`; the Owner-run Bootstrap policy then
+applies the package's bounded business-object grants. It does not grant DBA,
+SYSDBA, or unrestricted object access. Initialization preflight blocks when a
+user-lifecycle privilege, the role, or its Owner management grant is absent.
+
 ### Phase 1: Schema Deployment (1_schema.sql)
 | Privilege | Reason |
 |-----------|--------|
@@ -31,11 +73,17 @@ Business Agents use independent identities and cannot fall back to the owner.
 | CREATE SEQUENCE | Create sequences (IDENTITY columns on TAGS, TASK_CONTEXT_SNAPSHOTS, etc.) |
 | CREATE VIEW | Create JSON Duality Views (MEMORY_DV, KNOWLEDGE_DV) |
 | CREATE PROCEDURE | Create safe_ddl, safe_idx helper procedures |
+| CREATE TRIGGER | Create organization, lifecycle, audit, and governance enforcement triggers |
 | CREATE PROPERTY GRAPH | Create ORACLE_MEMORY_GRAPH |
-| UNLIMITED TABLESPACE | Or: QUOTA UNLIMITED ON <tablespace_name> |
+| Explicit tablespace quota | Use a DBA-sized finite `QUOTA <size> ON <tablespace_name>`; do not grant `UNLIMITED TABLESPACE` |
 
 **Oracle Text prerequisite (DBA runs `0_oracle_text_prerequisites.sql` before
 `1_schema.sql`)**:
+
+For a fresh v4.4.10 Oracle Enterprise deployment, use the consolidated
+`0_oracle_database_prerequisites.sql` after reviewing its `SCHEMA_OWNER` and
+`APP_TABLESPACE`, and `APP_QUOTA` definitions. The older Text-only script remains available for
+installations whose DBA manages all other grants independently.
 
 | Privilege | Reason |
 |-----------|--------|
@@ -44,11 +92,19 @@ Business Agents use independent identities and cannot fall back to the owner.
 
 These are deployment-time Schema Owner privileges. They are not granted to
 Business Agent End Users and do not expand runtime data scope.
+The consolidated prerequisite also creates `DEEP_SEC_SESSION_ROLE`
+idempotently, grants only `CREATE SESSION` to it, and grants it to the Schema
+Owner with `ADMIN OPTION` so the Deep Data Security policy can attach it to
+Data Roles during initialization.
 
 **Partitioning-specific requirements**:
 - No additional privilege needed for partitioned DDL — `CREATE TABLE` covers it
 - Reference partitioning, LIST+RANGE, and RANGE+HASH are all covered by `CREATE TABLE`
 - ROW MOVEMENT (`ALTER TABLE ... ENABLE ROW MOVEMENT`) requires `ALTER` on the table (auto-granted to schema owner)
+- The active Oracle Home must expose `Partitioning=TRUE` in `V$OPTION`; this is
+  a database-option prerequisite, not a privilege that the installer can grant
+- Grant `SELECT ON SYS.V_$INSTANCE` only when version evidence is required;
+  `SELECT ANY DICTIONARY` and `DBA` are not required
 
 ### Phase 2: API Packages (2_api.sql)
 | Privilege | Reason |
@@ -102,7 +158,7 @@ GRANT CREATE JOB TO MEMORY_SYSTEM_ROLE;
 GRANT CREATE PROPERTY GRAPH TO MEMORY_SYSTEM_ROLE;
 
 -- 3. Grant tablespace quota (instead of UNLIMITED TABLESPACE)
--- ALTER USER openclaw QUOTA UNLIMITED ON USERS;
+-- ALTER USER openclaw QUOTA 20G ON USERS;
 
 -- 4. Grant the role to user
 GRANT MEMORY_SYSTEM_ROLE TO openclaw;
@@ -135,7 +191,7 @@ GRANT CREATE VIEW TO openclaw;
 GRANT CREATE TYPE TO openclaw;
 GRANT CREATE PROPERTY GRAPH TO openclaw;
 GRANT CREATE TRIGGER TO openclaw;
-ALTER USER openclaw QUOTA UNLIMITED ON USERS;
+ALTER USER openclaw QUOTA 20G ON USERS;
 ```
 
 ## Partitioned Tables Requiring Maintenance Access
@@ -161,7 +217,7 @@ REVOKE DBA FROM openclaw;
 REVOKE SELECT ANY DICTIONARY FROM openclaw;
 REVOKE UNLIMITED TABLESPACE FROM openclaw;
 -- Then set explicit quota:
-ALTER USER openclaw QUOTA UNLIMITED ON USERS;
+ALTER USER openclaw QUOTA 20G ON USERS;
 ```
 
 ## Verification Script
@@ -206,6 +262,13 @@ DROP PROPERTY GRAPH _priv_test_pg;
 ## Deep Sec Privileges (AIADMIN)
 
 Required for Deep Data Security deployment and management:
+
+For v4.4.10 Oracle Enterprise these are blocking preflight requirements, not
+optional post-deployment grants. They must be granted directly to the configured
+Schema Owner because privileges inherited only through a role may be unavailable
+while Oracle parses stored PL/SQL or Data Grant statements. Replace `AIADMIN`
+with the configured owner; the active migration does not require that literal
+username.
 
 | Privilege | Reason |
 |-----------|--------|

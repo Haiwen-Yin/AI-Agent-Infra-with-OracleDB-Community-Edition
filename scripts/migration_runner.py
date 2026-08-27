@@ -93,7 +93,7 @@ class MigrationResult:
     failed_statement: int = 0
     checksum: str = ""
     ledger_status: str = ""
-    backup_verified: bool = False
+    database_backup_confirmed: bool = False
     capacity: dict[str, Any] | None = None
     warnings: list[str] | None = None
     step_statuses: list[dict[str, Any]] | None = None
@@ -153,6 +153,19 @@ LEGACY_V442_STEP_CHECKSUMS = {
     "yashandb": {"37_v4_4_2_embedding_graph_operations": frozenset({
         "c1e92386326e9dbb7cd58a4e43d6f479c1ae4dd19696bd58679168ef3907c3f2",
     })},
+}
+
+# The retained local YashanDB Enterprise baseline received migration 62 while
+# its final idempotent table-creation guard was still being normalized.  The
+# old checksum may be adopted only after the migration-specific object/column
+# probe reports the current contract complete; arbitrary checksum changes
+# remain fail-closed.
+LEGACY_V410_STEP_CHECKSUMS = {
+    "yashandb": {
+        "62_v4_4_10_agent_embedding_contract": frozenset({
+            "f656f8f325c9b6a2e64f7d5d4e00161640db39a5f049c28a2b8d94005f2da027",
+        }),
+    },
 }
 
 V434_COMPLIANCE_TABLES = frozenset({
@@ -515,28 +528,6 @@ def _upsert_step_row(cursor: Any, database: str, script: Path, checksum: str,
     )
 
 
-def verify_backup_evidence(path: Path | None) -> tuple[bool, str]:
-    """Verify a small, portable backup manifest without exposing backup data."""
-    if path is None:
-        return False, "backup evidence path was not provided"
-    try:
-        evidence = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return False, f"backup evidence is unreadable: {type(exc).__name__}"
-    if evidence.get("recoverable") is not True:
-        return False, "backup evidence must declare recoverable=true"
-    if not evidence.get("created_at") or not evidence.get("backup_ref"):
-        return False, "backup evidence requires created_at and backup_ref"
-    expected = evidence.get("manifest_sha256")
-    if expected:
-        copy = dict(evidence)
-        copy.pop("manifest_sha256", None)
-        actual = hashlib.sha256(json.dumps(copy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        if actual != str(expected):
-            return False, "backup evidence manifest checksum mismatch"
-    return True, "verified"
-
-
 def _capacity_probe(cursor: Any, database: str, tier: int | None = None) -> dict[str, Any]:
     """Collect comparable, non-destructive capacity facts for migration evidence."""
     tables = ("ENTITIES", "ENTITY_EDGES", "GRAPH_DEFINITIONS", "GRAPH_RUNS")
@@ -759,20 +750,26 @@ def _v448_schema_detected(cursor: Any, database: str) -> bool:
         if database == "pg":
             cursor.execute(
                 "SELECT version FROM ai_schema_migration_steps "
-                "WHERE version IN (%s, %s) AND status IN ('APPLIED', 'RUNNING', 'FAILED')",
-                (WITHDRAWN_SCHEMA_VERSION, "4.4.9"),
+                "WHERE (version IN (%s, %s) AND status IN ('APPLIED', 'RUNNING', 'FAILED')) "
+                "OR (version = %s AND status = 'APPLIED')",
+                (WITHDRAWN_SCHEMA_VERSION, "4.4.9", "4.4.10"),
             )
         else:
             cursor.execute(
                 "SELECT VERSION FROM AI_SCHEMA_MIGRATION_STEPS "
-                "WHERE VERSION IN (:withdrawn_version, :repair_version) "
-                "AND STATUS IN ('APPLIED', 'RUNNING', 'FAILED')",
-                {"withdrawn_version": WITHDRAWN_SCHEMA_VERSION, "repair_version": "4.4.9"},
+                "WHERE (VERSION IN (:withdrawn_version, :repair_version) "
+                "AND STATUS IN ('APPLIED', 'RUNNING', 'FAILED')) "
+                "OR (VERSION = :current_version AND STATUS = 'APPLIED')",
+                {
+                    "withdrawn_version": WITHDRAWN_SCHEMA_VERSION,
+                    "repair_version": "4.4.9",
+                    "current_version": "4.4.10",
+                },
             )
         versions = {str(row[0]) for row in cursor.fetchall()}
         if WITHDRAWN_SCHEMA_VERSION in versions:
             return True
-        if "4.4.9" in versions:
+        if versions & {"4.4.9", "4.4.10"}:
             return False
     except Exception:
         try:
@@ -1305,9 +1302,20 @@ def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
         return bool(capability) and "wallboard.read" in permissions and "model_usage.read" in permissions
     if key == "57_v4_4_10_complete_model_governance":
         present = _schema_tables(cursor, database)
-        return set(V410_MODEL_TABLES) <= present and {
+        return (set(V410_MODEL_TABLES) - {"CX_EMBEDDING_ACCESS_GRANTS"}) <= present and {
             "CORRELATION_ID", "CREDENTIAL_ID",
         } <= _schema_columns(cursor, database, "CX_MODEL_REQUESTS")
+    if key == "61_v4_4_10_external_embedding_authorization":
+        return "CX_EMBEDDING_ACCESS_GRANTS" in _schema_tables(cursor, database) and {
+            "GRANT_ID", "SUBJECT_TYPE", "SUBJECT_ID", "EFFECT",
+            "ALLOWED_PROFILE_ID", "MAX_BATCH_SIZE", "MAX_INPUT_CHARS",
+            "VALID_FROM", "VALID_UNTIL", "STATUS", "VERSION",
+        } <= _schema_columns(cursor, database, "CX_EMBEDDING_ACCESS_GRANTS")
+    if key == "62_v4_4_10_agent_embedding_contract":
+        return "AGENT_REGISTRATIONS" in _schema_tables(cursor, database) and {
+            "EMBEDDING_MODE", "EMBEDDING_MODEL_ID", "EMBEDDING_FINGERPRINT",
+            "EMBEDDING_DIMENSION", "EMBEDDING_DISTANCE_METRIC", "EMBEDDING_NORMALIZE",
+        } <= _schema_columns(cursor, database, "AGENT_REGISTRATIONS")
     if key == "49_v4_4_8_security_domain_rls":
         return _v448_pg_security_domain_complete(cursor)
     return True
@@ -1326,6 +1334,15 @@ def _legacy_v442_step_compatible(cursor: Any, database: str, script: Path,
                                  checksum: str) -> bool:
     """Adopt only the recorded pre-release v4.4.2 checksum after schema proof."""
     allowed = LEGACY_V442_STEP_CHECKSUMS.get(database, {}).get(
+        _script_key(script), frozenset(),
+    )
+    return checksum in allowed and _step_objects_complete(cursor, database, script)
+
+
+def _legacy_v410_step_compatible(cursor: Any, database: str, script: Path,
+                                 checksum: str) -> bool:
+    """Adopt an exact retained v4.4.10 checksum only after schema proof."""
+    allowed = LEGACY_V410_STEP_CHECKSUMS.get(database, {}).get(
         _script_key(script), frozenset(),
     )
     return checksum in allowed and _step_objects_complete(cursor, database, script)
@@ -1637,6 +1654,18 @@ def _v410_script_names(database: str, config_path: Path, edition: str) -> list[s
         names.append("58_v4_4_10_knowledge_scope.sql")
     if "59_v4_4_10_knowledge_graph_context.sql" not in names:
         names.append("59_v4_4_10_knowledge_graph_context.sql")
+    if "60_v4_4_10_organization_approval_closure.sql" not in names:
+        names.append("60_v4_4_10_organization_approval_closure.sql")
+    if "61_v4_4_10_external_embedding_authorization.sql" not in names:
+        names.append("61_v4_4_10_external_embedding_authorization.sql")
+    if "62_v4_4_10_agent_embedding_contract.sql" not in names:
+        names.append("62_v4_4_10_agent_embedding_contract.sql")
+    if "63_v4_4_10_external_agent_gateway_grants.sql" not in names:
+        names.append("63_v4_4_10_external_agent_gateway_grants.sql")
+    if "64_v4_4_10_external_agent_context_repair.sql" not in names:
+        names.append("64_v4_4_10_external_agent_context_repair.sql")
+    if "65_v4_4_10_external_agent_domain_context.sql" not in names:
+        names.append("65_v4_4_10_external_agent_domain_context.sql")
     return names
 
 
@@ -1758,6 +1787,16 @@ def _statements(path: Path) -> list[str]:
             dollar_tag = dollar_match.group(0)
             in_block = True
             continue
+        # Oracle and YashanDB stored objects contain ordinary semicolons but
+        # are terminated by a standalone slash.  Treat the complete CREATE
+        # body as one driver statement; otherwise package bodies are split at
+        # their first procedure and compile as truncated fragments.
+        if not in_block and re.match(
+            r"^CREATE\s+OR\s+REPLACE\s+"
+            r"(?:PACKAGE(?:\s+BODY)?|PROCEDURE|FUNCTION|TRIGGER|TYPE(?:\s+BODY)?)\b",
+            upper,
+        ):
+            in_block = True
         # Some adapter migrations use the compact form ``BEGIN EXECUTE
         # IMMEDIATE ...``.  It is still a PL/SQL block and its internal
         # semicolons must not terminate the statement early.
@@ -1771,11 +1810,19 @@ def _statements(path: Path) -> list[str]:
             in_block = True
         if not in_block and stripped.endswith(";"):
             flush()
-        elif in_block and (upper == "$$;" or upper.endswith(" END;") or upper == "END;" or upper == "END $$;" or upper == "END /"):
-            # A slash line is preferred for Oracle; this fallback handles
-            # drivers/files that omit it after a single top-level block.
-            if upper in {"$$;", "END $$;"} or upper == "END;" or upper.endswith(" END;"):
-                flush()
+        elif in_block and (upper == "$$;" or upper == "END $$;"):
+            flush()
+        elif (
+            in_block
+            and len(buffer) == 1
+            and upper.endswith(" END;")
+            and not re.match(r"DECLARE\s+(?:PROCEDURE|FUNCTION)\b", upper)
+        ):
+            # Preserve support for a compact one-line PL/SQL block without a
+            # slash terminator. A leading one-line local subprogram declaration
+            # is only the declaration section; its outer BEGIN follows later
+            # and the standalone slash remains the unambiguous terminator.
+            flush()
     flush()
     return statements
 
@@ -1873,6 +1920,16 @@ def _apply_statement_migration(
                             conn.commit()
                             result.passed = True
                             result.ledger_status = "adopted_v442_pre_release_checksum"
+                            result.statements_executed = existing["statements_executed"]
+                            return result
+                        elif _legacy_v410_step_compatible(cursor, database, script, existing["checksum"]):
+                            _upsert_step_row(
+                                cursor, database, script, result.checksum, "APPLIED",
+                                existing["statements_executed"], existing["failed_statement"],
+                            )
+                            conn.commit()
+                            result.passed = True
+                            result.ledger_status = "adopted_v410_development_checksum"
                             result.statements_executed = existing["statements_executed"]
                             return result
                         elif _legacy_graph_step_compatible(cursor, database, script, existing["checksum"]):
@@ -2137,8 +2194,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="show checksums and capacity without changing the database")
     parser.add_argument("--capacity-tier", type=int, choices=(5000, 10000, 50000, 100000),
                         help="benchmark tier used for non-destructive capacity evidence")
-    parser.add_argument("--backup-evidence", type=Path,
-                        help="JSON manifest proving that a recoverable pre-migration backup exists")
+    parser.add_argument(
+        "--confirm-database-backup", action="store_true",
+        help="confirm database-side backup/recovery responsibility before applying migrations",
+    )
     args = parser.parse_args()
 
     global MIGRATION_VERSION, MIGRATION_EDITION
@@ -2150,7 +2209,6 @@ def main() -> int:
         "yashandb": args.yashandb_config,
     }
     runners = {"oracle": _apply_oracle, "pg": _apply_pg, "yashandb": _apply_yashandb}
-    backup_verified, backup_message = verify_backup_evidence(args.backup_evidence)
     results = []
     preflight_results = []
     available_databases = _available_databases()
@@ -2239,23 +2297,33 @@ def main() -> int:
             finally:
                 connection_for_probe.close()
             preflight_results.append(preflight)
-            graph_backup_missing = MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS and not backup_verified
+            # The client cannot reliably inspect database-native backup state.
+            # Mutating standalone runs therefore require an explicit operator
+            # acknowledgement; read-only checks never do.
+            confirmation_missing = (
+                MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS
+                and not (args.preflight or args.dry_run)
+                and not args.confirm_database_backup
+            )
             preflight_blocked = not bool(preflight.get("passed"))
-            if args.preflight or args.dry_run or graph_backup_missing or preflight_blocked:
+            if args.preflight or args.dry_run or confirmation_missing or preflight_blocked:
                 warnings = []
-                if graph_backup_missing:
-                    warnings.append(backup_message)
+                if confirmation_missing:
+                    warnings.append(
+                        "database-side backup/recovery responsibility was not confirmed; "
+                        "pass --confirm-database-backup to apply"
+                    )
                 if preflight.get("error_message"):
                     warnings.append(str(preflight["error_message"]))
                 results.append(MigrationResult(
                     database=database,
-                    passed=bool(preflight.get("passed")) and not graph_backup_missing,
+                    passed=bool(preflight.get("passed")) and not confirmation_missing,
                     script="preflight",
                     mode="dry-run" if args.dry_run else "preflight",
                     checksum=hashlib.sha256("".join(item["checksum"] for item in preflight["scripts"]).encode()).hexdigest(),
                     error_type=str(preflight.get("error_type") or "") if preflight_blocked else "",
-                    ledger_status="ready" if preflight.get("passed") and not graph_backup_missing else "blocked",
-                    backup_verified=backup_verified,
+                    ledger_status="ready" if preflight.get("passed") and not confirmation_missing else "blocked",
+                    database_backup_confirmed=args.confirm_database_backup,
                     capacity=preflight.get("capacity"),
                     warnings=warnings or None,
                 ))
@@ -2299,13 +2367,14 @@ def main() -> int:
                         for item in per_script
                     ],
                 )
-            aggregate.backup_verified = backup_verified
+            aggregate.database_backup_confirmed = args.confirm_database_backup
             aggregate.capacity = preflight.get("capacity")
             results.append(aggregate)
         except Exception as exc:
             results.append(MigrationResult(
                 database=database, passed=False, script="preflight", mode="preflight",
-                backup_verified=backup_verified, error_type=type(exc).__name__,
+                database_backup_confirmed=args.confirm_database_backup,
+                error_type=type(exc).__name__,
                 error_code=_error_code(exc),
             ))
 
@@ -2315,7 +2384,11 @@ def main() -> int:
         "edition": MIGRATION_EDITION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "dry-run" if args.dry_run else ("preflight" if args.preflight else "apply"),
-        "backup": {"verified": backup_verified, "message": backup_message},
+        "database_backup": {
+            "authority": "DATABASE_MANAGED",
+            "operator_confirmed": bool(args.confirm_database_backup),
+            "verification": "NOT_CLIENT_VERIFIABLE",
+        },
         "preflight": preflight_results,
         "results": [asdict(result) for result in results],
         "passed": bool(results) and all(result.passed for result in results),

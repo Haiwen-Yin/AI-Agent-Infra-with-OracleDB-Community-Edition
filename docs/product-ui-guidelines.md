@@ -39,6 +39,11 @@ state and reloads the current page shell. The HTML shell and static
 control-plane assets use `Cache-Control: no-store` so a platform upgrade cannot
 leave an older SPA bundle active.
 
+Authentication errors distinguish credential admission from Session expiry.
+A `401` from `/api/auth/login` is shown as invalid credentials or a temporary
+account lock; a `401` from an authenticated API is shown as an expired login.
+A rejected password must never be described as an expired Session.
+
 ## Streaming message updates
 
 A streaming Channel response owns one stable message row. While its message

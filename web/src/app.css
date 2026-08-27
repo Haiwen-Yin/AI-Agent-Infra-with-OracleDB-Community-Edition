@@ -2438,6 +2438,10 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   gap: 7px 10px;
   margin-top: 9px;
 }
+.embedding-grant-form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+}
 .native-profile-form {
   grid-template-columns: repeat(2, minmax(190px, 1fr));
 }
@@ -3052,7 +3056,35 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .widget-selector { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
 .widget-selector label { display: flex; align-items: center; gap: 8px; min-height: 34px; }
 .widget-selector input { width: 16px; height: 16px; flex: 0 0 16px; }
+.model-governance-panel,
+.model-governance-panel > *,
+.model-governance-panel .info-panel,
+.model-governance-panel .configuration-form,
+.model-governance-panel .config-field { min-width: 0; }
 .model-governance-panel .view-toggle { align-self: flex-start; max-width: 100%; overflow-x: auto; }
+.model-governance-panel .compact-configuration-form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  align-items: start;
+}
+.model-governance-panel .config-field,
+.model-governance-panel .config-field.config-multiline {
+  grid-template-rows: 16px auto minmax(22px, auto);
+}
+.model-governance-panel .config-field > .inline-field-pair,
+.model-governance-panel .config-field > .widget-selector {
+  align-self: start;
+}
+.model-governance-panel .table-wrap { max-width: 100%; }
+.model-governance-panel td { max-width: 360px; }
+.model-governance-panel td:not(:has(button, input, select, textarea)) { overflow-wrap: anywhere; }
 .governance-action-forms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-@media (max-width: 960px) { .governance-action-forms { grid-template-columns: 1fr; } }
+.governance-action-forms > .compact-configuration-form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  align-content: start;
+}
+@media (max-width: 1180px) { .governance-action-forms { grid-template-columns: 1fr; } }
+@media (max-width: 520px) {
+  .model-governance-panel .inline-field-pair,
+  .model-governance-panel .widget-selector { grid-template-columns: 1fr; }
+}
 .wallboard-metrics .metric small { display: block; margin-top: 4px; color: var(--muted-text); font-size: .72rem; }

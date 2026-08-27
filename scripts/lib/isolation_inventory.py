@@ -50,6 +50,7 @@ def ensure_isolation_inventory() -> Dict[str, Any]:
             if existing:
                 continue
             inventory_id = "DII_" + object_type.upper() + "_" + object_name.upper()
+            derived_inheritance = f"{derived}:{inheritance}"
             tx.execute(
                 "INSERT INTO CX_DATABASE_ISOLATION_INVENTORY(INVENTORY_ID,OBJECT_TYPE,OBJECT_NAME,SCOPE_KEYS_JSON,"
                 "HUMAN_PATH,AGENT_PATH,SHARING_MODEL,DERIVED_INHERITANCE,MOVE_POLICY,ORACLE_ENFORCEMENT,"
@@ -59,9 +60,8 @@ def ensure_isolation_inventory() -> Dict[str, Any]:
                 {"id": inventory_id[:128], "object_type": object_type[:128], "object_name": object_name[:128],
                  "keys": json.dumps(keys, sort_keys=True, separators=(",", ":")),
                  "human": human_path[:512], "agent": agent_path[:512], "sharing": sharing[:64],
-                 "derived": derived[:256], "move": move_policy[:64],
-                 "inheritance": inheritance[:256],
-                 "reason": "v4.4.8 database-authoritative isolation inventory"},
+                 "move": move_policy[:64], "inheritance": derived_inheritance[:256],
+                 "reason": "v4.4.10 database-authoritative isolation baseline"},
             )
             inserted += 1
         return {"status": "COMPLETED", "inserted": inserted, "total": len(INVENTORY)}

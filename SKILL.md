@@ -198,6 +198,7 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
     ├── agent_bootstrap.py          # Business Agent registration CLI
     ├── deploy/                     # SQL scripts (run in order)
     │   ├── 0_oracle_text_prerequisites.sql # SYSDBA Oracle Text grants
+    │   ├── 0_oracle_database_prerequisites.sql # consolidated v4.4.10 SYSDBA owner grants
     │   ├── 1_schema.sql            #   tables, indexes, partitions
     │   ├── 2_api.sql               #   PL/SQL packages (API layer)
     │   ├── 3_jobs.sql              #   scheduler jobs
@@ -246,6 +247,8 @@ AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 | oracledb driver | 4.0.1+ | bundled in `vendor/` |
 | DBMS_CRYPTO grant | required | `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>;` |
 | Oracle Text grants | required before `1_schema.sql` | `CTXAPP` + `EXECUTE ON CTXSYS.CTX_DDL` |
+| Deep Data Security owner grants | Enterprise required before initialize | Apply the End User, Data Role, Data Grant, context, and mandatory-enforcement grants in `scripts/deploy/4_grants.sql`; preflight reports every missing privilege |
+| Partitioning | required by the v4.4.10 Oracle baseline | `V$OPTION` must report `Partitioning=TRUE` |
 | Memory | 2 GB free | for connection pool + vector search |
 
 ## 4. Installation (offline-capable runtime)
@@ -296,6 +299,7 @@ real credentials are NEVER bundled. Two ways to produce a runnable
 ./start_web_server.sh start
 # -> wizard auto-detects <PLACEHOLDER> tokens and prompts for:
 #     database: user / password / dsn (host:port/service)
+#     server:   listen address / Web port
 #     llm:      api_url / model / api_key
 #     embedding: api_url / model / dimension
 # -> writes config.json
@@ -380,7 +384,7 @@ do not select or reorder individual migration files manually:
   --database oracle --edition <community|enterprise> --oracle-config config.json
 "$PYTHON_BIN" scripts/migration_runner.py --version 4.4.10 \
   --database oracle --edition <community|enterprise> --oracle-config config.json \
-  --backup-evidence release_evidence/backup.json
+  --confirm-database-backup
 ```
 
 The runner applies the edition-aware chain through steps `46` and `47`,
@@ -542,13 +546,51 @@ Tests use the configured owner-only (`0600`) `config.json` connection. Set
 | `import oracledb` fails | driver not installed | `bash scripts/install_offline.sh` |
 | `ORA-01017: invalid credentials` | wrong DB user/password | re-run `bash scripts/config_wizard.sh` |
 | `DBMS_CRYPTO` not found | missing grant | `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <user>;` |
+| `DPY-3001` reports Native Network Encryption | the database requires native encryption that the packaged pure-Python connection cannot negotiate | do not weaken encryption silently; use a DBA-approved compatible connection policy or a separately validated Oracle Client deployment path before retrying |
+| `ORACLE_PARTITIONING` is blocked | Partitioning is disabled in the active Oracle Home, or `V$OPTION` is not visible | the DBA enables Partitioning and restarts the database, then grants only the read access required for preflight evidence |
+| `OWNER_PRIVILEGES` lists Data Grant or End User privileges | the Enterprise owner has only ordinary schema DDL rights | the DBA applies the complete owner privilege set in `scripts/deploy/4_grants.sql`; do not continue with a partial set |
+| `ORA-52551` for `ADMIN_DATA_ROLE` | the administrative Data Role was absent in an older or partial package | use the current v4.4.10 package; its security-boundary migration creates the Data Role idempotently |
+| `ORA-00942` names another schema owner | an older migration hard-coded `AIADMIN` | use the current v4.4.10 package; active fresh-baseline migrations resolve the configured owner |
+| `DPY-4008` reports an unknown bind | package code and Oracle's strict bind set are out of sync | use the current v4.4.10 package; isolation inventory and deployment-state updates now bind exact parameters |
 | Server starts but `import yaspy` fails | wrong adapter - this is the Oracle edition | use the YashanDB release zip instead |
 | `config.json` has `_encrypted` but server can't decrypt | configured master key does not match | restore the matching `MASTER_DB_KEY` or `~/.ai-agent-infra/master.key` backup |
+| Migration preflight reports `FileNotFoundError` for `~/.oracle-infra/master.key` | obsolete package has a migration-only hard-coded legacy key path | replace the complete package with the current v4.4.10 artifact; do not duplicate the key into the retired directory |
+| Fresh v4.4.10 baseline is reported as withdrawn v4.4.8 | obsolete preflight ignores current-version migration ledger before object-shape fallback | replace the complete package and rerun preflight; never edit ledger rows or remove retained platform tables manually |
 | Portal chat returns 500 | LLM `api_url` not configured | edit `config.json` -> `llm.api_url` |
-| Deployment fails with "schema_version exists" | DB already has schema | use `--force` flag or drop schema first |
+| Deployment reports an existing or partial schema | target is not a verified empty baseline | never force initialization; use supported `upgrade`/`resume`, or have the DBA restore or precisely clean the target after preserving required data |
 | `Deep Data Security` not filtering rows | Oracle version < 23.26.2 | upgrade to 26ai 23.26.2+ |
 
 Server log: `viz_server.log` in the project directory.
+
+### v4.4.10 Oracle fresh-install field validation (2026-08-25)
+
+The release was exercised against an empty Oracle AI Database 26ai Enterprise
+schema through terminal migration 65, native Platform/Compliance Agent
+postflight, retirement of the Bootstrap Deployment Agent, and a separate
+`verify` call. The successful boundary was `RETIRED`, with zero failed
+migration steps.
+
+The validation fixed six failure classes that an older package could expose:
+
+1. Foundational schema SQL referenced `SYSTEM_CONFIG` before creation, called
+   an unavailable configuration function, and declared a duplicate index.
+2. The migration parser truncated anonymous PL/SQL at an inner `END;`, including
+   files whose first line declared a local procedure.
+3. Memory adoption required `DBMS_CRYPTO` before prerequisite grants. It now
+   uses Oracle `STANDARD_HASH` for SHA-256 during baseline migration.
+4. The security repair hard-coded `AIADMIN`, assumed `admin_data_role` and
+   `AGENT_API` existed, and therefore failed for a configured owner or a clean
+   target. The current migration is owner-independent and narrowly idempotent.
+5. Enterprise preflight checked too few Deep Data Security privileges. It now
+   reports the complete missing owner privilege set before creating tables.
+6. Native postflight supplied extra bind values rejected by Oracle. Inventory
+   and deployment-state writes now use exact bind sets.
+
+After any failed older attempt, do not run `resume` merely because a local
+journal exists. First inspect the database migration ledger and object
+inventory. A fresh v4.4.10 initialization is valid only when preflight proves
+`TARGET_EMPTY=PASS`; otherwise use an explicitly supported upgrade or a
+database-operator-controlled restore/cleanup boundary.
 
 ## 13. v4.3.0 Integrated Graph Engineering
 
@@ -673,18 +715,23 @@ For a prepared target, run the package-local Bootstrap Deployment Agent:
 
 ```bash
 bash scripts/install_platform.sh initialize --database oracle \
-  --edition <community|enterprise> --version 4.4.10 --config config.json \
-  --backup-evidence release_evidence/backup.json
+  --edition <community|enterprise> --version 4.4.10 --config config.json
 ```
 
 It verifies a checksum-bound package manifest, executes only packaged SQL, and
-executes through the manifest's terminal migration. Interactive initialization
+executes through the manifest's terminal migration. It requires a verified
+empty target, records a database-managed recovery boundary, and does not
+require client-side backup evidence. Interactive initialization
 prompts twice for the first `admin` password; automation must use a current-user-
 owned `0600` regular file with `--admin-password-file`. Only the Argon2id hash
 is stored. The command records sanitized deployment evidence before retiring
 its temporary identity.
 It does not create PDBs, tablespaces, or privileged Oracle infrastructure.
 Use `status`, `verify`, `resume`, or `upgrade` with the same command wrapper.
+An interactive upgrade explains the database-native recovery boundary and
+requires `UPGRADE`; automation passes `--confirm-database-backup`. The accepted
+responsibility is journaled, but this client never claims to verify an Oracle
+backup or requires a client-side evidence file.
 Embedding Profiles, immutable Contracts, Spaces, and bindings govern every
 vector write and retrieval. Choose exactly one mode: `PLATFORM_MANAGED`,
 `ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`, `PRECOMPUTED_IMPORT`, or `NONE`.
@@ -748,4 +795,5 @@ final human approval. The Enterprise Compliance Agent remains proposal-only.
 Platform private knowledge is isolated with Oracle Data Grants, and the
 application-context setter requires the current Deep Data Security End User
 unless the deployment Owner is performing an administrative bootstrap.
-Apply step `48` only through the migration runner with backup evidence.
+Apply step `48` only through the migration runner after explicitly confirming
+database-side backup responsibility.

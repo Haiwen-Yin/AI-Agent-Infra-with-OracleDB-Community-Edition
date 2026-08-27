@@ -96,12 +96,26 @@ def register_agent(
 
 def _ensure_end_user(agent_id: str) -> None:
     try:
+        # Oracle AI Database deployments commonly enforce mixed-case, digit,
+        # and special-character password profiles. The SQL package's random
+        # generator did not guarantee all classes, so generate a compliant
+        # password here and pass it explicitly to the package.
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+        password = (
+            secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ")
+            + secrets.choice("abcdefghijkmnopqrstuvwxyz")
+            + secrets.choice("23456789")
+            + secrets.choice("!@#$%")
+            + secrets.choice("!@#$%")
+            + "".join(secrets.choice(alphabet) for _ in range(27))
+        )
+        username = _database_user_name(agent_id)
         with get_connection() as conn:
             with conn.cursor() as cur:
                 result_var = cur.var(oracledb.STRING)
                 cur.execute(
-                    "BEGIN :r := END_USER_MANAGER.ensure_end_user(:aid); END;",
-                    {"r": result_var, "aid": agent_id},
+                    "BEGIN :r := END_USER_MANAGER.create_end_user(:aid, :eu, :pwd); END;",
+                    {"r": result_var, "aid": agent_id, "eu": username, "pwd": password},
                 )
                 result = result_var.getvalue()
                 if result and not str(result).startswith('ERROR'):
@@ -111,6 +125,19 @@ def _ensure_end_user(agent_id: str) -> None:
                     logger.debug("End User for %s: %s", agent_id, result)
     except Exception as e:
         logger.debug("End User creation skipped for %s: %s", agent_id, e)
+
+
+def ensure_external_agent_identity(agent_id: str) -> None:
+    """Ensure a redeemed external Agent has a verifiable Deep Security user."""
+    execute(
+        "MERGE INTO AGENT_REGISTRY t USING (SELECT :agent_id AGENT_ID FROM DUAL) s "
+        "ON (t.AGENT_ID=s.AGENT_ID) WHEN NOT MATCHED THEN INSERT "
+        "(AGENT_ID,AGENT_NAME,AGENT_TYPE,STATUS) VALUES (:agent_id,:agent_name,'external-skill','ACTIVE')",
+        {"agent_id": agent_id, "agent_name": agent_id},
+    )
+    _ensure_end_user(agent_id)
+    if not _get_end_user_password_direct(agent_id):
+        raise RuntimeError(f"No Oracle End User credentials for agent {agent_id}")
 
 
 def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:

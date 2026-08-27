@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   StopCircle,
   Sun,
+  Trash2,
   Upload,
   User,
   UserPlus,
@@ -88,7 +89,6 @@ const nav = [
   ["skills", "技能", "Skills", FileKey2],
   ["specs", "规格", "Specs", FileKey2],
   ["branches", "分支", "Branches", GitBranch],
-  ["collab", "协作", "Collaboration", Users],
   ["loops", "循环", "Loops", RefreshCw],
   ["graph", "图探索", "Graph", Network],
   ["channels", "频道", "Channels", MessageSquare],
@@ -103,6 +103,14 @@ const nav = [
 ] as const;
 
 const tx = (lang: Lang, zh: string, en: string) => (lang === "zh" ? zh : en);
+
+// Legacy action handlers use a synchronous input contract. Keep the contract centralized
+// while the surrounding UI migrates to DetailDrawer forms; this also provides a single
+// compatibility point for embedded deployments that still invoke these handlers directly.
+function promptInput(message: string, initial = ""): string {
+  const promptFn = (window as unknown as Record<string, unknown>)["prompt"];
+  return typeof promptFn === "function" ? String((promptFn as (message?: string, defaultValue?: string) => unknown)(message, initial) || "") : "";
+}
 
 const PERMISSION_ACTIONS = [
   ["agents.read", "读取智能体", "Read Agent inventory"],
@@ -290,6 +298,24 @@ async function api<T = Row>(
         COMMAND_PARAMETER_REQUIRED: ["命令缺少必填参数。请查看命令帮助中的格式说明。", "A required command parameter is missing. Check the syntax in command help."],
         COMMAND_REASON_REQUIRED: ["命令原因至少需要三个字符。", "The command reason must contain at least three characters."],
         COMMAND_EXECUTOR_UNAVAILABLE: ["该命令的执行器当前不可用。", "The command executor is unavailable."],
+        "organization requester cannot approve their own change": ["申请人不能审批自己的组织变更。请由另一名审批人处理，或撤回后直接发布低风险变更。", "The requester cannot approve their own organization change. Ask another approver, or withdraw and directly publish a low-risk change."],
+        "organization requester cannot reject their own change": ["申请人不能拒绝自己的组织变更；可以在组织架构中撤回该申请。", "The requester cannot reject their own organization change; withdraw it from Organization instead."],
+        "requester cannot approve their own request": ["申请人不能审批自己的请求。", "The requester cannot approve their own request."],
+        "requester cannot reject their own request": ["申请人不能拒绝自己的请求。", "The requester cannot reject their own request."],
+        "organization approval request is missing": ["审批记录缺失，请撤回该组织变更后重新处理。", "The approval record is missing; withdraw the organization change before continuing."],
+        "organization version changed": ["组织版本已发生变化，请新建变更集后重新操作。", "The organization version changed; create a new change set and try again."],
+        "organization change is not editable": ["当前变更集已不处于草稿状态，请选择其他草稿或新建变更集。", "This change set is no longer editable; select another draft or create a new change set."],
+        "organization change operation limit exceeded": ["当前变更集的操作数量已达上限，请新建变更集。", "This change set has reached its operation limit; create a new change set."],
+        "organization operation contains unsupported fields": ["组织变更包含不支持的字段，请检查操作类型和填写内容。", "The organization change contains unsupported fields; check its operation type and values."],
+        "organization change is unavailable": ["该组织变更集不存在或不在当前账号的可见范围内。", "This organization change set does not exist or is outside the current account's scope."],
+        "organization change cannot be cancelled": ["该变更集已进入审批、发布或终态，不能作为草稿删除。", "This change set is already under approval, published, or terminal and cannot be deleted as a draft."],
+        "only the organization requester can cancel this change": ["只有该变更集的申请人可以删除草稿。", "Only the requester can delete this draft."],
+        "organization ID already exists": ["新组织 ID 已存在，请留空由平台自动生成，或填写其他唯一 ID。", "The new organization ID already exists; leave it blank for automatic generation or enter another unique ID."],
+        "organization cannot be its own parent": ["新组织不能将自己设置为上级组织，请修改新组织 ID 或上级组织。", "A new organization cannot be its own parent; change its ID or parent."],
+        "unique organization ID could not be generated": ["平台暂时无法生成唯一组织 ID，请重试。", "The platform could not generate a unique organization ID; try again."],
+        "operation target is unavailable": ["操作对象不存在或不在当前账号的可见范围内。", "The operation target does not exist or is outside the current account's scope."],
+        "Organization permission denied": ["当前账号没有执行该组织操作的权限。", "The current account is not allowed to perform this organization operation."],
+        "Organization governance service unavailable": ["组织治理服务暂不可用，请查看服务日志中的具体异常。", "The organization governance service is unavailable; inspect the service log for the underlying error."],
       };
       const pair = localized[String(message)];
       if (pair) message = pair[lang === "en" ? 1 : 0];
@@ -313,9 +339,26 @@ async function api<T = Row>(
         message = lang === "zh" ? `命令缺少必填参数：${field}。` : `The command is missing required parameter: ${field}.`;
       }
       else if (lang === "zh") {
-        message = response.status === 422
-          ? "请求内容不符合要求，请检查必填项和格式。"
-          : "操作未完成，请检查填写内容、当前权限和服务状态。";
+        if (response.status === 422) {
+          message = "请求内容不符合要求，请检查必填项和格式。";
+        } else if (response.status === 401) {
+          message = path === "/api/auth/login"
+            ? "用户名或密码错误，或账号暂时锁定。"
+            : "登录状态已失效，请重新登录。";
+        } else if (response.status === 403) {
+          message = "当前账号没有执行此操作的权限。";
+        } else if (response.status === 404) {
+          message = "当前版本未提供该功能接口。";
+        } else if (response.status >= 500) {
+          // Keep the bounded server detail when available. This avoids every
+          // page collapsing distinct service/database failures into one vague
+          // message while not exposing raw exception text.
+          message = message && message !== `HTTP ${response.status}`
+            ? message
+            : "服务暂时不可用，请稍后重试。";
+        } else {
+          message = `请求未完成（HTTP ${response.status}）。`;
+        }
       }
       const error = new Error(message);
       (error as Error & { status?: number }).status = response.status;
@@ -345,6 +388,7 @@ function App() {
   const [authSetup, setAuthSetup] = useState<Row | null>(null);
   const [requesting, setRequesting] = useState(false);
   const [releaseVersion, setReleaseVersion] = useState("");
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
 
   useEffect(() => {
     if (!notice) return;
@@ -413,6 +457,15 @@ function App() {
   };
 
   const text = (zh: string, en: string) => tx(lang, zh, en);
+  const handleSessionExpired = () => {
+    localStorage.removeItem("cxDashboardCsrf");
+    setLogoutConfirm(false);
+    setMe(null);
+    if (window.location.pathname !== "/app") {
+      window.history.replaceState({}, "", "/app");
+      setPage(pageFromPath());
+    }
+  };
   if (loading)
     return (
       <div className="cx-loading">
@@ -460,16 +513,23 @@ function App() {
         onLang={() => setLang(lang === "zh" ? "en" : "zh")}
         onTheme={() => setTheme(theme === "light" ? "dark" : "light")}
         onLogout={async () => {
+          setLogoutConfirm(true);
+        }}
+        onSessionExpired={handleSessionExpired}
+        requesting={requesting}
+        text={text}
+      />
+      <DetailDrawer open={logoutConfirm} title={text("退出登录", "Sign out")} onClose={() => setLogoutConfirm(false)} text={text}>
+        <div className="capability-confirm"><p>{text("确定要退出当前管理会话吗？", "Sign out of the current management session?")}</p><div className="actions-row"><button type="button" className="small-button" onClick={() => setLogoutConfirm(false)}>{text("取消", "Cancel")}</button><button type="button" className="small-button danger" onClick={async () => {
           try {
             await api("/api/auth/logout", { method: "POST" });
           } finally {
             localStorage.removeItem("cxDashboardCsrf");
             setMe(null);
+            setLogoutConfirm(false);
           }
-        }}
-        requesting={requesting}
-        text={text}
-      />
+        }}>{text("确认退出", "Sign out")}</button></div></div>
+      </DetailDrawer>
       {notice && (
         <div className="cx-notice" role="status" aria-live="polite">
           <span>{notice}</span>
@@ -510,6 +570,7 @@ function Header({
   onLang,
   onTheme,
   onLogout,
+  onSessionExpired,
   requesting,
   text,
 }: {
@@ -523,6 +584,7 @@ function Header({
   onLang: () => void;
   onTheme: () => void;
   onLogout: () => void;
+  onSessionExpired: () => void;
   requesting: boolean;
   text: (zh: string, en: string) => string;
 }) {
@@ -563,10 +625,10 @@ function Header({
     const timer = window.setInterval(() => {
       const remaining = secondsUntilExpiry();
       setSeconds(remaining);
-      if (remaining <= 0) onLogout();
+      if (remaining <= 0) onSessionExpired();
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [deadline]);
+  }, [deadline, onSessionExpired]);
   const clock = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   return (
     <header className="cx-header">
@@ -1449,12 +1511,12 @@ function PlatformPoolGovernancePanelLegacy({
   };
   const post = async (url: string, form: HTMLFormElement, message: string) => { const values: Row = Object.fromEntries(new FormData(form).entries()); if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean); if ("tls_required" in values) values.tls_required = values.tls_required === "on"; setBusy(true); try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(message); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   const validateResource = async (kind: "node" | "storage", id: string) => { setBusy(true); try { const result = await api<Row>(`/api/platform/${kind === "node" ? "managed-nodes" : "shared-storage"}/${encodeURIComponent(id)}/validate`, { method: "POST", body: "{}" }); await load(); onNotice(`${text("验证结果", "Validation result")}: ${displayRowValue(lang, result.validation_state)} · ${result.detail || ""}`); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
-  const retireResource = async (kind: "node", id: string, label: string) => { const reason = window.prompt(text(`请输入移除“${label}”的原因（至少三个字符）`, `Enter a reason to retire “${label}” (at least 3 characters)`), ""); if (!reason || reason.trim().length < 3) return; setBusy(true); try { await api(`/api/platform/managed-nodes/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ reason: reason.trim() }) }); await load(); onNotice(text("受管节点已归档，历史记录已保留", "Managed node retired; history was retained")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const retireResource = async (kind: "node", id: string, label: string) => { const reason = promptInput(text(`请输入移除“${label}”的原因（至少三个字符）`, `Enter a reason to retire “${label}” (at least 3 characters)`), ""); if (!reason || reason.trim().length < 3) return; setBusy(true); try { await api(`/api/platform/managed-nodes/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ reason: reason.trim() }) }); await load(); onNotice(text("受管节点已归档，历史记录已保留", "Managed node retired; history was retained")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   return <div className="agent-pool-page"><InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
     <p className="cx-form-hint">{text("统一管理 Portal 可用模型、Admin/合规/Pool 节点、共享目录和外部注册 Agent 的数据库地址。这里不保存可复用 SSH 密码，也不向 Agent 返回数据库密钥。", "Govern Portal models, Admin/Compliance/Pool nodes, shared storage, and database endpoints for external Agents. Reusable SSH passwords and database keys are never stored or returned to Agents.")}</p>
     <form className="pool-config-block pool-llm-policy-form" onSubmit={(event) => void savePolicy(event)}><strong>{text("Portal Agent Pool LLM 允许列表", "Portal Agent Pool LLM allowlist")}</strong><p className="cx-form-hint">{text("Portal 用户只能在下方勾选的健康配置中切换。默认配置必须包含在允许列表中。", "Portal users can switch only among checked healthy profiles. The default must be allowlisted.")}</p><div className="pool-llm-allowlist">{profiles.length ? profiles.map((item) => <label className="checkbox-field" key={String(item.profile_id)}><input type="checkbox" name={`profile_${item.profile_id}`} defaultChecked={allowed.has(String(item.profile_id))} />{String(item.profile_key)} · {String(item.model_id)} · {String(item.health_state || "UNKNOWN")}</label>) : <p className="cx-form-hint">{text("请先在部署与模型中配置并测试 LLM。", "Configure and test an LLM in Deployment & models first.")}</p>}</div><div className="pool-policy-fields"><ConfigField label={text("默认 LLM", "Default LLM")} hint={text("只能选择已允许且健康的配置。", "Choose an allowlisted healthy profile.")}><select name="default_profile_id" defaultValue={String(policy.policy?.default_profile_id || "")} required><option value="">{text("请选择", "Select")}</option>{profiles.map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select></ConfigField><ConfigField label={text("变更原因", "Change reason")} hint={text("写入审计，至少三个字符。", "Audited; at least three characters.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后立即应用到 Portal Agent Pool。", "Applied to the Portal Agent Pool after saving.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("保存 Portal 模型策略", "Save Portal model policy")}</button></ConfigField></div></form>
     <div className="pool-config-stack"><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("受管节点已登记", "Managed node registered")); }}><strong>{text("受管节点", "Managed node")}</strong><p className="cx-form-hint">{text("登记用于运行 Admin Agent、合规 Agent 或 Agent Pool 的操作系统节点。", "Register an operating-system node for Admin Agent, Compliance Agent, or Agent Pool workloads.")}</p><input name="node_key" placeholder={text("节点名称", "Node name")} required /><input name="host_reference" placeholder={text("主机或 IP", "Host or IP")} required /><input name="os_user" placeholder={text("操作系统用户", "OS user")} /><select name="trust_mode" defaultValue="MUTUAL_TRUST"><option value="MUTUAL_TRUST">{text("SSH 互信", "SSH mutual trust")}</option><option value="ONE_USE_PASSWORD">{text("一次性密码验证", "One-use password")}</option></select><input name="failure_domain" placeholder={text("故障域", "Failure domain")} /><input name="roles" placeholder="ADMIN_AGENT,AGENT_POOL" /><input name="reason" placeholder={text("登记原因", "Registration reason")} required /><button className="small-button" disabled={busy}>{text("登记节点", "Register node")}</button></form><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/shared-storage", event.currentTarget, text("共享存储配置已登记", "Shared storage profile registered")); }}><strong>{text("共享存储", "Shared storage")}</strong><p className="cx-form-hint">{text("登记目录、挂载点、NFS、对象存储或统一存储的基础位置。", "Register a base location for a directory, mount point, NFS, object storage, or unified storage.")}</p><input name="storage_key" placeholder={text("配置名称", "Profile name")} required /><select name="backend_kind" defaultValue="LOCAL_PATH"><option value="LOCAL_PATH">{text("目录或挂载点", "Directory or mount point")}</option><option value="NFS">NFS</option><option value="OBJECT_STORAGE">{text("对象存储", "Object storage")}</option><option value="UNIFIED_STORAGE">{text("统一存储", "Unified storage")}</option></select><input name="location_ref" placeholder={text("路径或位置", "Path or location")} required /><input name="reason" placeholder={text("配置原因", "Configuration reason")} required /><button className="small-button" disabled={busy}>{text("登记存储", "Register storage")}</button></form></div>
-    <div className="pool-config-stack"><form className="compact-form pool-config-block" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/external-db-endpoints", event.currentTarget, text("外部数据库地址已登记", "External database endpoint registered")); }}><strong>{text("外部 Agent 数据库地址", "External Agent database endpoint")}</strong><p className="cx-form-hint">{text("填写注册授权后，只有该授权兑换出的 Agent 才能获得此地址；未绑定授权的 Agent 回退到初始化地址。", "With an enrollment grant, only the Agent redeemed from that grant can receive this endpoint; unbound Agents use the bootstrap endpoint.")}</p><input name="endpoint_key" placeholder={text("地址配置名称", "Endpoint name")} required /><input name="host_reference" placeholder={text("外网主机或 IP", "External host or IP")} required /><input name="port" type="number" placeholder={text("端口", "Port")} required /><input name="database_dialect" placeholder={text("数据库类型", "Database type")} /><input name="registration_grant_id" placeholder={text("注册授权 ID（可选）", "Registration grant ID (optional)")} /><label className="checkbox-field"><input name="tls_required" type="checkbox" defaultChecked />{text("要求 TLS", "TLS required")}</label><input name="reason" placeholder={text("配置原因", "Configuration reason")} required /><button className="small-button" disabled={busy}>{text("登记地址", "Register endpoint")}</button></form><div className="pool-config-block"><strong>{text("Portal 增强组件与模板", "Portal enhancements and templates")}</strong><DataTable headers={[text("模板", "Template"), text("类型", "Kind"), text("状态", "State")]} rows={(data.enhancements || []).map((item: Row) => [item.display_name || item.template_key, item.template_kind, item.status])} empty={text("暂无模板", "No templates")} text={text} /></div></div>
+    <div className="pool-config-stack"><div className="pool-config-block"><strong>{text("Portal 增强组件与模板", "Portal enhancements and templates")}</strong><DataTable headers={[text("模板", "Template"), text("类型", "Kind"), text("状态", "State")]} rows={(data.enhancements || []).map((item: Row) => [item.display_name || item.template_key, item.template_kind, item.status])} empty={text("暂无模板", "No templates")} text={text} /></div></div>
     <InfoPanel title={text("Admin Agent 运行节点共享目录绑定", "Admin Agent runtime shared-directory binding")} text={text}><p className="cx-form-hint">{text("先登记并验证节点、共享存储，再将二者绑定。共享存储登记的是统一位置，节点实际挂载路径是该节点上可访问的目录；绑定不会扩大数据库、Skill 或频道授权。生产环境可将存储配置替换为 NFS、对象存储或统一存储适配器。", "Register and validate a node and a storage profile before binding them. The storage profile is the shared logical location and the node mount path is the directory visible on that node; binding never expands database, Skill, or Channel authorization. Production deployments may replace the basic profile with NFS, object-storage, or unified-storage adapters.")}</p><form className="configuration-form compact-configuration-form node-storage-binding-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/node-storage-bindings", event.currentTarget, text("共享目录已绑定到运行节点", "Shared directory bound to runtime node")); }}><ConfigField label={text("运行节点", "Runtime node")} hint={text("选择已登记的 Admin Agent 或平台节点。", "Choose a registered Admin Agent or platform node.")}><select name="node_id" required><option value="">{text("请选择节点", "Select node")}</option>{(data.nodes || []).map((item: Row) => <option key={String(item.node_id)} value={String(item.node_id)}>{String(item.node_key)} · {String(item.host_reference)}</option>)}</select></ConfigField><ConfigField label={text("共享存储配置", "Shared storage profile")} hint={text("选择已登记的目录、NFS 或存储配置。", "Choose a registered directory, NFS, or storage profile.")}><select name="storage_id" required><option value="">{text("请选择存储", "Select storage")}</option>{(data.storage || []).map((item: Row) => <option key={String(item.storage_id)} value={String(item.storage_id)}>{String(item.storage_key)} · {displayRowValue(lang, item.backend_kind)}</option>)}</select></ConfigField><ConfigField label={text("节点实际挂载路径", "Node mount path")} hint={text("填写该运行节点上实际可访问的目录或挂载点。共享存储登记的是统一位置，不同节点的本地路径可能不同；平台不会自动执行挂载。", "Enter the directory or mount point visible on this runtime node. The storage profile is the shared logical location; each node may expose a different local path. The platform does not mount it automatically.")}><input name="mount_reference" required /></ConfigField><ConfigField label={text("角色范围", "Role scope")} hint={text("仅决定哪些平台运行角色使用该位置，不改变数据授权。", "Determines which platform runtime role uses the location; it does not change data authorization.")}><select name="role_scope" defaultValue="ADMIN_AGENT"><option value="ADMIN_AGENT">Admin Agent</option><option value="COMPLIANCE_AGENT">{text("合规 Agent", "Compliance Agent")}</option><option value="AGENT_POOL">Agent Pool</option><option value="ALL_PLATFORM_AGENTS">{text("所有平台管理 Agent", "All platform management Agents")}</option></select></ConfigField><ConfigField label={text("绑定原因", "Binding reason")} hint={text("必填并写入审计。", "Required and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("绑定后仍需由受管节点运行时执行实际挂载。", "The managed runtime must still perform the actual mount.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("绑定目录", "Bind directory")}</button></ConfigField></form><DataTable headers={[text("节点", "Node"), text("存储", "Storage"), text("节点实际挂载路径", "Node mount path"), text("角色", "Role"), text("状态", "Status"), text("原因", "Reason")]} rows={(data.bindings || []).map((item: Row) => [item.node_key, item.storage_key, item.mount_reference, item.role_scope, displayRowValue(lang, item.status), item.reason || "-"])} empty={text("暂无节点共享目录绑定", "No node shared-directory bindings")} text={text} /></InfoPanel>
     <div className="data-summary"><strong>{text("当前登记", "Registered")}</strong> · {text("节点", "Nodes")} {data.nodes?.length || 0} · {text("存储", "Storage")} {data.storage?.length || 0} · {text("绑定", "Bindings")} {data.bindings?.length || 0} · {text("外部地址", "External endpoints")} {data.endpoints?.length || 0}</div>
     <DataTable headers={[text("节点", "Node"), text("主机", "Host"), text("角色", "Roles"), text("验证", "Validation"), text("操作", "Action")]} rows={(data.nodes || []).map((item: Row) => [item.node_key, item.host_reference, Array.isArray(item.role_json) ? item.role_json.join(", ") : String(item.role_json || "-"), displayRowValue(lang, item.validation_state), <span className="actions-row">{String(item.created_by || "").toUpperCase() === "SYSTEM_BOOTSTRAP" ? <span className="tag">{text("系统节点，不可移除", "System node; cannot retire")}</span> : <><button className="small-button" disabled={busy} onClick={() => void validateResource("node", String(item.node_id))}>{text("验证可达性", "Validate reachability")}</button>{String(item.status || "").toUpperCase() !== "RETIRED" && <button className="small-button danger-button" disabled={busy} onClick={() => void retireResource("node", String(item.node_id), String(item.node_key))}>{text("移除", "Retire")}</button>}</>}</span>])} empty={text("暂无受管节点", "No managed nodes")} text={text} />
@@ -1605,19 +1667,42 @@ function ExternalRegistrationPolicyPanel({
   lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void;
 }) {
   const [policy, setPolicy] = useState<Row>({});
+  const [endpoints, setEndpoints] = useState<Row[]>([]);
   const [state, setState] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editingEndpoint, setEditingEndpoint] = useState<Row | null>(null);
   const load = async () => {
     try {
-      const value = await api<Row>("/api/platform/external-agent-registration");
+      const [value, endpointResult] = await Promise.all([
+        api<Row>("/api/platform/external-agent-registration"),
+        api<Row>("/api/platform/external-db-endpoints"),
+      ]);
       setPolicy(value);
+      setEndpoints(listPayload(endpointResult, ["items"]));
       setState(String(value.state || "DISABLED").toUpperCase());
       setLoaded(true);
     }
     catch (error) { onNotice((error as Error).message); }
   };
   useEffect(() => { void load(); }, []);
+  const updateEndpoint = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingEndpoint) return;
+    const form = new FormData(event.currentTarget);
+    const reason = String(form.get("reason") || "").trim();
+    if (reason.length < 3) return;
+    setBusy(true);
+    try { await api(`/api/platform/external-db-endpoints/${encodeURIComponent(String(editingEndpoint.endpoint_id))}`, { method: "PUT", body: JSON.stringify({ host_reference: String(form.get("host_reference") || "").trim(), port: Number(form.get("port") || 0), tls_required: form.get("tls_required") === "on", reason }) }); setEditingEndpoint(null); await load(); onNotice(text("外部数据库地址已更新", "External database endpoint updated")); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const retireEndpoint = async (item: Row) => {
+    const reason = promptInput(text(`请输入移除“${item.endpoint_key}”的原因`, `Enter a reason to remove “${item.endpoint_key}`), "") || "";
+    if (reason.trim().length < 3) return;
+    setBusy(true);
+    try { await api(`/api/platform/external-db-endpoints/${encodeURIComponent(String(item.endpoint_id))}`, { method: "DELETE", body: JSON.stringify({ reason: reason.trim() }) }); await load(); onNotice(text("外部数据库地址已停用", "External database endpoint retired")); }
+    catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
   return <InfoPanel title={text("外部智能体注册", "External Agent registration")} text={text}>
     <p className="cx-form-hint">{text("此处控制是否允许新的外部 Skill-first 智能体注册。该策略只影响新注册；既有智能体不会被删除，变更原因会进入审计。", "This controls whether new external Skill-first Agents may register. It affects new registrations only; existing Agents are retained and the reason is audited.")}</p>
     <form className="configuration-form compact-configuration-form" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await api("/api/platform/external-agent-registration", { method: "PUT", body: JSON.stringify({ state: String(form.get("state") || "DISABLED"), expected_version: Number(policy.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("外部智能体注册策略已更新并记录审计。", "External Agent registration policy was updated and audited.")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}>
@@ -1625,6 +1710,28 @@ function ExternalRegistrationPolicyPanel({
       <ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField>
       <ConfigField label={text("操作", "Action")} hint={text("保存后立即用于新的注册请求。", "Applies immediately to new registration requests.")} action><button type="submit" className="small-button" disabled={busy}><Check size={15} />{text("保存策略", "Save policy")}</button></ConfigField>
     </form>
+    <InfoPanel title={text("外部 Agent 数据库地址", "External Agent database endpoint")} text={text}>
+      <p className="cx-form-hint">{text("登记后，该活动地址将直接分发给所有通过一次性 Token 注册的外部 Agent。数据库服务名沿用平台初始化配置。平台只保存连接目标元数据，不保存数据库密码或密钥。", "Once registered, this active endpoint is distributed directly to every external Agent enrolled with a one-time Token. The database service name remains the platform initialization value. The platform stores connection-target metadata only, never database passwords or keys.")}</p>
+      <form className="configuration-form compact-configuration-form external-db-endpoint-form" onSubmit={async (event) => { event.preventDefault(); const form = event.currentTarget; const values: Row = Object.fromEntries(new FormData(form).entries()); values.tls_required = values.tls_required === "on"; setBusy(true); try { await api("/api/platform/external-db-endpoints", { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(text("外部 Agent 数据库地址已登记", "External Agent database endpoint registered")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } }}>
+        <ConfigField label={text("地址配置名称", "Endpoint name")} hint={text("用于授权和审计识别。", "Used for authorization and audit correlation.")}><input name="endpoint_key" required /></ConfigField>
+        <ConfigField label={text("外网主机或 IP", "External host or IP")} hint={text("填写外部 Agent 实际可达的数据库主机。", "Enter the database host reachable by the external Agent.")}><input name="host_reference" required /></ConfigField>
+        <ConfigField label={text("数据库端口", "Database port")} hint={text("1-65535。", "1-65535.")}><input name="port" type="number" min="1" max="65535" required /></ConfigField>
+        <label className="checkbox-field"><input name="tls_required" type="checkbox" defaultChecked />{text("要求 TLS", "TLS required")}</label>
+        <ConfigField label={text("配置原因", "Configuration reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField>
+        <ConfigField label={text("操作", "Action")} hint={text("不会保存数据库密码。", "Database passwords are never stored.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("登记地址", "Register endpoint")}</button></ConfigField>
+      </form>
+      <DataTable headers={[text("配置", "Endpoint"), text("主机", "Host"), text("端口", "Port"), text("状态", "Status"), text("操作", "Actions")]} rows={endpoints.map((item: Row) => [item.endpoint_key, item.host_reference, item.port, displayRowValue(lang, item.status), <span className="actions-row"><button type="button" className="small-button" disabled={busy || String(item.status).toUpperCase() !== "ACTIVE"} onClick={() => setEditingEndpoint(item)}>{text("编辑", "Edit")}</button><button type="button" className="small-button danger" disabled={busy || String(item.status).toUpperCase() !== "ACTIVE"} onClick={() => void retireEndpoint(item)}>{text("删除", "Delete")}</button></span>])} empty={text("暂无外部数据库地址", "No external database endpoints")} text={text} />
+    </InfoPanel>
+    <DetailDrawer open={Boolean(editingEndpoint)} title={text("编辑外部数据库地址", "Edit external database endpoint")} onClose={() => { if (!busy) setEditingEndpoint(null); }} text={text}>
+      {editingEndpoint && <form className="configuration-form compact-configuration-form" onSubmit={(event) => void updateEndpoint(event)}>
+        <p className="cx-form-hint">{text(`配置：${editingEndpoint.endpoint_key}。数据库类型和服务名由发行版及初始化配置决定。`, `Configuration: ${editingEndpoint.endpoint_key}. Database type and service name are fixed by the edition and initialization.`)}</p>
+        <ConfigField label={text("外部主机或 IP", "External host or IP")} hint={text("填写外部 Agent 实际可达的公网地址。", "Enter the public address reachable by external Agents.")}><input name="host_reference" defaultValue={String(editingEndpoint.host_reference || "")} required /></ConfigField>
+        <ConfigField label={text("公网端口", "Public port")} hint={text("填写公网映射端口。", "Enter the public mapped port.")}><input name="port" type="number" min="1" max="65535" defaultValue={String(editingEndpoint.port || "")} required /></ConfigField>
+        <label className="checkbox-field"><input name="tls_required" type="checkbox" defaultChecked={String(editingEndpoint.tls_required || "Y").toUpperCase() !== "N"} />{text("要求 TLS", "TLS required")}</label>
+        <ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符并写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField>
+        <ConfigField label={text("操作", "Action")} hint={text("保存后立即影响后续外部 Agent 地址分发。", "Applies to subsequent external Agent distribution immediately.")} action><button type="submit" className="small-button" disabled={busy}><Check size={14} />{text("保存变更", "Save changes")}</button></ConfigField>
+      </form>}
+    </DetailDrawer>
   </InfoPanel>;
 }
 
@@ -1702,6 +1809,7 @@ function LLMProviderProfilesPanel({ lang, capabilities, text, onNotice }: {
   type RouteModes = { direct: boolean; gateway: boolean; address: string };
   const [routingByProfile, setRoutingByProfile] = useState<Record<string, RouteModes>>({});
   const [routingDraft, setRoutingDraft] = useState<Record<string, RouteModes>>({});
+  const [reasonDialog, setReasonDialog] = useState<{ kind: "retire" | "route"; item: Row } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const canManage = canAction(capabilities, "platform.manage") || canAction(capabilities, "agents.manage");
   const load = async () => {
@@ -1755,15 +1863,15 @@ function LLMProviderProfilesPanel({ lang, capabilities, text, onNotice }: {
     finally { setBusy(false); }
   };
   const probe = async (profileId: string) => { setBusy(true); try { await api(`/api/llm-provider-profiles/${encodeURIComponent(profileId)}/probe`, { method: "POST", body: "{}" }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
-  const retire = async (item: Row) => {
-    const reason = window.prompt(text(`请输入移除“${item.profile_key}”的原因（至少三个字符）`, `Enter a reason to retire “${item.profile_key}” (at least 3 characters)`), "");
-    if (!reason || reason.trim().length < 3) return;
+  const retire = async (item: Row, reason: string) => {
+    if (reason.trim().length < 3) return;
+    setReasonDialog(null);
     setBusy(true); try { await api(`/api/llm-provider-profiles/${encodeURIComponent(String(item.profile_id))}`, { method: "DELETE", body: JSON.stringify({ reason: reason.trim() }) }); await load(); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const confirmRouting = async (item: Row) => {
+  const confirmRouting = async (item: Row, reason = "") => {
     const profileId = String(item.profile_id || ""); if (!profileId) return;
     const draft = routingDraft[profileId] || { direct: true, gateway: false, address: "" };
-    const reason = window.prompt(text(`请输入变更“${item.profile_key}”路由模式的合规理由`, `Enter a compliance reason for changing routing modes for “${item.profile_key}”`), "");
+    if (!reason) { setReasonDialog({ kind: "route", item }); return; }
     if (!reason || reason.trim().length < 3) return;
     setBusy(true); try { const saved = await api<Row>("/api/model-gateway/routing", { method: "PUT", body: JSON.stringify({ profile_id: profileId, gateway_enabled: draft.gateway, direct_allowed: draft.direct, reason: reason.trim() }) }); const next = { ...draft, address: String(saved.gateway_url || draft.address) }; setRoutingByProfile((current) => ({ ...current, [profileId]: next })); setRoutingDraft((current) => ({ ...current, [profileId]: next })); onNotice(text("模型路由已更新", "Model routing updated")); }
     catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
@@ -1779,7 +1887,8 @@ function LLMProviderProfilesPanel({ lang, capabilities, text, onNotice }: {
       <ConfigField label={text("保存原因", "Save reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField>
       <ConfigField label={text("测试与保存", "Test and save")} hint={testedVersion === draftVersion ? text("测试通过，可以保存。", "Test passed; saving is enabled.") : text("修改任一字段后需重新测试。", "Retest after changing any field.")} action><div className="action-button-row"><button type="button" className="small-button" disabled={busy || testing} onClick={() => void testProfile()}><Activity className={testing ? "spin" : ""} size={14} />{text("测试", "Test")}</button><button className="primary-button" disabled={busy || testedVersion !== draftVersion}><Plus size={14} />{text("保存", "Save")}</button></div></ConfigField>
     </form>}
-    {loading ? <PageLoading text={text} /> : <DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health"), text("模型路由", "Model routing"), text("操作", "Action")]} rows={profiles.map((item) => { const id = String(item.profile_id || ""); const saved = routingByProfile[id] || { direct: true, gateway: false, address: "" }; const draft = routingDraft[id] || saved; const changed = draft.direct !== saved.direct || draft.gateway !== saved.gateway; const update = (key: "direct" | "gateway") => setRoutingDraft((current) => ({ ...current, [id]: { ...draft, [key]: !draft[key] } })); return [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), displayRowValue(lang, item.health_state), canManage ? <div className="route-mode-control"><div className="route-mode-options"><label className={draft.direct ? "route-choice active" : "route-choice"}><input type="checkbox" checked={draft.direct} onChange={() => update("direct")} disabled={busy} />{text("直连", "Direct")}</label><label className={draft.gateway ? "route-choice active" : "route-choice"}><input type="checkbox" checked={draft.gateway} onChange={() => update("gateway")} disabled={busy} />{text("平台网关", "Gateway")}</label><input className="route-address" value={draft.address} readOnly title={draft.address} aria-label={text("平台自动分发地址", "Platform-distributed URL")} /></div><button type="button" className={`small-button route-confirm${changed ? " pending" : ""}`} disabled={busy || !changed} onClick={() => void confirmRouting(item)}><Check size={13} />{text("确认变更", "Confirm")}</button></div> : text("只读", "Read-only"), canManage && String(item.status || "").toUpperCase() !== "RETIRED" ? <span className="actions-row"><button className="small-button" disabled={busy} onClick={() => void probe(String(item.profile_id))}>{text("探活", "Probe")}</button><button className="small-button danger" disabled={busy} onClick={() => void retire(item)}>{text("移除", "Retire")}</button></span> : displayRowValue(lang, item.status)]; })} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} />}
+    {loading ? <PageLoading text={text} /> : <DataTable headers={[text("配置", "Profile"), text("模型", "Model"), text("密钥", "Secret"), text("健康", "Health"), text("模型路由", "Model routing"), text("操作", "Action")]} rows={profiles.map((item) => { const id = String(item.profile_id || ""); const saved = routingByProfile[id] || { direct: true, gateway: false, address: "" }; const draft = routingDraft[id] || saved; const changed = draft.direct !== saved.direct || draft.gateway !== saved.gateway; const update = (key: "direct" | "gateway") => setRoutingDraft((current) => ({ ...current, [id]: { ...draft, [key]: !draft[key] } })); return [item.profile_key, item.model_id, item.secret_present ? text("已加密", "Encrypted") : text("未设置", "Not set"), displayRowValue(lang, item.health_state), canManage ? <div className="route-mode-control"><div className="route-mode-options"><label className={draft.direct ? "route-choice active" : "route-choice"}><input type="checkbox" checked={draft.direct} onChange={() => update("direct")} disabled={busy} />{text("直连", "Direct")}</label><label className={draft.gateway ? "route-choice active" : "route-choice"}><input type="checkbox" checked={draft.gateway} onChange={() => update("gateway")} disabled={busy} />{text("平台网关", "Gateway")}</label><input className="route-address" value={draft.address} readOnly title={draft.address} aria-label={text("平台自动分发地址", "Platform-distributed URL")} /></div><button type="button" className={`small-button route-confirm${changed ? " pending" : ""}`} disabled={busy || !changed} onClick={() => void confirmRouting(item)}><Check size={13} />{text("确认变更", "Confirm")}</button></div> : text("只读", "Read-only"), canManage && String(item.status || "").toUpperCase() !== "RETIRED" ? <span className="actions-row"><button className="small-button" disabled={busy} onClick={() => void probe(String(item.profile_id))}>{text("探活", "Probe")}</button><button className="small-button danger" disabled={busy} onClick={() => setReasonDialog({ kind: "retire", item })}>{text("移除", "Retire")}</button></span> : displayRowValue(lang, item.status)]; })} empty={text("暂无 LLM 配置", "No LLM profiles")} text={text} />}
+    <DetailDrawer open={Boolean(reasonDialog)} title={text("输入变更原因", "Enter change reason")} onClose={() => { if (!busy) setReasonDialog(null); }} text={text}>{reasonDialog && <form className="configuration-form compact-configuration-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || "").trim(); if (reason.length < 3) return; if (reasonDialog.kind === "retire") void retire(reasonDialog.item, reason); else void confirmRouting(reasonDialog.item, reason); }}><ConfigField label={text("原因", "Reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField><button className="primary-button" disabled={busy}><Check size={14} />{text(reasonDialog.kind === "retire" ? "确认移除" : "确认变更", reasonDialog.kind === "retire" ? "Confirm retirement" : "Confirm change")}</button></form>}</DetailDrawer>
   </InfoPanel>;
 }
 
@@ -1795,6 +1904,7 @@ function ModelGovernancePanel({ lang, capabilities, text, onNotice }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [widgets, setWidgets] = useState<string[]>(["agent_overview", "runtime", "usage_trend", "model_usage", "coverage", "budget_risk"]);
+  const [governanceReason, setGovernanceReason] = useState<{ action: string; path: string; body?: Row; message: string } | null>(null);
   const canGateway = canAction(capabilities, "model_gateway.manage") || canAction(capabilities, "platform.manage");
   const canUsage = canAction(capabilities, "model_usage.manage") || canAction(capabilities, "platform.manage");
   const canWallboard = canAction(capabilities, "wallboard.manage") || canAction(capabilities, "platform.manage");
@@ -1823,6 +1933,7 @@ function ModelGovernancePanel({ lang, capabilities, text, onNotice }: {
     finally { setBusy(false); }
   };
   const formRow = (form: HTMLFormElement) => Object.fromEntries(new FormData(form).entries());
+  const submitGovernanceReason = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!governanceReason) return; const reason = String(new FormData(event.currentTarget).get("reason") || "").trim(); if (reason.length < 3) return; await submit(governanceReason.path, { ...(governanceReason.body || {}), reason }, governanceReason.message); setGovernanceReason(null); };
   const widgetRegistry = (payload.widget_registry || ["agent_overview", "runtime", "usage_trend", "model_usage", "coverage", "budget_risk", "compliance", "approvals", "graph_runs", "provider_health"]) as string[];
   return <section className="page-stack model-governance-panel">
     <div className="view-toggle" role="tablist" aria-label={text("模型治理分区", "Model governance sections")}>
@@ -1858,11 +1969,12 @@ function ModelGovernancePanel({ lang, capabilities, text, onNotice }: {
     </> : tab === "evidence" ? <>
       {canUsage && <InfoPanel title={text("注册外部观测适配器", "Register external observation adapter")} text={text}><form className="configuration-form compact-configuration-form" onSubmit={(event) => { event.preventDefault(); const row = formRow(event.currentTarget); void submit("/api/model-evidence/adapters", { adapter_id: row.adapter_id, display_name: row.display_name, verification_key: row.verification_key, scopes: String(row.scopes || "").split(",").map((item) => item.trim()).filter(Boolean) }, text("外部观测适配器已注册", "External observation adapter registered")); }}><ConfigField label={text("适配器 ID 与名称", "Adapter ID and name")} hint={text("留空 ID 时由平台生成。", "The platform generates an empty ID.")}><div className="inline-field-pair"><input name="adapter_id" /><input name="display_name" required /></div></ConfigField><ConfigField label={text("Ed25519 验证公钥", "Ed25519 verification public key")} hint={text("Base64 公钥；私钥不得上传平台。", "Base64 public key; never upload the private key.")} multiline><textarea name="verification_key" required /></ConfigField><ConfigField label={text("允许范围", "Allowed scopes")} hint={text("逗号分隔，如 provider:openai,agent:AGENT_1。", "Comma-separated, e.g. provider:openai,agent:AGENT_1.")}><input name="scopes" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("轮换同一 ID 会产生新密钥版本。", "Reusing an ID creates a rotated key version.")} action><button className="primary-button" disabled={busy}><Plus size={14} />{text("注册适配器", "Register adapter")}</button></ConfigField></form></InfoPanel>}
       <div className="metric-grid"><InfoPanel title={text("外部已验证请求", "Externally verified requests")} text={text}><strong className="metric-value">{String(payload.coverage?.externally_verified_requests || 0)}</strong></InfoPanel><InfoPanel title={text("外部已验证 Token", "Externally verified Tokens")} text={text}><strong className="metric-value">{String(payload.coverage?.externally_verified_tokens || 0)}</strong></InfoPanel><InfoPanel title={text("证据水位", "Evidence watermark")} text={text}><strong className="metric-value metric-identifier">{String(payload.coverage?.watermark || "-")}</strong></InfoPanel></div>
-      <InfoPanel title={text("适配器密钥版本", "Adapter key versions")} text={text}><DataTable headers={[text("适配器", "Adapter"), text("版本", "Version"), text("范围", "Scopes"), text("状态", "Status"), text("操作", "Action")]} rows={listPayload(payload.adapters, ["items"]).map((item) => [item.display_name, item.key_version, (item.scopes || []).join(", "), displayRowValue(lang, item.status), String(item.status).toUpperCase() === "ACTIVE" ? <button className="small-button danger" disabled={busy} onClick={() => { const reason = window.prompt(text("请输入吊销原因", "Enter revocation reason"), ""); if (reason) void submit(`/api/model-evidence/adapters/${encodeURIComponent(String(item.adapter_id))}/revoke`, { reason }, text("适配器已吊销", "Adapter revoked")); }}>{text("吊销", "Revoke")}</button> : "-"])} empty={text("暂无外部适配器", "No external adapters")} text={text} /></InfoPanel>
+      <InfoPanel title={text("适配器密钥版本", "Adapter key versions")} text={text}><DataTable headers={[text("适配器", "Adapter"), text("版本", "Version"), text("范围", "Scopes"), text("状态", "Status"), text("操作", "Action")]} rows={listPayload(payload.adapters, ["items"]).map((item) => [item.display_name, item.key_version, (item.scopes || []).join(", "), displayRowValue(lang, item.status), String(item.status).toUpperCase() === "ACTIVE" ? <button className="small-button danger" disabled={busy} onClick={() => setGovernanceReason({ action: "revoke", path: `/api/model-evidence/adapters/${encodeURIComponent(String(item.adapter_id))}/revoke`, body: {}, message: text("适配器已吊销", "Adapter revoked") })}>{text("吊销", "Revoke")}</button> : "-"])} empty={text("暂无外部适配器", "No external adapters")} text={text} /></InfoPanel>
     </> : <>
       {canWallboard && <InfoPanel title={text("创建大屏定义版本", "Create wallboard definition version")} text={text}><form className="configuration-form compact-configuration-form" onSubmit={(event) => { event.preventDefault(); const row = formRow(event.currentTarget); void submit("/api/wallboard/definitions", { definition_id: row.definition_id, display_name: row.display_name, config: { widgets, dimensions: ["day", "provider", "model", "provenance"], refresh_seconds: Number(row.refresh_seconds || 30), locale: row.locale, layout: "EXECUTIVE_GRID" }, scope: { ...(row.organization_id ? { organization_id: row.organization_id } : {}), ...(row.security_domain_id ? { security_domain_id: row.security_domain_id } : {}) }, reason: row.reason }, text("大屏定义版本已创建", "Wallboard definition version created")); }}><ConfigField label={text("定义 ID 与名称", "Definition ID and name")} hint={text("首次可留空 ID；创建新版本时使用已有 ID。", "Leave ID empty initially; reuse it for a new version.")}><div className="inline-field-pair"><input name="definition_id" /><input name="display_name" required /></div></ConfigField><ConfigField label={text("组件", "Widgets")} hint={text("只能选择平台登记组件。", "Only registered widgets are selectable.")} multiline><div className="widget-selector">{widgetRegistry.map((item) => <label key={item}><input type="checkbox" checked={widgets.includes(item)} onChange={() => setWidgets((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])} />{item}</label>)}</div></ConfigField><ConfigField label={text("刷新与语言", "Refresh and locale")} hint={text("刷新范围 15 至 3600 秒。", "Refresh range is 15 to 3600 seconds.")}><div className="inline-field-pair"><input name="refresh_seconds" type="number" min="15" max="3600" defaultValue="30" /><select name="locale" defaultValue="zh-CN"><option value="zh-CN">中文</option><option value="en-US">English</option></select></div></ConfigField><ConfigField label={text("数据范围", "Data scope")} hint={text("可按组织或安全域收窄。", "May narrow to an organization or security domain.")}><div className="inline-field-pair"><input name="organization_id" placeholder="Organization ID" /><input name="security_domain_id" placeholder="Security Domain ID" /></div></ConfigField><ConfigField label={text("合规原因", "Compliance reason")} hint={text("创建、发布和回滚均单独记录原因。", "Creation, publication, and rollback each retain a reason.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("新版本保持草稿，需单独发布。", "A new version remains draft until published.")} action><button className="primary-button" disabled={busy || !widgets.length}><Plus size={14} />{text("创建草稿版本", "Create draft version")}</button></ConfigField></form></InfoPanel>}
-      <InfoPanel title={text("大屏定义版本", "Wallboard definition versions")} text={text}><DataTable headers={[text("定义", "Definition"), text("版本", "Version"), text("组件", "Widgets"), text("状态", "Status"), text("操作", "Action")]} rows={listPayload(payload, ["items"]).map((item) => { const current = String(item.published || "").toUpperCase() === "Y"; return [item.display_name, `${item.definition_id} · v${item.version}`, (item.config?.widgets || []).join(", "), current ? text("当前发布", "Current") : displayRowValue(lang, item.status), canWallboard ? <button className={current ? "small-button" : "small-button primary"} disabled={busy || current} onClick={() => { const reason = window.prompt(current ? text("请输入回滚原因", "Enter rollback reason") : text("请输入发布原因", "Enter publication reason"), ""); if (reason) void submit(`/api/wallboard/definitions/${encodeURIComponent(String(item.version_id))}/${current ? "rollback" : "publish"}`, { reason }, text("大屏发布状态已更新", "Wallboard publication updated")); }}>{current ? text("当前版本", "Current") : text("发布/回滚到此版本", "Publish / roll back")}</button> : "-"]; })} empty={text("暂无大屏定义", "No wallboard definitions")} text={text} /></InfoPanel>
+      <InfoPanel title={text("大屏定义版本", "Wallboard definition versions")} text={text}><DataTable headers={[text("定义", "Definition"), text("版本", "Version"), text("组件", "Widgets"), text("状态", "Status"), text("操作", "Action")]} rows={listPayload(payload, ["items"]).map((item) => { const current = String(item.published || "").toUpperCase() === "Y"; return [item.display_name, `${item.definition_id} · v${item.version}`, (item.config?.widgets || []).join(", "), current ? text("当前发布", "Current") : displayRowValue(lang, item.status), canWallboard ? <button className={current ? "small-button" : "small-button primary"} disabled={busy || current} onClick={() => { const reason = promptInput(current ? text("请输入回滚原因", "Enter rollback reason") : text("请输入发布原因", "Enter publication reason"), ""); if (reason) void submit(`/api/wallboard/definitions/${encodeURIComponent(String(item.version_id))}/${current ? "rollback" : "publish"}`, { reason }, text("大屏发布状态已更新", "Wallboard publication updated")); }}>{current ? text("当前版本", "Current") : text("发布/回滚到此版本", "Publish / roll back")}</button> : "-"]; })} empty={text("暂无大屏定义", "No wallboard definitions")} text={text} /></InfoPanel>
     </>}
+    <DetailDrawer open={Boolean(governanceReason)} title={text("输入治理原因", "Enter governance reason")} onClose={() => { if (!busy) setGovernanceReason(null); }} text={text}>{governanceReason && <form className="configuration-form compact-configuration-form" onSubmit={(event) => void submitGovernanceReason(event)}><ConfigField label={text("原因", "Reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField><button className="primary-button" disabled={busy}><Check size={14} />{text("确认提交", "Confirm")}</button></form>}</DetailDrawer>
   </section>;
 }
 
@@ -1984,13 +2096,14 @@ function DeploymentModelsPage({
   const load = async () => {
     setLoading(true);
     try {
-      const [runs, readiness, profiles, contracts, spaces, bindings, jobs] = await Promise.all([
+      const [runs, readiness, profiles, contracts, spaces, bindings, jobs, grants] = await Promise.all([
         api<Row>("/api/deployment-runs?limit=20"), api<Row>("/api/embedding/readiness"),
         api<Row>("/api/embedding/profiles?limit=100"), api<Row>("/api/embedding/contracts?limit=100"),
         api<Row>("/api/embedding/spaces?limit=100"), api<Row>("/api/embedding/bindings?limit=100"),
         api<Row>("/api/embedding/jobs?limit=100"),
+        api<Row>("/api/embedding/access-grants?limit=200"),
       ]);
-      setPayload({ runs, readiness, profiles, contracts, spaces, bindings, jobs });
+      setPayload({ runs, readiness, profiles, contracts, spaces, bindings, jobs, grants });
     } catch (error) {
       onNotice((error as Error).message);
     } finally {
@@ -2057,11 +2170,49 @@ function DeploymentModelsPage({
         : text("LLM 服务探活未通过，状态已更新为降级。", "LLM provider probe failed; health state is Degraded."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
+  const saveAccessGrant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    setBusy(true);
+    try {
+      await api("/api/embedding/access-grants", {
+        method: "POST",
+        body: JSON.stringify({
+          subject_type: String(form.get("subject_type") || "AGENT"),
+          subject_id: String(form.get("subject_id") || "").trim(),
+          effect: String(form.get("effect") || "ALLOW"),
+          allowed_profile_id: String(form.get("allowed_profile_id") || ""),
+          max_batch_size: Number(form.get("max_batch_size") || 1),
+          max_input_chars: Number(form.get("max_input_chars") || 16000),
+          valid_from: String(form.get("valid_from") || ""),
+          valid_until: String(form.get("valid_until") || ""),
+          reason: String(form.get("reason") || "").trim(),
+        }),
+      });
+      formElement.reset();
+      await load();
+      onNotice(text("Embedding 调用授权已保存，受影响 Agent 的旧令牌已失效。", "Embedding access grant saved; affected Agents' old tokens were revoked."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
+  const revokeAccessGrant = async (item: Row) => {
+    const reason = promptInput(text("请输入撤销授权的原因（至少三个字符）", "Enter a reason to revoke this grant (at least 3 characters)"), "");
+    if (!reason || reason.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await api(`/api/embedding/access-grants/${encodeURIComponent(String(item.grant_id))}`, {
+        method: "DELETE", body: JSON.stringify({ reason: reason.trim() }),
+      });
+      await load();
+      onNotice(text("Embedding 调用授权已撤销，受影响 Agent 的旧令牌已失效。", "Embedding access grant revoked; affected Agents' old tokens were revoked."));
+    } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
+  };
   const profiles = listPayload(payload.profiles, ["items"]);
   const contracts = listPayload(payload.contracts, ["items"]);
   const spaces = listPayload(payload.spaces, ["items"]);
   const bindings = listPayload(payload.bindings, ["items"]);
   const jobs = listPayload(payload.jobs, ["items"]);
+  const grants = listPayload(payload.grants, ["items"]);
   const runs = listPayload(payload.runs, ["items"]);
   const readiness = payload.readiness?.readiness || {};
   const embeddingDeployed = Boolean(readiness.platform_deployed);
@@ -2094,6 +2245,22 @@ function DeploymentModelsPage({
       {canManage && embeddingDeployed && <InfoPanel title={text("统一 Embedding 已完成配置", "Platform Embedding configured")} text={text}>
         <div className="automation-boundary" role="status"><ShieldCheck size={14} />{text("统一 Embedding 契约已部署并绑定到平台默认空间。为保证所有智能体写入的向量一致，运行期不提供修改入口。", "The unified Embedding Contract is deployed and bound to the platform default Space. Runtime edits are unavailable to keep vector writes consistent for every Agent.")}</div>
         <p className="cx-form-hint">{text("如需更换模型、接入模式、距离度量或密钥引用，请使用新版平台包重新部署。重新部署会按受控流程建立新的契约、空间和绑定，不会在运行期改写当前统一契约。", "To change the model, execution mode, distance metric, or secret reference, redeploy with a new platform package. Redeployment creates a new governed Contract, Space, and binding instead of changing the active unified Contract at runtime.")}</p>
+      </InfoPanel>}
+      {canManage && <InfoPanel title={text("外部 Agent 调用授权", "External Agent access grants")} text={text}>
+        <div className="automation-boundary" role="status"><ShieldCheck size={14} />{text("模型绑定只决定使用哪个模型，不授予调用权。外部 Agent 默认拒绝；只有命中这里的 ALLOW 才能申请 embedding.generate，任意匹配的 DENY 始终优先。", "A model Binding selects a model but grants no access. External Agents are denied by default; only a matching ALLOW permits embedding.generate, and any matching DENY always wins.")}</div>
+        <form className="configuration-form compact-configuration-form embedding-grant-form" onSubmit={saveAccessGrant}>
+          <ConfigField label={text("授权主体类型", "Subject type")} hint={text("可对单个 Agent、模板、组织或安全域授权。", "Grant an Agent, template, organization, or security domain.")}><select name="subject_type" defaultValue="AGENT"><option value="AGENT">Agent</option><option value="TEMPLATE">{text("Agent 模板", "Agent template")}</option><option value="ORGANIZATION">{text("组织", "Organization")}</option><option value="SECURITY_DOMAIN">{text("安全域", "Security domain")}</option></select></ConfigField>
+          <ConfigField label={text("主体 ID", "Subject ID")} hint={text("填写对应页面展示的真实 ID；名称不能替代 ID。", "Use the exact ID shown on the relevant page; a display name is not accepted.")}><input name="subject_id" required /></ConfigField>
+          <ConfigField label={text("授权效果", "Effect")} hint={text("拒绝规则优先于所有允许规则。", "DENY overrides every matching ALLOW.")}><select name="effect" defaultValue="ALLOW"><option value="ALLOW">{text("允许", "Allow")}</option><option value="DENY">{text("拒绝", "Deny")}</option></select></ConfigField>
+          <ConfigField label={text("限定模型配置", "Limited Profile")} hint={text("留空时适用于主体当前有效的模型绑定。", "Leave blank to follow the subject's current effective Binding.")}><select name="allowed_profile_id" defaultValue=""><option value="">{text("当前有效配置（不限 Profile）", "Current effective Binding (any Profile)")}</option>{profiles.filter((item) => String(item.status || "").toUpperCase() === "ACTIVE").map((item) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key || item.profile_id)}</option>)}</select></ConfigField>
+          <ConfigField label={text("单次最大文本数", "Maximum batch size")} hint={text("每次请求允许 1 至 16 条文本。", "Allow 1 to 16 texts per request.")}><input name="max_batch_size" type="number" min="1" max="16" defaultValue="1" required /></ConfigField>
+          <ConfigField label={text("单次最大字符数", "Maximum input characters")} hint={text("按整批文本合计，范围 1 至 64000。", "Total across the batch, from 1 to 64000.")}><input name="max_input_chars" type="number" min="1" max="64000" defaultValue="16000" required /></ConfigField>
+          <ConfigField label={text("生效时间", "Valid from")} hint={text("留空表示保存后立即生效。", "Leave blank to take effect immediately.")}><input name="valid_from" type="datetime-local" /></ConfigField>
+          <ConfigField label={text("失效时间", "Valid until")} hint={text("留空表示不自动到期。", "Leave blank for no automatic expiry.")}><input name="valid_until" type="datetime-local" /></ConfigField>
+          <ConfigField label={text("合规原因", "Compliance reason")} hint={text("至少三个字符，并写入数据库审计。", "At least three characters; retained in database audit.")}><input name="reason" minLength={3} required /></ConfigField>
+          <ConfigField label={text("操作", "Action")} hint={text("保存后受影响 Agent 必须重新申请短期 Token。", "Affected Agents must request a new short-lived Token after saving.")} action><button className="primary-button" disabled={busy}><ShieldCheck size={15} />{text("保存调用授权", "Save access grant")}</button></ConfigField>
+        </form>
+        <DataTable headers={[text("主体", "Subject"), text("效果", "Effect"), text("模型限制", "Profile limit"), text("请求限制", "Request limits"), text("有效期", "Validity"), text("状态", "Status"), text("操作", "Action")]} rows={grants.map((item) => [`${displayRowValue(lang, item.subject_type)} · ${item.subject_id}`, displayRowValue(lang, item.effect), item.allowed_profile_id || text("当前绑定", "Current Binding"), `${item.max_batch_size} ${text("条", "texts")} · ${item.max_input_chars} ${text("字符", "chars")}`, `${displayRowValue(lang, item.valid_from || text("立即", "Immediate"))} → ${displayRowValue(lang, item.valid_until || text("长期", "No expiry"))}`, displayRowValue(lang, item.status), String(item.status || "").toUpperCase() === "ACTIVE" ? <button type="button" className="small-button danger" disabled={busy} onClick={() => void revokeAccessGrant(item)}><Trash2 size={13} />{text("撤销", "Revoke")}</button> : "-"])} empty={text("尚未配置外部 Agent 的 Embedding 调用授权", "No external Agent Embedding access grants configured")} text={text} />
       </InfoPanel>}
       <InfoPanel title={text("自动化结果", "Automated results")} text={text}><p className="cx-form-hint">{text("配置、契约、默认空间、平台绑定和迁移任务均由上方的自动化流程维护。以下为只读状态，不提供手工创建、修改或补偿入口。", "The configuration, Contract, default Space, platform binding, and migration jobs are maintained by the automated workflow above. These are read-only results; no manual create, update, or compensation path is available here.")}</p><DataTable headers={[text("配置", "Profile"), text("模式", "Mode"), text("模型", "Model"), text("维度", "Dimension"), text("密钥", "Secret"), text("状态", "State")]} rows={profiles.map((item) => [item.profile_key, displayRowValue(lang, item.execution_mode), item.model_id || "-", item.dimension, item.secret_present ? text("已加密", "Encrypted") : "-", displayRowValue(lang, item.health_state)])} empty={text("尚未配置 Embedding", "No Embedding configured")} text={text} /><DataTable headers={[text("契约", "Contract"), text("模型", "Model"), text("维度", "Dimension"), text("模式", "Mode"), text("状态", "State")]} rows={contracts.map((item) => [item.contract_id, item.model_id || "-", item.dimension, displayRowValue(lang, item.execution_mode), displayRowValue(lang, item.status)])} empty={text("尚未创建契约", "No Contract created")} text={text} /><DataTable headers={[text("空间", "Space"), text("契约", "Contract"), text("验证", "Validation"), text("默认", "Default"), text("可写", "Writable")]} rows={spaces.map((item) => [item.space_key, item.contract_id || "-", displayRowValue(lang, item.validation_state), item.is_default, item.write_enabled])} empty={text("尚未创建空间", "No Space created")} text={text} />
       <DataTable headers={[text("范围", "Scope"), text("主体", "Subject"), text("配置", "Profile"), text("空间", "Space"), text("版本", "Version")]} rows={bindings.map((item) => [displayRowValue(lang, item.binding_scope), item.binding_subject_id, item.profile_key || item.profile_id, item.space_key || item.space_id, item.version])} empty={text("平台默认绑定尚未建立", "No platform default binding")} text={text} /><DataTable headers={[text("任务", "Job"), text("类型", "Kind"), text("状态", "State"), text("目标空间", "Target space"), text("时间", "Time")]} rows={jobs.map((item) => [item.job_id, displayRowValue(lang, item.job_kind), displayRowValue(lang, item.status), item.target_space_id, displayRowValue(lang, item.created_at)])} empty={text("没有自动迁移任务", "No automated migration jobs")} text={text} /></InfoPanel>
@@ -2210,7 +2377,7 @@ function NativeAgentsPage({
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const decide = async (request: Row, decision: string) => {
-    const why = window.prompt(text("请输入审批原因", "Enter the decision reason")) || "";
+    const why = promptInput(text("请输入审批原因", "Enter the decision reason")) || "";
     if (why.trim().length < 3) return;
     setBusy(true);
     try {
@@ -2220,7 +2387,7 @@ function NativeAgentsPage({
   };
   const activate = async (agent: Row, profileId = String(profiles[0]?.profile_id || "")) => {
     if (!profileId) { onNotice(text("请先配置一个 LLM 服务商配置", "Configure an LLM Provider Profile first")); return; }
-    const why = window.prompt(text("请输入激活原因", "Enter the activation reason")) || "";
+    const why = promptInput(text("请输入激活原因", "Enter the activation reason")) || "";
     if (why.trim().length < 3) return;
     setBusy(true);
     try {
@@ -2580,29 +2747,6 @@ const dataPageConfigs: Record<string, DataPageConfig> = {
     ],
     payloadKeys: ["branches", "items"],
   },
-  collab: {
-    endpoint: "/api/collab",
-    title: ["协作", "Collaboration"],
-    subtitle: [
-      "旧版协作组作为兼容视图保留；新的多人协作应使用具备主体与安全域边界的频道。",
-      "Legacy collaboration groups remain as a compatibility view; new collaboration should use Principal- and Security Domain-governed Channels.",
-    ],
-    labels: [
-      ["ID", "ID"],
-      ["协作组", "Group"],
-      ["协调者", "Coordinator"],
-      ["状态", "Status"],
-      ["成员", "Members"],
-    ],
-    fields: [
-      ["group_id", "id"],
-      ["group_name", "name"],
-      ["coordinator_agent_id", "created_by"],
-      ["status"],
-      ["member_count"],
-    ],
-    payloadKeys: ["groups", "items"],
-  },
   loops: {
     endpoint: "/api/loops",
     title: ["循环", "Loops"],
@@ -2927,7 +3071,7 @@ function askReason(
   labelOrDefault: string,
   requestedDefault?: string,
 ): string | null {
-  const reason = window.prompt(
+  const reason = promptInput(
     requestedDefault ? `${text("请输入原因", "Enter reason")} - ${labelOrDefault}` : text("请输入原因", "Enter reason"),
     requestedDefault || labelOrDefault,
   );
@@ -3861,11 +4005,11 @@ function GraphPage({
                 rows={types.map((row) => [
                   displayRowValue(
                     lang,
-                    rowField(row, ["kind", "type", "graph_type"]),
+                    rowField(row, ["type_kind", "kind", "type", "graph_type"]),
                   ),
-                  String(rowField(row, ["name", "title"])),
+                  String(rowField(row, ["type_name", "name", "title"])),
                   displayRowValue(lang, rowField(row, ["status"])),
-                  String(rowField(row, ["description", "summary"])),
+                  String(rowField(row, ["description", "summary", "manifest"])),
                 ])}
                 empty={text("暂无图类型", "No Graph types")}
                 text={text}
@@ -4337,14 +4481,17 @@ function OrganizationPage({
   );
   const [changes, setChanges] = useState<Row[]>([]);
   const [draft, setDraft] = useState<Row | null>(null);
+  const [newChangeMode, setNewChangeMode] = useState(false);
   const [historyRows, setHistoryRows] = useState<Row[]>([]);
   const [conflicts, setConflicts] = useState<Row[]>([]);
   const [organizationKnowledge, setOrganizationKnowledge] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [sideLoading, setSideLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [draftOperationType, setDraftOperationType] = useState("MOVE_ORGANIZATION");
   const [layoutVersion, setLayoutVersion] = useState(0);
   const graphRequest = useRef(0);
+  const newChangeModeRef = useRef(false);
   const [desktopEditing, setDesktopEditing] = useState(() =>
     !window.matchMedia("(max-width: 780px)").matches,
   );
@@ -4363,19 +4510,21 @@ function OrganizationPage({
     return () => media.removeEventListener("change", update);
   }, []);
 
-  const loadChanges = async () => {
+  const loadChanges = async (): Promise<Row[]> => {
     try {
       const value = await api<Row>("/api/organization/changes");
       const rows = organizationItems(value, ["changes", "change_sets"]);
       setChanges(rows);
       const active = rows.find((row) =>
-        ["DRAFT", "VALIDATING", "APPROVAL_REQUIRED"].includes(
+        ["DRAFT", "VALIDATING", "VALIDATED", "APPROVAL_REQUIRED", "PENDING_APPROVAL"].includes(
           String(row.status || "").toUpperCase(),
         ),
       );
-      if (active && !draft) setDraft(active);
+      if (active && !draft && !newChangeModeRef.current) setDraft(active);
+      return rows;
     } catch {
       setChanges([]);
+      return [];
     }
   };
 
@@ -4504,7 +4653,7 @@ function OrganizationPage({
     setBusy(true);
     try {
       let value: Row;
-      const draftId = draft
+      const draftId = !newChangeModeRef.current && draft
         ? String(rowField(draft, ["change_set_id", "change_id", "id"]))
         : "";
       if (draftId && draftId !== "-") {
@@ -4518,6 +4667,8 @@ function OrganizationPage({
           body: JSON.stringify({ reason, operations: [operation] }),
         });
       }
+      newChangeModeRef.current = false;
+      setNewChangeMode(false);
       setDraft(value.change || value.change_set || value);
       setPanel("draft");
       setLayoutVersion((current) => current + 1);
@@ -4532,16 +4683,6 @@ function OrganizationPage({
   };
 
   const moveByDrag = (source: Row, target: Row) => {
-    const confirmed = window.confirm(
-      text(
-        `将“${organizationNodeLabel(source)}”移动至“${organizationNodeLabel(target)}”下方并加入草稿？`,
-        `Move “${organizationNodeLabel(source)}” under “${organizationNodeLabel(target)}” in the draft?`,
-      ),
-    );
-    if (!confirmed) {
-      setLayoutVersion((current) => current + 1);
-      return;
-    }
     void addOperation({
       operation_type: "MOVE_ORGANIZATION",
       organization_id: organizationResourceId(source),
@@ -4553,11 +4694,27 @@ function OrganizationPage({
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const operationType = String(data.operation_type || "MOVE_ORGANIZATION");
+    const requestedOrganizationId = String(data.subject_id || "").trim();
+    const requestedParentId = String(data.target_id || "").trim();
+    if (operationType === "CREATE_ORGANIZATION" && requestedOrganizationId) {
+      if (requestedOrganizationId === requestedParentId) {
+        onNotice(text("新组织不能将自己设置为上级组织。", "A new organization cannot be its own parent."));
+        return;
+      }
+      if (targetNodes.some((node) => organizationResourceId(node) === requestedOrganizationId)) {
+        onNotice(text("新组织 ID 已存在，请留空自动生成或填写其他唯一 ID。", "The new organization ID already exists; leave it blank for automatic generation or enter another unique ID."));
+        return;
+      }
+    }
     const operation: Row = {
       operation_type: operationType,
-      subject_id: data.subject_id || organizationResourceId(selected || {}),
+      subject_id: operationType === "CREATE_ORGANIZATION"
+        ? data.subject_id || ""
+        : data.subject_id || organizationResourceId(selected || {}),
       target_id: data.target_id || undefined,
       name: data.name || undefined,
+      organization_code: data.organization_code || undefined,
+      organization_type: data.organization_type || undefined,
       membership_kind: data.membership_kind || undefined,
       effective_at: data.effective_at || undefined,
     };
@@ -4568,19 +4725,61 @@ function OrganizationPage({
     void addOperation(operation, String(data.reason || ""));
   };
 
-  const draftAction = async (action: "undo" | "redo" | "validate" | "submit") => {
+  const draftAction = async (action: "undo" | "redo" | "validate" | "validate-submit" | "submit" | "publish" | "withdraw" | "discard") => {
     if (!draft) return;
     const id = String(rowField(draft, ["change_set_id", "change_id", "id"]));
     if (!id || id === "-") return;
+    let reason = "";
+    if (action === "publish" || action === "withdraw" || action === "discard") {
+      reason = askReason(
+        text,
+        action === "publish"
+          ? text("直接发布低风险组织变更", "Direct low-risk organization publication")
+          : action === "withdraw"
+            ? text("撤回组织审批申请", "Withdraw organization approval request")
+            : text("删除草稿（审计记录将保留）", "Delete draft (audit evidence is retained)"),
+      ) || "";
+      if (!reason) return;
+    }
     setBusy(true);
     try {
-      const value = await api<Row>(
-        `/api/organization/changes/${encodeURIComponent(id)}/${action}`,
-        { method: "POST", body: JSON.stringify({}) },
-      );
-      setDraft(value.change || value.change_set || value);
-      setPanel(action === "validate" ? "impact" : "draft");
-      await loadChanges();
+      let value: Row;
+      if (action === "validate-submit") {
+        const validation = await api<Row>(
+          `/api/organization/changes/${encodeURIComponent(id)}/validate`,
+          { method: "POST", body: JSON.stringify({}) },
+        );
+        const validated = validation.change || validation.change_set || validation;
+        if (String(validated.status || "").toUpperCase() !== "VALIDATED") {
+          setDraft(validated);
+          setPanel("impact");
+          await loadChanges();
+          onNotice(text("校验未通过，请查看影响分析中的具体问题。", "Validation failed; review the issues in impact analysis."));
+          return;
+        }
+        value = await api<Row>(
+          `/api/organization/changes/${encodeURIComponent(id)}/submit`,
+          { method: "POST", body: JSON.stringify({}) },
+        );
+      } else {
+        value = await api<Row>(
+          `/api/organization/changes/${encodeURIComponent(id)}/${action}`,
+          { method: "POST", body: JSON.stringify({ reason }) },
+        );
+      }
+      if (action === "discard") {
+        setDraft(null);
+        const rows = await loadChanges();
+        const next = rows.find((row) =>
+          ["DRAFT", "VALIDATING", "VALIDATED", "APPROVAL_REQUIRED", "PENDING_APPROVAL"].includes(String(row.status || "").toUpperCase()),
+        );
+        setDraft(next || null);
+        onNotice(text("草稿已删除，审计记录已保留。", "Draft deleted; audit evidence was retained."));
+      } else {
+        setDraft(value.change || value.change_set || value);
+        setPanel(action === "validate" ? "impact" : "draft");
+        await loadChanges();
+      }
     } catch (error) {
       onNotice(error instanceof Error ? error.message : text("操作失败", "Operation failed"));
     } finally {
@@ -4627,6 +4826,9 @@ function OrganizationPage({
     ).values(),
   );
   const targetNodes = treeNodes;
+  const workflowChanges = changes.filter((row) =>
+    ["DRAFT", "VALIDATING", "VALIDATED", "APPROVAL_REQUIRED", "PENDING_APPROVAL"].includes(String(row.status || "").toUpperCase()),
+  );
   const operations = organizationItems(draft, ["operations"]);
   const diffRows = organizationItems(draft?.diff, ["diff", "items", "operations"]);
   const impact = draft?.impact || draft?.impact_summary || {};
@@ -4836,12 +5038,14 @@ function OrganizationPage({
               <>
                 <div className="organization-panel-heading">
                   <h2>{text("语义变更草稿", "Semantic change draft")}</h2>
-                  {draft && <span className="tag">{displayRowValue(lang, draft.status || "DRAFT")}</span>}
+                  {newChangeMode
+                    ? <span className="tag">{text("新变更集", "New change set")}</span>
+                    : draft && <span className="tag">{displayRowValue(lang, draft.status || "DRAFT")}</span>}
                 </div>
                 {!canEdit && <p className="organization-readonly-note"><ShieldCheck size={14} />{text("当前权限不允许配置组织关系。", "Current access cannot configure organization relationships.")}</p>}
                 <form className="compact-form organization-change-form org-edit-only" onSubmit={submitOperation}>
                   <label>{text("操作", "Operation")}
-                    <select name="operation_type" disabled={!canEdit || busy}>
+                    <select name="operation_type" value={draftOperationType} onChange={(event) => setDraftOperationType(event.target.value)} disabled={!canEdit || busy}>
                       <option value="MOVE_ORGANIZATION">{text("移动组织", "Move organization")}</option>
                       <option value="CREATE_ORGANIZATION">{text("创建组织", "Create organization")}</option>
                       <option value="UPDATE_ORGANIZATION">{text("修改组织", "Update organization")}</option>
@@ -4849,31 +5053,55 @@ function OrganizationPage({
                       <option value="ASSIGN_AGENT">{text("配置智能体责任", "Configure Agent responsibility")}</option>
                     </select>
                   </label>
-                  <label>{text("对象 ID", "Subject ID")}<input name="subject_id" defaultValue={selected ? organizationResourceId(selected) : ""} disabled={!canEdit || busy} required /></label>
-                  <label>{text("目标组织", "Target organization")}
-                    <select name="target_id" disabled={!canEdit || busy}>
+                  <label>{draftOperationType === "CREATE_ORGANIZATION" ? text("新组织 ID（留空自动生成）", "New organization ID (blank for automatic generation)") : text("对象 ID", "Subject ID")}<input key={`${draftOperationType}:${selected ? organizationResourceId(selected) : ""}`} name="subject_id" defaultValue={draftOperationType === "CREATE_ORGANIZATION" ? "" : selected ? organizationResourceId(selected) : ""} disabled={!canEdit || busy} required={draftOperationType !== "CREATE_ORGANIZATION"} placeholder={draftOperationType === "CREATE_ORGANIZATION" ? text("留空由平台生成", "Generated when blank") : ""} /></label>
+                  <label>{draftOperationType === "CREATE_ORGANIZATION" ? text("上级组织", "Parent organization") : text("目标组织", "Target organization")}
+                    <select key={`${draftOperationType}:${selected ? organizationResourceId(selected) : ""}`} name="target_id" defaultValue={draftOperationType === "CREATE_ORGANIZATION" && selected ? organizationResourceId(selected) : ""} disabled={!canEdit || busy}>
                       <option value="">{text("请选择", "Select")}</option>
                       {targetNodes.map((node) => <option key={organizationNodeId(node)} value={organizationResourceId(node)}>{organizationNodeLabel(node)}</option>)}
                     </select>
                   </label>
-                  <label>{text("名称或配置值（按需）", "Name or configuration value (when needed)")}<input name="name" disabled={!canEdit || busy} /></label>
+                  <label>{draftOperationType === "CREATE_ORGANIZATION" ? text("组织名称", "Organization name") : text("名称或配置值（按需）", "Name or configuration value (when needed)")}<input name="name" disabled={!canEdit || busy} required={draftOperationType === "CREATE_ORGANIZATION"} /></label>
+                  {draftOperationType === "CREATE_ORGANIZATION" && <>
+                    <label>{text("组织编码（可选）", "Organization code (optional)")}<input name="organization_code" disabled={!canEdit || busy} placeholder="RND_PLATFORM" /></label>
+                    <label>{text("组织类型", "Organization type")}<select name="organization_type" defaultValue="DEPARTMENT" disabled={!canEdit || busy}><option value="GROUP">{text("集团", "Group")}</option><option value="COMPANY">{text("公司", "Company")}</option><option value="DIVISION">{text("事业部", "Division")}</option><option value="DEPARTMENT">{text("部门", "Department")}</option><option value="TEAM">{text("团队", "Team")}</option></select></label>
+                  </>}
                   <label>{text("成员关系", "Membership kind")}
                     <select name="membership_kind" disabled={!canEdit || busy}><option value="">-</option><option value="PRIMARY">{text("主组织", "Primary")}</option><option value="SECONDARY">{text("兼职组织", "Secondary")}</option></select>
                   </label>
-                  {!draft && <label>{text("变更原因", "Change reason")}<textarea name="reason" required disabled={!canEdit || busy} /></label>}
+                  {(newChangeMode || !draft) && <label>{text("变更原因", "Change reason")}<textarea name="reason" required disabled={!canEdit || busy} /></label>}
                   <button className="primary-button" disabled={!canEdit || busy}><Plus size={14} />{text("加入草稿", "Add to draft")}</button>
                 </form>
                 <div className="organization-draft-actions org-edit-only">
-                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("undo")}><Undo2 size={13} />{text("撤销", "Undo")}</button>
-                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("redo")}><Redo2 size={13} />{text("重做", "Redo")}</button>
-                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("validate")}><Check size={13} />{text("校验与影响分析", "Validate and analyze")}</button>
-                  <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("submit")}><ShieldCheck size={13} />{text("提交审批", "Submit for approval")}</button>
+                  <button className={newChangeMode ? "small-button active" : "small-button"} disabled={busy} onClick={() => {
+                    newChangeModeRef.current = true;
+                    setNewChangeMode(true);
+                    setDraft(null);
+                    setDraftOperationType("CREATE_ORGANIZATION");
+                  }}>{newChangeMode ? text("正在新建变更集", "Creating new change set") : text("新建变更集", "New change set")}</button>
+                  {["DRAFT", "VALIDATED"].includes(String(draft?.status || "").toUpperCase()) &&
+                    <button className="small-button danger" disabled={!draft || busy || !canEdit} onClick={() => void draftAction("discard")}><Trash2 size={13} />{text("删除草稿", "Delete draft")}</button>}
+                  {String(draft?.status || "").toUpperCase() === "DRAFT" && <>
+                    <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("undo")}><Undo2 size={13} />{text("撤销", "Undo")}</button>
+                    <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("redo")}><Redo2 size={13} />{text("重做", "Redo")}</button>
+                    <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("validate")}><Check size={13} />{text("校验与影响分析", "Validate and analyze")}</button>
+                    <button className="small-button" disabled={!draft || busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("validate-submit")}><Send size={13} />{text("校验并提交审批", "Validate and submit")}</button>
+                  </>}
+                  {String(draft?.status || "").toUpperCase() === "VALIDATED" && <>
+                    <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布低风险变更", "Publish low-risk change")}</button>
+                    <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("submit")}><ShieldCheck size={13} />{text("提交审批", "Submit for approval")}</button>
+                  </>}
+                  {String(draft?.status || "").toUpperCase() === "PENDING_APPROVAL" &&
+                    <button className="small-button danger" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("withdraw")}><X size={13} />{text("撤回审批", "Withdraw approval")}</button>}
                 </div>
                 <div className="organization-operation-list">
                   {operations.map((row, index) => <div key={String(row.operation_id || index)}><b>{displayRowValue(lang, row.operation_type || row.type)}</b><small>{String(row.subject_id || row.organization_id || "-")} → {String(row.target_id || row.new_parent_id || "-")}</small></div>)}
                   {!operations.length && <p className="empty-text">{text("当前没有草稿操作", "No draft operations")}</p>}
                 </div>
-                {changes.length > 0 && <select className="organization-change-picker" value={draft ? String(rowField(draft, ["change_set_id", "change_id", "id"])) : ""} onChange={(event) => setDraft(changes.find((row) => String(rowField(row, ["change_set_id", "change_id", "id"])) === event.target.value) || null)}><option value="">{text("选择变更集", "Select change set")}</option>{changes.map((row) => { const id = String(rowField(row, ["change_set_id", "change_id", "id"])); return <option value={id} key={id}>{id} · {displayRowValue(lang, row.status)}</option>; })}</select>}
+                {workflowChanges.length > 0 && <select className="organization-change-picker" value={newChangeMode ? "" : draft ? String(rowField(draft, ["change_set_id", "change_id", "id"])) : ""} onChange={(event) => {
+                  newChangeModeRef.current = false;
+                  setNewChangeMode(false);
+                  setDraft(workflowChanges.find((row) => String(rowField(row, ["change_set_id", "change_id", "id"])) === event.target.value) || null);
+                }}><option value="">{newChangeMode ? text("正在创建新的变更集", "Creating a new change set") : text("选择未完成的变更集", "Select unfinished change set")}</option>{workflowChanges.map((row) => { const id = String(rowField(row, ["change_set_id", "change_id", "id"])); return <option value={id} key={id}>{id} · {displayRowValue(lang, row.status)}</option>; })}</select>}
               </>
             )}
             {panel === "diff" && (
@@ -4936,8 +5164,17 @@ function ApprovalsPage({
   const setPage = (value: number) => { setPageSize(value); setCursorHistory([""]); setNextCursor(""); };
   const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
   const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
+  const openDetail = async (row: Row) => {
+    const id = String(rowField(row, ["approval_id", "request_id", "id"]));
+    try {
+      const value = await api<Row>(`/api/approvals/${encodeURIComponent(id)}`);
+      setDetail((value.approval as Row) || row);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : text("审批详情加载失败", "Approval detail could not be loaded"));
+    }
+  };
   const decide = async (row: Row, decision: string) => {
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入审批原因", "Enter decision reason"),
       text("完成人工复核", "Human review completed"),
     );
@@ -5020,13 +5257,14 @@ function ApprovalsPage({
             const status = approvalStatus(
               rowField(row, ["approval_status", "status", "decision"]),
             );
+            const canDecide = row.can_decide !== false;
             return [
-              <button className="text-button" onClick={() => setDetail(row)}>
+              <button className="text-button" onClick={() => void openDetail(row)}>
                 {id}
               </button>,
-              `${displayRowValue(lang, rowField(row, ["entity_type", "resource_type", "action"]))} · ${String(rowField(row, ["entity_id", "resource_id"]))}`,
+              `${String(rowField(row, ["entity_type"])) === "ORGANIZATION_CHANGE" ? text("组织变更", "Organization change") : displayRowValue(lang, rowField(row, ["entity_type", "resource_type", "action"]))} · ${String(rowField(row, ["entity_id", "resource_id"]))}`,
               displayRowValue(lang, status),
-              status === "PENDING" ? (
+              status === "PENDING" && canDecide ? (
                 <span className="row-actions">
                   <button
                     className="small-button"
@@ -5045,9 +5283,9 @@ function ApprovalsPage({
                     {text("拒绝", "Reject")}
                   </button>
                 </span>
-              ) : (
-                "-"
-              ),
+              ) : status === "PENDING" && row.decision_blocker === "REQUESTER_SEPARATION" ? (
+                <span className="cx-form-hint">{text("申请人不能审批自己的请求", "Requester cannot decide their own request")}</span>
+              ) : "-",
             ];
           })}
           empty={text(emptyByState[filter][0], emptyByState[filter][1])}
@@ -5113,7 +5351,7 @@ function AuditPage({
   const nextPage = () => { if (!nextCursor) return; const history = [...cursorHistory, nextCursor]; setCursorHistory(history); void load(nextCursor); };
   const previousPage = () => { if (cursorHistory.length <= 1) return; const history = cursorHistory.slice(0, -1); setCursorHistory(history); void load(history[history.length - 1]); };
   const exportEvidence = async () => {
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入证据导出原因", "Enter evidence export reason"),
       text("合规复核", "Compliance review"),
     );
@@ -5664,7 +5902,7 @@ function CompliancePage({
       <div className="empty-state">{text("最近租约节点：", "Last lease owner: ")}{summary.lease_owner || text("暂无", "None")}</div>
     </InfoPanel>}
     <DetailDrawer open={Boolean(selected)} title={text("合规详情", "Compliance details")} onClose={() => setSelected(null)} text={text} wide>
-      {selected && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = window.prompt(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = window.prompt(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
+      {selected && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
     </DetailDrawer>
   </section>;
 }
@@ -5789,7 +6027,7 @@ function AgentsPage({
     }
   };
   const transfer = async (item: Row) => {
-    const owner = window.prompt(
+    const owner = promptInput(
       text("输入新的人员主体 ID", "Enter new Human Principal ID"),
     );
     if (!owner) return;
@@ -7333,7 +7571,7 @@ function BarriersPage({
     }
   };
   const substitute = async (item: Row) => {
-    const value = window.prompt(
+    const value = promptInput(
       text(
         "输入已授权的替代主体 ID",
         "Enter an explicitly authorized substitute Principal ID",
@@ -7533,7 +7771,7 @@ function RegistrationGovernancePanel({
   };
   useEffect(() => { void load(); }, []);
   const updateField = async (fieldKey: string, fieldState: string, version: number) => {
-    const reason = window.prompt(text("请输入注册字段策略变更原因", "Enter a registration-field policy reason"));
+    const reason = promptInput(text("请输入注册字段策略变更原因", "Enter a registration-field policy reason"));
     if (!reason?.trim()) return;
     setBusy(true);
     try {
@@ -7546,7 +7784,7 @@ function RegistrationGovernancePanel({
   };
   const updateTokenPolicy = async () => {
     if (!policy) return;
-    const reason = window.prompt(text("请输入一次性注册令牌策略变更原因", "Enter a one-time registration Token policy reason"));
+    const reason = promptInput(text("请输入一次性注册令牌策略变更原因", "Enter a one-time registration Token policy reason"));
     if (!reason?.trim()) return;
     setBusy(true);
     try {
@@ -7572,7 +7810,7 @@ function RegistrationGovernancePanel({
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const revokeToken = async (tokenId: string) => {
-    const reason = window.prompt(text("请输入撤销原因", "Enter a revocation reason"));
+    const reason = promptInput(text("请输入撤销原因", "Enter a revocation reason"));
     if (!reason?.trim()) return;
     setBusy(true);
     try {
@@ -7616,8 +7854,8 @@ function ExternalIdentityProviderPanel({ lang, capabilities, text, onNotice }: {
       }) }); form.reset(); await load(); onNotice(text("身份提供方配置已保存；经适配器验证前保持不可用。", "Identity provider configuration saved; it remains unavailable until adapter validation."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const testProvider = async (providerId: string) => { const reason = window.prompt(text("请输入测试原因", "Enter a test reason")); if (!reason?.trim()) return; setBusy(true); try { const value = await api<Row>(`/api/identity/providers/${encodeURIComponent(providerId)}/test`, { method: "POST", body: JSON.stringify({ reason }) }); onNotice(String(value.message || text("测试完成", "Test completed"))); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
-  const deleteProvider = async (providerId: string) => { const reason = window.prompt(text("请输入删除原因", "Enter a deletion reason")); if (!reason?.trim()) return; setBusy(true); try { await api(`/api/identity/providers/${encodeURIComponent(providerId)}`, { method: "DELETE", body: JSON.stringify({ reason }) }); await load(); onNotice(text("身份提供方配置已删除", "Identity provider profile deleted")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const testProvider = async (providerId: string) => { const reason = promptInput(text("请输入测试原因", "Enter a test reason")); if (!reason?.trim()) return; setBusy(true); try { const value = await api<Row>(`/api/identity/providers/${encodeURIComponent(providerId)}/test`, { method: "POST", body: JSON.stringify({ reason }) }); onNotice(String(value.message || text("测试完成", "Test completed"))); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const deleteProvider = async (providerId: string) => { const reason = promptInput(text("请输入删除原因", "Enter a deletion reason")); if (!reason?.trim()) return; setBusy(true); try { await api(`/api/identity/providers/${encodeURIComponent(providerId)}`, { method: "DELETE", body: JSON.stringify({ reason }) }); await load(); onNotice(text("身份提供方配置已删除", "Identity provider profile deleted")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   return <InfoPanel title={text("企业身份与扫码登录", "Enterprise identity and QR login")} text={text}>
     <p className="cx-form-hint">{text("使用通用 OIDC、OAuth 2.0、SAML 2.0 或企业扫码适配器契约。仅保存配置不会启用登录，必须通过单独的适配器验证和发布证据门禁。", "Uses a provider-neutral OIDC, OAuth 2.0, SAML 2.0, or enterprise QR adapter contract. Saving configuration does not enable login; a separately validated adapter and release evidence are required.")}</p>
     <form className="configuration-form compact-configuration-form" onSubmit={submit}>
@@ -7642,7 +7880,7 @@ function PortalConnectionPanel({ principalId, capabilities, text, onNotice }: { 
   useEffect(() => { void load(); }, [principalId]);
   const policy = value?.policy || {}; const items = value?.items || [];
   const update = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); try { await api(`/api/users/${encodeURIComponent(principalId)}/portal-connections/policy`, { method: "PUT", body: JSON.stringify({ max_connections: Number(data.get("max_connections")), expected_version: Number(policy.version || 0), reason: data.get("reason") }) }); await load(); onNotice(text("Portal 连接上限已更新", "Portal connection limit updated")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
-  const release = async (connectionId: string) => { const reason = window.prompt(text("请输入终止连接的原因", "Enter a connection termination reason")); if (!reason?.trim()) return; setBusy(true); try { await api(`/api/users/${encodeURIComponent(principalId)}/portal-connections/${encodeURIComponent(connectionId)}`, { method: "DELETE", body: JSON.stringify({ reason }) }); await load(); onNotice(text("Portal 连接已终止", "Portal connection terminated")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const release = async (connectionId: string) => { const reason = promptInput(text("请输入终止连接的原因", "Enter a connection termination reason")); if (!reason?.trim()) return; setBusy(true); try { await api(`/api/users/${encodeURIComponent(principalId)}/portal-connections/${encodeURIComponent(connectionId)}`, { method: "DELETE", body: JSON.stringify({ reason }) }); await load(); onNotice(text("Portal 连接已终止", "Portal connection terminated")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   return <InfoPanel title={text("Portal 连接控制", "Portal connection control")} text={text}>
     <div className="metric-grid three-up">{[[text("配置上限", "Configured limit"), policy.configured_limit ?? "-"], [text("实际生效上限", "Effective limit"), policy.effective_limit ?? "-"], [text("当前活动连接", "Active connections"), policy.active_connections ?? "-"]].map(([label, metric]) => <div className="metric-card" key={String(label)}><small>{label}</small><strong>{metric}</strong></div>)}</div>
     <form className="inline-form" onSubmit={update}><label className="inline-field"><span>{text("每用户 Portal 连接数", "Portal connections per user")}</span><input name="max_connections" type="number" min="1" max="8" defaultValue={Number(policy.configured_limit || 1)} required /></label><label className="inline-field"><span>{text("变更原因", "Reason")}</span><input name="reason" required /></label><button className="small-button" disabled={busy || !canAction(capabilities, "users.permissions.manage")}>{text("更新上限", "Update limit")}</button></form>
@@ -7793,7 +8031,7 @@ function UsersPage({
       onNotice(text("请先选择主组织", "Select a primary organization first"));
       return;
     }
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入审批原因", "Enter approval reason"),
       text("完成注册审核", "Registration reviewed"),
     );
@@ -7816,7 +8054,7 @@ function UsersPage({
   };
 
   const reject = async (requestId: string) => {
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入拒绝原因", "Enter a rejection reason"),
     );
     if (!reason?.trim()) return;
@@ -7855,7 +8093,7 @@ function UsersPage({
 
   const revokeRole = async (role: Row) => {
     if (!selected) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入撤销角色的原因", "Enter a role revocation reason"),
     );
     if (!reason?.trim()) return;
@@ -7872,7 +8110,7 @@ function UsersPage({
   const changeEntryAccess = async (appEnabled: boolean) => {
     if (!selected || entryAccess?.protected_system_admin) return;
     if (Boolean(entryAccess?.app_enabled) === appEnabled) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入登录入口变更原因", "Enter the access-surface change reason"),
     );
     if (!reason?.trim()) return;
@@ -7900,7 +8138,7 @@ function UsersPage({
 
   const toggleMfa = async () => {
     if (!selected) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入 MFA 策略变更原因", "Enter the MFA policy change reason"),
     );
     if (!reason?.trim()) return;
@@ -7922,7 +8160,7 @@ function UsersPage({
 
   const enrollMfa = async () => {
     if (!selected) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入 MFA 注册原因", "Enter the MFA enrollment reason"),
     );
     if (!reason?.trim()) return;
@@ -7941,14 +8179,14 @@ function UsersPage({
 
   const confirmMfa = async () => {
     if (!selected || !factor?.factor_id) return;
-    const code = window.prompt(
+    const code = promptInput(
       text(
         "请输入验证器中的 6 位验证码",
         "Enter the 6-digit authenticator code",
       ),
     );
     if (!code?.trim()) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入 MFA 确认原因", "Enter the MFA confirmation reason"),
       text("完成 MFA 注册", "Complete MFA enrollment"),
     );
@@ -7971,7 +8209,7 @@ function UsersPage({
 
   const issueRecovery = async () => {
     if (!selected) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入生成恢复码的原因", "Enter the recovery-code issuance reason"),
     );
     if (!reason?.trim()) return;
@@ -7990,7 +8228,7 @@ function UsersPage({
 
   const revokeSession = async (session: Row) => {
     if (!selected) return;
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入终止会话的原因", "Enter the session revocation reason"),
     );
     if (!reason?.trim()) return;
@@ -8078,7 +8316,7 @@ function UsersPage({
   };
 
   const revokeDelegation = async (delegation: Row) => {
-    const reason = window.prompt(
+    const reason = promptInput(
       text("请输入撤销委派的原因", "Enter the delegation revocation reason"),
     );
     if (!reason?.trim()) return;

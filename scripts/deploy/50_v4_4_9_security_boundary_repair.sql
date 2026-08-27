@@ -28,26 +28,44 @@ MERGE INTO CX_PLATFORM_SAFE_AUTONOMY_POLICIES d USING (SELECT 'DEFAULT' POLICY_I
 WHEN NOT MATCHED THEN INSERT(POLICY_ID,STATE,REASON,UPDATED_BY) VALUES('DEFAULT','DISABLED','v4.4.9 safe autonomy is disabled by default','SYSTEM_BOOTSTRAP');
 -- Platform private knowledge is readable only by the trusted management data
 -- role. No ordinary Agent, Pool, or shared session role receives table access.
+BEGIN
+  EXECUTE IMMEDIATE 'CREATE DATA ROLE admin_data_role';
+EXCEPTION
+  WHEN OTHERS THEN
+    IF SQLCODE != -52514 THEN RAISE; END IF;
+END;
+/
 CREATE OR REPLACE DATA GRANT platform_knowledge_admin
   AS SELECT
-  ON AIADMIN.CX_PLATFORM_KNOWLEDGE
+  ON CX_PLATFORM_KNOWLEDGE
   TO admin_data_role;
 /
 CREATE OR REPLACE DATA GRANT platform_knowledge_chunk_admin
   AS SELECT
-  ON AIADMIN.CX_PLATFORM_KNOWLEDGE_CHUNKS
+  ON CX_PLATFORM_KNOWLEDGE_CHUNKS
   TO admin_data_role;
 /
 CREATE OR REPLACE DATA GRANT platform_knowledge_grant_admin
   AS SELECT, UPDATE, INSERT, DELETE
-  ON AIADMIN.CX_PLATFORM_KNOWLEDGE_GRANTS
+  ON CX_PLATFORM_KNOWLEDGE_GRANTS
   TO admin_data_role;
 /
 -- Legacy collaboration groups are historical coordination objects, not data
 -- authorization grants. Revoke their broad runtime paths.
-REVOKE SELECT ON AIADMIN.COLLAB_GROUPS FROM AGENT_API;
-REVOKE SELECT ON AIADMIN.COLLAB_GROUP_MEMBERS FROM AGENT_API;
-REVOKE SELECT ON AIADMIN.COLLAB_MESSAGES FROM AGENT_API;
+DECLARE
+  PROCEDURE revoke_legacy(p_table VARCHAR2) IS
+  BEGIN
+    EXECUTE IMMEDIATE 'REVOKE SELECT ON ' || p_table || ' FROM AGENT_API';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLCODE NOT IN (-1917, -1927) THEN RAISE; END IF;
+  END;
+BEGIN
+  revoke_legacy('COLLAB_GROUPS');
+  revoke_legacy('COLLAB_GROUP_MEMBERS');
+  revoke_legacy('COLLAB_MESSAGES');
+END;
+/
 
 -- Deep Data Security already filters rows by ORA_END_USER_CONTEXT.username.
 -- The legacy application-context setter must not let a Pool or management
@@ -56,10 +74,15 @@ REVOKE SELECT ON AIADMIN.COLLAB_MESSAGES FROM AGENT_API;
 -- current End User.
 CREATE OR REPLACE PACKAGE BODY SET_AGENT_CONTEXT AS
     PROCEDURE set_agent_id(p_agent_id VARCHAR2) IS
+        v_end_user VARCHAR2(128);
     BEGIN
-        IF UPPER(ORA_END_USER_CONTEXT.username) IS NOT NULL
-           AND UPPER(REPLACE(p_agent_id, '-', '_')) <> UPPER(ORA_END_USER_CONTEXT.username)
-           AND SYS_CONTEXT('USERENV', 'SESSION_USER') <> 'AIADMIN'
+        -- ORA_END_USER_CONTEXT is a SQL pseudo-object. Read it through SQL
+        -- before enforcing the identity match in PL/SQL.
+        SELECT ORA_END_USER_CONTEXT.username INTO v_end_user FROM DUAL;
+        IF UPPER(v_end_user) IS NOT NULL
+           AND UPPER(REPLACE(p_agent_id, '-', '_')) <> UPPER(v_end_user)
+           AND SYS_CONTEXT('USERENV', 'SESSION_USER') <>
+               SYS_CONTEXT('USERENV', 'CURRENT_USER')
         THEN
             RAISE_APPLICATION_ERROR(-20001,
                 'Agent identity does not match the trusted End User');

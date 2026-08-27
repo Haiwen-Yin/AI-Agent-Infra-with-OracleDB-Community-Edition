@@ -197,6 +197,218 @@ def test_platform_embedding_activation_only_binds_parameters_used_by_sql(monkeyp
     assert ":execution_mode" in contract_sql
 
 
+def test_managed_embedding_lookup_only_binds_parameters_used_by_sql(monkeypatch):
+    """Oracle rejects the write payload's surplus binds on the existence lookup."""
+    captured: dict[str, Any] = {}
+
+    def query_one(sql, params):
+        captured.update(sql=sql, params=dict(params))
+        return {"c": 0}
+
+    monkeypatch.setattr(embedding_governance.connection, "execute_query_one", query_one)
+    monkeypatch.setattr(embedding_governance.connection, "execute", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(embedding_governance, "_dialect", lambda: "oracle")
+
+    embedding_governance._managed_write(
+        {"profile_id": "PROFILE_1", "model_id": "bge-m3:latest", "execution_mode": "PLATFORM_MANAGED"},
+        {"space_id": "SPACE_1"},
+        {"contract_id": "CONTRACT_1", "dimension": 3},
+        "ENTITY_1", "MEMORY", "content", [0.1, 0.2, 0.3],
+    )
+
+    placeholders = set(re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", captured["sql"]))
+    assert set(captured["params"]) == placeholders == {"entity_id", "entity_type", "space_id"}
+
+
+def test_agent_embedding_gateway_uses_effective_binding_and_records_only_digest(monkeypatch):
+    writes: list[tuple[str, dict[str, Any]]] = []
+    audits: list[tuple[Any, ...]] = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _amount):
+            return json.dumps({
+                "model": "bge-m3:latest",
+                "data": [
+                    {"index": 0, "embedding": [3.0, 4.0, 0.0]},
+                    {"index": 1, "embedding": [0.0, 0.0, 2.0]},
+                ],
+                "usage": {"prompt_tokens": 7, "total_tokens": 7},
+            }).encode()
+
+    monkeypatch.setattr(embedding_governance, "effective_binding", lambda _actor: {
+        "binding": {"binding_id": "BINDING_1"}, "ready": True,
+        "profile": {
+            "profile_id": "PROFILE_1", "profile_key": "platform-default",
+            "provider_url": "https://embedding.example/v1", "model_id": "bge-m3:latest",
+            "execution_mode": "PLATFORM_MANAGED", "normalize_vectors": "Y",
+        },
+        "contract": {"contract_id": "CONTRACT_1", "dimension": 3},
+        "space": {"space_id": "SPACE_1"},
+    })
+    monkeypatch.setattr(embedding_governance, "require_embedding_gateway_access", lambda _actor: {
+        "allowed": True, "decision": "EXPLICIT_ALLOW", "max_batch_size": 2,
+        "max_input_chars": 16000,
+        "effective": embedding_governance.effective_binding(_actor),
+    })
+    monkeypatch.setattr(embedding_governance.connection, "execute", lambda sql, params: writes.append((sql, dict(params))) or 1)
+    monkeypatch.setattr(embedding_governance.identity_api, "_audit", lambda *args: audits.append(args))
+    monkeypatch.setattr(embedding_governance.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response())
+
+    from lib import model_governance_api, model_usage_api
+    monkeypatch.setattr(model_governance_api, "reserve_quota", lambda *_args: {"warnings": []})
+    monkeypatch.setattr(model_usage_api, "_reserve_idempotency", lambda *_args: None)
+    monkeypatch.setattr(model_usage_api, "_write_usage", lambda *_args, **_kwargs: {
+        "prompt_tokens": 7, "total_tokens": 7,
+    })
+
+    result = embedding_governance.gateway_embeddings(
+        "AGENT_1", ["first private text", "second private text"],
+        requested_model="bge-m3:latest", idempotency_key="request-1",
+    )
+
+    assert result["model"] == "bge-m3:latest"
+    assert result["usage"] == {"prompt_tokens": 7, "total_tokens": 7}
+    assert result["data"][0]["embedding"] == pytest.approx([0.6, 0.8, 0.0])
+    assert result["data"][1]["embedding"] == pytest.approx([0.0, 0.0, 1.0])
+    persisted = repr(writes) + repr(audits)
+    assert "first private text" not in persisted
+    assert "second private text" not in persisted
+    assert "bge-m3:latest" in persisted
+
+
+def test_agent_embedding_gateway_rejects_model_override_before_dispatch(monkeypatch):
+    monkeypatch.setattr(embedding_governance, "effective_binding", lambda _actor: {
+        "binding": {"binding_id": "BINDING_1"}, "ready": True,
+        "profile": {
+            "profile_id": "PROFILE_1", "profile_key": "platform-default",
+            "provider_url": "https://embedding.example/v1", "model_id": "bge-m3:latest",
+            "execution_mode": "PLATFORM_MANAGED", "normalize_vectors": "Y",
+        },
+        "contract": {"contract_id": "CONTRACT_1", "dimension": 1024},
+        "space": {"space_id": "SPACE_1"},
+    })
+    monkeypatch.setattr(embedding_governance, "require_embedding_gateway_access", lambda _actor: {
+        "allowed": True, "decision": "EXPLICIT_ALLOW", "max_batch_size": 1,
+        "max_input_chars": 16000,
+        "effective": embedding_governance.effective_binding(_actor),
+    })
+    monkeypatch.setattr(
+        embedding_governance.urllib.request, "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("provider was called for a model override"),
+    )
+
+    with pytest.raises(embedding_governance.EmbeddingConflict):
+        embedding_governance.gateway_embeddings(
+            "AGENT_1", "private text", requested_model="attacker-selected-model",
+        )
+
+
+def _embedding_access(monkeypatch, *, source="EXTERNAL_SKILL", grants=None):
+    effective = {
+        "binding": {"binding_id": "BINDING_1"}, "ready": True,
+        "profile": {"profile_id": "PROFILE_1", "profile_key": "platform-default",
+                    "provider_url": "https://embedding.example/v1", "model_id": "bge-m3:latest",
+                    "execution_mode": "PLATFORM_MANAGED", "normalize_vectors": "Y"},
+        "contract": {"contract_id": "CONTRACT_1", "dimension": 3},
+        "space": {"space_id": "SPACE_1"},
+    }
+    monkeypatch.setattr(embedding_governance, "effective_binding", lambda _actor: effective)
+    monkeypatch.setattr(
+        embedding_governance.connection,
+        "execute_query_one",
+        lambda sql, _params: {
+            "principal_id": "AGENT_1", "status": "ACTIVE", "source": source,
+            "template_id": "TEMPLATE_1",
+        } if "FROM CX_PRINCIPALS p" in sql else None,
+    )
+
+    def query(sql, _params=None):
+        if "FROM CX_DOMAIN_MEMBERS" in sql:
+            return [{"security_domain_id": "DOMAIN_1"}]
+        if "FROM CX_ORGANIZATION_MEMBERS" in sql:
+            return [{"organization_id": "ORG_1"}]
+        if "FROM CX_EMBEDDING_ACCESS_GRANTS" in sql:
+            return list(grants or [])
+        return []
+
+    monkeypatch.setattr(embedding_governance.connection, "execute_query", query)
+    return embedding_governance.embedding_gateway_access("AGENT_1")
+
+
+def test_external_agent_embedding_access_is_default_deny(monkeypatch):
+    access = _embedding_access(monkeypatch)
+    assert access["external"] is True
+    assert access["allowed"] is False
+    assert access["decision"] == "EXTERNAL_DEFAULT_DENY"
+
+    unknown = _embedding_access(monkeypatch, source="FUTURE_UNRECOGNIZED_SOURCE")
+    assert unknown["external"] is True
+    assert unknown["allowed"] is False
+
+
+def test_platform_agent_embedding_access_retains_platform_default(monkeypatch):
+    access = _embedding_access(monkeypatch, source="PLATFORM_CREATED")
+    assert access["external"] is False
+    assert access["allowed"] is True
+    assert access["decision"] == "PLATFORM_AGENT_DEFAULT"
+
+
+def test_embedding_explicit_deny_overrides_allow(monkeypatch):
+    access = _embedding_access(monkeypatch, grants=[
+        {"grant_id": "ALLOW_1", "subject_type": "AGENT", "subject_id": "AGENT_1",
+         "effect": "ALLOW", "allowed_profile_id": "PROFILE_1", "max_batch_size": 4,
+         "max_input_chars": 32000, "version": 2},
+        {"grant_id": "DENY_1", "subject_type": "SECURITY_DOMAIN", "subject_id": "DOMAIN_1",
+         "effect": "DENY", "allowed_profile_id": None, "max_batch_size": 1,
+         "max_input_chars": 1, "version": 1},
+    ])
+    assert access["allowed"] is False
+    assert access["decision"] == "EXPLICIT_DENY"
+    assert access["grant"]["grant_id"] == "DENY_1"
+
+
+def test_embedding_allow_is_profile_bound_and_enforces_request_limits(monkeypatch):
+    grant = {"grant_id": "ALLOW_1", "subject_type": "AGENT", "subject_id": "AGENT_1",
+             "effect": "ALLOW", "allowed_profile_id": "PROFILE_1", "max_batch_size": 2,
+             "max_input_chars": 12, "version": 1}
+    access = _embedding_access(monkeypatch, grants=[grant])
+    assert access["allowed"] is True
+    assert access["max_batch_size"] == 2
+    assert access["max_input_chars"] == 12
+
+    monkeypatch.setattr(embedding_governance, "require_embedding_gateway_access", lambda _actor: access)
+    monkeypatch.setattr(
+        embedding_governance.urllib.request, "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("provider was called after a grant-limit violation"),
+    )
+    with pytest.raises(embedding_governance.EmbeddingGovernanceError, match="between 1 and 2"):
+        embedding_governance.gateway_embeddings("AGENT_1", ["one", "two", "three"])
+    with pytest.raises(embedding_governance.EmbeddingGovernanceError, match="configured limit"):
+        embedding_governance.gateway_embeddings("AGENT_1", ["1234567", "7654321"])
+
+    mismatch = dict(grant, allowed_profile_id="PROFILE_OTHER")
+    access = _embedding_access(monkeypatch, grants=[mismatch])
+    assert access["allowed"] is False
+    assert access["decision"] == "EXTERNAL_DEFAULT_DENY"
+
+
+def test_agent_gateway_exposes_scoped_openai_embedding_route():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "web_app.py").read_text(encoding="utf-8")
+    assert '@app.post("/api/gateway/v1/embeddings")' in source
+    assert '@app.post("/api/agent-gateway/v1/embeddings")' in source
+    route = source.split('def gateway_embeddings(request: Request', 1)[1].split('\n\n', 1)[0]
+    assert '"embedding.generate"' in route
+    assert "attach_agent_database_context=False" in route
+    assert '"embedding.generate"' in source.split("Requested Agent scope is not allowed", 1)[0]
+
+
 def test_shared_runtime_sql_does_not_use_known_oracle_reserved_binds():
     root = Path(__file__).resolve().parents[1]
     for name, reserved in (

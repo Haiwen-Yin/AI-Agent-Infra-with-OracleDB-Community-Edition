@@ -27,7 +27,7 @@ evaluated for list, item, graph, and retrieval paths. Security Domains and
 Channels govern collaboration; legacy collaboration groups are compatibility
 execution relations and are not knowledge-sharing policy.
 
-## v4.4.9 Historical Platform Control Plane
+## v4.4.10 Platform Control Plane
 
 v4.4.8 is withdrawn history. v4.4.9 records the runtime security repair, typed evidence,
 restored relationship visualization, governed organization data, and bounded

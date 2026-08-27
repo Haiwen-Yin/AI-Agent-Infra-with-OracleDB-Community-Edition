@@ -2222,6 +2222,27 @@ CREATE OR REPLACE PACKAGE BODY DB_CRYPTO AS
 END DB_CRYPTO;
 /
 
+-- Initialize database-local key material inside the checksummed owner
+-- baseline. DBA preparation grants DBMS_CRYPTO directly before this step.
+MERGE INTO SYSTEM_CONFIG target
+USING (
+    SELECT 'db_crypto_master_key' AS config_key,
+           RAWTOHEX(DBMS_CRYPTO.RANDOMBYTES(32)) AS config_value,
+           'AES-256 master key for DB-side encryption' AS description
+    FROM DUAL
+    UNION ALL
+    SELECT 'db_crypto_key_salt',
+           RAWTOHEX(DBMS_CRYPTO.RANDOMBYTES(32)),
+           'Salt for DB_CRYPTO key derivation'
+    FROM DUAL
+) source
+ON (target.CONFIG_KEY = source.config_key)
+WHEN NOT MATCHED THEN
+    INSERT (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION)
+    VALUES (source.config_key, source.config_value, source.description);
+
+COMMIT;
+
 PROMPT ============================================================
 PROMPT 16. TRACE_MANAGER Package [NEW v3.7.5]
 PROMPT ============================================================

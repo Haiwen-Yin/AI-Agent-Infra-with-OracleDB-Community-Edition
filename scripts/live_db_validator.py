@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import re
@@ -33,7 +32,6 @@ def _resolve_repo_root() -> Path:
 
 
 REPO_ROOT = _resolve_repo_root()
-LEGACY_KEY_PATH = Path.home() / ".oracle-infra" / "master.key"
 
 
 def _available_databases() -> tuple[str, ...]:
@@ -203,6 +201,12 @@ V410_MIGRATION_SCRIPTS = V449_MIGRATION_SCRIPTS + (
     "57_v4_4_10_complete_model_governance.sql",
     "58_v4_4_10_knowledge_scope.sql",
     "59_v4_4_10_knowledge_graph_context.sql",
+    "60_v4_4_10_organization_approval_closure.sql",
+    "61_v4_4_10_external_embedding_authorization.sql",
+    "62_v4_4_10_agent_embedding_contract.sql",
+    "63_v4_4_10_external_agent_gateway_grants.sql",
+    "64_v4_4_10_external_agent_context_repair.sql",
+    "65_v4_4_10_external_agent_domain_context.sql",
 )
 V410_MODEL_TABLES = (
     "CX_MODEL_GATEWAY_CREDENTIALS", "CX_MODEL_REQUESTS", "CX_MODEL_PRICING",
@@ -214,6 +218,7 @@ V410_MODEL_TABLES = (
     "CX_MODEL_ALLOCATION_RULES", "CX_MODEL_ALLOCATIONS",
     "CX_MODEL_EVIDENCE_ADAPTERS", "CX_MODEL_EVIDENCE_BATCHES",
     "CX_WALLBOARD_DEF_VERSIONS", "CX_WALLBOARD_PUBLICATIONS",
+    "CX_EMBEDDING_ACCESS_GRANTS",
 )
 V448_PLATFORM_AGENT_ISOLATION_TABLES = (
     "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
@@ -1128,7 +1133,10 @@ def validate_v432_static_contract(database: str, scripts: Sequence[Path]) -> dic
         "columns_missing": missing_columns,
         "digest_alignment": bool(alignment_source) and (
             "SHA256(" in alignment_source.upper()
-            if database == "pg" else "DBMS_CRYPTO.HASH" in alignment_source.upper()
+            if database == "pg" else (
+                "STANDARD_HASH(" in alignment_source.upper()
+                if database == "oracle" else "DBMS_CRYPTO.HASH" in alignment_source.upper()
+            )
         ),
         "legacy_fusion_disabled": "MEMORY_FUSION_JOB" in scheduler_source.upper() and (
             "CRON.UNSCHEDULE" in scheduler_source.upper()
@@ -1483,12 +1491,14 @@ def validate_v410_static_contract(database: str, scripts: Sequence[Path]) -> dic
     completion = selected.get("57_v4_4_10_complete_model_governance.sql")
     knowledge_scope = selected.get("58_v4_4_10_knowledge_scope.sql")
     graph_context = selected.get("59_v4_4_10_knowledge_graph_context.sql")
+    approval_closure = selected.get("60_v4_4_10_organization_approval_closure.sql")
+    embedding_authorization = selected.get("61_v4_4_10_external_embedding_authorization.sql")
     source = "\n".join(
         item.read_text(encoding="utf-8").upper()
-        for item in (migration, repair, completion, knowledge_scope, graph_context) if item and item.is_file()
+        for item in (migration, repair, completion, knowledge_scope, graph_context, approval_closure, embedding_authorization) if item and item.is_file()
     )
     repair_source = repair.read_text(encoding="utf-8").upper() if repair and repair.is_file() else ""
-    markers = set(V410_MODEL_TABLES) | {"CX_PLATFORM_CAPABILITIES", "WALLBOARD", "IDEMPOTENCY_KEY", "IDX_MODEL_ROUTE_SCOPE_UQ", "CX_KNOWLEDGE_CONTEXTS", "ORGANIZATION_CHAIN_JSON", "GRAPH_SNAPSHOT_DIGEST"}
+    markers = set(V410_MODEL_TABLES) | {"CX_PLATFORM_CAPABILITIES", "WALLBOARD", "IDEMPOTENCY_KEY", "IDX_MODEL_ROUTE_SCOPE_UQ", "CX_KNOWLEDGE_CONTEXTS", "ORGANIZATION_CHAIN_JSON", "GRAPH_SNAPSHOT_DIGEST", "ORGANIZATION_CHANGE", "CX_AGENT_RELATIONSHIP_HISTORY", "CX_EMBEDDING_ACCESS_GRANTS", "MAX_BATCH_SIZE", "MAX_INPUT_CHARS"}
     if database == "pg":
         markers |= {"FORCE ROW LEVEL SECURITY", "PUBLIC.CURRENT_AGENT_IDENTITY()", "CX_MODEL_CREDENTIALS_OWNER"}
     control = {
@@ -1836,11 +1846,10 @@ def _load_database_config(path: Path) -> dict[str, Any]:
     section.pop("_key_source", None)
     if encrypted:
         try:
-            from shared.lib.connection_crypto import decrypt_section
+            from shared.lib.connection_crypto import decrypt_section, get_master_key
         except ImportError:  # Generated packages place the shared library under scripts/.
-            from lib.connection_crypto import decrypt_section
-        key = base64.b64decode(LEGACY_KEY_PATH.read_text(encoding="ascii").strip())
-        section.update(decrypt_section(encrypted, key))
+            from lib.connection_crypto import decrypt_section, get_master_key
+        section.update(decrypt_section(encrypted, get_master_key()))
     return section
 
 

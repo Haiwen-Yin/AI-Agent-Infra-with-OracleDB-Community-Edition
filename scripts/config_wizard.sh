@@ -23,6 +23,42 @@ RUNTIME_HELPER="$SCRIPT_DIR/python_runtime.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
+read_masked_secret() {
+    local prompt="$1"
+    local target="$2"
+    local value=""
+    local char=""
+
+    # Automated installers provide answers through stdin. Keep that path
+    # silent and line-oriented; interactive terminals receive live masking.
+    if [ ! -t 0 ]; then
+        IFS= read -r value || true
+        printf -v "$target" '%s' "$value"
+        return
+    fi
+
+    printf '%s' "$prompt"
+    while IFS= read -r -s -n 1 char; do
+        if [ -z "$char" ]; then
+            break
+        fi
+        case "$char" in
+            $'\177'|$'\b')
+                if [ -n "$value" ]; then
+                    value="${value%?}"
+                    printf '\b \b'
+                fi
+                ;;
+            *)
+                value+="$char"
+                printf '*'
+                ;;
+        esac
+    done
+    printf '\n'
+    printf -v "$target" '%s' "$value"
+}
+
 # --- Step 1: ensure config.json exists (copy from template if missing) -------
 if [ ! -f "$CONFIG_FILE" ]; then
     if [ ! -f "$EXAMPLE_FILE" ]; then
@@ -71,12 +107,35 @@ else
     DB_SHAPE="hostport"
 fi
 
+if [ ! -f "$RUNTIME_HELPER" ]; then
+    echo -e "${RED}[wizard] ERROR: Python runtime helper is missing${NC}" >&2
+    exit 1
+fi
+source "$RUNTIME_HELPER"
+if ! PY_BIN="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
+    echo -e "${RED}[wizard] ERROR: Python 3.14+ interpreter was not found${NC}" >&2
+    exit 1
+fi
+cx_prepare_python_environment "$PY_BIN"
+
+mapfile -t SERVER_DEFAULTS < <("$PY_BIN" - "$CONFIG_FILE" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    server = (json.load(stream).get("server") or {})
+print(server.get("host") or "0.0.0.0")
+print(server.get("port") or 8000)
+PYEOF
+)
+DEFAULT_SERVER_HOST="${SERVER_DEFAULTS[0]:-0.0.0.0}"
+DEFAULT_SERVER_PORT="${SERVER_DEFAULTS[1]:-8000}"
+
 echo ""
 echo -e "${BLUE}[database]${NC}"
 read -r -p "  DB user [aiadmin]: " DB_USER
 DB_USER="${DB_USER:-aiadmin}"
-read -r -s -p "  DB password: " DB_PASS
-echo
+read_masked_secret "  DB password: " DB_PASS
 
 if [ "$DB_SHAPE" = "dsn" ]; then
     read -r -p "  DB DSN (host:port/service): " DB_DSN
@@ -91,15 +150,85 @@ else
 fi
 
 echo ""
+echo -e "${BLUE}[server]${NC}"
+read -r -p "  Listen address [$DEFAULT_SERVER_HOST] (127.0.0.1 is local only): " SERVER_HOST
+SERVER_HOST="${SERVER_HOST:-$DEFAULT_SERVER_HOST}"
+read -r -p "  Web port [$DEFAULT_SERVER_PORT]: " SERVER_PORT
+SERVER_PORT="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+if [ -z "$SERVER_HOST" ]; then
+    echo -e "${RED}[wizard] ERROR: listen address must not be empty${NC}" >&2
+    exit 2
+fi
+if ! [[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || (( SERVER_PORT < 1 || SERVER_PORT > 65535 )); then
+    echo -e "${RED}[wizard] ERROR: web port must be an integer from 1 to 65535${NC}" >&2
+    exit 2
+fi
+
+echo ""
 echo -e "${BLUE}[llm]${NC}"
 read -r -p "  LLM API URL (leave empty to configure after bootstrap): " LLM_URL
-if [ -n "$LLM_URL" ]; then
-    read -r -p "  LLM model name: " LLM_MODEL
-else
-    LLM_MODEL=""
+read -r -p "  LLM model ID (provider model identifier; leave empty if URL is empty): " LLM_MODEL
+if { [ -n "$LLM_URL" ] && [ -z "$LLM_MODEL" ]; } || { [ -z "$LLM_URL" ] && [ -n "$LLM_MODEL" ]; }; then
+    echo -e "${RED}[wizard] ERROR: LLM API URL and model ID must be configured together${NC}" >&2
+    exit 2
 fi
-read -r -s -p "  LLM API key (leave empty if none): " LLM_KEY
-echo
+read_masked_secret "  LLM API key (leave empty if none): " LLM_KEY
+if [ -n "$LLM_URL" ]; then
+    echo "  Verifying LLM endpoint and model ID (bounded 1-token probe)..."
+    export LLM_URL LLM_MODEL LLM_KEY
+    if ! "$PY_BIN" <<'PYEOF'
+import json
+import os
+import re
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
+
+url = os.environ["LLM_URL"].strip().rstrip("/")
+model = os.environ["LLM_MODEL"].strip()
+parsed = urlsplit(url)
+if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    raise SystemExit("[wizard] ERROR: LLM API URL must be an absolute HTTP(S) URL")
+if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    raise SystemExit("[wizard] ERROR: LLM API URL must not contain credentials, a query, or a fragment")
+
+headers = {"Content-Type": "application/json"}
+api_key = os.environ.get("LLM_KEY", "")
+if api_key:
+    headers["Authorization"] = "Bearer " + api_key
+request = urllib.request.Request(
+    url + "/chat/completions",
+    data=json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "health check"}],
+        "max_tokens": 1,
+        "stream": False,
+    }).encode("utf-8"),
+    headers=headers,
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+except (urllib.error.URLError, TimeoutError, ValueError):
+    raise SystemExit("[wizard] ERROR: LLM endpoint probe failed") from None
+if not isinstance(payload, dict) or not payload.get("choices"):
+    raise SystemExit("[wizard] ERROR: LLM endpoint returned no completion")
+observed = str(payload.get("model") or "").strip().lower()
+expected = model.lower()
+observed_base = observed.rsplit("/", 1)[-1]
+expected_base = expected.rsplit("/", 1)[-1]
+exact = bool(observed) and (observed == expected or observed_base == expected_base)
+version = observed_base[len(expected_base) + 1:] if observed_base.startswith(expected_base + "-") else ""
+versioned_alias = re.fullmatch(r"(?:\d{3,8}|\d{4}-\d{2}-\d{2})", version) is not None
+if not exact and not versioned_alias:
+    raise SystemExit("[wizard] ERROR: LLM endpoint returned a different model ID")
+PYEOF
+    then
+        exit 2
+    fi
+    echo -e "${GREEN}  LLM endpoint and model ID verified${NC}"
+fi
 
 echo ""
 echo -e "${BLUE}[embedding]${NC}"
@@ -133,8 +262,7 @@ else
     EMB_MODEL="${EMB_MODEL:-text-embedding-bge-m3}"
     read -r -p "  Embedding dimension [1024]: " EMB_DIM
     EMB_DIM="${EMB_DIM:-1024}"
-    read -r -s -p "  Embedding API key (leave empty if none or Agent-side): " EMB_KEY
-    echo
+    read_masked_secret "  Embedding API key (leave empty if none or Agent-side): " EMB_KEY
     read -r -p "  Profile key [platform-default]: " EMB_PROFILE_KEY
     EMB_PROFILE_KEY="${EMB_PROFILE_KEY:-platform-default}"
     read -r -p "  Distance metric [COSINE]: " EMB_DISTANCE
@@ -151,20 +279,11 @@ fi
 # Build the override as a JSON object, then merge into config.json. We pass
 # values via environment variables to avoid quoting pitfalls in the heredoc.
 export DB_USER DB_PASS DB_SHAPE DB_DSN DB_HOST DB_PORT DB_NAME
+export SERVER_HOST SERVER_PORT
 export LLM_URL LLM_MODEL LLM_KEY
 export EMB_URL EMB_MODEL EMB_DIM EMB_KEY EMB_MODE EMB_PROFILE_KEY EMB_DISTANCE EMB_NORMALIZE EMB_SECRET_REF
 export CONFIG_FILE
 
-if [ ! -f "$RUNTIME_HELPER" ]; then
-    echo -e "${RED}[wizard] ERROR: Python runtime helper is missing${NC}" >&2
-    exit 1
-fi
-source "$RUNTIME_HELPER"
-if ! PY_BIN="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
-    echo -e "${RED}[wizard] ERROR: Python 3.14+ interpreter was not found${NC}" >&2
-    exit 1
-fi
-cx_prepare_python_environment "$PY_BIN"
 "$PY_BIN" <<'PYEOF'
 import json, os, secrets
 
@@ -180,6 +299,10 @@ else:
     c["database"]["host"] = os.environ["DB_HOST"]
     c["database"]["port"] = int(os.environ["DB_PORT"])
     c["database"]["database"] = os.environ["DB_NAME"]
+
+c.setdefault("server", {})
+c["server"]["host"] = os.environ["SERVER_HOST"]
+c["server"]["port"] = int(os.environ["SERVER_PORT"])
 
 c.setdefault("llm", {})
 c["llm"]["api_url"] = os.environ["LLM_URL"]
@@ -214,5 +337,6 @@ fi
 
 echo ""
 echo -e "${GREEN}[wizard] Done. config.json is ready.${NC}"
+echo -e "${GREEN}[wizard] Web service binding: ${SERVER_HOST}:${SERVER_PORT}${NC}"
 echo -e "${YELLOW}[wizard] Sensitive sections will be auto-encrypted when the server starts.${NC}"
 exit 0

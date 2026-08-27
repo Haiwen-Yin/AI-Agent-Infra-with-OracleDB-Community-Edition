@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import re
 import inspect
+import json
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from lib import organization_api
+
+try:
+    from lib import approval_api
+except ImportError:  # Community packages intentionally omit enterprise approvals.
+    approval_api = None
 
 
 class FakeConnection:
@@ -24,6 +32,7 @@ class FakeConnection:
             "author_principal_id": "admin", "reason": "test", "risk_level": "LOW", "row_version": 1,
         }
         self.operations: list[dict[str, Any]] = []
+        self.approvals: dict[str, dict[str, Any]] = {}
         self.organizations = {
             "root": {"organization_id": "root", "parent_id": None, "organization_code": "ROOT", "organization_name": "Root", "organization_type": "GROUP", "sort_order": 0, "status": "ACTIVE", "row_version": 3},
             "child": {"organization_id": "child", "parent_id": "root", "organization_code": "CHILD", "organization_name": "Child", "organization_type": "DEPARTMENT", "sort_order": 1, "status": "ACTIVE", "row_version": 2},
@@ -43,6 +52,14 @@ class FakeConnection:
             if "IDEMPOTENCY_KEY" in upper:
                 return None
             return dict(self.change) if params.get("change_id") == "change-1" else None
+        if "FROM APPROVAL_REQUESTS" in upper:
+            if params.get("approval_id"):
+                row = self.approvals.get(str(params["approval_id"]))
+                return dict(row) if row else None
+            for row in self.approvals.values():
+                if row["entity_id"] == params.get("change_id") and row["approval_status"] == "PENDING":
+                    return {"approval_id": row["approval_id"]}
+            return None
         if "FROM CX_ORGANIZATIONS" in upper and "COUNT(" not in upper:
             oid = params.get("organization_id")
             if oid:
@@ -79,8 +96,35 @@ class FakeConnection:
                 "expected_row_version": params["expected_row_version"],
                 "command_json": params["command_json"], "status": "ACTIVE",
             })
+        elif "INSERT INTO APPROVAL_REQUESTS" in upper:
+            self.approvals[params["approval_id"]] = {
+                "approval_id": params["approval_id"], "entity_type": "ORGANIZATION_CHANGE",
+                "entity_id": params["change_id"], "requested_by": params["requested_by"],
+                "approval_status": "PENDING",
+            }
+        elif "UPDATE APPROVAL_REQUESTS SET APPROVAL_STATUS = 'APPROVED'" in upper:
+            row = self.approvals[params["approval_id"]]
+            if row["approval_status"] != "PENDING":
+                return 0
+            row["approval_status"] = "APPROVED"
+        elif "UPDATE APPROVAL_REQUESTS SET APPROVAL_STATUS = 'REJECTED'" in upper:
+            row = self.approvals[params["approval_id"]]
+            if row["approval_status"] != "PENDING":
+                return 0
+            row["approval_status"] = "REJECTED"
+            row["reject_reason"] = params["reason"]
+        elif "SET STATUS = 'VALIDATED'" in upper:
+            self.change["status"] = "VALIDATED"
+        elif "STATUS = 'CANCELLED'" in upper:
+            self.change["status"] = "CANCELLED"
+        elif "STATUS = 'REJECTED'" in upper:
+            self.change["status"] = "REJECTED"
+        elif "STATUS = 'PENDING_APPROVAL'" in upper:
+            self.change["status"] = "PENDING_APPROVAL"
         elif "STATUS = 'PUBLISHED'" in upper:
             self.change["status"] = "PUBLISHED"
+        elif "STATUS = 'PUBLISHING'" in upper:
+            self.change["status"] = "PUBLISHING"
         elif "UPDATE CX_ORG_CHANGESETS SET STATUS =" in upper:
             self.change["status"] = params["status"]
             self.change["risk_level"] = params["risk_level"]
@@ -113,6 +157,7 @@ def service(monkeypatch):
     monkeypatch.setattr(organization_api.identity_api, "_audit_tx", lambda *args: None)
     monkeypatch.setattr(organization_api.identity_api, "_principal_visible_to", lambda *args: True)
     monkeypatch.setattr(organization_api.identity_api, "_agent_visible_to", lambda *args: True)
+    monkeypatch.setattr(organization_api.identity_api, "_protected_bootstrap_admin", lambda *args: False)
     monkeypatch.setattr(organization_api.identity_api, "_id", lambda prefix: prefix + "_test")
     return db
 
@@ -126,6 +171,11 @@ def test_read_contract_is_scoped_bounded_and_uses_named_binds(service):
     assert params["parent_id"] == "root"
     assert "LIMIT :limit" in sql
     assert not re.search(r"%(?:\([^)]+\))s", sql)
+
+
+def test_organization_history_json_is_deterministic_for_database_types(service):
+    encoded = organization_api._json({"at": datetime(2026, 8, 25, 12, 0, 1), "version": Decimal("7")})
+    assert encoded == '{"at":"2026-08-25T12:00:01","version":"7"}'
 
 
 def test_scope_clause_uses_closure_and_primary_membership(monkeypatch, service):
@@ -208,6 +258,167 @@ def test_operation_rejects_canvas_coordinates_and_unknown_fields(service):
         organization_api.append_operation(
             "admin", "change-1", "MOVE_ORGANIZATION", "ORGANIZATION", "child", {"parent_id": "root", "x": 42},
         )
+
+
+def test_create_organization_generates_id_when_blank(service):
+    result = organization_api.append_operation(
+        "admin", "change-1", "CREATE_ORGANIZATION", "ORGANIZATION", "",
+        {"organization_name": "Generated", "organization_code": "GENERATED", "parent_id": "root"},
+    )
+    assert result["target_id"] == "ORG_test"
+    assert result["payload"]["organization_id"] == "ORG_test"
+
+
+def test_create_organization_rejects_existing_or_self_parent_id(service):
+    with pytest.raises(organization_api.OrganizationConflict, match="ID already exists"):
+        organization_api.append_operation(
+            "admin", "change-1", "CREATE_ORGANIZATION", "ORGANIZATION", "",
+            {"organization_id": "child", "organization_name": "Duplicate", "organization_code": "DUP"},
+        )
+    with pytest.raises(organization_api.OrganizationError, match="own parent"):
+        organization_api.append_operation(
+            "admin", "change-1", "CREATE_ORGANIZATION", "ORGANIZATION", "",
+            {"organization_id": "new-child", "organization_name": "Self", "organization_code": "SELF", "parent_id": "new-child"},
+        )
+
+
+def test_submission_atomically_creates_one_organization_approval(service):
+    db = service
+    db.change["status"] = "VALIDATED"
+    db.operations.append({
+        "operation_id": "op-1", "change_set_id": "change-1", "sequence_number": 1,
+        "operation_type": "RENAME_ORGANIZATION", "target_type": "ORGANIZATION", "target_id": "child",
+        "expected_row_version": 2, "command_json": '{"organization_name":"Renamed"}', "status": "ACTIVE",
+    })
+    result = organization_api.submit_change_set("admin", "change-1")
+    assert result["status"] == "PENDING_APPROVAL"
+    assert result["approval_id"] == "APR_test"
+    assert db.approvals["APR_test"]["entity_type"] == "ORGANIZATION_CHANGE"
+
+    repeated = organization_api.submit_change_set("admin", "change-1")
+    assert repeated["idempotent"] is True
+    assert len(db.approvals) == 1
+
+
+def test_draft_cancellation_retains_evidence_and_reaches_terminal_state(service):
+    result = organization_api.cancel_change_set("admin", "change-1", "清理无效测试草稿")
+    assert result["status"] == "CANCELLED"
+    sql, params = next((sql, params) for sql, params in service.calls if "STATUS = 'CANCELLED'" in sql)
+    assert "OUTCOME_JSON" in sql
+    assert json.loads(params["outcome_json"])["reason"] == "清理无效测试草稿"
+
+
+def test_organization_requester_cannot_decide_their_own_change(service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    db.approvals["approval-1"] = {
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE", "entity_id": "change-1",
+        "requested_by": "admin", "approval_status": "PENDING",
+    }
+    with pytest.raises(PermissionError, match="cannot approve"):
+        organization_api.approve_change("admin", "approval-1", "self approval")
+
+
+def test_protected_bootstrap_admin_can_emergency_approve_own_change(monkeypatch, service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    db.operations.append({
+        "operation_id": "op-1", "change_set_id": "change-1", "sequence_number": 1,
+        "operation_type": "MOVE_ORGANIZATION", "target_type": "ORGANIZATION", "target_id": "child",
+        "expected_row_version": 2, "command_json": '{"parent_id":"root"}', "status": "ACTIVE",
+    })
+    db.approvals["approval-1"] = {
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE", "entity_id": "change-1",
+        "requested_by": "admin", "approval_status": "PENDING",
+    }
+    audit_actions: list[str] = []
+    monkeypatch.setattr(organization_api.identity_api, "_protected_bootstrap_admin", lambda actor: actor == "admin")
+    monkeypatch.setattr(
+        organization_api.identity_api, "_audit_tx",
+        lambda tx, actor, action, *args: audit_actions.append(action),
+    )
+    assert organization_api._risk_for(organization_api._operations("change-1")) == "HIGH"
+    result = organization_api.approve_change("admin", "approval-1", "引导管理员紧急审批")
+    assert result["status"] == "PUBLISHED"
+    assert db.approvals["approval-1"]["approval_status"] == "APPROVED"
+    assert "ORG_CHANGESET_EMERGENCY_SELF_APPROVE" in audit_actions
+
+
+def test_requester_can_withdraw_pending_organization_change(service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    db.approvals["approval-1"] = {
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE", "entity_id": "change-1",
+        "requested_by": "admin", "approval_status": "PENDING",
+    }
+    result = organization_api.withdraw_change_set("admin", "change-1", "改用低风险直接发布")
+    assert result["status"] == "VALIDATED"
+    assert result["withdrawn_approval_id"] == "approval-1"
+    assert db.approvals["approval-1"]["approval_status"] == "REJECTED"
+    assert db.approvals["approval-1"]["reject_reason"] == "WITHDRAWN: 改用低风险直接发布"
+    assert result["orphan_recovered"] is False
+
+
+def test_requester_can_recover_orphaned_pending_change(monkeypatch, service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    audit_actions: list[str] = []
+    monkeypatch.setattr(
+        organization_api.identity_api, "_audit_tx",
+        lambda tx, actor, action, *args: audit_actions.append(action),
+    )
+    result = organization_api.withdraw_change_set("admin", "change-1", "恢复历史孤立申请")
+    assert result["status"] == "VALIDATED"
+    assert result["withdrawn_approval_id"] is None
+    assert result["orphan_recovered"] is True
+    assert "ORG_CHANGESET_WITHDRAW_ORPHAN_RECOVERY" in audit_actions
+
+
+def test_non_requester_cannot_withdraw_pending_organization_change(service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    db.change["author_principal_id"] = "author"
+    db.approvals["approval-1"] = {
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE", "entity_id": "change-1",
+        "requested_by": "author", "approval_status": "PENDING",
+    }
+    with pytest.raises(PermissionError, match="only the organization requester"):
+        organization_api.withdraw_change_set("admin", "change-1", "not mine")
+
+
+@pytest.mark.parametrize(
+    ("emergency_admin", "can_decide", "blocker"),
+    [(False, False, "REQUESTER_SEPARATION"), (True, True, "")],
+)
+def test_approval_inventory_explains_separation_and_admin_override(
+    monkeypatch, emergency_admin, can_decide, blocker,
+):
+    if approval_api is None:
+        pytest.skip("enterprise approval inventory is not included in community packages")
+    monkeypatch.setattr(approval_api, "execute_query", lambda *args, **kwargs: [{
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE",
+        "entity_id": "change-1", "requested_by": "admin", "approval_status": "PENDING",
+    }])
+    monkeypatch.setattr(approval_api, "execute_query_one", lambda *args, **kwargs: {"cnt": 1})
+    monkeypatch.setattr(
+        approval_api.identity_api, "_protected_bootstrap_admin", lambda principal_id: emergency_admin,
+    )
+    result = approval_api.list_all_cursor("admin", page_size=20)
+    assert result["items"][0]["can_decide"] is can_decide
+    assert result["items"][0]["decision_blocker"] == blocker
+
+
+def test_organization_rejection_closes_request_and_change_atomically(service):
+    db = service
+    db.change["status"] = "PENDING_APPROVAL"
+    db.approvals["approval-1"] = {
+        "approval_id": "approval-1", "entity_type": "ORGANIZATION_CHANGE", "entity_id": "change-1",
+        "requested_by": "author", "approval_status": "PENDING",
+    }
+    result = organization_api.reject_change("admin", "approval-1", "impact is not acceptable")
+    assert result["status"] == "REJECTED"
+    assert db.approvals["approval-1"]["approval_status"] == "REJECTED"
+    assert db.change["status"] == "REJECTED"
 
 
 def test_cycle_validation_rejects_descendant_move(service):
@@ -346,6 +557,18 @@ def test_fastapi_exposes_organization_routes_with_governed_dependencies():
         assert declaration in source
     assert "organization_api" in source
     assert "require_action(\"organizations." in source
+    assert 'action == "publish"' in source
+    assert 'action == "withdraw"' in source
+    assert "ORG_CHANGESET_EMERGENCY_SELF_APPROVE" in Path(organization_api.__file__).read_text(encoding="utf-8")
+
+
+def test_web_create_organization_blank_id_is_not_replaced_by_parent():
+    source = (Path(organization_api.__file__).resolve().parents[1] / "web_app.py").read_text(encoding="utf-8")
+    adapter = source.split("def _organization_operation(", 1)[1].split("\n\n@app.get", 1)[0]
+    assert 'if requested == "CREATE_ORGANIZATION":' in adapter
+    assert 'item.get("subject_id") or item.get("organization_id") or ""' in adapter
+    assert '"organization_id": subject,' in adapter
+    assert 'subject or identity_api._id("ORG")' not in adapter
 
 
 def test_organization_membership_requires_existing_login_and_excludes_bootstrap_admin():
@@ -377,6 +600,46 @@ def test_organization_canvas_spacing_exceeds_constrained_node_size():
     assert "requestId !== graphRequest.current" in source
     assert 'depth: "10"' in source
     assert "[...roots, ...scopeNodes]" in source
+
+
+def test_organization_draft_operation_state_is_declared_in_page_scope():
+    scripts_root = Path(organization_api.__file__).resolve().parents[1]
+    source = (scripts_root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    organization_page = source.split("function OrganizationPage(", 1)[1].split(
+        "function ApprovalsPage(", 1,
+    )[0]
+    declaration = 'const [draftOperationType, setDraftOperationType] = useState("MOVE_ORGANIZATION");'
+    assert declaration in organization_page
+    assert source.count(declaration) == 1
+
+
+def test_new_organization_change_mode_cannot_be_overwritten_by_draft_refresh():
+    scripts_root = Path(organization_api.__file__).resolve().parents[1]
+    source = (scripts_root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    organization_page = source.split("function OrganizationPage(", 1)[1].split(
+        "function ApprovalsPage(", 1,
+    )[0]
+    assert "const newChangeModeRef = useRef(false);" in organization_page
+    assert "active && !draft && !newChangeModeRef.current" in organization_page
+    assert "const draftId = !newChangeModeRef.current && draft" in organization_page
+    assert "newChangeModeRef.current = true;" in organization_page
+    assert "(newChangeMode || !draft)" in organization_page
+    assert "newChangeModeRef.current = false;" in organization_page
+
+
+def test_organization_governance_errors_remain_actionable_in_chinese_ui():
+    scripts_root = Path(organization_api.__file__).resolve().parents[1]
+    source = (scripts_root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert '"organization change is not editable"' in source
+    assert '"organization change operation limit exceeded"' in source
+    assert '"organization change is unavailable"' in source
+    assert '"Organization permission denied"' in source
+
+
+def test_organization_contract_module_keeps_enterprise_approval_import_optional():
+    source = Path(__file__).read_text(encoding="utf-8")
+    assert "except ImportError:  # Community packages intentionally omit enterprise approvals." in source
+    assert 'pytest.skip("enterprise approval inventory is not included in community packages")' in source
 
 
 def test_change_set_creation_has_actor_scoped_idempotency(service):

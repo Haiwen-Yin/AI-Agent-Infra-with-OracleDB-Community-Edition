@@ -5,7 +5,7 @@
 v4.4.10 is delivered as a new-install baseline for Oracle, PostgreSQL, and
 YashanDB. Select the adapter's `deploy/baseline_v4_4_10.json`; the journaled
 runner executes the retained, checksum-bound ordered chain through
-`59_v4_4_10_knowledge_graph_context.sql`. Historical numbered scripts remain visible
+`65_v4_4_10_external_agent_domain_context.sql`. Historical numbered scripts remain visible
 for reproducibility and source audit, but no earlier v4.4.x package is presented
 as a supported customer upgrade source.
 
@@ -18,18 +18,28 @@ knowledge policies. Step 59 records the Agent's creation-time organization
 chain and governed group context in the relational and Property Graph knowledge
 projection. Applied checksums must never be edited.
 
-Run a new installation through the package-local Bootstrap Deployment Agent
-with a recoverable deployment boundary backup. The command selects the
-baseline manifest, prompts securely for the first administrator password, runs
+Step 60 closes organization approval application. Step 61 adds explicit
+external Embedding authorization; step 62 binds external Agents to the unified
+Embedding Contract. Steps 63 and 64 close Gateway grants and request-context
+behavior. Step 65 is the terminal external-Agent Domain-context boundary and
+adds forced Agent-self Security Domain RLS on PostgreSQL. It also closes one
+policy for the actual table owner on every forced-RLS relation so native
+bootstrap can write governed control-plane and audit state without a
+superuser bypass; ordinary Agent roles remain under their explicit policies.
+
+Run a new installation through the package-local Bootstrap Deployment Agent.
+The initializer first proves that the target contains no platform data and
+records a database-managed recovery boundary; it does not require backup
+metadata to be copied to the client machine. The command selects the baseline
+manifest, prompts securely for the first administrator password, runs
 the complete journaled migration chain, creates the Human Admin and native
-management Agent identities, verifies migration 59, encrypts configuration,
+management Agent identities, verifies terminal migration 65, encrypts configuration,
 and retires its temporary identity:
 
 ```bash
 bash scripts/install_platform.sh initialize --version 4.4.10 \
   --database <oracle|pg|yashandb> --edition <community|enterprise> \
-  --config config.json \
-  --backup-evidence release_evidence/backup.json
+  --config config.json
 ```
 
 After migration, start with direct mode enabled and gateway mode disabled.
@@ -42,7 +52,64 @@ v4.4.8 is withdrawn and must not be used as a deployment or migration source.
 Unknown or partial schemas fail closed; initialize a prepared empty target with
 the v4.4.10 baseline instead of attempting an undocumented in-place conversion.
 
-## v4.4.9 Migration From The Approved Baseline
+### Three-database fresh-baseline validation (2026-08-27)
+
+Dedicated empty targets were created as a new Oracle PDB, PostgreSQL database,
+and YashanDB PDB. All three Enterprise packages began with
+`TARGET_EMPTY=PASS`, reached migration 65, activated the initial Human Admin,
+created the Platform and Compliance management Agents, migrated scoped
+management knowledge, returned `RETIRED`, and passed standalone `verify`.
+
+The PostgreSQL run used a dedicated non-superuser Schema Owner and exposed
+three historical assumptions that a superuser owner had masked. v4.4.10 now:
+
+- ships `0_pg_database_prerequisites.sql` for bounded AGE catalog access,
+  database graph-namespace creation, `CREATEROLE`, and runtime-role
+  `ADMIN OPTION`;
+- blocks missing `PG_AGE_OWNER_PRIVILEGES` or `PG_AGENT_ROLE_ADMIN` before DDL;
+- creates the migration-50 trusted Owner policy before its seed write; and
+- makes migration 65 converge a trusted actual-owner policy on every forced-
+  RLS table before native handoff.
+
+The redacted result is recorded in
+`release_evidence/attempts/v4.4.10-local-three-database-fresh-initialization.json`.
+It is development acceptance evidence, not customer production evidence.
+
+### Oracle v4.4.10 fresh-baseline corrections (validated 2026-08-27)
+
+The Oracle Enterprise package has been validated on a real empty 26ai schema
+through migration 65, native Agent postflight, `RETIRED`, and `verify`. The
+v4.4.10 baseline contains the following compatibility corrections required for
+that complete chain:
+
+- anonymous PL/SQL remains one statement through its standalone `/`, including
+  an inner function/procedure and a first-line local procedure declaration;
+- Memory adoption uses `STANDARD_HASH(..., 'SHA256')` and does not require
+  `DBMS_CRYPTO` before prerequisite grants are complete;
+- the active security-boundary migration resolves the configured owner instead
+  of hard-coding `AIADMIN`, creates `admin_data_role` idempotently, and accepts
+  an absent legacy `AGENT_API` role only during its bounded revoke operation;
+- Oracle Enterprise preflight blocks a partial Deep Data Security privilege set
+  before foundational DDL; and
+- native postflight uses exact Oracle bind sets for isolation inventory and
+  deployment-state writes.
+
+When diagnosing an older failed run, query the durable step ledger before any
+cleanup:
+
+```sql
+SELECT STEP_NAME, STATUS, STATEMENTS_EXECUTED, FAILED_STATEMENT,
+       ERROR_CODE, ERROR_MESSAGE
+  FROM AI_SCHEMA_MIGRATION_STEPS
+ WHERE STATUS = 'FAILED';
+```
+
+Do not replay an individual fragment, force initialization, or use `resume`
+against an unknown partial schema. Preserve the database recovery boundary and
+either restore/precisely clean the target or use the documented supported
+upgrade path. A new initialization requires `TARGET_EMPTY=PASS`.
+
+## v4.4.9 Historical Migration From The Approved Baseline
 
 v4.4.9 changes the repaired database contract. Oracle and YashanDB apply
 `48_v4_4_8_platform_agent_isolation.sql`; PostgreSQL applies that script and
@@ -51,9 +118,11 @@ maintenance lifecycle, safe-autonomy policy, platform private knowledge, and
 isolation inventory. PostgreSQL installs forced RLS and the strict trusted
 identity function. Oracle installs the End User-constrained context setter.
 
-Run only through the journaled migration runner with a recoverable backup
-manifest. The same scripts are idempotent and are verified against Oracle,
-PostgreSQL, and YashanDB Enterprise baselines.
+Run only through the journaled migration runner after the database operator
+has established the database-native backup/recovery boundary and explicitly
+confirmed that responsibility. The client does not attempt to inspect a
+database backup. The same scripts are idempotent and are verified against
+Oracle, PostgreSQL, and YashanDB Enterprise baselines.
 
 ## v4.4.7 Maintenance Release
 
@@ -70,13 +139,13 @@ binding evidence, and reviewable conversion-draft/member records. It retains
 existing Security Domains, Channel rows, collaboration groups, workspaces,
 messages, SDD facts, and audit history unchanged.
 
-Run the journaled migration with a recoverable backup evidence manifest:
+Run the journaled migration after confirming database-side backup responsibility:
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py --version 4.4.3 \
   --database <oracle|pg|yashandb> --edition <community|enterprise> \
   --<adapter>-config config.json \
-  --backup-evidence release_evidence/backup.json
+  --confirm-database-backup
 ```
 
 After migration, create a dedicated project Security Domain, specify its
@@ -103,7 +172,7 @@ Run it through the journaled migration runner:
 "$PYTHON_BIN" scripts/migration_runner.py --version 4.4.5 \
   --database <oracle|pg|yashandb> --edition <community|enterprise> \
   --<adapter>-config config.json \
-  --backup-evidence release_evidence/backup.json
+  --confirm-database-backup
 ```
 
 New Run admission rejects a Plan belonging to another Version or a digest
@@ -118,14 +187,15 @@ the Graph Production Profile matrix and history, and the non-secret Admin
 node deployment evidence tables. Existing Profile, Contract, Space, Binding,
 Graph, SDD, Agent, identity, governance, and audit records remain in place.
 
-Run the v4.4.2 migration only through the journaled runner after recording a
-recoverable backup evidence manifest:
+Run the v4.4.2 migration only through the journaled runner after the database
+operator confirms responsibility for the database-native backup and recovery
+boundary:
 
 ```bash
 "$PYTHON_BIN" scripts/migration_runner.py --version 4.4.2 \
   --database <oracle|pg|yashandb> --edition <community|enterprise> \
   --<adapter>-config config.json \
-  --backup-evidence release_evidence/backup.json
+  --confirm-database-backup
 ```
 
 The provider probe is performed before the database activation transaction.
@@ -153,7 +223,8 @@ metadata, and upgrade approval evidence. Existing Agent, Channel, identity,
 SDD, memory, Graph, approval, and audit records are retained.
 
 Run `migration_runner.py --version 4.4.1 --edition
-<community|enterprise>` after recording recoverable backup evidence. The
+<community|enterprise>` after confirming database-side backup and recovery
+responsibility. The
 runner validates every journaled checksum and object contract. It can adopt
 only the explicitly recorded v4.4.1 development checksum on a complete test
 schema; unknown checksum changes remain blocked. Never edit an applied
@@ -183,7 +254,8 @@ gate, SCM and artifact tables. Existing SPEC, Task, Loop, Graph, Channel,
 approval and audit records are retained.
 
 Run `migration_runner.py --version 4.4.0 --edition
-<community|enterprise>` after recording recoverable backup evidence. The
+<community|enterprise>` after confirming database-side backup and recovery
+responsibility. The
 runner applies the edition-aware v4.3.7 prerequisite chain, validates checksums
 and resumes interrupted steps. The v4.4.0 baseline is created only after
 structured validation, review, approval and fragment checks. Do not edit an
@@ -198,10 +270,11 @@ PDB.
 
 For a prepared new target, use `scripts/install_platform.sh initialize` with
 the selected adapter and edition. It validates the package manifest and target
-prerequisites, recoverable backup evidence, terminal migration, and protected
-initial administrator before running the migration chain. For an existing target, use
-`upgrade`; `status`, `verify`, and `resume` retain the same manifest and
-evidence boundary. Do not use the installer to create Oracle/YashanDB PDBs,
+prerequisites, strict empty-target boundary, terminal migration, and protected
+initial administrator before running the migration chain. Database backup and
+recovery remain database-operator responsibilities and are not exported to the
+initializer client. For an existing target, use `upgrade`; `status`, `verify`,
+and `resume` retain the same manifest and evidence boundary. Do not use the installer to create Oracle/YashanDB PDBs,
 tablespaces, or privileged infrastructure.
 
 Migration `33_v4_3_7_bootstrap_embedding.sql` is additive. It introduces
@@ -220,7 +293,7 @@ v4.3.4 compliance chain before step 31; Community keeps its physical edition
 boundary and does not receive Enterprise compliance scripts.
 
 Run `migration_runner.py --version 4.3.5 --edition <community|enterprise>`
-after recording recoverable backup evidence. The runner is additive,
+after confirming database-side backup and recovery responsibility. The runner is additive,
 idempotent, checksum-journaled, and retries an interrupted step. Validate with
 `live_db_validator.py --version 4.3.5`. Do not edit an applied migration or
 delete migration-ledger rows. Disabling an optional capability retains its
@@ -238,7 +311,8 @@ expiry/deadline indexes. Run the complete v4.3.4 chain with
 `migration_runner.py --version 4.3.4 --edition enterprise`; do not run step
 30 by hand or edit either applied step.
 
-Record a recoverable backup manifest before applying. Legacy Agents are
+Establish the database-native recovery point and confirm database-side backup
+responsibility before applying. Legacy Agents are
 backfilled only as `UNKNOWN` and `BOUNDARY_ONLY`; the migration never invents
 past Skill use, runtime activity, signatures, or compliance proof. The
 Controller creates the five unassigned restricted Profile templates and a
@@ -261,7 +335,8 @@ delivery metadata. It does not alter existing Graph Versions, Runs, Attempts,
 Checkpoints, memory, organization, Channel, identity, governance, audit, or
 Artifact facts.
 
-Run `migration_runner.py --version 4.3.3` after creating a recoverable backup
+Run `migration_runner.py --version 4.3.3` after establishing a database-native
+recovery point and confirming database-side backup responsibility
 reference. The runner verifies the checksum ledger and retries an interrupted
 step through the same command. Do not edit an applied migration or delete a
 ledger row to simulate a rollback. Application rollback preserves the additive
@@ -304,7 +379,7 @@ replacement are rechecked before a pinned member is returned.
 
 The migration is a logical-forgetting upgrade. It does not physically erase
 old Memory content and does not assert model unlearning. Before an upgrade,
-record a recoverable backup/evidence manifest and verify current authorization,
+establish a database-native recovery point, confirm responsibility, and verify current authorization,
 history, chain, candidate, and job behavior after the journal reports applied.
 
 ## v4.3.1 Organization Step
@@ -741,15 +816,15 @@ SELECT GRANT_NAME FROM USER_DATA_GRANTS WHERE GRANT_NAME LIKE 'COLLAB%';
 
 The v4.3.0 migration tail starts from the v4.1.x baseline. It is additive: it
 does not rewrite the v4.1.0 entity graph or remove Task/Loop history. Before
-applying it, create a recoverable database backup and record the backup
-reference in the migration evidence file.
+applying it, establish a database-native recovery point and accept responsibility
+for its recovery through the migration confirmation.
 
 ### Preflight and Dry Run
 
 Run the migration tool in preflight/Dry Run mode first. It verifies database
 identity, required v4.1 objects, migration checksums, capacity tier, and the
-database-specific graph capability. A Dry Run without verified backup evidence
-is intentionally blocked and must not be described as a successful migration.
+database-specific graph capability. Preflight and Dry Run are read-only and do
+not require backup confirmation; an apply operation does.
 
 ### Apply Order
 
@@ -823,8 +898,8 @@ existing internal closure step record: `GRAPH_ATTEMPTS.COMPLETION_DIGEST`,
 present. A table-only or stale ledger observation remains incomplete and is
 retryable.
 
-For an existing v4.2 deployment, the historical Executor step can be run with
-a verified recoverable backup evidence record:
+For an existing v4.2 deployment, the historical Executor step can be run after
+the operator confirms the database-native backup and recovery responsibility:
 
 ```bash
 source scripts/python_runtime.sh
@@ -834,7 +909,7 @@ cx_prepare_python_environment "$PYTHON_BIN"
   --oracle-config /path/to/oracle-config.json \
   --pg-config /path/to/pg-config.json \
   --yashandb-config /path/to/yashandb-config.json \
-  --backup-evidence /path/to/backup-evidence.json \
+  --confirm-database-backup \
   --output release_evidence/migrations-v4.3.0.json
 ```
 
@@ -853,7 +928,8 @@ compensation, or human review and are never blindly replayed.
 
 ## v4.4.6 Identity, Portal, and Graph Posture
 
-Create and verify a recoverable backup manifest before applying v4.4.6. Run
+Establish the database-native recovery point and confirm database-side backup
+responsibility before applying v4.4.6. Run
 the common migration set with `--version 4.4.6`; the runner applies the Human
 profile and registration policy contract, external identity transaction
 tables, Portal connection and page leases, and Graph capability posture. The
@@ -875,12 +951,12 @@ reconciliation/allocation, external evidence adapter/batch, wallboard
 version/publication, and request correlation/credential references. Historical
 55/56 checksums must not be changed.
 
-Before step 57, source checkouts use `tools/v410_pre57_backup.py`; generated
-packages use `scripts/tools/v410_pre57_backup.py`. The tool produces a permission-restricted
-logical boundary snapshot, rollback SQL, restore procedure, and evidence
-digest. It is not a vendor physical full-backup claim. The runner validates the
-55/56/57 closure and adopts only a complete step. PostgreSQL acceptance also
-requires enabled and forced RLS plus policies on every new governance table.
+Before an existing-target apply, the database operator establishes the
+adapter-appropriate native backup and recovery point. The client requires an
+explicit responsibility confirmation but does not create, copy, or verify a
+backup artifact. The runner validates the 55/56/57 closure and adopts only a
+complete step. PostgreSQL acceptance also requires enabled and forced RLS plus
+policies on every new governance table.
 
 Effective dates default to database `CURRENT_TIMESTAMP`, not host time. A
 successful rerun is read-only; partial failure is retried through the journal
@@ -889,6 +965,19 @@ and closure validator, never by editing checksums.
 
 New installations use the adapter `deploy/baseline_v4_4_10.json` manifest and the
 migration runner's ordered chain,
-ending at `59_v4_4_10_knowledge_graph_context.sql`. The v4.4.8 chain is withdrawn and
+ending at `61_v4_4_10_external_embedding_authorization.sql`. The v4.4.8 chain is withdrawn and
 is not an upgrade source. Numbered historical scripts remain in source control
 for audit and reproducibility; they are not a customer upgrade promise.
+
+Encrypted migration configuration uses the runtime's single master-key
+resolver: `MASTER_DB_KEY`, then `~/.ai-agent-infra/master.key`, with the
+read-and-migrate legacy fallback only when the current key is absent. The
+migration runner must not independently read `~/.oracle-infra/master.key`.
+
+Withdrawn-version detection gives an explicit v4.4.8 migration journal
+priority and always blocks it. If no such journal exists and applied steps are
+recorded under v4.4.10, that current baseline is authoritative; an object such
+as `CX_PLATFORM_KNOWLEDGE` that is intentionally retained in v4.4.10 must not
+trigger the historical object-shape fallback. This permits a fresh baseline to
+receive a newly added terminal step without weakening the v4.4.8 fail-closed
+boundary.

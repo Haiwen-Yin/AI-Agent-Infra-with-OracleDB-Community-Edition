@@ -11,9 +11,9 @@ DECLARE
 BEGIN
     SELECT COUNT(*) INTO v_count FROM USER_TABLES WHERE TABLE_NAME = 'SYSTEM_CONFIG';
     IF v_count > 0 THEN
-        SELECT CONFIG_VALUE INTO v_version 
-        FROM SYSTEM_CONFIG 
-        WHERE CONFIG_KEY = 'schema_version';
+        EXECUTE IMMEDIATE
+            'SELECT CONFIG_VALUE FROM SYSTEM_CONFIG WHERE CONFIG_KEY = :config_key'
+            INTO v_version USING 'schema_version';
         DBMS_OUTPUT.PUT_LINE('================================================');
         DBMS_OUTPUT.PUT_LINE('EXISTING DEPLOYMENT DETECTED: schema_version = ' || v_version);
         DBMS_OUTPUT.PUT_LINE('================================================');
@@ -1843,7 +1843,7 @@ PROMPT ============================================================
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('schema_version', '3.10.1', 'Current schema version');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('default_visibility', 'PRIVATE', 'Default visibility for new entities');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('max_importance', '10', 'Maximum importance value');
-INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_url', get_config('embedding_url'), 'Embedding API URL for in-database generation');
+INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_url', 'NOT_CONFIGURED', 'Embedding API URL for in-database generation; governed postflight replaces this sentinel');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_model', 'text-embedding-bge-m3', 'Embedding model name');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('embedding_dim', '1024', 'Default embedding dimension');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('retrieval_decay', '0.95', 'Retrieval count decay factor');
@@ -1867,9 +1867,6 @@ INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_max_value', '1.0', 'Max trust value');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_initial_coordinator', '0.5', 'Initial trust to group coordinator');
 INSERT INTO SYSTEM_CONFIG (CONFIG_KEY, CONFIG_VALUE, DESCRIPTION) VALUES ('trust_initial_member', '0.3', 'Initial trust to other group members');
-
--- v3.10.0: EDGE_TYPE index for multi-type graph queries
-CREATE INDEX IDX_EDGES_EDGE_TYPE ON ENTITY_EDGES(EDGE_TYPE) LOCAL;
 
 INSERT INTO CONTEXT_AUDIT_RULES (RULE_ID, RULE_NAME, RULE_TYPE, DESCRIPTION, CONDITION_EXPR, SEVERITY) VALUES (
     'RULE_CROSS_WS', 'Cross-Workspace Access', 'CROSS_BOUNDARY',

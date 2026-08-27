@@ -546,11 +546,12 @@ def issue_containment(actor: str, agent_id: str, instance_id: str, requested_sta
     # support replay evidence, while an authenticated Agent can reconstruct
     # the signed envelope without a second secret-delivery channel.
     nonce = command_id
-    expiry = (datetime.now(timezone.utc) + timedelta(seconds=max(60, min(int(expires_seconds), 3600)))).isoformat()
+    expiry_at = datetime.now(timezone.utc) + timedelta(seconds=max(60, min(int(expires_seconds), 3600)))
+    expiry = expiry_at.isoformat()
     payload = containment.command_payload(instance_id, next_generation, nonce, actor, reason, expiry, state)
     from .connection_crypto import get_master_key
     signature = containment.sign_command(payload, get_master_key())
-    connection.execute("INSERT INTO CX_AGENT_CONTAINMENT_COMMANDS(COMMAND_ID,AGENT_ID,INSTANCE_ID,REQUESTED_STATE,CONTROL_GENERATION,NONCE_DIGEST,ISSUER_PRINCIPAL_ID,REASON,EXPIRES_AT,SIGNATURE,AUTHORITY_STATE) VALUES (:id,:agent,:instance,:state,:generation,:nonce,:issuer,:reason,:expires,:signature,'ISOLATED')", {"id": command_id, "agent": agent_id, "instance": instance_id, "state": state, "generation": next_generation, "nonce": _digest(nonce), "issuer": actor, "reason": reason[:2000], "expires": expiry, "signature": signature})
+    connection.execute("INSERT INTO CX_AGENT_CONTAINMENT_COMMANDS(COMMAND_ID,AGENT_ID,INSTANCE_ID,REQUESTED_STATE,CONTROL_GENERATION,NONCE_DIGEST,ISSUER_PRINCIPAL_ID,REASON,EXPIRES_AT,SIGNATURE,AUTHORITY_STATE) VALUES (:id,:agent,:instance,:state,:generation,:nonce,:issuer,:reason,:expires,:signature,'ISOLATED')", {"id": command_id, "agent": agent_id, "instance": instance_id, "state": state, "generation": next_generation, "nonce": _digest(nonce), "issuer": actor, "reason": reason[:2000], "expires": expiry_at, "signature": signature})
     identity_api._audit(actor, "AGENT_CONTAINMENT_" + state, "AGENT_INSTANCE", instance_id, "ALLOW", reason)
     return {"command_id": command_id, "state": state, "control_generation": next_generation, "authority_state": "ISOLATED", "infrastructure_termination": "NOT_CONFIGURED" if state == "INFRA_TERMINATE" else "NOT_REQUESTED"}
 

@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import secrets
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -66,6 +67,18 @@ def _parse(value: Any, fallback: Any) -> Any:
         return json.loads(str(value or ""))
     except (TypeError, ValueError):
         return fallback
+
+
+def _optional_timestamp(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise EmbeddingGovernanceError("Embedding grant validity timestamp is invalid") from exc
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
 def _digest(value: Any) -> str:
@@ -855,6 +868,240 @@ def effective_binding(agent_id: str = "", template_key: str = "") -> Dict[str, A
     return {"binding": None, "profile": None, "space": None, "contract": None, "source": "NONE", "ready": False}
 
 
+def embedding_gateway_access(agent_id: str) -> Dict[str, Any]:
+    """Resolve runtime access independently from the model Binding.
+
+    Platform-created Agents retain platform-default behavior. External Agents
+    fail closed unless an active, time-bounded database grant matches their
+    Agent, template, organization, or security-domain identity.
+    """
+    agent = _row(connection.execute_query_one(
+        "SELECT p.PRINCIPAL_ID,p.STATUS,n.SOURCE,n.TEMPLATE_ID FROM CX_PRINCIPALS p "
+        "LEFT JOIN CX_NATIVE_AGENTS n ON n.AGENT_ID=p.PRINCIPAL_ID "
+        "WHERE p.PRINCIPAL_ID=:id AND p.PRINCIPAL_TYPE='AGENT'", {"id": agent_id},
+    ))
+    if not agent or str(agent.get("status") or "").upper() != "ACTIVE":
+        raise EmbeddingGovernanceError("Agent is unavailable for Embedding gateway access")
+    source = str(agent.get("source") or "EXTERNAL_SKILL").upper()
+    external = source not in {"PLATFORM_BUILTIN", "PLATFORM_CREATED"}
+    effective = effective_binding(agent_id)
+    if external:
+        registration = _row(connection.execute_query_one(
+            "SELECT EMBEDDING_MODE FROM AGENT_REGISTRATIONS WHERE AGENT_ID=:id", {"id": agent_id}
+        ))
+        if registration and str(registration.get("embedding_mode") or "PLATFORM_MANAGED").upper() == "AGENT_MANAGED":
+            return {"allowed": False, "external": True, "agent_source": source,
+                    "decision": "AGENT_MANAGED_NO_PLATFORM_ROUTE", "grant": None,
+                    "effective": effective}
+    if not effective.get("binding") or not effective.get("ready"):
+        raise EmbeddingGovernanceError("Embedding Contract is not available for this Agent")
+    profile_id = str(((effective.get("profile") or {}).get("profile_id") or ""))
+    subject_ids: Dict[str, set[str]] = {
+        "AGENT": {agent_id}, "TEMPLATE": set(), "ORGANIZATION": set(), "SECURITY_DOMAIN": set(),
+    }
+    if agent.get("template_id"):
+        subject_ids["TEMPLATE"].add(str(agent["template_id"]))
+    for row in _rows(connection.execute_query(
+        "SELECT SECURITY_DOMAIN_ID FROM CX_DOMAIN_MEMBERS WHERE PRINCIPAL_ID=:id AND STATUS='ACTIVE' "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP)", {"id": agent_id},
+    )):
+        if row.get("security_domain_id"):
+            subject_ids["SECURITY_DOMAIN"].add(str(row["security_domain_id"]))
+    for row in _rows(connection.execute_query(
+        "SELECT ORGANIZATION_ID FROM CX_ORGANIZATION_MEMBERS WHERE PRINCIPAL_ID=:id AND STATUS='ACTIVE' "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP) UNION SELECT om.ORGANIZATION_ID "
+        "FROM CX_AGENT_RELATIONSHIPS ar JOIN CX_ORGANIZATION_MEMBERS om ON om.PRINCIPAL_ID=ar.PRINCIPAL_ID "
+        "WHERE ar.AGENT_ID=:id AND ar.STATUS='ACTIVE' AND om.STATUS='ACTIVE' "
+        "AND (om.VALID_UNTIL IS NULL OR om.VALID_UNTIL>CURRENT_TIMESTAMP)", {"id": agent_id},
+    )):
+        if row.get("organization_id"):
+            subject_ids["ORGANIZATION"].add(str(row["organization_id"]))
+    grants = _rows(connection.execute_query(
+        "SELECT GRANT_ID,SUBJECT_TYPE,SUBJECT_ID,EFFECT,ALLOWED_PROFILE_ID,MAX_BATCH_SIZE,MAX_INPUT_CHARS,"
+        "VALID_FROM,VALID_UNTIL,VERSION FROM CX_EMBEDDING_ACCESS_GRANTS WHERE STATUS='ACTIVE' "
+        "AND (VALID_FROM IS NULL OR VALID_FROM<=CURRENT_TIMESTAMP) "
+        "AND (VALID_UNTIL IS NULL OR VALID_UNTIL>CURRENT_TIMESTAMP)", {},
+    ))
+    matching = [item for item in grants
+                if str(item.get("subject_id") or "") in subject_ids.get(str(item.get("subject_type") or ""), set())
+                and (not item.get("allowed_profile_id") or str(item.get("allowed_profile_id")) == profile_id)]
+    denied = next((item for item in matching if str(item.get("effect") or "").upper() == "DENY"), None)
+    if denied:
+        return {"allowed": False, "external": external, "agent_source": source,
+                "decision": "EXPLICIT_DENY", "grant": denied, "effective": effective}
+    priority = {"AGENT": 0, "TEMPLATE": 1, "SECURITY_DOMAIN": 2, "ORGANIZATION": 3}
+    allowed = sorted(
+        (item for item in matching if str(item.get("effect") or "").upper() == "ALLOW"),
+        key=lambda item: (priority.get(str(item.get("subject_type") or ""), 99), -int(item.get("version") or 0)),
+    )
+    if allowed:
+        grant = allowed[0]
+        return {"allowed": True, "external": external, "agent_source": source,
+                "decision": "EXPLICIT_ALLOW", "grant": grant, "effective": effective,
+                "max_batch_size": max(1, min(int(grant.get("max_batch_size") or 1), 16)),
+                "max_input_chars": max(1, min(int(grant.get("max_input_chars") or 16000), 64000))}
+    if external:
+        return {"allowed": False, "external": True, "agent_source": source,
+                "decision": "EXTERNAL_DEFAULT_DENY", "grant": None, "effective": effective}
+    return {"allowed": True, "external": False, "agent_source": source,
+            "decision": "PLATFORM_AGENT_DEFAULT", "grant": None, "effective": effective,
+            "max_batch_size": 16, "max_input_chars": 64000}
+
+
+def require_embedding_gateway_access(agent_id: str) -> Dict[str, Any]:
+    access = embedding_gateway_access(agent_id)
+    if not access.get("allowed"):
+        raise PermissionError("Agent is not authorized for platform Embedding generation")
+    return access
+
+
+def gateway_embeddings(actor: str, input_value: Any, *, requested_model: str = "",
+                       idempotency_key: str = "", correlation_id: str = "") -> Dict[str, Any]:
+    """Generate governed vectors for an authenticated external Agent.
+
+    The caller can name the effective model as an OpenAI-client compatibility
+    check, but cannot select or override the Profile bound by the platform.
+    Prompt text and returned vectors are never persisted in usage or audit
+    records.
+    """
+    access = require_embedding_gateway_access(actor)
+    effective = access["effective"]
+    profile = effective.get("profile") or {}
+    contract = effective.get("contract") or {}
+    space = effective.get("space") or {}
+    mode = _validated_mode(profile.get("execution_mode"))
+    if mode != "PLATFORM_MANAGED":
+        raise EmbeddingGovernanceError("Agent Embedding generation is not routed through the platform")
+    model_id = str(profile.get("model_id") or "")
+    profile_key = str(profile.get("profile_key") or "")
+    requested = _text(requested_model, 256)
+    if requested and requested not in {model_id, profile_key}:
+        raise EmbeddingConflict("Requested model differs from the effective Embedding Binding")
+    if isinstance(input_value, str):
+        inputs = [input_value]
+    elif isinstance(input_value, list) and all(isinstance(item, str) for item in input_value):
+        inputs = list(input_value)
+    else:
+        raise EmbeddingGovernanceError("input must be a string or a list of strings")
+    batch_limit = int(access.get("max_batch_size") or 1)
+    char_limit = int(access.get("max_input_chars") or 16000)
+    if not inputs or len(inputs) > batch_limit:
+        raise EmbeddingGovernanceError(f"input must contain between 1 and {batch_limit} texts")
+    inputs = [item.strip() for item in inputs]
+    if any(not item or len(item) > char_limit for item in inputs) or sum(len(item) for item in inputs) > char_limit:
+        raise EmbeddingGovernanceError("Embedding input exceeds the configured limit")
+
+    from . import model_governance_api, model_usage_api
+    request_id = _id("EMR")
+    started = time.monotonic()
+    input_digest = _digest(inputs)
+    key = _text(idempotency_key, 160)
+    if key:
+        model_usage_api._reserve_idempotency(actor, key, input_digest)
+    request_params = {
+        "id": request_id, "actor": actor, "agent": actor,
+        "profile": str(profile.get("profile_id") or ""), "model": model_id,
+        "key": key or None, "digest": input_digest,
+        "correlation": _text(correlation_id, 128) or request_id,
+    }
+    connection.execute(
+        "INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,"
+        "IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) "
+        "VALUES(:id,:actor,:agent,:profile,:model,'AUTHORIZED',:key,:digest,:correlation,NULL)",
+        request_params,
+    )
+    try:
+        quota = model_governance_api.reserve_quota(
+            request_id, actor, "", actor, str(profile.get("profile_id") or ""), model_id,
+        )
+    except model_governance_api.QuotaExceeded:
+        connection.execute(
+            "UPDATE CX_MODEL_REQUESTS SET STATUS='QUOTA_REJECTED',ERROR_CATEGORY='QUOTA_EXCEEDED',"
+            "COMPLETED_AT=CURRENT_TIMESTAMP WHERE REQUEST_ID=:id", {"id": request_id},
+        )
+        identity_api._audit(actor, "EMBEDDING_GATEWAY_GENERATE", "EMBEDDING_PROFILE",
+                            str(profile.get("profile_id") or ""), "DENY", "Embedding quota exceeded")
+        raise
+    except Exception:
+        connection.execute(
+            "UPDATE CX_MODEL_REQUESTS SET STATUS='FAILED',ERROR_CATEGORY='QUOTA_EVALUATION_FAILED',"
+            "COMPLETED_AT=CURRENT_TIMESTAMP WHERE REQUEST_ID=:id", {"id": request_id},
+        )
+        identity_api._audit(actor, "EMBEDDING_GATEWAY_GENERATE", "EMBEDDING_PROFILE",
+                            str(profile.get("profile_id") or ""), "DENY", "Embedding quota evaluation failed")
+        raise
+
+    headers = {"Content-Type": "application/json"}
+    api_key = _profile_api_key(profile)
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+    request = urllib.request.Request(
+        _endpoint_url(str(profile.get("provider_url") or "")),
+        data=json.dumps({"model": model_id, "input": inputs if len(inputs) > 1 else inputs[0]},
+                        ensure_ascii=False).encode("utf-8"),
+        headers=headers, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            raw = response.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
+            raise EmbeddingGovernanceError("Embedding provider response exceeded the configured limit")
+        payload = json.loads(raw.decode("utf-8"))
+        data = payload.get("data")
+        dimension = int(contract.get("dimension") or 0)
+        if not isinstance(data, list) or len(data) != len(inputs):
+            raise EmbeddingGovernanceError("Embedding provider returned an invalid batch")
+        vectors: List[List[float]] = []
+        for item in data:
+            vector = (item or {}).get("embedding") if isinstance(item, dict) else None
+            if (not isinstance(vector, list) or len(vector) != dimension
+                    or not all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in vector)):
+                raise EmbeddingGovernanceError("Embedding provider returned an invalid vector")
+            normalized = [float(value) for value in vector]
+            if str(profile.get("normalize_vectors") or "Y").upper() == "Y":
+                norm = math.sqrt(sum(value * value for value in normalized))
+                if norm <= 0:
+                    raise EmbeddingGovernanceError("Embedding provider returned a zero vector")
+                normalized = [value / norm for value in normalized]
+            vectors.append(normalized)
+        provider_usage = payload.get("usage") or {}
+        usage = model_usage_api._usage({"usage": provider_usage})
+        usage_record = model_usage_api._write_usage(
+            request_id, actor, actor, profile_key or "embedding", model_id, usage,
+            "PROVIDER_REPORTED" if usage.get("total_tokens") is not None else "INCOMPLETE",
+            started, "SUCCEEDED", key,
+        )
+        connection.execute(
+            "UPDATE CX_MODEL_REQUESTS SET STATUS='SUCCEEDED',COMPLETED_AT=CURRENT_TIMESTAMP "
+            "WHERE REQUEST_ID=:id", {"id": request_id},
+        )
+        identity_api._audit(actor, "EMBEDDING_GATEWAY_GENERATE", "EMBEDDING_PROFILE",
+                            str(profile.get("profile_id") or ""), "ALLOW", "Governed Agent Embedding request")
+        return {
+            "object": "list",
+            "data": [{"object": "embedding", "index": index, "embedding": vector}
+                     for index, vector in enumerate(vectors)],
+            "model": model_id,
+            "usage": {
+                "prompt_tokens": usage_record.get("prompt_tokens"),
+                "total_tokens": usage_record.get("total_tokens"),
+            },
+            "request_id": request_id,
+            "contract_id": str(contract.get("contract_id") or ""),
+            "space_id": str(space.get("space_id") or ""),
+            "quota_warnings": quota.get("warnings") or [],
+        }
+    except Exception:
+        model_governance_api.release_quota(request_id)
+        connection.execute(
+            "UPDATE CX_MODEL_REQUESTS SET STATUS='FAILED',ERROR_CATEGORY='EMBEDDING_PROVIDER_FAILED',"
+            "COMPLETED_AT=CURRENT_TIMESTAMP WHERE REQUEST_ID=:id AND STATUS<>'SUCCEEDED'", {"id": request_id},
+        )
+        identity_api._audit(actor, "EMBEDDING_GATEWAY_GENERATE", "EMBEDDING_PROFILE",
+                            str(profile.get("profile_id") or ""), "DENY", "Governed Agent Embedding request failed")
+        raise
+
+
 def validate_vector_write(agent_id: str, vector: List[float], *, space_id: str,
                           profile_id: str, contract_id: str, source_mode: str) -> Dict[str, Any]:
     if not isinstance(vector, list) or not vector or not all(isinstance(item, (int, float)) and math.isfinite(float(item)) for item in vector):
@@ -999,7 +1246,8 @@ def _managed_write(profile: Dict[str, Any], space: Dict[str, Any], contract: Dic
     }
     exists = connection.execute_query_one(
         "SELECT COUNT(*) AS C FROM ENTITY_EMBEDDINGS WHERE ENTITY_ID=:entity_id AND ENTITY_TYPE=:entity_type "
-        "AND EMBEDDING_SPACE_ID=:space_id", params,
+        "AND EMBEDDING_SPACE_ID=:space_id",
+        {"entity_id": params["entity_id"], "entity_type": params["entity_type"], "space_id": params["space_id"]},
     )
     count = int((_row(exists) or {}).get("c") or 0)
     expression = _managed_vector_expression()
@@ -1047,6 +1295,136 @@ def _managed_job_candidates(input_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         params,
     )
     return _rows(rows)
+
+
+def list_access_grants(limit: int = 200) -> List[Dict[str, Any]]:
+    suffix, params = _limit(limit)
+    return _rows(connection.execute_query(
+        "SELECT GRANT_ID,GRANT_KEY,SUBJECT_TYPE,SUBJECT_ID,EFFECT,ALLOWED_PROFILE_ID,MAX_BATCH_SIZE,"
+        "MAX_INPUT_CHARS,VALID_FROM,VALID_UNTIL,STATUS,VERSION,APPROVED_BY,REASON,CREATED_AT,UPDATED_AT "
+        "FROM CX_EMBEDDING_ACCESS_GRANTS ORDER BY UPDATED_AT DESC" + suffix, params,
+    ))
+
+
+def _grant_subject_exists(subject_type: str, subject_id: str, tx: Any) -> bool:
+    queries = {
+        "AGENT": ("SELECT PRINCIPAL_ID FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id AND PRINCIPAL_TYPE='AGENT' AND STATUS='ACTIVE'", {}),
+        "TEMPLATE": ("SELECT TEMPLATE_ID FROM CX_AGENT_TEMPLATES WHERE TEMPLATE_ID=:id AND STATUS='PUBLISHED'", {}),
+        "ORGANIZATION": ("SELECT ORGANIZATION_ID FROM CX_ORGANIZATIONS WHERE ORGANIZATION_ID=:id AND STATUS='ACTIVE'", {}),
+        "SECURITY_DOMAIN": ("SELECT SECURITY_DOMAIN_ID FROM CX_SECURITY_DOMAINS WHERE SECURITY_DOMAIN_ID=:id AND STATUS='ACTIVE'", {}),
+    }
+    sql, params = queries[subject_type]
+    params["id"] = subject_id
+    return bool(_row(tx.query_one(sql, params)))
+
+
+def _revoke_subject_tokens(tx: Any, subject_type: str, subject_id: str) -> None:
+    predicates = {
+        "AGENT": "AGENT_ID=:subject",
+        "TEMPLATE": "AGENT_ID IN (SELECT AGENT_ID FROM CX_NATIVE_AGENTS WHERE TEMPLATE_ID=:subject)",
+        "SECURITY_DOMAIN": "AGENT_ID IN (SELECT PRINCIPAL_ID FROM CX_DOMAIN_MEMBERS WHERE SECURITY_DOMAIN_ID=:subject AND STATUS='ACTIVE')",
+        "ORGANIZATION": (
+            "(AGENT_ID IN (SELECT PRINCIPAL_ID FROM CX_ORGANIZATION_MEMBERS WHERE ORGANIZATION_ID=:subject AND STATUS='ACTIVE') "
+            "OR AGENT_ID IN (SELECT ar.AGENT_ID FROM CX_AGENT_RELATIONSHIPS ar JOIN CX_ORGANIZATION_MEMBERS om "
+            "ON om.PRINCIPAL_ID=ar.PRINCIPAL_ID AND om.STATUS='ACTIVE' WHERE om.ORGANIZATION_ID=:subject "
+            "AND ar.STATUS='ACTIVE'))"
+        ),
+    }
+    tx.execute(
+        "UPDATE CX_AGENT_ACCESS_TOKENS SET REVOKED_AT=CURRENT_TIMESTAMP WHERE REVOKED_AT IS NULL AND "
+        + predicates[subject_type], {"subject": subject_id},
+    )
+
+
+def upsert_access_grant(actor: str, *, subject_type: str, subject_id: str, effect: str,
+                        allowed_profile_id: str = "", max_batch_size: int = 1,
+                        max_input_chars: int = 16000, valid_from: Any = None,
+                        valid_until: Any = None, reason: str = "") -> Dict[str, Any]:
+    subject_type = _text(subject_type, 32).upper()
+    subject_id = _text(subject_id, 128)
+    effect = _text(effect, 16).upper()
+    profile_id = _text(allowed_profile_id, 128)
+    if subject_type not in {"AGENT", "TEMPLATE", "ORGANIZATION", "SECURITY_DOMAIN"}:
+        raise EmbeddingGovernanceError("Embedding grant subject type is invalid")
+    if not subject_id or effect not in {"ALLOW", "DENY"} or len(_text(reason, 2000)) < 3:
+        raise EmbeddingGovernanceError("Embedding grant subject, effect, and reason are required")
+    try:
+        batch_limit = int(max_batch_size)
+        char_limit = int(max_input_chars)
+    except (TypeError, ValueError) as exc:
+        raise EmbeddingGovernanceError("Embedding grant limits are invalid") from exc
+    if batch_limit < 1 or batch_limit > 16 or char_limit < 1 or char_limit > 64000:
+        raise EmbeddingGovernanceError("Embedding grant limits are outside the supported range")
+    valid_from = _optional_timestamp(valid_from)
+    valid_until = _optional_timestamp(valid_until)
+    if valid_from and valid_until and valid_until <= valid_from:
+        raise EmbeddingGovernanceError("Embedding grant expiry must be later than its start time")
+    grant_key = _digest({"subject_type": subject_type, "subject_id": subject_id, "profile_id": profile_id or "*"})[:64]
+
+    def work(tx: Any) -> Dict[str, Any]:
+        if not _grant_subject_exists(subject_type, subject_id, tx):
+            raise EmbeddingGovernanceError("Embedding grant subject is unavailable")
+        if profile_id and not _row(tx.query_one(
+            "SELECT PROFILE_ID FROM CX_EMBEDDING_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": profile_id},
+        )):
+            raise EmbeddingGovernanceError("Embedding grant Profile is unavailable")
+        existing = _row(tx.query_one(
+            "SELECT GRANT_ID,VERSION FROM CX_EMBEDDING_ACCESS_GRANTS WHERE GRANT_KEY=:key FOR UPDATE", {"key": grant_key},
+        ))
+        grant_id = str((existing or {}).get("grant_id") or _id("EAG"))
+        version = int((existing or {}).get("version") or 0) + 1
+        params = {
+            "id": grant_id, "key": grant_key, "subject_type": subject_type, "subject_id": subject_id,
+            "effect": effect, "profile": profile_id or None, "batch": batch_limit, "chars": char_limit,
+            "valid_from": valid_from or None, "valid_until": valid_until or None,
+            "version": version, "actor": actor, "reason": _text(reason, 2000),
+        }
+        if existing:
+            tx.execute(
+                "UPDATE CX_EMBEDDING_ACCESS_GRANTS SET EFFECT=:effect,ALLOWED_PROFILE_ID=:profile,"
+                "MAX_BATCH_SIZE=:batch,MAX_INPUT_CHARS=:chars,VALID_FROM=:valid_from,VALID_UNTIL=:valid_until,"
+                "STATUS='ACTIVE',VERSION=:version,APPROVED_BY=:actor,REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP "
+                "WHERE GRANT_ID=:id", {key: params[key] for key in (
+                    "effect", "profile", "batch", "chars", "valid_from", "valid_until", "version", "actor", "reason", "id")},
+            )
+        else:
+            tx.execute(
+                "INSERT INTO CX_EMBEDDING_ACCESS_GRANTS(GRANT_ID,GRANT_KEY,SUBJECT_TYPE,SUBJECT_ID,EFFECT,"
+                "ALLOWED_PROFILE_ID,MAX_BATCH_SIZE,MAX_INPUT_CHARS,VALID_FROM,VALID_UNTIL,STATUS,VERSION,APPROVED_BY,REASON) "
+                "VALUES(:id,:key,:subject_type,:subject_id,:effect,:profile,:batch,:chars,:valid_from,:valid_until,"
+                "'ACTIVE',:version,:actor,:reason)", params,
+            )
+        _revoke_subject_tokens(tx, subject_type, subject_id)
+        _audit(tx, actor, "EMBEDDING_ACCESS_GRANT_UPSERT", "EMBEDDING_ACCESS_GRANT", grant_id, "ALLOW", reason)
+        return {"grant_id": grant_id, "grant_key": grant_key, "version": version, "status": "ACTIVE",
+                "subject_type": subject_type, "subject_id": subject_id, "effect": effect,
+                "allowed_profile_id": profile_id or None, "max_batch_size": batch_limit,
+                "max_input_chars": char_limit}
+    return connection.execute_transaction_callback(work)
+
+
+def revoke_access_grant(actor: str, grant_id: str, reason: str) -> Dict[str, Any]:
+    identifier = _text(grant_id, 128)
+    if not identifier or len(_text(reason, 2000)) < 3:
+        raise EmbeddingGovernanceError("Embedding grant and reason are required")
+
+    def work(tx: Any) -> Dict[str, Any]:
+        grant = _row(tx.query_one(
+            "SELECT GRANT_ID,SUBJECT_TYPE,SUBJECT_ID,STATUS,VERSION FROM CX_EMBEDDING_ACCESS_GRANTS "
+            "WHERE GRANT_ID=:id FOR UPDATE", {"id": identifier},
+        ))
+        if not grant:
+            raise EmbeddingGovernanceError("Embedding access grant is unavailable")
+        if str(grant.get("status") or "").upper() != "REVOKED":
+            tx.execute(
+                "UPDATE CX_EMBEDDING_ACCESS_GRANTS SET STATUS='REVOKED',VERSION=VERSION+1,APPROVED_BY=:actor,"
+                "REASON=:reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE GRANT_ID=:id",
+                {"actor": actor, "reason": _text(reason, 2000), "id": identifier},
+            )
+            _revoke_subject_tokens(tx, str(grant["subject_type"]), str(grant["subject_id"]))
+            _audit(tx, actor, "EMBEDDING_ACCESS_GRANT_REVOKE", "EMBEDDING_ACCESS_GRANT", identifier, "ALLOW", reason)
+        return {"grant_id": identifier, "status": "REVOKED", "version": int(grant.get("version") or 0) + 1}
+    return connection.execute_transaction_callback(work)
 
 
 def _run_managed_job(worker_id: str, job: Dict[str, Any]) -> Dict[str, Any]:

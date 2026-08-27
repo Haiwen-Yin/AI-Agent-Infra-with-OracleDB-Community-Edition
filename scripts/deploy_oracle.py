@@ -192,13 +192,14 @@ def is_comment_only(text):
     return True
 
 
-def execute_sql_file(conn, sql_file, verbose=True):
-    """Execute all statements in a SQL file."""
+def execute_sql_file(conn, sql_file, verbose=True, define_overrides=None):
+    """Execute SQL statements and stop after the first non-idempotent error."""
     with open(sql_file, 'r') as f:
         content = f.read()
     
     # Preprocess
     defines, content = parse_defines(content)
+    defines.update({str(key): str(value) for key, value in (define_overrides or {}).items()})
     content = substitute_vars(content, defines)
     content = remove_prompts(content)
     
@@ -229,22 +230,21 @@ def execute_sql_file(conn, sql_file, verbose=True):
             if verbose and (i % 20 == 0 or i <= 3):
                 print(f"    [{i}/{len(statements)}] OK: {first_line}")
         except Exception as e:
-            failed += 1
             err = str(e).replace('\n', ' ')[:120]
             # Skip "already exists" errors (expected during re-deployment)
             if "ORA-00955" in str(e) or "already exists" in str(e).lower():
                 if verbose:
                     print(f"    [{i}/{len(statements)}] SKIP (exists): {first_line}")
                 success += 1
-                failed -= 1
             elif "ORA-01430" in str(e) or "ORA-02260" in str(e):
                 if verbose:
                     print(f"    [{i}/{len(statements)}] SKIP (exists): {first_line}")
                 success += 1
-                failed -= 1
             else:
+                failed = 1
                 print(f"    [{i}/{len(statements)}] ERROR: {first_line}")
                 print(f"           {err}")
+                break
     
     if verbose:
         print(f"  [{os.path.basename(sql_file)}] Done: {success} success, {failed} failed")

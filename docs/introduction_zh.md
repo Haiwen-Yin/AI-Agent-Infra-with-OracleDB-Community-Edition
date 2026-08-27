@@ -1,6 +1,6 @@
 # AI Agent Infra with OracleDB — 社区版 v4.4.10
 
-**版本**: v4.4.10 | **日期**: 2026-08-24 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.4.10 | **日期**: 2026-08-27 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.cn**
 
@@ -1365,6 +1365,43 @@ Web 可视化系统提供统一的 Portal 与 Dashboard 管理界面，共 17 �
 
 ## 九、快速开始
 
+### 2026-08-25 Oracle 26ai 现场初始化问题总结
+
+v4.4.10 已在真实 Oracle AI Database 26ai Enterprise 空 Schema 上完成全链路验证：
+基础 Schema、迁移 9 至终端迁移 62、平台管理 Agent/合规 Agent 后置初始化、部署身份
+退役和独立 `verify` 均成功，最终状态为 `RETIRED`，失败迁移数为 0。
+
+本次现场处理确认并修复了以下问题：
+
+| 现象 | 根因 | v4.4.10 当前处理 |
+|------|------|------------------|
+| 基础部署出现连续 `ORA-00942`、`ORA-00904`、`ORA-01408` | Schema SQL 过早引用对象、调用不存在的配置函数并重复创建同列索引 | 基础 SQL 已修正，纯 Python 执行器在首个非幂等错误处停止，避免后续错误掩盖根因 |
+| 迁移 17/35 报 `PLS-00103: end-of-file` | 解析器在局部函数/过程的内部 `END;` 处截断匿名块 | 匿名 PL/SQL 块保持到独立 `/`；首行局部 `PROCEDURE/FUNCTION` 不再被误判为完整块 |
+| 迁移 23 报 `DBMS_CRYPTO.HASH` 无效 | 初始化迁移早于高权限包授权 | Oracle Memory 基线摘要改用 `STANDARD_HASH(..., 'SHA256')` |
+| 非 `AIADMIN` Schema 报跨 Schema `ORA-00942` | 活动安全迁移硬编码 Owner 名称 | 迁移按当前 Schema 解析对象，不再依赖固定 Owner 名称 |
+| Data Grant 报 `ORA-01031` 或 `ORA-52551` | 企业版 Owner 权限集不完整，或 `admin_data_role` 尚未创建 | preflight 在建表前列出全部缺失的 End User/Data Role/Data Grant/Context 权限；迁移幂等创建管理 Data Role |
+| 初始化完成但 `DB_CRYPTO`、`SET_AGENT_CONTEXT` 无效 | 直接 SYS 包授权、Deep Data Security 基线和后置验证未形成闭环 | preflight 强制检查 `DBMS_CRYPTO`/`UTL_HTTP` 直接授权；Enterprise 基线自动执行策略 6，迁移 50 随后加固上下文；postflight 验证加密往返、上下文、Data Grant 和全部可执行 PL/SQL |
+| `SET_AGENT_CONTEXT` 报 `PLS-00201: ORA_END_USER_CONTEXT.USERNAME` | SQL 伪列被直接写入 PL/SQL 条件表达式 | 迁移 50 先通过 SQL 将 End User 名称读入局部变量，再进行可信身份比较 |
+| fresh baseline 撤权时报 `ORA-01917` | 干净目标本来没有旧 `AGENT_API` 角色 | 仅在限定的旧权限撤销操作中把角色不存在视为已撤销，其他安全错误仍失败关闭 |
+| native Agent 后置初始化报 `DPY-4008` | Python 向 Oracle 传入 SQL 中不存在的额外绑定参数 | 隔离库存和部署状态写入均使用精确绑定集合 |
+| 迁移 22 创建组织成员触发器时报 `ORA-01031` | 旧的统一前置 SQL 和 preflight 漏检直接 `CREATE TRIGGER` 权限 | `CREATE TRIGGER` 已纳入统一前置授权与阻断式 Owner 权限检查；不得跳过触发器或手工标记迁移成功 |
+| 连接时报 `DPY-3001` | 数据库强制 Native Network Encryption，而当前发布包连接路径不能协商该模式 | 不得静默降低安全配置；由 DBA 采用经批准的兼容连接策略，或先完成独立验证的 Oracle Client 连接方案 |
+
+现场处理还确认：Oracle v4.4.10 基线要求活动 Oracle Home 的
+`V$OPTION.Partitioning=TRUE`。数据库选件、PDB、表空间、Schema Owner 和高权限授权
+均属于 DBA 前置责任，应用不会自动修改这些基础设施。建议仅向部署 Owner 增加
+`SYS.V_$INSTANCE` 的只读权限，以便 preflight 记录数据库版本；不要授予
+`SELECT ANY DICTIONARY` 或 `DBA`。
+
+如果旧包已留下部分对象，不要直接 `resume`，也不要强制覆盖。先查询
+`AI_SCHEMA_MIGRATION_STEPS` 的失败语句与 ORA 编号，并由 DBA 在备份/恢复边界内
+精确清理或恢复。只有 `TARGET_EMPTY=PASS` 才能执行新的 `initialize`。
+在专用测试环境中执行经批准的全新重置时，不能仅以 `DROP USER ... CASCADE`
+作为空基线证据；Oracle Context 和 Deep Data Security 全局对象可能继续存在。
+DBA 还必须确认该 Owner 的 Context、Data Grant、Data Role、End User 均为 0，
+再重建 Owner 并重新应用统一前置 SQL。生产环境应优先使用数据库原生恢复流程，
+不得把测试重置流程当作升级方式。
+
 ### ⚠️ 部署前安全检查（必读）
 
 **在运行任何部署脚本之前，必须检查数据库是否已有部署。重新初始化将销毁所有已有数据（Agent、会话、知识、工作空间、Skill）。**
@@ -1391,11 +1428,30 @@ SQL 脚本 `1_schema.sql` 已内置保护：检测到 `SYSTEM_CONFIG.schema_vers
 
 ### 前置条件
 
+全新 v4.4.10 Enterprise 部署应先由 DBA 在目标 PDB（不得是
+`CDB$ROOT`）审核并执行 `scripts/deploy/0_oracle_database_prerequisites.sql`。
+执行前必须修改脚本顶部的 `SCHEMA_OWNER`、`APP_TABLESPACE` 与有限
+`APP_QUOTA`，该脚本统一
+授予基础建模、Oracle Text、直接数据库包、只读版本/选件证据以及 Oracle
+26ai Deep Data Security 权限，并幂等创建只含 `CREATE SESSION` 的
+`DEEP_SEC_SESSION_ROLE`；数据库用户及其密码仍由客户的秘密管理流程
+创建。执行后再运行 `migration_runner.py --preflight`，不要以手工执行后续
+Schema SQL 代替 preflight 和迁移日志。
+
+应用主机连接数据库前还必须确定传输加密方案。发布包默认使用
+python-oracledb Thin Mode；数据库在 TCP 上强制 Native Network Encryption
+时会返回 `DPY-3001`。应选择经 DBA 批准的 TCPS/Wallet 策略，或独立安装并
+验证 Oracle Client Thick Mode。不得简单把加密和完整性设置为 `REJECTED`
+来绕过检查。数据库侧启用 `UTL_HTTP` 时，仅为批准的模型或 Embedding
+目标配置最小网络 ACL。
+
 - **Oracle AI Database 26ai 版本 23.26.2.0.0 或更高** — 早期版本（23.26.1）Deep Data Security 支持不完整。验证：`SELECT VERSION FROM PRODUCT_COMPONENT_VERSION WHERE PRODUCT LIKE 'Oracle%';`
 - **Python 3.14+，需安装 `oracledb 4.0.1+`** - 驱动已包含在 `vendor/` 目录中，通过 `bash scripts/install_offline.sh` 安装。Linuxbrew 不是必需项。注意：oracledb 4.0.0 存在 TCPS 协议不兼容问题，请确保使用 4.0.1+。
 - **SQL 部署工具** - 使用 `scripts/deploy_oracle.py`（纯 Python，无需 SQLcl）
-- **DBMS_CRYPTO 授权**：部署前需由 DBA 执行 `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <schema_user>;`（DB_CRYPTO 包依赖）
-- **Oracle Text 授权**：部署 `1_schema.sql` 前，DBA 必须在目标 PDB 执行 `0_oracle_text_prerequisites.sql`，向 Schema Owner 授予 `CTXAPP` 和 `EXECUTE ON CTXSYS.CTX_DDL`；该授权只用于创建全文索引，不授予 Business Agent 数据访问权限。
+- **数据库包直接授权**：部署前需由 DBA 执行 `GRANT EXECUTE ON SYS.DBMS_CRYPTO TO <schema_user>;` 和 `GRANT EXECUTE ON SYS.UTL_HTTP TO <schema_user>;`。授权必须直接授予 Schema Owner，不能依赖角色；preflight 会逐项验证。
+- **Oracle Text 授权**：部署前由 DBA 通过统一 `0_oracle_database_prerequisites.sql` 向 Schema Owner 授予 `CTXAPP` 和 `EXECUTE ON CTXSYS.CTX_DDL`；该授权只用于创建全文索引，不授予 Business Agent 数据访问权限。
+- **Deep Data Security 授权（企业版）**：初始化前由 DBA 通过统一前置 SQL 向 Schema Owner 直接授予 End User、Data Role、Data Grant、Context 与 `SET USE DATA GRANTS ONLY` 所需权限，并准备受限 Session Role。初始化 preflight 会列出全部缺失权限，并在创建平台表之前阻断不完整配置。
+- **Partitioning**：v4.4.10 Oracle 基线要求当前 Oracle Home 的 `V$OPTION` 返回 `Partitioning=TRUE`；禁用或无法验证时初始化会失败关闭。
 
 > ⚠️ **关键**：Oracle AI Database 26ai 必须为 **23.26.2** 或更高版本。早期版本的 Deep Data Security 功能不完整。
 
@@ -1414,8 +1470,11 @@ SQL 脚本 `1_schema.sql` 已内置保护：检测到 `SYSTEM_CONFIG.schema_vers
     scripts/deploy/4_grants.sql
 ```
 
-企业版还需按权限要求执行 `5_audit_policy.sql`（SYSDBA）和
-`6_deep_sec_policy.sql`（Schema Owner）。`1_schema.sql` 会验证
+上述分阶段命令仅用于受控诊断和历史部署说明。v4.4.10 正式新装应使用
+`scripts/install_platform.sh initialize`；Oracle Enterprise 初始化清单会自动执行
+`6_deep_sec_policy.sql`，随后在同一迁移链中执行迁移 50 的安全边界加固，操作员
+不再单独补跑策略 6。`5_audit_policy.sql` 仍属于需要 DBA 授权的审计基础设施。
+`1_schema.sql` 会验证
 `ENTITIES_MCD` 与 `ENTITIES_SEARCH_CTX` 的 Oracle Text 状态；如果未先执行
 前置脚本，部署会明确失败，不会留下不可用的全文索引。
 
@@ -1443,6 +1502,7 @@ v4.0.0 起发布包不再携带真实 `config.json`，只携带 `config.example.
 ./start_web_server.sh start
 # → 向导自动检测 <PLACEHOLDER>，依次询问：
 #     database: user / password / dsn (host:port/service)
+#     server:   监听地址 / Web 端口
 #     llm:      api_url / model / api_key
 #     embedding: api_url / model / dimension
 # → 写入 config.json，随后服务器自动加密敏感字段
@@ -1539,4 +1599,6 @@ Dynamic Graph Migration、Framework Adapter Execution、A2A 与 OTLP 为
 
 模型网关保持可选，直连与平台网关可以并行。平台网关提供硬配额和软预算、原子预留与结算、AES-GCM 有界响应重放、统一错误关联标识；模型用量账、供应商账单、追加式纠正/对账和 Enterprise 内部分摊保持为相互可追溯但不混淆的事实层。
 
-可信外部适配器以 Ed25519 签名、版本化密钥、吊销、顺序号和 nonce 上报证据。平台不声称自动发现未经过网关且没有签名证据的模型调用。管理大屏支持 allowlist 定义版本、发布和回滚，但 Viewer 仍为登录后只读。v4.4.10 使用 `baseline_v4_4_10.json` 进行全新部署并执行到迁移 59；Bootstrap 在任何写入前验证备份证据，通过交互输入或 `0600` 密码文件建立首次管理员 Argon2id 凭据，然后创建平台原生管理 Agent 并退休临时部署身份。历史脚本继续保持 journal 和 checksum 完整，但不作为旧包原地升级承诺。v4.4.8 已撤回。
+可信外部适配器以 Ed25519 签名、版本化密钥、吊销、顺序号和 nonce 上报证据。平台不声称自动发现未经过网关且没有签名证据的模型调用。管理大屏支持 allowlist 定义版本、发布和回滚，但 Viewer 仍为登录后只读。v4.4.10 使用 `baseline_v4_4_10.json` 进行全新部署并执行到迁移 59；Bootstrap 在任何写入前严格验证空目标，记录数据库侧恢复边界而不要求客户端备份文件，通过交互输入或 `0600` 密码文件建立首次管理员 Argon2id 凭据，然后创建平台原生管理 Agent 并退休临时部署身份。历史脚本继续保持 journal 和 checksum 完整，但不作为旧包原地升级承诺。v4.4.8 已撤回。
+
+升级时，交互流程要求输入 `UPGRADE` 确认数据库侧备份恢复责任，自动化使用 `--confirm-database-backup`。确认写入 journal，但运行客户端不要求备份文件，也不伪称能够验证 Oracle 原生备份。

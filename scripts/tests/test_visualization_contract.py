@@ -432,8 +432,8 @@ def test_portal_exit_is_not_overwritten_by_session_renewal_middleware():
     route = app.split("async def legacy_compatibility", 1)[1]
     assert '"/portal/api/agent/release"' in middleware
     assert 'if normalized == "/portal/api/agent/release":' in route
-    assert 'response.delete_cookie(_cookie_name("PORTAL"), path="/")' in route
-    assert 'response.delete_cookie(_cookie_name("DASHBOARD"), path="/")' in route
+    assert 'response.delete_cookie(_cookie_name("PORTAL", request.url.port), path="/")' in route
+    assert 'response.delete_cookie(_cookie_name("DASHBOARD", request.url.port), path="/")' in route
 
 
 def test_portal_session_recovery_restores_the_latest_conversation_workspace():

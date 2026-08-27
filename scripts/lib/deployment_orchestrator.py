@@ -22,6 +22,26 @@ from typing import Any, Dict, Iterable, List, Optional
 
 RUN_MODES = frozenset({"INITIALIZE", "UPGRADE", "RESUME", "STATUS", "VERIFY"})
 TERMINAL_STATES = frozenset({"COMPLETED", "RETIRED", "FAILED_MANUAL_ACTION_REQUIRED"})
+ORACLE_OWNER_BASE_PRIVILEGES = frozenset({
+    "CREATE SESSION", "CREATE TABLE", "CREATE SEQUENCE", "CREATE VIEW",
+    "CREATE PROCEDURE", "CREATE TRIGGER", "CREATE TYPE", "CREATE JOB",
+    "CREATE PROPERTY GRAPH",
+})
+ORACLE_ENTERPRISE_OWNER_PRIVILEGES = frozenset({
+    "CREATE DATA GRANT", "CREATE ANY DATA GRANT", "ADMINISTER ANY DATA GRANT",
+    "CREATE DATA ROLE", "DROP DATA ROLE", "GRANT ANY DATA ROLE",
+    "SET USE DATA GRANTS ONLY", "CREATE END USER", "ALTER END USER",
+    "DROP END USER", "CREATE END USER CONTEXT", "CREATE ANY END USER CONTEXT",
+    "CREATE END USER SECURITY CONTEXT", "CREATE ANY CONTEXT",
+})
+ORACLE_OWNER_OBJECT_PRIVILEGES = frozenset({
+    ("SYS", "DBMS_CRYPTO", "EXECUTE"),
+    ("SYS", "UTL_HTTP", "EXECUTE"),
+})
+YASHAN_OWNER_BASE_PRIVILEGES = frozenset({
+    "CREATE TABLE", "CREATE PROCEDURE", "CREATE SEQUENCE",
+    "CREATE USER", "ALTER USER",
+})
 
 
 class DeploymentError(RuntimeError):
@@ -170,6 +190,10 @@ def manifest(database: str, edition: str, root: Path = PACKAGE_ROOT) -> List[Man
     deploy = _package_deploy_dir(database, root)
     names = ["1_schema.sql", "7_v4_0_1_migration.sql", "2_api.sql", "3_jobs.sql", "4_harness_templates.sql"]
     names.append("8_v4_1_0_governance.sql" if edition.lower() == "enterprise" else "8_v4_1_0_registration.sql")
+    if database == "oracle" and edition.lower() == "enterprise":
+        names.append("6_deep_sec_policy.sql")
+    if database == "yashandb":
+        names.append("6_deep_sec_policy.sql")
     actions = []
     for index, name in enumerate(names, start=1):
         path = deploy / name
@@ -210,10 +234,25 @@ def _check(code: str, state: str, message: str, remediation: str = "", detail: O
     return {"code": code, "state": state, "message": message, "remediation": remediation, "detail": _safe(detail or {})}
 
 
-def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = False) -> Dict[str, Any]:
+def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = False,
+              edition: str = "") -> Dict[str, Any]:
     """Return normalized prepared-database checks without changing the target."""
     checks: List[Dict[str, Any]] = []
-    conn = _connect(database, config)
+    try:
+        conn = _connect(database, config)
+    except Exception as exc:
+        message = str(exc)
+        nne = database == "oracle" and ("DPY-3001" in message or "Native Network Encryption" in message)
+        checks.append(_check(
+            "DATABASE_CONNECTION", "BLOCKED", "Database connection could not be established",
+            ("The database requires Oracle Native Network Encryption. Use a DBA-approved compatible "
+             "server policy or a separately validated Oracle Client Thick Mode deployment; do not "
+             "silently weaken encryption." if nne else
+             "Verify the configured host, port, service, listener, credentials, and network path."),
+            {"error_code": "ORACLE_NATIVE_ENCRYPTION_REQUIRES_THICK_MODE" if nne else "DATABASE_CONNECTION_FAILED"},
+        ))
+        return {"database": database, "checked_at": _now(), "checks": checks,
+                "passed": False, "blocked": checks}
     try:
         with conn.cursor() as cursor:
             if database == "pg":
@@ -234,6 +273,73 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                                          f"{extension} extension is enabled in the target database",
                                          f"Install and enable PostgreSQL extension {extension} in the target database.",
                                          {"enabled": extension in extension_rows, "available": extension in available_rows}))
+                if "age" in extension_rows:
+                    try:
+                        age_usage = bool(_scalar(cursor, "SELECT has_schema_privilege(current_user,'ag_catalog','USAGE')"))
+                        age_graph = bool(_scalar(
+                            cursor,
+                            "SELECT has_table_privilege(current_user,'ag_catalog.ag_graph','SELECT,INSERT,UPDATE,DELETE')",
+                        ))
+                        age_label = bool(_scalar(
+                            cursor,
+                            "SELECT has_table_privilege(current_user,'ag_catalog.ag_label','SELECT,INSERT,UPDATE,DELETE')",
+                        ))
+                        age_create = bool(_scalar(
+                            cursor,
+                            "SELECT has_database_privilege(current_user,current_database(),'CREATE')",
+                        ))
+                        age_ready = age_usage and age_graph and age_label and age_create
+                        checks.append(_check(
+                            "PG_AGE_OWNER_PRIVILEGES", "PASS" if age_ready else "BLOCKED",
+                            "Deployment owner can create and maintain Apache AGE graph namespaces",
+                            "Run deploy/0_pg_database_prerequisites.sql as the database administrator in the target database.",
+                            {
+                                "schema_usage": age_usage,
+                                "graph_catalog_access": age_graph,
+                                "label_catalog_access": age_label,
+                                "database_create": age_create,
+                            },
+                        ))
+                    except Exception:
+                        checks.append(_check(
+                            "PG_AGE_OWNER_PRIVILEGES", "BLOCKED",
+                            "Apache AGE owner privileges could not be verified",
+                            "Run deploy/0_pg_database_prerequisites.sql as the database administrator in the target database.",
+                        ))
+                try:
+                    can_create_roles = bool(_scalar(
+                        cursor,
+                        "SELECT rolcreaterole FROM pg_roles WHERE rolname=current_user",
+                    ))
+                    runtime_role_exists = bool(_scalar(
+                        cursor,
+                        "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='ai_agent_runtime')",
+                    ))
+                    runtime_role_admin = bool(_scalar(
+                        cursor,
+                        "SELECT EXISTS(SELECT 1 FROM pg_auth_members membership "
+                        "JOIN pg_roles granted_role ON granted_role.oid=membership.roleid "
+                        "JOIN pg_roles member_role ON member_role.oid=membership.member "
+                        "WHERE granted_role.rolname='ai_agent_runtime' "
+                        "AND member_role.rolname=current_user AND membership.admin_option)",
+                    ))
+                    role_ready = can_create_roles and runtime_role_exists and runtime_role_admin
+                    checks.append(_check(
+                        "PG_AGENT_ROLE_ADMIN", "PASS" if role_ready else "BLOCKED",
+                        "Deployment owner can provision isolated Agent login roles",
+                        "Run deploy/0_pg_database_prerequisites.sql as the database administrator in the target database.",
+                        {
+                            "create_role": can_create_roles,
+                            "runtime_role_exists": runtime_role_exists,
+                            "runtime_role_admin": runtime_role_admin,
+                        },
+                    ))
+                except Exception:
+                    checks.append(_check(
+                        "PG_AGENT_ROLE_ADMIN", "BLOCKED",
+                        "Agent login role-management prerequisites could not be verified",
+                        "Run deploy/0_pg_database_prerequisites.sql as the database administrator in the target database.",
+                    ))
                 try:
                     can_create = bool(_scalar(cursor, "SELECT has_schema_privilege(current_user,'public','CREATE')"))
                     checks.append(_check("PG_SCHEMA_CREATE", "PASS" if can_create else "BLOCKED",
@@ -258,6 +364,28 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                     pass
                 checks.append(_check("PDB_OR_SERVICE", "PASS" if service else "WARN", "Connected target is a prepared application service",
                                      "Connect to the prepared PDB/service for this deployment.", {"version": version, "service": service}))
+                if database == "oracle" and service.upper() == "CDB$ROOT":
+                    checks.append(_check("ORACLE_TARGET_PDB", "BLOCKED", "Oracle target is CDB$ROOT",
+                                         "Create/open a dedicated PDB service and connect the deployment owner to that service."))
+                elif database == "oracle":
+                    checks.append(_check("ORACLE_TARGET_PDB", "PASS" if service else "WARN", "Oracle target PDB/service boundary"))
+                if database == "oracle":
+                    try:
+                        cursor.execute("SELECT VALUE FROM V$OPTION WHERE PARAMETER = :parameter", {"parameter": "Partitioning"})
+                        row = cursor.fetchone()
+                        enabled = bool(row and str(row[0] or "").upper() == "TRUE")
+                        checks.append(_check(
+                            "ORACLE_PARTITIONING", "PASS" if enabled else "BLOCKED",
+                            "Oracle Partitioning is enabled for the packaged baseline",
+                            "Enable Partitioning in the active Oracle Home with chopt, restart the database, and rerun preflight.",
+                            {"enabled": enabled},
+                        ))
+                    except Exception:
+                        checks.append(_check(
+                            "ORACLE_PARTITIONING", "BLOCKED",
+                            "Oracle Partitioning availability could not be verified",
+                            "Grant read-only access to V$OPTION for preflight or have the DBA verify Partitioning=TRUE.",
+                        ))
                 try:
                     cursor.execute("SELECT DEFAULT_TABLESPACE,TEMPORARY_TABLESPACE FROM USER_USERS")
                     row = cursor.fetchone()
@@ -267,15 +395,104 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                 except Exception:
                     checks.append(_check("TABLESPACES", "WARN", "Tablespace metadata is not visible", "Grant read-only metadata visibility or review the DBA remediation report."))
                 try:
-                    cursor.execute("SELECT PRIVILEGE FROM SESSION_PRIVS")
+                    privilege_view = "USER_SYS_PRIVS" if database == "yashandb" else "SESSION_PRIVS"
+                    cursor.execute(f"SELECT PRIVILEGE FROM {privilege_view}")
                     privileges = {str(item[0]).upper() for item in cursor.fetchall()}
-                    required = {"CREATE TABLE", "CREATE PROCEDURE", "CREATE SEQUENCE"}
+                    if database == "oracle":
+                        required = set(ORACLE_OWNER_BASE_PRIVILEGES)
+                    elif database == "yashandb":
+                        required = set(YASHAN_OWNER_BASE_PRIVILEGES)
+                    else:
+                        required = {"CREATE TABLE", "CREATE PROCEDURE", "CREATE SEQUENCE"}
+                    if database == "oracle" and str(edition).lower() == "enterprise":
+                        required.update(ORACLE_ENTERPRISE_OWNER_PRIVILEGES)
                     missing = sorted(required - privileges)
                     checks.append(_check("OWNER_PRIVILEGES", "PASS" if not missing else "BLOCKED", "Deployment owner privileges",
                                          "Grant the required schema-owner privileges before deployment.", {"missing": missing}))
                 except Exception:
                     checks.append(_check("OWNER_PRIVILEGES", "WARN", "Deployment owner privileges could not be verified",
                                          "Verify schema-owner privileges before deployment."))
+                if database == "yashandb":
+                    try:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM USER_ROLE_PRIVS "
+                            "WHERE GRANTED_ROLE='DEEP_SEC_SESSION_ROLE' AND ADMIN_OPTION='Y'"
+                        )
+                        role_admin = int(cursor.fetchone()[0] or 0) > 0
+                        role_exists = role_admin
+                        checks.append(_check(
+                            "YASHAN_AGENT_ROLE_ADMIN",
+                            "PASS" if role_exists and role_admin else "BLOCKED",
+                            "YashanDB independent Agent session-role management",
+                            "Run deploy/0_yashandb_database_prerequisites.sql as the database administrator in the target PDB.",
+                            {"role_exists": role_exists, "owner_admin_option": role_admin},
+                        ))
+                    except Exception:
+                        checks.append(_check(
+                            "YASHAN_AGENT_ROLE_ADMIN", "BLOCKED",
+                            "YashanDB Agent session-role prerequisites could not be verified",
+                            "Run deploy/0_yashandb_database_prerequisites.sql as the database administrator in the target PDB.",
+                        ))
+                if database == "oracle":
+                    try:
+                        has_unlimited = "UNLIMITED TABLESPACE" in privileges
+                        cursor.execute("SELECT MAX_BYTES FROM USER_TS_QUOTAS WHERE TABLESPACE_NAME=(SELECT DEFAULT_TABLESPACE FROM USER_USERS)")
+                        quota_row = cursor.fetchone()
+                        quota = int(quota_row[0]) if quota_row and quota_row[0] is not None else 0
+                        quota_ok = has_unlimited or quota == -1 or quota > 0
+                        checks.append(_check("TABLESPACE_QUOTA", "PASS" if quota_ok else "BLOCKED",
+                                             "Deployment owner has writable default-tablespace quota",
+                                             "Grant an explicit quota on the application tablespace; UNLIMITED TABLESPACE is not required."))
+                    except Exception:
+                        checks.append(_check("TABLESPACE_QUOTA", "WARN", "Tablespace quota could not be verified",
+                                             "Verify a non-zero owner quota on the default application tablespace."))
+                    try:
+                        cursor.execute("SELECT GRANTED_ROLE FROM USER_ROLE_PRIVS WHERE GRANTED_ROLE='CTXAPP'")
+                        has_ctxapp = bool(cursor.fetchone())
+                        cursor.execute("SELECT COUNT(*) FROM USER_TAB_PRIVS_RECD WHERE OWNER='CTXSYS' AND TABLE_NAME='CTX_DDL' AND PRIVILEGE='EXECUTE'")
+                        has_ctxddl = int(cursor.fetchone()[0] or 0) > 0
+                        checks.append(_check("ORACLE_TEXT", "PASS" if has_ctxapp and has_ctxddl else "BLOCKED",
+                                             "Oracle Text creation privileges",
+                                             "Grant CTXAPP and direct EXECUTE on CTXSYS.CTX_DDL to the deployment owner.",
+                                             {"ctxapp": has_ctxapp, "ctx_ddl_execute": has_ctxddl}))
+                    except Exception:
+                        checks.append(_check("ORACLE_TEXT", "BLOCKED", "Oracle Text privileges could not be verified",
+                                             "Install Oracle Text and grant CTXAPP plus direct CTXSYS.CTX_DDL execute."))
+                    try:
+                        cursor.execute("SELECT VALUE FROM NLS_DATABASE_PARAMETERS WHERE PARAMETER='NLS_CHARACTERSET'")
+                        charset_row = cursor.fetchone()
+                        charset = str(charset_row[0] or "") if charset_row else ""
+                        checks.append(_check("DATABASE_CHARACTER_SET", "PASS" if charset == "AL32UTF8" else "WARN",
+                                             "Oracle database character set", "Use AL32UTF8 for complete multilingual behavior.",
+                                             {"character_set": charset}))
+                    except Exception:
+                        checks.append(_check("DATABASE_CHARACTER_SET", "WARN", "Oracle character set could not be verified",
+                                             "Have the DBA verify NLS_CHARACTERSET=AL32UTF8."))
+                    try:
+                        cursor.execute(
+                            "SELECT OWNER,TABLE_NAME,PRIVILEGE FROM USER_TAB_PRIVS_RECD "
+                            "WHERE OWNER='SYS' AND TABLE_NAME IN ('DBMS_CRYPTO','UTL_HTTP')"
+                        )
+                        received = {
+                            (str(row[0]).upper(), str(row[1]).upper(), str(row[2]).upper())
+                            for row in cursor.fetchall()
+                        }
+                        missing_objects = sorted(
+                            ".".join(item) for item in ORACLE_OWNER_OBJECT_PRIVILEGES - received
+                        )
+                        checks.append(_check(
+                            "OWNER_OBJECT_PRIVILEGES",
+                            "PASS" if not missing_objects else "BLOCKED",
+                            "Deployment owner direct package privileges",
+                            "Grant direct EXECUTE on SYS.DBMS_CRYPTO and SYS.UTL_HTTP to the deployment owner.",
+                            {"missing": missing_objects},
+                        ))
+                    except Exception:
+                        checks.append(_check(
+                            "OWNER_OBJECT_PRIVILEGES", "BLOCKED",
+                            "Deployment owner direct package privileges could not be verified",
+                            "Grant the documented direct SYS package privileges and permit the owner to inspect received grants.",
+                        ))
             checks.append(_check("TARGET_EMPTY", "PASS" if count == 0 else ("BLOCKED" if require_empty else "WARN"),
                                  "Application schema table count", "Use upgrade/resume for an existing platform target.", {"table_count": count}))
     finally:
@@ -289,7 +506,12 @@ def _execute_action(database: str, config: Dict[str, Any], action: ManifestActio
     conn = _connect(database, config)
     try:
         if database in {"oracle", "pg"}:
-            ok = bool(tool.execute_sql_file(conn, action.path, verbose=False))
+            options = {
+                "define_overrides": {
+                    "SCHEMA_OWNER" if database == "oracle" else "schema_owner": config["user"],
+                },
+            }
+            ok = bool(tool.execute_sql_file(conn, action.path, verbose=False, **options))
             if not ok:
                 raise DeploymentError(f"package action failed: {action.key}")
             return
@@ -400,19 +622,29 @@ def _migration_apply(target_version: str, database: str, edition: str, config_pa
     return results
 
 
-def _verify_backup_evidence(path: Optional[Path], root: Path) -> Dict[str, Any]:
-    import sys
-    scripts_root = root / "scripts"
-    if scripts_root.is_dir() and str(scripts_root) not in sys.path:
-        sys.path.insert(0, str(scripts_root))
-    try:
-        import migration_runner as runner
-    except ImportError as exc:
-        raise DeploymentError("migration runner is unavailable in this package") from exc
-    passed, message = runner.verify_backup_evidence(path)
-    if not passed:
-        raise DeploymentError(message)
-    return {"status": "VERIFIED", "reference": str(path.name if path else "")}
+def _recovery_boundary(mode: str, database_backup_confirmed: bool,
+                       initialization_boundary: str = "") -> Dict[str, Any]:
+    """Record the operator boundary without pretending to inspect DB backups."""
+    if mode == "INITIALIZE":
+        if initialization_boundary != "VERIFIED_EMPTY_TARGET":
+            raise DeploymentError("initialization requires a verified empty target boundary")
+        return {
+            "status": "NOT_REQUIRED",
+            "authority": "DATABASE_MANAGED",
+            "reason": "NO_PREEXISTING_PLATFORM_DATA",
+            "initialization_boundary": initialization_boundary,
+        }
+    if not database_backup_confirmed:
+        raise DeploymentError(
+            "upgrade requires explicit confirmation that database-side backup "
+            "and recovery responsibilities have been accepted"
+        )
+    return {
+        "status": "OPERATOR_CONFIRMED",
+        "authority": "DATABASE_MANAGED",
+        "reason": "DATABASE_BACKUP_AND_RECOVERY_ACCEPTED",
+        "verification": "NOT_CLIENT_VERIFIABLE",
+    }
 
 
 def _database_record(run_id: str, mode: str, database: str, edition: str, target_version: str, plan_digest: str,
@@ -426,8 +658,12 @@ def _database_record(run_id: str, mode: str, database: str, edition: str, target
                   "status": status, "readiness": json.dumps(_safe(readiness), ensure_ascii=True), "plan": plan_digest,
                   "journal": journal_digest, "agent": agent_id, "step": current_step or None}
         if existing:
+            update_params = {
+                key: params[key]
+                for key in ("status", "readiness", "journal", "step", "id")
+            }
             tx.execute("UPDATE CX_DEPLOYMENT_RUNS SET STATUS=:status,READINESS_JSON=:readiness,JOURNAL_DIGEST=:journal,"
-                       "CURRENT_STEP=:step,UPDATED_AT=CURRENT_TIMESTAMP WHERE RUN_ID=:id", params)
+                       "CURRENT_STEP=:step,UPDATED_AT=CURRENT_TIMESTAMP WHERE RUN_ID=:id", update_params)
         else:
             tx.execute("INSERT INTO CX_DEPLOYMENT_RUNS(RUN_ID,RUN_MODE,DATABASE_DIALECT,EDITION,PACKAGE_VERSION,STATUS,"
                        "READINESS_JSON,PLAN_DIGEST,JOURNAL_DIGEST,DEPLOYMENT_AGENT_ID,CURRENT_STEP,CREATED_BY) VALUES "
@@ -451,11 +687,15 @@ def _record_step(run_id: str, step_key: str, step_order: int, action_digest: str
                   "digest": action_digest, "result": json.dumps(payload, ensure_ascii=True, sort_keys=True),
                   "error": _text_error(error_code), "attempts": int((existing or {}).get("attempt_count") or 0) + 1}
         if existing:
+            update_params = {
+                key: params[key]
+                for key in ("id", "status", "digest", "result", "error", "attempts")
+            }
             tx.execute(
                 "UPDATE CX_DEPLOYMENT_STEPS SET STATUS=:status,ACTION_DIGEST=:digest,RESULT_JSON=:result,ERROR_CODE=:error,"
                 "ATTEMPT_COUNT=:attempts,UPDATED_AT=CURRENT_TIMESTAMP,STARTED_AT=CASE WHEN :status='RUNNING' THEN CURRENT_TIMESTAMP ELSE STARTED_AT END,"
                 "COMPLETED_AT=CASE WHEN :status IN ('COMPLETED','FAILED') THEN CURRENT_TIMESTAMP ELSE COMPLETED_AT END "
-                "WHERE STEP_ID=:id", params,
+                "WHERE STEP_ID=:id", update_params,
             )
         else:
             tx.execute(
@@ -515,6 +755,126 @@ def _deployment_database_status(database: str, config: Dict[str, Any], run_id: s
         conn.close()
 
 
+def postflight(database: str, edition: str, config: Dict[str, Any], terminal_migration: str) -> Dict[str, Any]:
+    """Verify release and database-security closure before reporting READY."""
+    checks: List[Dict[str, Any]] = []
+    conn = _connect(database, config)
+    try:
+        with conn.cursor() as cursor:
+            step = terminal_migration.removesuffix(".sql")
+            if database == "pg":
+                cursor.execute(
+                    "SELECT COUNT(*) FROM AI_SCHEMA_MIGRATION_STEPS WHERE STEP_NAME=%s AND STATUS='APPLIED'",
+                    (step,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM AI_SCHEMA_MIGRATION_STEPS WHERE STEP_NAME=:step AND STATUS='APPLIED'",
+                    {"step": step},
+                )
+            terminal_count = int((cursor.fetchone() or [0])[0] or 0)
+            checks.append(_check(
+                "TERMINAL_MIGRATION", "PASS" if terminal_count == 1 else "BLOCKED",
+                "Packaged terminal migration is applied",
+                "Apply the complete release-bound migration chain before handoff.",
+                {"step": terminal_migration, "count": terminal_count},
+            ))
+
+            cursor.execute("SELECT COUNT(*) FROM AI_SCHEMA_MIGRATION_STEPS WHERE STATUS='FAILED'")
+            failed = int((cursor.fetchone() or [0])[0] or 0)
+            checks.append(_check(
+                "FAILED_MIGRATIONS", "PASS" if failed == 0 else "BLOCKED",
+                "Migration ledger has no failed steps",
+                "Resolve failed migration steps before handoff.", {"count": failed},
+            ))
+
+            if database == "oracle":
+                dual = "DU" + "AL"
+                cursor.execute(
+                    "SELECT COUNT(*) FROM USER_OBJECTS WHERE STATUS='INVALID' "
+                    "AND OBJECT_TYPE IN ('PACKAGE','PACKAGE BODY','PROCEDURE','FUNCTION','TRIGGER')"
+                )
+                invalid_plsql = int((cursor.fetchone() or [0])[0] or 0)
+                checks.append(_check(
+                    "ORACLE_INVALID_PLSQL", "PASS" if invalid_plsql == 0 else "BLOCKED",
+                    "Oracle executable schema objects are valid",
+                    "Inspect USER_ERRORS and compile or redeploy every invalid executable object.",
+                    {"count": invalid_plsql},
+                ))
+
+                cursor.execute(
+                    "SELECT COUNT(*) FROM SYSTEM_CONFIG WHERE CONFIG_KEY IN "
+                    "('db_crypto_master_key','db_crypto_key_salt') AND CONFIG_VALUE IS NOT NULL"
+                )
+                key_count = int((cursor.fetchone() or [0])[0] or 0)
+                checks.append(_check(
+                    "DB_CRYPTO_KEYS", "PASS" if key_count == 2 else "BLOCKED",
+                    "Database encryption keys are initialized",
+                    "Initialize both DB_CRYPTO key records through the trusted owner bootstrap.",
+                    {"count": key_count},
+                ))
+
+                cursor.execute(
+                    "SELECT CASE WHEN DB_CRYPTO.decrypt(DB_CRYPTO.encrypt('postflight'))='postflight' "
+                    f"THEN 1 ELSE 0 END FROM {dual}"
+                )
+                crypto_probe = int((cursor.fetchone() or [0])[0] or 0)
+                checks.append(_check(
+                    "DB_CRYPTO_PROBE", "PASS" if crypto_probe == 1 else "BLOCKED",
+                    "Database encryption package round trip succeeds",
+                    "Resolve DB_CRYPTO compilation, grants, or key initialization before handoff.",
+                ))
+
+                if str(edition).lower() == "enterprise":
+                    cursor.execute(
+                        "BEGIN SET_AGENT_CONTEXT.set_agent_id(:agent_id); END;",
+                        {"agent_id": "POSTFLIGHT_PROBE"},
+                    )
+                    cursor.execute(
+                        f"SELECT CASE WHEN SYS_CONTEXT('AGENT_CTX','AGENT_ID')='POSTFLIGHT_PROBE' "
+                        f"THEN 1 ELSE 0 END FROM {dual}"
+                    )
+                    context_probe = int((cursor.fetchone() or [0])[0] or 0)
+                    cursor.execute("BEGIN SET_AGENT_CONTEXT.clear_context(); END;")
+                    checks.append(_check(
+                        "ORACLE_AGENT_CONTEXT", "PASS" if context_probe == 1 else "BLOCKED",
+                        "Trusted Agent application context exists",
+                        "Execute the packaged Oracle Enterprise Deep Data Security policy.",
+                    ))
+
+                    cursor.execute("SELECT COUNT(DISTINCT GRANT_NAME) FROM USER_DATA_GRANTS")
+                    grant_count = int((cursor.fetchone() or [0])[0] or 0)
+                    checks.append(_check(
+                        "ORACLE_DATA_GRANTS", "PASS" if grant_count >= 23 else "BLOCKED",
+                        "Oracle Data Grants are installed",
+                        "Execute the packaged Deep Data Security policy and inspect invalid grant definitions.",
+                        {"count": grant_count, "minimum": 23},
+                    ))
+
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM USER_SOURCE WHERE NAME='SET_AGENT_CONTEXT' AND TYPE='PACKAGE BODY' "
+                        "AND (LOWER(TEXT) LIKE '%ora_end_user_context.username%' "
+                        "OR LOWER(TEXT) LIKE '%trusted end user%')"
+                    )
+                    hardening_markers = int((cursor.fetchone() or [0])[0] or 0)
+                    checks.append(_check(
+                        "ORACLE_CONTEXT_HARDENING", "PASS" if hardening_markers >= 2 else "BLOCKED",
+                        "Agent context setter enforces trusted End User identity",
+                        "Apply the packaged security-boundary repair after the Deep Data Security policy.",
+                        {"markers": hardening_markers},
+                    ))
+    except Exception as exc:
+        checks.append(_check(
+            "POSTFLIGHT_QUERY", "BLOCKED", "Database postflight could not be completed",
+            "Resolve the database error and rerun verify.", {"error": type(exc).__name__},
+        ))
+    finally:
+        conn.close()
+    blocked = [item for item in checks if item["state"] == "BLOCKED"]
+    return {"database": database, "edition": edition, "checked_at": _now(),
+            "checks": checks, "passed": not blocked, "blocked": blocked}
+
+
 def _retire_run(run_id: str) -> None:
     from . import connection
     agent_id = "BOOTSTRAP_DEPLOYMENT_AGENT:" + run_id
@@ -526,10 +886,12 @@ def _bootstrap_admin_hash(password: str) -> str:
     if not password:
         raise DeploymentError("initial administrator password is required")
     try:
-        from .identity_api import hash_password_argon2id
+        from .identity_api import IdentityError, hash_password_argon2id
         return hash_password_argon2id(password)
-    except Exception as exc:
+    except IdentityError as exc:
         raise DeploymentError("initial administrator password does not meet policy") from exc
+    except RuntimeError as exc:
+        raise DeploymentError("administrator password hashing dependency is unavailable") from exc
 
 
 def _set_bootstrap_admin(database: str, config: Dict[str, Any], password: str, password_hash: str) -> None:
@@ -540,6 +902,21 @@ def _set_bootstrap_admin(database: str, config: Dict[str, Any], password: str, p
             cursor.execute("SELECT PASSWORD_HASH FROM SYSTEM_USERS WHERE USERNAME='admin' AND ROLE='ADMIN'")
             row = cursor.fetchone()
             current_hash = str(row[0] or "") if row else ""
+            if not row:
+                if database == "pg":
+                    cursor.execute(
+                        "INSERT INTO system_users(username,password_hash,role,status,auth_source,created_at,updated_at) "
+                        "VALUES ('admin',%(password_hash)s,'ADMIN','ACTIVE','LOCAL',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                        {"password_hash": password_hash},
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT INTO SYSTEM_USERS(USER_ID,USERNAME,PASSWORD_HASH,ROLE,STATUS,AUTH_SOURCE,CREATED_AT,UPDATED_AT) "
+                        "VALUES ('admin','admin',:password_hash,'ADMIN','ACTIVE','LOCAL',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                        {"password_hash": password_hash},
+                    )
+                conn.commit()
+                return
             if current_hash and current_hash != "SHA256:placeholder_change_me":
                 from .identity_api import verify_password_hash
                 if verify_password_hash(password, current_hash)[0]:
@@ -563,6 +940,19 @@ def _set_bootstrap_admin(database: str, config: Dict[str, Any], password: str, p
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+def _bootstrap_admin_configured(database: str, config: Dict[str, Any]) -> bool:
+    """Return whether initialization already committed a non-seed admin."""
+    conn = _connect(database, config)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT PASSWORD_HASH FROM SYSTEM_USERS WHERE USERNAME='admin' AND ROLE='ADMIN'")
+            row = cursor.fetchone()
+            current_hash = str(row[0] or "") if row else ""
+            return bool(current_hash and current_hash != "SHA256:placeholder_change_me")
     finally:
         conn.close()
 
@@ -624,7 +1014,7 @@ def _configure_models(raw: Dict[str, Any], run_id: str) -> Dict[str, Any]:
 
 def run(mode: str, *, database: str, edition: str, config_path: Path,
         root: Path = PACKAGE_ROOT, run_id: str = "", target_version: str = "",
-        bootstrap_admin_password: str = "", backup_evidence: Optional[Path] = None) -> Dict[str, Any]:
+        bootstrap_admin_password: str = "", database_backup_confirmed: bool = False) -> Dict[str, Any]:
     mode = str(mode or "").upper()
     database = str(database or "").lower()
     edition = str(edition or "").lower()
@@ -639,42 +1029,72 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     journal = DeploymentJournal(root, run_id)
     if mode in {"STATUS", "VERIFY"}:
         durable = _deployment_database_status(database, config, run_id)
+        verified = postflight(database, edition, config, terminal_migration) if mode == "VERIFY" else None
         return {"run_id": journal.run_id, "mode": mode, "version": target_version,
-                "terminal_migration": terminal_migration, "preflight": preflight(database, config, require_empty=False),
-                "deployment": durable}
+                "terminal_migration": terminal_migration,
+                "preflight": preflight(database, config, require_empty=False, edition=edition),
+                "postflight": verified, "deployment": durable}
     resuming = mode == "RESUME"
+    resume_from_handoff = False
     if resuming:
         prior = journal.load()
         if (str(prior.get("database") or "") != database or str(prior.get("edition") or "") != edition
                 or str(prior.get("target_version") or target_version) != target_version):
             raise DeploymentError("deployment journal does not match the requested target")
         mode = str(prior.get("mode") or "INITIALIZE")
-    admin_hash = _bootstrap_admin_hash(bootstrap_admin_password) if mode == "INITIALIZE" else ""
-    backup = _verify_backup_evidence(backup_evidence, root)
+        durable_resume = _deployment_database_status(database, config, journal.run_id)
+        resume_from_handoff = str(durable_resume.get("status") or "").upper() == "NATIVE_HANDOFF"
+    admin_hash = (
+        _bootstrap_admin_hash(bootstrap_admin_password)
+        if mode == "INITIALIZE" and bootstrap_admin_password
+        else ""
+    )
     plan = manifest(database, edition, root)
     plan_digest = _digest([{"key": action.key, "digest": action.digest, "authority": action.authority} for action in plan])
     state = {"run_id": journal.run_id, "mode": mode, "database": database, "edition": edition,
              "target_version": target_version, "terminal_migration": terminal_migration,
              "plan_digest": plan_digest, "updated_at": _now()}
     journal_digest = journal.save(state)
-    first = preflight(database, config, require_empty=mode == "INITIALIZE" and not resuming)
+    first = preflight(
+        database, config,
+        require_empty=mode == "INITIALIZE" and not resuming,
+        edition=edition,
+    )
     if not first["passed"]:
         state["status"] = "FAILED_MANUAL_ACTION_REQUIRED"
         state["preflight"] = first
         journal.save(state)
         return {"run_id": journal.run_id, "status": state["status"], "preflight": first}
     if mode == "INITIALIZE":
-        for action in plan:
-            state["current_step"] = action.key
-            journal_digest = journal.save(state)
-            _execute_action(database, config, action, root)
-        _set_bootstrap_admin(database, config, bootstrap_admin_password, admin_hash)
+        initialization_boundary = str(prior.get("initialization_boundary") or "") if resuming else "VERIFIED_EMPTY_TARGET"
+        recovery = _recovery_boundary(mode, False, initialization_boundary)
+        state["initialization_boundary"] = initialization_boundary
+        state["recovery_boundary"] = recovery
+        journal_digest = journal.save(state)
+    else:
+        prior_recovery = dict(prior.get("recovery_boundary") or {}) if resuming else {}
+        confirmed = database_backup_confirmed or prior_recovery.get("status") == "OPERATOR_CONFIRMED"
+        recovery = _recovery_boundary(mode, confirmed)
+        state["recovery_boundary"] = recovery
+        journal_digest = journal.save(state)
+    if mode == "INITIALIZE":
+        if not resume_from_handoff:
+            for action in plan:
+                state["current_step"] = action.key
+                journal_digest = journal.save(state)
+                _execute_action(database, config, action, root)
+            if bootstrap_admin_password:
+                _set_bootstrap_admin(database, config, bootstrap_admin_password, admin_hash)
+            elif not (resuming and _bootstrap_admin_configured(database, config)):
+                raise DeploymentError("initial administrator password is required")
+        elif not _bootstrap_admin_configured(database, config):
+            raise DeploymentError("initial administrator setup is incomplete; resume with --admin-password-file")
     migrations = _migration_apply(target_version, database, edition, config_path, config, root)
     if not migrations or str(migrations[-1].get("script") or "") != terminal_migration:
         raise DeploymentError("migration chain did not reach the packaged terminal migration")
-    readiness = {"database": "READY", "control_plane": "READY", "llm": "UNCONFIGURED", "embedding": "UNCONFIGURED", "runtime": "PENDING", "enrollment": "BLOCKED"}
+    readiness = {"database": "PENDING", "control_plane": "PENDING", "llm": "UNCONFIGURED", "embedding": "UNCONFIGURED", "runtime": "PENDING", "enrollment": "BLOCKED"}
     _database_record(journal.run_id, mode, database, edition, target_version, plan_digest, journal_digest, "NATIVE_HANDOFF", readiness, "native-handoff")
-    _record_evidence(journal.run_id, "PREFLIGHT", {"target": first, "backup": backup})
+    _record_evidence(journal.run_id, "PREFLIGHT", {"target": first, "recovery_boundary": recovery})
     _record_evidence(journal.run_id, "MIGRATION_RESULTS", {"migrations": migrations, "manifest_digest": plan_digest})
     for index, action in enumerate(plan, start=1):
         _record_step(journal.run_id, action.key, index, action.digest, "COMPLETED", {"phase": action.phase, "path": action.path.name})
@@ -692,12 +1112,17 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         raise DeploymentError("scoped platform management knowledge did not pass postflight")
     _record_evidence(journal.run_id, "PLATFORM_KNOWLEDGE_POSTFLIGHT", knowledge_state)
     models = _configure_models(raw, journal.run_id)
+    verified = postflight(database, edition, config, terminal_migration)
+    if not verified["passed"]:
+        raise DeploymentError("database postflight verification failed")
+    readiness["database"] = "READY"
+    readiness["control_plane"] = "READY"
     readiness.update(models)
     readiness["runtime"] = "READY"
     readiness["enrollment"] = "READY" if models.get("embedding") in {"VERIFIED", "DISABLED", "UNCONFIGURED"} else "BLOCKED"
     journal_digest = journal.save({**state, "status": "POSTFLIGHT_PASSED", "readiness": readiness, "migrations": migrations})
     _database_record(journal.run_id, mode, database, edition, target_version, plan_digest, journal_digest, "COMPLETED", readiness, "postflight")
-    _record_evidence(journal.run_id, "POSTFLIGHT", {"readiness": readiness, "initial_admin": admin,
+    _record_evidence(journal.run_id, "POSTFLIGHT", {"readiness": readiness, "verification": verified, "initial_admin": admin,
                                                      "native_agents": native, "models": models})
     _retire_run(journal.run_id)
     journal.retire()

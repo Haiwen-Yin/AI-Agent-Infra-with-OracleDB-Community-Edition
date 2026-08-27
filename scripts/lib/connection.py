@@ -19,6 +19,7 @@ def merge_scalar_suffix() -> str:
     """Return the Oracle-only suffix for a dialect-neutral MERGE source."""
     return " FROM " + "DU" + "AL"
 import threading
+from contextvars import ContextVar
 import logging
 from contextlib import contextmanager
 from decimal import Decimal
@@ -88,7 +89,7 @@ def get_connection():
             pool.release(conn)
 
 
-_current_agent_id = threading.local()
+_current_agent_id: ContextVar[Optional[str]] = ContextVar("cx_oracle_agent_id", default=None)
 
 _end_user_connections: Dict[str, oracledb.Connection] = {}
 _end_user_lock = threading.Lock()
@@ -113,10 +114,10 @@ def _load_agent_eu_creds() -> Dict[str, str]:
 
 
 def set_agent_context(agent_id: Optional[str]) -> None:
-    _current_agent_id.value = agent_id
+    _current_agent_id.set(agent_id)
 
 def get_current_agent_id() -> Optional[str]:
-    return getattr(_current_agent_id, 'value', None)
+    return _current_agent_id.get()
 
 def _agent_id_to_end_user_name(agent_id: str) -> str:
     return agent_id.replace('-', '_').upper()

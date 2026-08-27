@@ -58,6 +58,13 @@ def cmd_register(args):
         payload["agent_type"] = args.agent_type
     if args.description:
         payload["description"] = args.description
+    payload["embedding_mode"] = args.embedding_mode
+    if args.embedding_mode == "AGENT_MANAGED":
+        payload["embedding_model_id"] = args.embedding_model_id
+        payload["embedding_fingerprint"] = args.embedding_fingerprint
+        payload["embedding_dimension"] = args.embedding_dimension
+        payload["embedding_distance_metric"] = args.embedding_distance_metric
+        payload["embedding_normalize"] = args.embedding_normalize
 
     print(f"Registering agent '{args.agent_id}' via Admin API...")
     result = _api_post(register_url, payload)
@@ -375,6 +382,12 @@ def main():
     reg.add_argument("--agent-type", default=None, help="Agent type (e.g. BUSINESS)")
     reg.add_argument("--description", default=None, help="Agent description")
     reg.add_argument("--config", default=None, help="Output agent_config.json path")
+    reg.add_argument("--embedding-mode", choices=["PLATFORM_MANAGED", "AGENT_MANAGED"], default="PLATFORM_MANAGED", help="Embedding execution mode")
+    reg.add_argument("--embedding-model-id", default="", help="Agent Embedding model identity (required for AGENT_MANAGED)")
+    reg.add_argument("--embedding-fingerprint", default="", help="Platform Contract model fingerprint")
+    reg.add_argument("--embedding-dimension", type=int, default=None, help="Agent Embedding vector dimension")
+    reg.add_argument("--embedding-distance-metric", choices=["COSINE", "EUCLIDEAN", "DOT_PRODUCT"], default="COSINE")
+    reg.add_argument("--embedding-normalize", action=argparse.BooleanOptionalAction, default=True)
 
     rec = sub.add_parser("recover", help="Recover agent via Admin API using recovery code")
     rec.add_argument("--agent-id", required=True, help="Agent identifier to recover")

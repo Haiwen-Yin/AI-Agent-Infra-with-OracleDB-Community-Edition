@@ -108,7 +108,8 @@ def get_knowledge_context(entity_id: str) -> Optional[Dict[str, Any]]:
 
 
 def capture_agent_knowledge_context(entity_id: str, agent_id: str, *, sharing_scope: str = "ORGANIZATION_SUBTREE",
-                                    organization_id: Optional[str] = None, reason: str = "Agent knowledge creation",
+                                    organization_id: Optional[str] = None, hierarchy_depth: Optional[int] = None,
+                                    reason: str = "Agent knowledge creation",
                                     context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     entity_id = str(entity_id)
     context = context or get_agent_knowledge_context(agent_id)
@@ -118,6 +119,8 @@ def capture_agent_knowledge_context(entity_id: str, agent_id: str, *, sharing_sc
         raise ValueError("invalid knowledge sharing scope")
     if scope in {"ORGANIZATION_SUBTREE", "ORGANIZATION_LEVEL"} and not selected_org:
         raise ValueError("Agent has no active organization for organization-scoped knowledge")
+    if scope == "ORGANIZATION_LEVEL" and (hierarchy_depth is None or int(hierarchy_depth) < 0):
+        raise ValueError("organization level requires a non-negative hierarchy depth")
     digest = __import__("hashlib").sha256(_json_value({"agent": context, "scope": scope, "org": selected_org}).encode()).hexdigest()
     execute(
         "INSERT INTO CX_KNOWLEDGE_CONTEXTS (CONTEXT_ID,ENTITY_ID,AGENT_ID,PRINCIPAL_ID,ORGANIZATION_ID,"
@@ -130,11 +133,13 @@ def capture_agent_knowledge_context(entity_id: str, agent_id: str, *, sharing_sc
          "scope": scope, "digest": digest, "reason": reason[:2000]},
     )
     if scope == "PRINCIPAL_PRIVATE":
-        target_principal = context.get("principal_id") or f"AGENT:{agent_id}"
+        # Agent-private knowledge belongs to the producing Agent identity. The
+        # Human owner remains provenance/context, not an implicit reader.
+        target_principal = agent_id
         set_access_policy(entity_id, scope, target_principal, principal_id=target_principal, reason=reason)
     else:
         set_access_policy(entity_id, scope, context.get("principal_id") or agent_id,
-                          organization_id=selected_org, reason=reason)
+                          organization_id=selected_org, hierarchy_depth=hierarchy_depth, reason=reason)
     return {"entity_id": entity_id, "sharing_scope": scope, "organization_id": selected_org,
             "organization_chain": context["organization_chain"], "responsible_groups": context["responsible_groups"],
             "execution_groups": context["execution_groups"], "graph_snapshot_digest": digest}
@@ -218,6 +223,7 @@ def create_knowledge(
     workspace_id: Optional[str] = None,
     sharing_scope: Optional[str] = None,
     organization_id: Optional[str] = None,
+    hierarchy_depth: Optional[int] = None,
     creation_reason: str = "Agent knowledge creation",
 ) -> str:
     # Resolve and validate the Agent's organization context before any row is
@@ -270,7 +276,8 @@ def create_knowledge(
     if owned_by_agent:
         capture_agent_knowledge_context(entity_id, owned_by_agent, sharing_scope=sharing_scope or (
             "PRINCIPAL_PRIVATE" if str(visibility).upper() == "PRIVATE" else "ORGANIZATION_SUBTREE"
-        ), organization_id=organization_id, reason=creation_reason, context=agent_context)
+        ), organization_id=organization_id, hierarchy_depth=hierarchy_depth,
+            reason=creation_reason, context=agent_context)
     return entity_id
 
 

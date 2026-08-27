@@ -666,15 +666,42 @@ def execute_approved_command(actor: str, command_id: str, action_id: str) -> Dic
             "SELECT ACTION_ID,ACTION_TYPE,PAYLOAD_JSON,STATUS FROM CX_ACTION_CARDS WHERE ACTION_ID=:id FOR UPDATE",
             {"id": action_id}))
         command = _row(tx.query_one(
-            "SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,STATUS FROM CX_PLATFORM_ADMIN_COMMANDS WHERE COMMAND_ID=:id FOR UPDATE",
+            "SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,STATUS,EXPIRES_AT "
+            "FROM CX_PLATFORM_ADMIN_COMMANDS WHERE COMMAND_ID=:id FOR UPDATE",
             {"id": command_id}))
         if not action or str(action.get("status") or "").upper() != "CONFIRMED":
             raise AgentPoolError("the platform Action Card is not confirmed")
-        if not command or str(command.get("status") or "").upper() != "PENDING_APPROVAL":
+        command_status = str((command or {}).get("status") or "").upper()
+        if command_status in {"COMPLETED", "PROPOSAL_CONFIRMED"}:
+            return {"command_id": command_id, "status": command_status, "idempotent": True}
+        if not command or command_status != "PENDING_APPROVAL":
             raise AgentPoolError("the platform command is no longer pending")
         payload = json.loads(str(action.get("payload_json") or "{}"))
-        if str(payload.get("command_id") or "") != command_id or str(command.get("command_type") or "").upper() != "AGENT_DRAIN":
+        command_type = str(command.get("command_type") or "").upper()
+        if str(payload.get("command_id") or "") != command_id:
             raise AgentPoolError("the platform Action Card does not match the requested command")
+        claimed = tx.execute(
+            "UPDATE CX_PLATFORM_ADMIN_COMMANDS SET STATUS='EXECUTING',UPDATED_AT=CURRENT_TIMESTAMP "
+            "WHERE COMMAND_ID=:id AND STATUS='PENDING_APPROVAL' AND EXPIRES_AT>CURRENT_TIMESTAMP",
+            {"id": command_id},
+        )
+        if claimed != 1:
+            raise AgentPoolError("the platform command has expired or was already claimed")
+        if command_type != "AGENT_DRAIN":
+            registry = _row(tx.query_one(
+                "SELECT EXECUTION_MODE FROM CX_PLATFORM_COMMANDS WHERE COMMAND_KEY=:key AND STATUS='PUBLISHED' "
+                "ORDER BY VERSION DESC FETCH FIRST 1 ROWS ONLY", {"key": command_type},
+            ))
+            if str((registry or {}).get("execution_mode") or "").upper() != "PROPOSAL_ONLY":
+                raise AgentPoolError("the platform command executor is unavailable")
+            tx.execute(
+                "UPDATE CX_PLATFORM_ADMIN_COMMANDS SET STATUS='PROPOSAL_CONFIRMED',UPDATED_AT=CURRENT_TIMESTAMP "
+                "WHERE COMMAND_ID=:id AND STATUS='EXECUTING'", {"id": command_id},
+            )
+            identity_api._audit_tx(tx, actor, "PLATFORM_PROPOSAL_CONFIRMED", "ADMIN_COMMAND", command_id,
+                                   "ALLOW", "confirmed Action Card " + action_id)
+            return {"command_id": command_id, "command_type": command_type,
+                    "status": "PROPOSAL_CONFIRMED", "idempotent": False}
         target = json.loads(str(command.get("target_json") or "{}"))
         params = json.loads(str(command.get("parameters_json") or "{}"))
         source = str(target.get("node_id") or "").strip()
@@ -690,7 +717,7 @@ def execute_approved_command(actor: str, command_id: str, action_id: str) -> Dic
         tx.execute("UPDATE CX_RUNTIME_WORKERS SET STATUS='DRAINING',UPDATED_AT=CURRENT_TIMESTAMP WHERE NODE_ID=:id AND STATUS IN ('ONLINE','STARTING')", {"id": source})
         retried = tx.execute("UPDATE CX_RUNTIME_EXECUTIONS SET STATUS='PENDING',WORKER_ID=NULL,NODE_ID=:destination,LEASE_EXPIRES_AT=NULL,UPDATED_AT=CURRENT_TIMESTAMP WHERE NODE_ID=:source AND STATUS='CLAIMED' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP", {"source": source, "destination": destination})
         active = _row(tx.query_one("SELECT COUNT(*) AS CNT FROM CX_RUNTIME_EXECUTIONS WHERE NODE_ID=:id AND STATUS IN ('CLAIMED','RUNNING','STREAMING','WAITING')", {"id": source})) or {}
-        tx.execute("UPDATE CX_PLATFORM_ADMIN_COMMANDS SET STATUS='COMPLETED',UPDATED_AT=CURRENT_TIMESTAMP WHERE COMMAND_ID=:id", {"id": command_id})
+        tx.execute("UPDATE CX_PLATFORM_ADMIN_COMMANDS SET STATUS='COMPLETED',UPDATED_AT=CURRENT_TIMESTAMP WHERE COMMAND_ID=:id AND STATUS='EXECUTING'", {"id": command_id})
         identity_api._audit_tx(tx, actor, "AGENT_POOL_NODE_DRAIN", "MANAGED_NODE", source, "ALLOW", "confirmed Action Card " + action_id)
         return {"command_id": command_id, "source_node_id": source, "destination_node_id": destination, "status": "DRAINING", "requeued_expired_tasks": int(retried or 0), "running_tasks_remaining": int(active.get("cnt") or 0)}
     return connection.execute_transaction_callback(work)
@@ -1161,6 +1188,29 @@ def list_endpoints(actor: str) -> list[Dict[str, Any]]:
     return _rows(connection.execute_query("SELECT ENDPOINT_ID,ENDPOINT_KEY,DATABASE_DIALECT,HOST_REFERENCE,PORT,TLS_REQUIRED,STATUS,CREATED_AT FROM CX_EXTERNAL_DB_ENDPOINTS ORDER BY ENDPOINT_KEY"))
 
 
+def _configured_database_endpoint() -> Dict[str, Any]:
+    """Normalize non-secret host/port/service metadata across adapters."""
+    from .config import get_config
+    db = get_config().database
+    host = str(getattr(db, "host", "") or "")
+    port = int(getattr(db, "port", 0) or 0)
+    service = str(getattr(db, "dbname", "") or "")
+    dsn = str(getattr(db, "dsn", "") or "").strip()
+    if dsn and (not host or not port or not service):
+        # Oracle/YashanDB use Easy Connect style host:port/service DSNs.
+        # Ignore any leading credential-like prefix and never return it.
+        target = dsn.rsplit("@", 1)[-1].lstrip("/")
+        try:
+            from urllib.parse import urlsplit
+            parsed = urlsplit("//" + target)
+            host = host or str(parsed.hostname or "")
+            port = port or int(parsed.port or 0)
+            service = service or str(parsed.path or "").lstrip("/").split("?", 1)[0]
+        except (TypeError, ValueError):
+            pass
+    return {"host": host, "port": port, "service_name": service, "dbname": service}
+
+
 def discover_agent_endpoint(actor: str) -> Dict[str, Any]:
     """Return only scoped connection metadata for an authenticated Agent."""
     if not actor:
@@ -1172,35 +1222,17 @@ def discover_agent_endpoint(actor: str) -> Dict[str, Any]:
             raise PermissionError("endpoint discovery rate limit exceeded")
         recent.append(now)
         _DISCOVERY_WINDOW[actor] = recent
-    endpoint = None
-    grants = connection.execute_query(
-        "SELECT GRANT_ID,SECURITY_DOMAIN_ID,POLICY_SNAPSHOT FROM CX_ENROLLMENT_GRANTS "
-        "WHERE AGENT_ID=:actor AND STATUS='ACTIVE' AND EXPIRES_AT>CURRENT_TIMESTAMP",
-        {"actor": actor})
-    for grant in grants:
-        grant_row = _row(grant) or {}
-        snapshot = grant_row.get("policy_snapshot")
-        if isinstance(snapshot, str):
-            try:
-                snapshot = json.loads(snapshot)
-            except (TypeError, ValueError):
-                snapshot = {}
-        endpoint_id = str((snapshot or {}).get("database_endpoint_id") or "")
-        if endpoint_id:
-            endpoint = _row(connection.execute_query_one(
-                "SELECT ENDPOINT_ID,ENDPOINT_KEY,DATABASE_DIALECT,HOST_REFERENCE,PORT,TLS_REQUIRED "
-                "FROM CX_EXTERNAL_DB_ENDPOINTS WHERE ENDPOINT_ID=:id AND STATUS='ACTIVE'",
-                {"id": endpoint_id}))
-            if endpoint:
-                break
-    source = "EXTERNAL_PROFILE"
+    endpoint = _row(connection.execute_query_one(
+        "SELECT ENDPOINT_ID,ENDPOINT_KEY,DATABASE_DIALECT,HOST_REFERENCE,PORT,TLS_REQUIRED "
+        "FROM CX_EXTERNAL_DB_ENDPOINTS WHERE STATUS='ACTIVE' ORDER BY CREATED_AT DESC "
+        + ("FETCH FIRST 1 ROWS ONLY" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() not in {"pg", "postgresql"} else "LIMIT 1")))
+    source = "EXTERNAL_GLOBAL"
+    configured = _configured_database_endpoint()
     if endpoint:
-        result = {"source": source, "endpoint_id": endpoint.get("endpoint_id"), "endpoint_key": endpoint.get("endpoint_key"), "database_dialect": endpoint.get("database_dialect"), "host": endpoint.get("host_reference"), "port": endpoint.get("port"), "tls_required": str(endpoint.get("tls_required") or "Y").upper() == "Y"}
+        result = {"source": source, "endpoint_id": endpoint.get("endpoint_id"), "endpoint_key": endpoint.get("endpoint_key"), "database_dialect": endpoint.get("database_dialect"), "host": endpoint.get("host_reference"), "port": endpoint.get("port"), "service_name": configured["service_name"], "dbname": configured["dbname"], "tls_required": str(endpoint.get("tls_required") or "Y").upper() == "Y"}
     else:
-        from .config import get_config
-        db = get_config().database
         source = "INITIALIZATION_FALLBACK"
-        result = {"source": source, "database_dialect": str(getattr(connection, "DATABASE_DIALECT", "unknown")), "host": str(getattr(db, "host", "") or ""), "port": int(getattr(db, "port", 0) or 0), "dbname": str(getattr(db, "dbname", "") or ""), "tls_required": True}
+        result = {"source": source, "database_dialect": str(getattr(connection, "DATABASE_DIALECT", "unknown")), **configured, "tls_required": True}
     connection.execute_transaction_callback(lambda tx: identity_api._audit_tx(tx, actor, "AGENT_DATABASE_ENDPOINT_DISCOVERY", "DB_ENDPOINT", str(result.get("endpoint_id") or source), "ALLOW", "scoped endpoint metadata was requested"))
     return result
 
@@ -1220,7 +1252,7 @@ def register_endpoint(actor: str, body: Dict[str, Any]) -> Dict[str, Any]:
             raise AgentPoolError("endpoint Security Domain does not match its registration grant")
     endpoint_id = _id("ENDPOINT")
     def work(tx: Any) -> Dict[str, Any]:
-        tx.execute("INSERT INTO CX_EXTERNAL_DB_ENDPOINTS(ENDPOINT_ID,ENDPOINT_KEY,DATABASE_DIALECT,HOST_REFERENCE,PORT,TLS_REQUIRED,STATUS,CREATED_BY,REASON) VALUES (:id,:key,:dialect,:host,:port,:tls,'ACTIVE',:actor,:reason)", {"id": endpoint_id, "key": str(body["endpoint_key"])[:128], "dialect": str(body.get("database_dialect") or getattr(connection, "DATABASE_DIALECT", "unknown"))[:32], "host": str(body["host_reference"])[:256], "port": int(body.get("port") or 0), "tls": "Y" if body.get("tls_required", True) else "N", "actor": actor, "reason": str(body["reason"])[:2000]})
+        tx.execute("INSERT INTO CX_EXTERNAL_DB_ENDPOINTS(ENDPOINT_ID,ENDPOINT_KEY,DATABASE_DIALECT,HOST_REFERENCE,PORT,TLS_REQUIRED,STATUS,CREATED_BY,REASON) VALUES (:id,:key,:dialect,:host,:port,:tls,'ACTIVE',:actor,:reason)", {"id": endpoint_id, "key": str(body["endpoint_key"])[:128], "dialect": str(getattr(connection, "DATABASE_DIALECT", "unknown"))[:32], "host": str(body["host_reference"])[:256], "port": int(body.get("port") or 0), "tls": "Y" if body.get("tls_required", True) else "N", "actor": actor, "reason": str(body["reason"])[:2000]})
         if grant_id:
             snapshot = grant.get("policy_snapshot") if grant else {}
             if isinstance(snapshot, str):
@@ -1234,6 +1266,36 @@ def register_endpoint(actor: str, body: Dict[str, Any]) -> Dict[str, Any]:
             tx.execute("UPDATE CX_ENROLLMENT_GRANTS SET POLICY_SNAPSHOT=:snapshot WHERE GRANT_ID=:grant", {"snapshot": _json(snapshot), "grant": grant_id})
         identity_api._audit_tx(tx, actor, "EXTERNAL_DB_ENDPOINT_REGISTER", "DB_ENDPOINT", endpoint_id, "ALLOW", str(body["reason"]))
         return {"endpoint_id": endpoint_id, "status": "ACTIVE", "registration_grant_id": grant_id or None}
+    return connection.execute_transaction_callback(work)
+
+
+def update_endpoint(actor: str, endpoint_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    _require_admin(actor)
+    reason = str(body.get("reason") or "").strip()
+    if len(reason) < 3 or not body.get("host_reference"):
+        raise AgentPoolError("host reference and change reason are required")
+    def work(tx: Any) -> Dict[str, Any]:
+        row = _row(tx.query_one("SELECT ENDPOINT_ID FROM CX_EXTERNAL_DB_ENDPOINTS WHERE ENDPOINT_ID=:id AND STATUS='ACTIVE'", {"id": endpoint_id}))
+        if not row:
+            raise AgentPoolError("external database endpoint is unavailable")
+        tx.execute("UPDATE CX_EXTERNAL_DB_ENDPOINTS SET HOST_REFERENCE=:host,PORT=:port,TLS_REQUIRED=:tls,REASON=:reason WHERE ENDPOINT_ID=:id", {"id": endpoint_id, "host": str(body["host_reference"])[:256], "port": int(body.get("port") or 0), "tls": "Y" if body.get("tls_required", True) else "N", "reason": reason[:2000]})
+        identity_api._audit_tx(tx, actor, "EXTERNAL_DB_ENDPOINT_UPDATE", "DB_ENDPOINT", endpoint_id, "ALLOW", reason)
+        return {"endpoint_id": endpoint_id, "status": "ACTIVE"}
+    return connection.execute_transaction_callback(work)
+
+
+def retire_endpoint(actor: str, endpoint_id: str, reason: str) -> Dict[str, Any]:
+    _require_admin(actor)
+    reason = str(reason or "").strip()
+    if len(reason) < 3:
+        raise AgentPoolError("retirement reason is required")
+    def work(tx: Any) -> Dict[str, Any]:
+        row = _row(tx.query_one("SELECT ENDPOINT_ID FROM CX_EXTERNAL_DB_ENDPOINTS WHERE ENDPOINT_ID=:id AND STATUS='ACTIVE'", {"id": endpoint_id}))
+        if not row:
+            raise AgentPoolError("external database endpoint is unavailable")
+        tx.execute("UPDATE CX_EXTERNAL_DB_ENDPOINTS SET STATUS='RETIRED',REASON=:reason WHERE ENDPOINT_ID=:id", {"id": endpoint_id, "reason": reason[:2000]})
+        identity_api._audit_tx(tx, actor, "EXTERNAL_DB_ENDPOINT_RETIRE", "DB_ENDPOINT", endpoint_id, "ALLOW", reason)
+        return {"endpoint_id": endpoint_id, "status": "RETIRED"}
     return connection.execute_transaction_callback(work)
 
 

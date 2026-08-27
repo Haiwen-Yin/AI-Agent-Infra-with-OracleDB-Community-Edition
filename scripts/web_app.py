@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+import functools
 import json
 import io
 import logging
@@ -27,6 +28,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -310,7 +312,7 @@ async def clear_agent_database_context(request: Request, call_next):
             "/portal/api/agent/release",
         }
         if session and raw_session_id and request.url.path not in session_exit_paths and response.status_code < 400:
-            _set_session_cookie(response, {"session_id": raw_session_id}, session_scope)
+            _set_session_cookie(response, {"session_id": raw_session_id}, session_scope, request.url.port)
             expires_at = _browser_session_expiry(session.get("expires_at"))
             if expires_at:
                 response.headers["X-Session-Expires-At"] = expires_at
@@ -343,6 +345,21 @@ def _schema_owner_context():
         yield
     finally:
         connection.set_agent_context(previous)
+
+
+def _gateway_request_context(func):
+    """Fence one synchronous Gateway call to its worker-thread invocation."""
+    @functools.wraps(func)
+    def wrapped(*args: Any, **kwargs: Any):
+        clear_context = getattr(connection, "set_agent_context", None)
+        if callable(clear_context):
+            clear_context(None)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if callable(clear_context):
+                clear_context(None)
+    return wrapped
 
 
 def _reclaim_local_agents() -> int:
@@ -787,6 +804,7 @@ def static_file(file_path: str) -> Response:
         DIST_ROOT / file_path,
         Path(__file__).resolve().parent / "visualization" / "static" / file_path,
         Path(__file__).resolve().parent / "visualization" / "static" / "brand" / file_path,
+        Path(__file__).resolve().parent / "scripts" / "visualization" / "static" / file_path,
         Path(__file__).resolve().parent.parent / "scripts" / "visualization" / "static" / "brand" / file_path,
         Path(__file__).resolve().parent.parent / "business_plan" / "brand" / "visual_system" / "assets" / Path(file_path).name,
     ]
@@ -911,6 +929,10 @@ class OrganizationOperationBody(BaseModel):
     reason: str = Field(default="MFA enrollment confirmation", max_length=2000)
 
 
+class OrganizationWorkflowBody(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
 class RecoveryCodesBody(BaseModel):
     target_principal_id: str = Field(default="", max_length=128)
     reason: str = Field(min_length=1, max_length=2000)
@@ -993,6 +1015,23 @@ class ModelForwardBody(BaseModel):
     agent_id: str = Field(default="", max_length=128)
     stream: bool = False
     idempotency_key: str = Field(default="", max_length=160)
+
+
+class EmbeddingGatewayBody(BaseModel):
+    model: str = Field(default="", max_length=256)
+    input: Any
+
+
+class EmbeddingAccessGrantBody(BaseModel):
+    subject_type: str = Field(min_length=1, max_length=32)
+    subject_id: str = Field(min_length=1, max_length=128)
+    effect: str = Field(default="ALLOW", max_length=16)
+    allowed_profile_id: str = Field(default="", max_length=128)
+    max_batch_size: int = Field(default=1, ge=1, le=16)
+    max_input_chars: int = Field(default=16000, ge=1, le=64000)
+    valid_from: str = Field(default="", max_length=64)
+    valid_until: str = Field(default="", max_length=64)
+    reason: str = Field(min_length=3, max_length=2000)
 
 
 class GatewayCredentialBody(BaseModel):
@@ -1333,6 +1372,21 @@ class GatewayMessageBody(BaseModel):
     references: Dict[str, Any] = Field(default_factory=dict)
 
 
+class GatewayKnowledgeBody(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1, max_length=100000)
+    summary: str = Field(default="", max_length=4000)
+    domain: str = Field(default="", max_length=128)
+    topic: str = Field(default="", max_length=128)
+    difficulty: str = Field(default="INTERMEDIATE", max_length=32)
+    category: str = Field(default="", max_length=128)
+    importance: int = Field(default=5, ge=1, le=10)
+    sharing_scope: str = Field(default="PRINCIPAL_PRIVATE", max_length=32)
+    organization_id: str = Field(default="", max_length=128)
+    hierarchy_depth: Optional[int] = Field(default=None, ge=0, le=100)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class ChannelMemberBody(BaseModel):
     principal_id: str = Field(min_length=1, max_length=128)
     member_role: str = Field(default="MEMBER", max_length=32)
@@ -1510,6 +1564,13 @@ class ExternalEndpointBody(BaseModel):
     tls_required: bool = True
     registration_grant_id: str = Field(default="", max_length=128)
     security_domain_id: str = Field(default="DEFAULT", max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class ExternalEndpointUpdateBody(BaseModel):
+    host_reference: str = Field(min_length=1, max_length=256)
+    port: int = Field(ge=1, le=65535)
+    tls_required: bool = True
     reason: str = Field(min_length=3, max_length=2000)
 
 
@@ -1750,12 +1811,16 @@ def _session_scope_for_path(path: str) -> str:
     return "PORTAL" if str(path or "").startswith("/portal/") else "DASHBOARD"
 
 
-def _cookie_name(scope: str = "DASHBOARD") -> str:
+def _cookie_name(scope: str = "DASHBOARD", port: Any = None) -> str:
     normalized = str(scope or "").upper()
     if normalized not in {"DASHBOARD", "PORTAL"}:
         raise ValueError("invalid session scope")
     prefix = "portal_session_id" if normalized == "PORTAL" else "dashboard_session_id"
-    return f"{prefix}_{os.environ.get('MEMORY_SERVER_PORT', '8000')}"
+    # The request port is authoritative because deployments may expose the
+    # service on any port, independently of its packaged/default setting.
+    if port is None:
+        port = os.environ.get("MEMORY_SERVER_PORT", "8000")
+    return f"{prefix}_{str(port or '8000')}"
 
 
 def _session_timeout_seconds() -> int:
@@ -1796,7 +1861,7 @@ def _browser_session_expiry(value: Any) -> str:
 
 def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optional[Dict[str, Any]]:
     normalized_scope = str(scope or "").upper()
-    raw = request.cookies.get(_cookie_name(normalized_scope))
+    raw = request.cookies.get(_cookie_name(normalized_scope, request.url.port))
     if not raw:
         return None
     cached = getattr(request.state, "cx_session_cache", None)
@@ -1814,6 +1879,14 @@ def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optiona
 
 
 def principal(request: Request) -> Dict[str, Any]:
+    # Sync endpoints run in a reusable worker-thread pool. ContextVar prevents
+    # concurrent-task sharing, but a value set by a completed sync Gateway
+    # endpoint can remain in that worker's context. Fence every Human request
+    # before resolving its session so no prior Agent DB identity is restored
+    # after a temporary Schema Owner authorization check.
+    clear_context = getattr(connection, "set_agent_context", None)
+    if callable(clear_context):
+        clear_context(None)
     scope = _session_scope_for_path(request.url.path)
     session = _session_from_request(request, scope)
     if not session:
@@ -1915,10 +1988,10 @@ def _optional_module(name: str):
             return None
 
 
-def _set_session_cookie(response: Response, session: Dict[str, str], scope: str = "DASHBOARD") -> None:
+def _set_session_cookie(response: Response, session: Dict[str, str], scope: str = "DASHBOARD", port: Any = None) -> None:
     secure = os.environ.get("CX_WEB_SECURE_COOKIE", "").lower() in {"1", "true", "yes"}
     response.set_cookie(
-        _cookie_name(scope), session["session_id"], max_age=int(_session_policy(scope)["absolute_timeout_seconds"]),
+        _cookie_name(scope, port), session["session_id"], max_age=int(_session_policy(scope)["absolute_timeout_seconds"]),
         httponly=True, samesite="lax", secure=secure, path="/",
     )
 
@@ -2094,7 +2167,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
                 mfa_level="SETUP", ttl_seconds=int(_dashboard_session_policy()["idle_timeout_seconds"]),
                 session_scope="DASHBOARD",
             )
-            _set_session_cookie(response, session)
+            _set_session_cookie(response, session, port=request.url.port)
             return {
                 "success": True,
                 "principal_id": user["principal_id"],
@@ -2129,7 +2202,7 @@ def login(body: LoginBody, response: Response, request: Request) -> Dict[str, An
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
-    _set_session_cookie(response, session)
+    _set_session_cookie(response, session, port=request.url.port)
     return {
         "success": True,
         "principal_id": user["principal_id"],
@@ -2151,14 +2224,14 @@ def logout(request: Request, session: Dict[str, Any] = Depends(require_csrf)) ->
     scopes = ("PORTAL", "DASHBOARD") if scope == "PORTAL" else ("DASHBOARD",)
     try:
         for candidate_scope in scopes:
-            raw = request.cookies.get(_cookie_name(candidate_scope), "")
+            raw = request.cookies.get(_cookie_name(candidate_scope, request.url.port), "")
             if raw:
                 identity_api.revoke_session(raw, "logout")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
     response = JSONResponse({"success": True})
     for candidate_scope in scopes:
-        response.delete_cookie(_cookie_name(candidate_scope), path="/")
+        response.delete_cookie(_cookie_name(candidate_scope, request.url.port), path="/")
     return response
 
 
@@ -2286,7 +2359,7 @@ def capabilities(session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]
         "users.identity.link", "users.security.manage", "users.sessions.read",
         "sessions.revoke", "users.delegations.read", "users.delegations.manage",
         "organizations.manage", "organizations.changes.create", "organizations.changes.write",
-        "organizations.changes.submit", "organizations.changes.approve",
+        "organizations.changes.submit", "organizations.changes.approve", "organizations.changes.publish",
         "organizations.history.read", "organizations.members.manage",
         "organizations.reporting.manage", "organizations.sync.manage",
         "organizations.emergency", "organizations.export",
@@ -3518,6 +3591,22 @@ def external_db_endpoint(body: ExternalEndpointBody, session: Dict[str, Any] = D
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.put("/api/platform/external-db-endpoints/{endpoint_id}")
+def external_db_endpoint_update(endpoint_id: str, body: ExternalEndpointUpdateBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.update_endpoint(str(session["principal_id"]), endpoint_id, body.model_dump())
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/platform/external-db-endpoints/{endpoint_id}")
+def external_db_endpoint_retire(endpoint_id: str, body: RetirementBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.retire_endpoint(str(session["principal_id"]), endpoint_id, body.reason)
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/platform/portal-enhancements")
 def portal_enhancements(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
@@ -3740,8 +3829,12 @@ def embedding_probe(
 
 @app.post("/api/gateway/embedding/profiles/{profile_id}/probe")
 @app.post("/api/agent-gateway/embedding/profiles/{profile_id}/probe")
+@_gateway_request_context
 def gateway_embedding_probe(profile_id: str, body: AgentEmbeddingProbeBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request, "embedding.probe", operation="embedding.probe")
+    context = _gateway_context(
+        request, "embedding.probe", operation="embedding.probe",
+        attach_agent_database_context=False,
+    )
     try:
         return embedding_governance.record_agent_probe(
             str(context["agent_id"]), profile_id, observed_dimension=body.observed_dimension,
@@ -3754,6 +3847,78 @@ def gateway_embedding_probe(profile_id: str, body: AgentEmbeddingProbeBody, requ
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Agent-side Embedding probe failed") from exc
+
+
+@app.post("/api/gateway/v1/embeddings")
+@app.post("/api/agent-gateway/v1/embeddings")
+@_gateway_request_context
+def gateway_embeddings(request: Request, body: EmbeddingGatewayBody) -> Dict[str, Any]:
+    context = _gateway_context(
+        request, "embedding.generate", operation="embedding.generate",
+        attach_agent_database_context=False,
+    )
+    try:
+        return embedding_governance.gateway_embeddings(
+            str(context["agent_id"]), body.input, requested_model=body.model,
+            idempotency_key=request.headers.get("Idempotency-Key", ""),
+            correlation_id=_correlation_id(request),
+        )
+    except embedding_governance.EmbeddingConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except model_usage_api.ModelUsageConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except model_governance_api.QuotaExceeded as exc:
+        raise HTTPException(status_code=429, detail={"code": exc.code, "message": str(exc), "retryable": False}) from exc
+    except Exception as exc:
+        logger.exception("Agent Embedding gateway request failed")
+        raise HTTPException(status_code=503, detail="Agent Embedding gateway request failed") from exc
+
+
+@app.get("/api/embedding/access-grants")
+def embedding_access_grants(
+    limit: int = 200,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        items = embedding_governance.list_access_grants(limit)
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding access grants are unavailable") from exc
+
+
+@app.post("/api/embedding/access-grants")
+def embedding_access_grant_create(
+    body: EmbeddingAccessGrantBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.upsert_access_grant(
+            str(session["principal_id"]), subject_type=body.subject_type, subject_id=body.subject_id,
+            effect=body.effect, allowed_profile_id=body.allowed_profile_id,
+            max_batch_size=body.max_batch_size, max_input_chars=body.max_input_chars,
+            valid_from=body.valid_from, valid_until=body.valid_until, reason=body.reason,
+        )
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding access grant could not be saved") from exc
+
+
+@app.delete("/api/embedding/access-grants/{grant_id}")
+def embedding_access_grant_revoke(
+    grant_id: str, body: GovernedReasonBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return embedding_governance.revoke_access_grant(str(session["principal_id"]), grant_id, body.reason)
+    except embedding_governance.EmbeddingGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Embedding access grant could not be revoked") from exc
 
 
 @app.get("/api/embedding/jobs")
@@ -3874,14 +4039,18 @@ def _organization_id(value: str) -> str:
 def _organization_operation(value: Dict[str, Any]) -> tuple[str, str, str, Dict[str, Any], Optional[int]]:
     item = dict(value or {})
     requested = str(item.get("operation_type") or "").upper()
-    subject = _organization_id(str(item.get("subject_id") or item.get("organization_id") or item.get("target_id") or ""))
+    if requested == "CREATE_ORGANIZATION":
+        # target_id is the parent for creates and must never become the child ID.
+        subject = _organization_id(str(item.get("subject_id") or item.get("organization_id") or ""))
+    else:
+        subject = _organization_id(str(item.get("subject_id") or item.get("organization_id") or item.get("target_id") or ""))
     target = _organization_id(str(item.get("target_id") or ""))
     expected = item.get("expected_row_version", item.get("row_version"))
     if requested == "MOVE_ORGANIZATION":
         return requested, "ORGANIZATION", subject, {"parent_id": _organization_id(str(item.get("new_parent_id") or target)) or None}, expected
     if requested == "CREATE_ORGANIZATION":
         command = {
-            "organization_id": subject or identity_api._id("ORG"),
+            "organization_id": subject,
             "parent_id": target or None,
             "organization_code": str(item.get("organization_code") or item.get("name") or subject or "ORG")[:128],
             "organization_name": str(item.get("organization_name") or item.get("name") or subject or "Organization")[:256],
@@ -3988,7 +4157,12 @@ def organization_change_operation(change_id: str, body: OrganizationOperationBod
 
 
 @app.post("/api/organization/changes/{change_id}/{action}")
-def organization_change_action(change_id: str, action: str, session: Dict[str, Any] = Depends(require_csrf)) -> Dict[str, Any]:
+def organization_change_action(
+    change_id: str,
+    action: str,
+    body: OrganizationWorkflowBody = OrganizationWorkflowBody(),
+    session: Dict[str, Any] = Depends(require_csrf),
+) -> Dict[str, Any]:
     actor = str(session["principal_id"])
     try:
         if action == "undo":
@@ -4001,6 +4175,12 @@ def organization_change_action(change_id: str, action: str, session: Dict[str, A
             result = organization_api.get_change_set(actor, change_id)
         elif action == "submit":
             result = organization_api.submit_change_set(actor, change_id)
+        elif action == "publish":
+            result = organization_api.publish_low_risk(actor, change_id, body.reason)
+        elif action == "withdraw":
+            result = organization_api.withdraw_change_set(actor, change_id, body.reason)
+        elif action == "discard":
+            result = organization_api.cancel_change_set(actor, change_id, body.reason)
         else:
             raise HTTPException(status_code=404, detail="Organization action not found")
         return {"change_set": result}
@@ -4054,16 +4234,36 @@ def approval_stats(session: Dict[str, Any] = Depends(require_action("approvals.r
         raise HTTPException(status_code=503, detail="Approval governance service unavailable") from exc
 
 
+@app.get("/api/approvals/{approval_id}")
+def approval_detail(approval_id: str, session: Dict[str, Any] = Depends(require_action("approvals.read"))) -> Dict[str, Any]:
+    module = _optional_module("approval_api")
+    if module is None:
+        raise HTTPException(status_code=404, detail="Enterprise approvals are unavailable")
+    try:
+        item = module.get_request_detail(approval_id, str(session["principal_id"]))
+        if not item:
+            raise HTTPException(status_code=404, detail="Approval request not found")
+        return {"approval": item}
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Approval detail is unavailable") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Approval governance service unavailable") from exc
+
+
 @app.post("/api/approvals/{approval_id}/approve")
 def approval_approve(approval_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("approvals.decide"))) -> Dict[str, Any]:
     module = _optional_module("approval_api")
     if module is None:
         raise HTTPException(status_code=404, detail="Enterprise approvals are unavailable")
     try:
-        changed = module.approve(approval_id, str(session["principal_id"]))
+        changed = module.approve(approval_id, str(session["principal_id"]), body.reason)
         return {"success": bool(changed), "approval_id": approval_id}
-    except (ValueError, PermissionError) as exc:
-        raise HTTPException(status_code=403, detail="Approval decision failed") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Approval governance service unavailable") from exc
 
@@ -4076,8 +4276,10 @@ def approval_reject(approval_id: str, body: DecisionBody, session: Dict[str, Any
     try:
         changed = module.reject(approval_id, str(session["principal_id"]), body.reason)
         return {"success": bool(changed), "approval_id": approval_id}
-    except (ValueError, PermissionError) as exc:
-        raise HTTPException(status_code=403, detail="Approval decision failed") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Approval governance service unavailable") from exc
 
@@ -4572,6 +4774,20 @@ def monitor_agents_page(page_size: int = 20, cursor: str = "", session: Dict[str
         raise HTTPException(status_code=503, detail="Monitor inventory is unavailable") from exc
 
 
+@app.get("/api/monitor/overview")
+def monitor_overview(session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    """Return the authenticated platform overview used by the Monitor page."""
+    module = _optional_module("monitor_api")
+    if module is None:
+        raise HTTPException(status_code=404, detail="Monitoring is unavailable")
+    try:
+        # Native platform Agents are included by monitor_api as control-plane
+        # health, while business Agent rows remain authorization scoped.
+        return module.get_system_overview(str(session["principal_id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Monitor overview is unavailable") from exc
+
+
 @app.get("/api/agents/{agent_id}/posture")
 def agent_posture(agent_id: str, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
@@ -4865,7 +5081,10 @@ def grant(body: GrantBody, session: Dict[str, Any] = Depends(require_action("age
         # A Dashboard grant names the Agent and fixes ownership/scope only.
         # Runtime identity is declared by the external Agent at redemption;
         # keeping it out of this request prevents stale or generic defaults.
-        return identity_api.create_enrollment_grant(str(session["principal_id"]), body.owner_principal_id or None, environment=body.environment, runtime="", security_domain_id=body.security_domain_id, agent_name=body.agent_name, risk_tier=body.risk_tier, ttl_seconds=ttl_seconds, responsible_group_id=body.responsible_group_id)
+        # Oracle keeps RUNTIME non-null for the grant snapshot.  The external
+        # Agent still declares its actual runtime during token redemption; this
+        # placeholder only represents an intentionally unconstrained grant.
+        return identity_api.create_enrollment_grant(str(session["principal_id"]), body.owner_principal_id or None, environment=body.environment, runtime="UNSPECIFIED", security_domain_id=body.security_domain_id, agent_name=body.agent_name, risk_tier=body.risk_tier, ttl_seconds=ttl_seconds, responsible_group_id=body.responsible_group_id)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Enrollment grant could not be created") from exc
 
@@ -5261,9 +5480,14 @@ def action_decision(action_id: str, body: DecisionBody, session: Dict[str, Any] 
     try:
         actor = str(session["principal_id"])
         changed = identity_api.decide_action_card(actor, action_id, body.decision, body.reason)
-        if changed and str(body.decision or "").upper() in {"CONFIRM", "APPROVE", "RELEASE"}:
-            action = {str(k).lower(): v for k, v in dict(connection.execute_query_one("SELECT ACTION_TYPE,PAYLOAD_JSON FROM CX_ACTION_CARDS WHERE ACTION_ID=:id", {"id": action_id}) or {}).items()}
-            if str(action.get("action_type") or "").upper() == "PLATFORM_ADMIN_COMMAND":
+        if str(body.decision or "").upper() in {"CONFIRM", "APPROVE", "RELEASE"}:
+            action = {str(k).lower(): v for k, v in dict(connection.execute_query_one(
+                "SELECT ACTION_TYPE,PAYLOAD_JSON,STATUS FROM CX_ACTION_CARDS WHERE ACTION_ID=:id", {"id": action_id},
+            ) or {}).items()}
+            # A confirmed Action Card is durable approval evidence. Replaying the
+            # same decision resumes an interrupted command without approving it twice.
+            if (str(action.get("status") or "").upper() == "CONFIRMED" and
+                    str(action.get("action_type") or "").upper() == "PLATFORM_ADMIN_COMMAND"):
                 payload = json.loads(str(action.get("payload_json") or "{}"))
                 command_id = str(payload.get("command_id") or "")
                 if command_id:
@@ -5344,6 +5568,12 @@ def runtime_profile_activate(change_id: str, body: DecisionBody, session: Dict[s
 
 def _gateway_context(request: Request, required_scope: str = "", *, operation: str = "work",
                      attach_agent_database_context: bool = True) -> Dict[str, Any]:
+    # A worker may previously have served another Agent or Human request.
+    # Authentication must always begin from the Schema Owner boundary; only
+    # the verified Agent for this request may then select a dedicated login.
+    clear_context = getattr(connection, "set_agent_context", None)
+    if callable(clear_context):
+        clear_context(None)
     authorization = request.headers.get("Authorization", "")
     raw_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
     agent_id = request.headers.get("X-Agent-Id", "").strip()
@@ -5381,6 +5611,7 @@ def _gateway_activation_credential(body: GatewayActivationBody) -> Optional[Dict
 
 @app.post("/api/gateway/activate")
 @app.post("/api/agent-gateway/activate")
+@_gateway_request_context
 def gateway_activate(body: GatewayActivationBody) -> Dict[str, Any]:
     """Complete the one allowed pre-active Gateway action: credential proof."""
     credential = _gateway_activation_credential(body)
@@ -5399,6 +5630,7 @@ def gateway_activate(body: GatewayActivationBody) -> Dict[str, Any]:
 
 @app.post("/api/gateway/token")
 @app.post("/api/agent-gateway/token")
+@_gateway_request_context
 def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
     """Exchange a one-time bootstrap credential for a short-lived instance token."""
     instance_id = body.instance_id
@@ -5436,18 +5668,48 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
         except (agent_gateway_api.GatewayError, PermissionError) as exc:
             raise HTTPException(status_code=403, detail="Agent instance could not be created") from exc
     requested = body.scopes or ["channels.read", "channels.write"]
-    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe"}
+    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe", "embedding.generate", "database.endpoint", "skills.read", "memory.propose", "knowledge.read", "knowledge.write"}
     if not set(requested) <= allowed:
         raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
+    if "embedding.generate" in requested:
+        try:
+            embedding_governance.require_embedding_gateway_access(body.agent_id)
+        except (PermissionError, embedding_governance.EmbeddingGovernanceError) as exc:
+            raise HTTPException(status_code=403, detail="Agent is not authorized for platform Embedding generation") from exc
     try:
-        return agent_gateway_api.issue_access_token(body.agent_id, instance_id, requested)
+        issued = agent_gateway_api.issue_access_token(body.agent_id, instance_id, requested)
+        # Database target metadata is distributed only after the Agent has
+        # authenticated.  Passwords, keys, and connection secrets are never
+        # included; the endpoint resolver applies the enrollment-grant scope.
+        issued["database_endpoint"] = platform_agent_pool.discover_agent_endpoint(body.agent_id)
+        return issued
     except agent_gateway_api.GatewayError as exc:
         raise HTTPException(status_code=403, detail="Agent token could not be issued") from exc
 
 
+@app.get("/api/gateway/database-endpoint")
+@app.get("/api/agent-gateway/database-endpoint")
+@_gateway_request_context
+def gateway_database_endpoint(request: Request) -> Dict[str, Any]:
+    """Rediscover the authenticated external Agent's scoped DB target."""
+    context = _gateway_context(
+        request, "database.endpoint", operation="database.endpoint",
+        attach_agent_database_context=False,
+    )
+    try:
+        return platform_agent_pool.discover_agent_endpoint(str(context["agent_id"]))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database endpoint discovery unavailable") from exc
+
+
 @app.post("/api/gateway/instances")
+@_gateway_request_context
 def gateway_instance(body: GatewayTokenBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="instances.create", attach_agent_database_context=False,
+    )
     try:
         return agent_gateway_api.create_instance(
             str(context["agent_id"]), channel_id=body.channel_id,
@@ -5461,8 +5723,12 @@ def gateway_instance(body: GatewayTokenBody, request: Request) -> Dict[str, Any]
 
 @app.get("/api/gateway/events")
 @app.get("/api/agent-gateway/events")
+@_gateway_request_context
 def gateway_events(request: Request, channel_id: str = "", limit: int = 100) -> Dict[str, Any]:
-    context = _gateway_context(request, "channels.read")
+    context = _gateway_context(
+        request, "channels.read", operation="channels.read",
+        attach_agent_database_context=False,
+    )
     try:
         items = agent_gateway_api.list_channel_events(str(context["agent_id"]), channel_id, max(1, min(int(limit), 500)))
     except Exception as exc:
@@ -5471,22 +5737,32 @@ def gateway_events(request: Request, channel_id: str = "", limit: int = 100) -> 
 
 
 @app.get("/api/gateway/events/stream")
+@_gateway_request_context
 def gateway_event_stream(request: Request, channel_id: str = "", limit: int = 50) -> StreamingResponse:
-    context = _gateway_context(request, "channels.read")
+    context = _gateway_context(
+        request, "channels.read", operation="channels.read",
+        attach_agent_database_context=False,
+    )
     try:
         items = agent_gateway_api.list_channel_events(str(context["agent_id"]), channel_id, max(1, min(int(limit), 500)))
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Agent event service unavailable") from exc
 
+    # Encode before response headers are sent. Database adapters return native
+    # datetime/Decimal values; a lazy json.dumps failure would otherwise leave
+    # the external Agent with a successful but truncated SSE response.
+    event_payload = json.dumps({"items": jsonable_encoder(items)}, ensure_ascii=True)
+
     async def stream():
         yield "event: channel\n"
-        yield "data: " + json.dumps({"items": items}, ensure_ascii=True) + "\n\n"
+        yield "data: " + event_payload + "\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 @app.post("/api/gateway/events/claim")
 @app.post("/api/agent-gateway/events/claim")
+@_gateway_request_context
 def gateway_claim(request: Request, limit: int = 50) -> Dict[str, Any]:
     context = _gateway_context(request, "events.read")
     try:
@@ -5499,6 +5775,7 @@ def gateway_claim(request: Request, limit: int = 50) -> Dict[str, Any]:
 
 
 @app.post("/api/gateway/events/{delivery_id}/ack")
+@_gateway_request_context
 def gateway_ack(delivery_id: str, body: GatewayAckBody, request: Request) -> Dict[str, Any]:
     context = _gateway_context(request, "events.read")
     try:
@@ -5512,8 +5789,11 @@ def gateway_ack(delivery_id: str, body: GatewayAckBody, request: Request) -> Dic
 
 
 @app.post("/api/gateway/heartbeat")
+@_gateway_request_context
 def gateway_heartbeat(request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="heartbeat", attach_agent_database_context=False,
+    )
     try:
         return {"success": agent_gateway_api.heartbeat_instance(str(context["agent_id"]), str(context["instance_id"]))}
     except Exception as exc:
@@ -5522,9 +5802,12 @@ def gateway_heartbeat(request: Request) -> Dict[str, Any]:
 
 @app.get("/api/gateway/containment")
 @app.get("/api/agent-gateway/containment")
+@_gateway_request_context
 def gateway_containment(request: Request) -> Dict[str, Any]:
     """Let an authenticated instance retrieve at most its newest command."""
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="containment.read", attach_agent_database_context=False,
+    )
     try:
         command = admin_management.pull_containment_command(
             str(context["agent_id"]), str(context["instance_id"]),
@@ -5538,8 +5821,11 @@ def gateway_containment(request: Request) -> Dict[str, Any]:
 
 @app.post("/api/gateway/containment/ack")
 @app.post("/api/agent-gateway/containment/ack")
+@_gateway_request_context
 def gateway_containment_ack(body: ContainmentAcknowledgementBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="containment.ack", attach_agent_database_context=False,
+    )
     try:
         return admin_management.acknowledge_containment(
             str(context["agent_id"]), str(context["instance_id"]), body.command_id,
@@ -5553,9 +5839,12 @@ def gateway_containment_ack(body: ContainmentAcknowledgementBody, request: Reque
 
 @app.post("/api/gateway/upgrades/vote")
 @app.post("/api/agent-gateway/upgrades/vote")
+@_gateway_request_context
 def gateway_upgrade_vote(body: UpgradeVoteBody, request: Request) -> Dict[str, Any]:
     """Accept an Admin Agent vote from its authenticated, fenced instance."""
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="upgrades.vote", attach_agent_database_context=False,
+    )
     try:
         return admin_management.vote_upgrade(
             str(context["agent_id"]), str(context["instance_id"]), body.upgrade_id,
@@ -5569,11 +5858,14 @@ def gateway_upgrade_vote(body: UpgradeVoteBody, request: Request) -> Dict[str, A
 
 @app.post("/api/gateway/upgrades/{upgrade_id}/node")
 @app.post("/api/agent-gateway/upgrades/{upgrade_id}/node")
+@_gateway_request_context
 def gateway_upgrade_node(
     upgrade_id: str, body: UpgradeNodeBody, request: Request,
 ) -> Dict[str, Any]:
     """Accept serialized node maintenance evidence only from the live Leader."""
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="upgrades.node", attach_agent_database_context=False,
+    )
     try:
         return admin_management.advance_upgrade_node_from_gateway(
             str(context["agent_id"]), str(context["instance_id"]), upgrade_id,
@@ -5587,9 +5879,13 @@ def gateway_upgrade_node(
 
 @app.get("/api/gateway/upgrades/skill-pending")
 @app.get("/api/agent-gateway/upgrades/skill-pending")
+@_gateway_request_context
 def gateway_pending_upgrade_skills(request: Request) -> Dict[str, Any]:
     """Return the caller's pending Skill updates without package contents."""
-    context = _gateway_context(request, "skills.read")
+    context = _gateway_context(
+        request, "skills.read", operation="skills.read",
+        attach_agent_database_context=False,
+    )
     try:
         return {"items": admin_management.pending_upgrade_skills(str(context["agent_id"]))}
     except Exception as exc:
@@ -5598,8 +5894,11 @@ def gateway_pending_upgrade_skills(request: Request) -> Dict[str, Any]:
 
 @app.post("/api/gateway/upgrades/skill-ack")
 @app.post("/api/agent-gateway/upgrades/skill-ack")
+@_gateway_request_context
 def gateway_upgrade_skill_ack(body: SkillDistributionAcknowledgementBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="skills.ack", attach_agent_database_context=False,
+    )
     try:
         return admin_management.acknowledge_upgrade_skill(
             str(context["agent_id"]), body.upgrade_id, body.skill_version,
@@ -5613,8 +5912,11 @@ def gateway_upgrade_skill_ack(body: SkillDistributionAcknowledgementBody, reques
 
 @app.post("/api/gateway/management-artifacts/receipt")
 @app.post("/api/agent-gateway/management-artifacts/receipt")
+@_gateway_request_context
 def gateway_management_artifact_receipt(body: ArtifactReceiptBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request)
+    context = _gateway_context(
+        request, operation="artifacts.receipt", attach_agent_database_context=False,
+    )
     try:
         return admin_management.record_artifact_receipt(
             str(context["agent_id"]), body.artifact_id, body.node_id, body.received_digest,
@@ -5627,6 +5929,7 @@ def gateway_management_artifact_receipt(body: ArtifactReceiptBody, request: Requ
 
 
 @app.post("/api/gateway/evidence")
+@_gateway_request_context
 def gateway_evidence(body: GatewayEvidenceBody, request: Request) -> Dict[str, Any]:
     """Accept bounded runtime evidence through the existing Gateway token."""
     context = _gateway_context(request, "compliance.evidence", operation="evidence", attach_agent_database_context=False)
@@ -5642,6 +5945,7 @@ def gateway_evidence(body: GatewayEvidenceBody, request: Request) -> Dict[str, A
 
 
 @app.post("/api/gateway/remediations/{case_id}/respond")
+@_gateway_request_context
 def gateway_remediation(case_id: str, body: GatewayRemediationBody, request: Request) -> Dict[str, Any]:
     context = _gateway_context(request, "compliance.remediation", operation="remediation", attach_agent_database_context=False)
     try:
@@ -5653,8 +5957,12 @@ def gateway_remediation(case_id: str, body: GatewayRemediationBody, request: Req
 
 
 @app.post("/api/gateway/channels/{channel_id}/messages")
+@_gateway_request_context
 def gateway_message(channel_id: str, body: GatewayMessageBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request, "channels.write")
+    context = _gateway_context(
+        request, "channels.write", operation="channels.write",
+        attach_agent_database_context=False,
+    )
     try:
         return identity_api.post_channel_message(
             str(context["agent_id"]), channel_id, body.body,
@@ -5667,9 +5975,87 @@ def gateway_message(channel_id: str, body: GatewayMessageBody, request: Request)
         raise HTTPException(status_code=503, detail="Channel message service unavailable") from exc
 
 
+@app.post("/api/gateway/channels/{channel_id}/memory-candidates")
+@_gateway_request_context
+def gateway_memory_candidate(channel_id: str, body: MemoryCandidateBody, request: Request) -> Dict[str, Any]:
+    """Submit external-Agent memory through the existing Human review gate."""
+    context = _gateway_context(
+        request, "memory.propose", operation="memory.propose",
+        attach_agent_database_context=False,
+    )
+    try:
+        return identity_api.propose_memory_candidate(
+            str(context["agent_id"]), channel_id, body.content,
+            body.classification, body.destination_scope, body.purpose,
+        )
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Memory candidate was not accepted") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Memory candidate service unavailable") from exc
+
+
+@app.post("/api/gateway/knowledge")
+@_gateway_request_context
+def gateway_knowledge_create(body: GatewayKnowledgeBody, request: Request) -> Dict[str, Any]:
+    """Create Agent-attributed knowledge with a database-authoritative scope."""
+    context = _gateway_context(
+        request, "knowledge.write", operation="knowledge.write",
+        attach_agent_database_context=False,
+    )
+    scope = str(body.sharing_scope or "PRINCIPAL_PRIVATE").upper()
+    if scope == "PUBLIC_COMPANY":
+        raise HTTPException(status_code=403, detail="Company-wide Agent knowledge requires Human publication approval")
+    if scope not in {"PRINCIPAL_PRIVATE", "ORGANIZATION_SUBTREE", "ORGANIZATION_LEVEL"}:
+        raise HTTPException(status_code=422, detail="Knowledge sharing scope is invalid")
+    try:
+        entity_id = knowledge_api.create_knowledge(
+            body.title, body.content, domain=body.domain or None, topic=body.topic or None,
+            difficulty=body.difficulty, category=body.category or None,
+            importance=body.importance, summary=body.summary or None,
+            owned_by_agent=str(context["agent_id"]),
+            visibility="PRIVATE" if scope == "PRINCIPAL_PRIVATE" else "SHARED",
+            sharing_scope=scope, organization_id=body.organization_id or None,
+            hierarchy_depth=body.hierarchy_depth, creation_reason=body.reason,
+        )
+        return {
+            "entity_id": str(entity_id), "agent_id": str(context["agent_id"]),
+            "sharing_scope": scope, "knowledge_context": knowledge_api.get_knowledge_context(str(entity_id)),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Agent knowledge creation service unavailable") from exc
+
+
+@app.get("/api/gateway/knowledge/{entity_id}")
+@_gateway_request_context
+def gateway_knowledge_get(entity_id: str, request: Request) -> Dict[str, Any]:
+    context = _gateway_context(
+        request, "knowledge.read", operation="knowledge.read",
+        attach_agent_database_context=False,
+    )
+    try:
+        item = knowledge_api.get_knowledge(entity_id, principal_id=str(context["agent_id"]))
+        if not item:
+            raise HTTPException(status_code=404, detail="Knowledge is unavailable")
+        return {"knowledge": item}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Agent knowledge service unavailable") from exc
+
+
 @app.post("/api/gateway/barriers/{barrier_id}/arrivals")
+@_gateway_request_context
 def gateway_arrival(barrier_id: str, body: ArrivalBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request, "barriers.arrive")
+    # Arrival can atomically advance the shared Barrier state. Keep the
+    # dedicated Agent login unable to UPDATE the Barrier table directly; the
+    # authenticated control-plane transaction rechecks instance, Channel,
+    # participant snapshot, role, and idempotency before changing it.
+    context = _gateway_context(
+        request, "barriers.arrive", operation="barriers.arrive",
+        attach_agent_database_context=False,
+    )
     try:
         return agent_gateway_api.submit_arrival(
             str(context["agent_id"]), str(context["instance_id"]), barrier_id,
@@ -5682,8 +6068,12 @@ def gateway_arrival(barrier_id: str, body: ArrivalBody, request: Request) -> Dic
 
 
 @app.post("/api/gateway/channels/{channel_id}/actions")
+@_gateway_request_context
 def gateway_action(channel_id: str, body: ActionCardBody, request: Request) -> Dict[str, Any]:
-    context = _gateway_context(request, "actions.propose")
+    context = _gateway_context(
+        request, "actions.propose", operation="actions.propose",
+        attach_agent_database_context=False,
+    )
     try:
         return identity_api.create_action_card(
             str(context["agent_id"]), channel_id, body.action_type,
@@ -5733,6 +6123,6 @@ async def legacy_compatibility(path: str, request: Request) -> Response:
         # The legacy handler clears both browser-entry Cookies. Preserve both
         # headers across the compatibility bridge and never let the session
         # renewal middleware recreate either one on this security boundary.
-        response.delete_cookie(_cookie_name("PORTAL"), path="/")
-        response.delete_cookie(_cookie_name("DASHBOARD"), path="/")
+        response.delete_cookie(_cookie_name("PORTAL", request.url.port), path="/")
+        response.delete_cookie(_cookie_name("DASHBOARD", request.url.port), path="/")
     return response

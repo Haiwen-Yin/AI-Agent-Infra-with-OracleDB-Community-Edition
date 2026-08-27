@@ -12,7 +12,7 @@
 ## v4.4.10 Fresh Baseline And Current Product Boundaries
 
 v4.4.10 is the current fresh-deployment baseline. Use each adapter's
-`deploy/baseline_v4_4_10.json` ordered chain through migration 59; earlier
+`deploy/baseline_v4_4_10.json` ordered chain through migration 65; earlier
 numbered scripts remain for journal/checksum reproducibility, not as a customer
 upgrade promise. v4.4.8 is withdrawn.
 
@@ -27,9 +27,10 @@ the usage ledger.
 Knowledge is company-public, organization-subtree, organization-level, or
 Human/Agent-private. Database policy and current organization closure govern
 inventory, item, graph, and retrieval reads. Security Domains and Channels are
-the product-facing collaboration model. Legacy collaboration groups are
-internal execution compatibility records and never grant authorization or
-knowledge scope.
+the product-facing collaboration model. The standalone Collaboration page and
+new collaboration-group workflow are removed in v4.4.10. Legacy collaboration
+groups remain only as internal execution compatibility records and never grant
+authorization or knowledge scope.
 
 ## v4.4.3 Governed Security Domains
 
@@ -399,6 +400,9 @@ the protected baseline database.
 - A saved profile is `HEALTHY` only when a bounded probe returns a completion
   from the configured model. A reachable endpoint serving another model is
   `DEGRADED`; provider namespaces may prefix an otherwise matching model ID.
+  A stable alias may resolve to the same basename plus a bounded numeric or
+  ISO-date version suffix (`deepseek-v4-flash` to
+  `deepseek-v4-flash-0731`), but arbitrary suffixes remain a mismatch.
 - Retiring an LLM profile is blocked while it remains referenced by Portal,
   an active native Agent, or a pending Business Agent request.
 - Add `reasoning_effort: "none"` for reasoning models

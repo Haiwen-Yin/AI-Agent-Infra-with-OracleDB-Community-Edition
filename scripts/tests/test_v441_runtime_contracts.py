@@ -111,7 +111,8 @@ def test_skill_distribution_requires_safe_point_and_records_drift():
 def test_agent_upgrade_poll_is_instance_authenticated_and_metadata_only():
     app = (Path(__file__).resolve().parents[1] / "web_app.py").read_text(encoding="utf-8")
     endpoint = app.split("def gateway_pending_upgrade_skills(", 1)[1].split("\n\n@app.post(\"/api/gateway/upgrades/skill-ack\")", 1)[0]
-    assert '_gateway_context(request, "skills.read")' in endpoint
+    assert 'request, "skills.read", operation="skills.read"' in endpoint
+    assert "attach_agent_database_context=False" in endpoint
     assert "pending_upgrade_skills" in endpoint
     source = Path(admin_management.__file__).read_text(encoding="utf-8")
     function = source.split("def pending_upgrade_skills(", 1)[1].split("\ndef record_artifact_receipt", 1)[0]

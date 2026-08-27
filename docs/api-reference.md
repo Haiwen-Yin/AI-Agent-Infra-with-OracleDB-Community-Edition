@@ -23,7 +23,16 @@ displays the resulting address read-only. Direct and gateway modes may both be
 true. Calls made directly to providers remain unobserved unless trusted usage
 evidence is imported through a verified adapter.
 
-## v4.4.9 Platform Command, Graph, Organization And Knowledge APIs
+External Agent registration accepts `embedding_mode`: `PLATFORM_MANAGED` uses
+the governed platform Embedding gateway after an explicit `embedding.generate`
+grant, while `AGENT_MANAGED` calls an Agent-owned service. Agent-managed
+registration must provide model ID, Contract fingerprint when names differ,
+dimension, distance metric, and normalization; these values are compared with
+the active Contract before credentials are issued. Agent-owned provider URLs
+and secrets are not stored, and Agent-managed identities cannot obtain the
+platform gateway route.
+
+## v4.4.10 Platform Command, Graph, Organization And Knowledge APIs
 
 The v4.4.9 API surface includes the restored entity-relationship graph,
 organization people/Agent projections, and compliance posture state summaries.
@@ -136,6 +145,13 @@ atomic audit writes.
 | `/api/embedding/bindings` | GET | Inspect effective bindings. Binding writes are internal to verified platform activation. |
 | `/api/embedding/profiles/{profile_id}/probe` | POST | Run a bounded platform-side compatibility probe. |
 | `/api/gateway/embedding/profiles/{profile_id}/probe` | POST | Accept an authenticated Agent-side direct-mode probe. |
+| `/api/gateway/v1/embeddings` | POST | Generate OpenAI-compatible vectors through the authenticated Agent's effective platform-managed Embedding Binding. Requires the short-lived `embedding.generate` Agent-token scope. |
+| `/api/embedding/access-grants` | GET/POST | List or publish explicit Agent, template, organization, or security-domain Embedding gateway grants. External Agents are denied without a matching active grant. |
+| `/api/gateway/database-endpoint` | GET | Return the authenticated external Agent's scoped database target metadata; the access-token response also carries `database_endpoint`. No password or key is returned. |
+| `/api/gateway/channels/{channel_id}/memory-candidates` | POST | Submit an Agent-owned Channel Memory Candidate. Requires `memory.propose`; durable Artifact promotion remains a Human-governed operation. |
+| `/api/gateway/knowledge` | POST | Create knowledge as the authenticated Agent. Requires `knowledge.write`; defaults to Agent-private and rejects direct `PUBLIC_COMPANY` publication. |
+| `/api/gateway/knowledge/{entity_id}` | GET | Read one knowledge entity through database-authoritative visibility. Requires `knowledge.read`; cross-Agent private reads are denied. |
+| `/api/embedding/access-grants/{grant_id}` | DELETE | Revoke a grant with a reason and invalidate affected Agent access tokens. |
 | `/api/embedding/jobs` | GET | Inspect automated ingestion or re-embedding work. Job creation is internal to verified activation and migration orchestration. |
 | `/api/embedding/jobs/{job_id}` | GET | Read authorized queued, claimed, retry, or terminal job state. |
 
@@ -143,6 +159,49 @@ The local `scripts/embedding_worker.py` claims jobs by database lease and
 fencing token. It accepts only verified writable `PLATFORM_MANAGED` and
 `ENTERPRISE_PROXY` targets; direct and imported vectors are validated at their
 respective write boundary.
+
+An active external Agent requests a short-lived gateway token with the
+`embedding.generate` scope, then uses the token as an OpenAI-compatible API
+key. The client cannot supply a provider URL or change its effective model:
+
+```http
+POST /api/gateway/token
+Content-Type: application/json
+
+{
+  "agent_id": "<registered-agent-id>",
+  "client_secret": "<registered-client-secret>",
+  "security_domain_id": "<authorized-security-domain-id>",
+  "node_id": "<external-agent-node-id>",
+  "scopes": ["embedding.generate"]
+}
+```
+
+The registration Client Secret is displayed once when issued but remains the
+long-lived credential used for token exchange until rotation, expiry, or
+revocation. If the Agent already has an active instance, send its
+`instance_id` instead of asking the token exchange to create one. The response
+contains the new or existing `instance_id` and a five-minute `access_token`.
+
+```http
+POST /api/gateway/v1/embeddings
+Authorization: Bearer <short-lived-access-token>
+Content-Type: application/json
+
+{"model":"bge-m3:latest","input":["first text","second text"]}
+```
+
+For an OpenAI-compatible SDK, set `base_url` to the platform address ending in
+`/api/gateway/v1`, use the short-lived Agent access token as `api_key`, and use
+the model identity from the effective Embedding Contract. Production external
+traffic MUST terminate TLS before reaching the Web service.
+
+External Agent work tokens may additionally request `memory.propose`,
+`knowledge.read`, and `knowledge.write`. Organization-scoped knowledge is
+resolved from the producing Agent owner's current organization closure and
+preserves `hierarchy_depth`. A Channel membership does not grant knowledge
+visibility, and an Agent cannot promote its own Memory Candidate or publish
+company-wide knowledge directly.
 
 ## v4.3.6 Native Agent API
 
@@ -266,11 +325,31 @@ Authenticated organization reads are available at `/api/organization/roots`,
 occur before nodes, edges, counts, or identifiers are returned.
 
 Semantic drafts use `/api/organization/changes`, the operations endpoint, and
-the `undo`, `redo`, `validate`, and `submit` action endpoints. History and
+the `undo`, `redo`, `validate`, `publish`, `submit`, and `withdraw` action
+endpoints. `publish` only accepts validated low-risk changes and requires
+`organizations.changes.publish`. `withdraw` is limited to the author of a
+pending request and atomically restores its unchanged snapshot to `VALIDATED`.
+For a pre-repair orphan whose pending approval row is absent, the same endpoint
+allows only the original author to restore the change and records
+`ORG_CHANGESET_WITHDRAW_ORPHAN_RECOVERY`; it never fabricates an approval
+decision or changes organization facts.
+History and
 directory conflicts use `/api/organization/history` and
 `/api/organization/sync/conflicts`. Mutations require a Human Session, CSRF,
 explicit `organizations.*` permission, and server-side scope validation. See
 `organization-governance.md`.
+
+`submit` returns the durable `approval_id`. Organization requests appear in
+`GET /api/approvals`; `GET /api/approvals/{approval_id}` adds bounded semantic
+operations, validation, impact, risk, reason, and author context. The existing
+`approve` and `reject` endpoints dispatch `ORGANIZATION_CHANGE` decisions to the
+organization service. An ordinary author cannot decide the request; inventory
+rows return `can_decide` and `decision_blocker` so clients can explain that
+boundary before submission. The database-identified protected bootstrap
+`admin` is the only break-glass exception and every self-decision writes
+dedicated emergency audit evidence. Approval publishes the organization
+version in the same transaction; rejection atomically marks both records
+rejected.
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project

@@ -125,13 +125,19 @@ def test_legacy_memory_digest_alignment_uses_sha256_on_all_adapters():
         # Generated packages deliberately contain one selected adapter only.
         script = (root / "scripts/deploy/24_v4_3_2_memory_digest_alignment.sql").read_text(encoding="utf-8").upper()
         dialect = str(getattr(lifecycle.connection, "DATABASE_DIALECT", "")).lower()
-        assert "ENCODE(SHA256(" in script if dialect in {"pg", "postgresql"} else "DBMS_CRYPTO.HASH" in script
+        if dialect in {"pg", "postgresql"}:
+            assert "ENCODE(SHA256(" in script
+        elif dialect == "oracle":
+            assert "STANDARD_HASH(" in script and "DBMS_CRYPTO.HASH" not in script
+        else:
+            assert "DBMS_CRYPTO.HASH" in script
         return
     oracle = (root / "adapters/oracle/deploy/24_v4_3_2_memory_digest_alignment.sql").read_text(encoding="utf-8").upper()
     pg = (root / "adapters/pg/deploy/24_v4_3_2_memory_digest_alignment.sql").read_text(encoding="utf-8").upper()
     yashan = (root / "adapters/yashandb/deploy/24_v4_3_2_memory_digest_alignment.sql").read_text(encoding="utf-8").upper()
 
-    assert "DBMS_CRYPTO.HASH" in oracle
+    assert "STANDARD_HASH(" in oracle
+    assert "DBMS_CRYPTO.HASH" not in oracle
     assert "ENCODE(SHA256(" in pg
     assert "DBMS_CRYPTO.HASH" in yashan
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import threading
 import time
 import uuid
@@ -119,7 +120,10 @@ class Gate:
         self.record("health_version", health.get("version") == "4.4.10", health.get("version"))
         ready = self.request("GET", "/api/ready").json()
         self.record("readiness", ready.get("status") in {"ready", "ok"}, ready.get("status"))
-        login = self.request("POST", "/api/auth/login", json={"username": "admin", "password": "admin"}).json()
+        admin_password = os.environ.get("CX_GATE_ADMIN_PASSWORD", "")
+        if not admin_password:
+            raise RuntimeError("CX_GATE_ADMIN_PASSWORD is required")
+        login = self.request("POST", "/api/auth/login", json={"username": "admin", "password": admin_password}).json()
         self.csrf = str(login.get("csrf_token") or "")
         self.record("admin_login", login.get("success") is True and bool(self.csrf))
         capabilities = self.request("GET", "/api/capabilities").json()

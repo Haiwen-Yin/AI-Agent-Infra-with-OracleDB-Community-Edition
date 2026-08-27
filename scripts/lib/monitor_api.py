@@ -165,6 +165,18 @@ def get_system_overview(principal_id: Optional[str] = None, resource_scope: Opti
         busy = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'ACTIVE' AND a.LAST_ACTIVE_AT > CURRENT_TIMESTAMP - INTERVAL '5' MINUTE" + and_scope, params)
     pool = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'POOL'" + and_scope, params)
     dormant = execute_query_one("SELECT COUNT(*) AS CNT FROM AGENT_REGISTRY a WHERE a.STATUS = 'DORMANT'" + and_scope, params)
+    # Native platform Agents live in CX_NATIVE_AGENTS and are not required to
+    # have a legacy AGENT_REGISTRY row. Include them in the same counters while
+    # preserving the authorization and organization scope predicate.
+    # Platform Agents are control-plane resources, so they are visible in the
+    # platform-wide overview even when the viewer's business-agent scope is
+    # limited to organization or security-domain members.
+    native_total = execute_query_one("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS n", {})
+    native_online = execute_query_one("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS n WHERE n.STATUS = 'ACTIVE'", {})
+    # Native Agent records do not expose a last-activity timestamp; do not
+    # mislabel every active platform Agent as busy.
+    native_busy = {"cnt": 0}
+    native_dormant = execute_query_one("SELECT COUNT(*) AS CNT FROM CX_NATIVE_AGENTS n WHERE n.STATUS IN ('DORMANT','DISABLED')", {})
     active_sessions = execute_query_one(
         "SELECT COUNT(*) AS CNT FROM AGENT_SESSION s WHERE s.IS_ACTIVE = 'Y'"
         + (" AND EXISTS (SELECT 1 FROM AGENT_REGISTRY a WHERE a.AGENT_ID=s.AGENT_ID AND " + scope + ")" if scope else ""), params,
@@ -190,11 +202,11 @@ def get_system_overview(principal_id: Optional[str] = None, resource_scope: Opti
 
     return {
         "agents": {
-            "total": total.get("cnt", 0) if total else 0,
-            "online": online.get("cnt", 0) if online else 0,
-            "busy": busy.get("cnt", 0) if busy else 0,
+            "total": (total.get("cnt", 0) if total else 0) + (native_total.get("cnt", 0) if native_total else 0),
+            "online": (online.get("cnt", 0) if online else 0) + (native_online.get("cnt", 0) if native_online else 0),
+            "busy": (busy.get("cnt", 0) if busy else 0) + (native_busy.get("cnt", 0) if native_busy else 0),
             "idle": pool.get("cnt", 0) if pool else 0,
-            "dormant": dormant.get("cnt", 0) if dormant else 0,
+            "dormant": (dormant.get("cnt", 0) if dormant else 0) + (native_dormant.get("cnt", 0) if native_dormant else 0),
         },
         "sessions": {
             "active": active_sessions.get("cnt", 0) if active_sessions else 0,

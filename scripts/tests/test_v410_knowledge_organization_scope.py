@@ -66,3 +66,40 @@ def test_agent_knowledge_context_resolves_single_line_org_chain_and_groups(monke
     assert context["responsible_groups"][0]["group_id"] == "RG_ENGINEERING"
     assert context["execution_groups"][0]["group_id"] == "CG_GRAPH"
     assert any("CX_ORGANIZATION_CLOSURE" in sql for sql, _ in calls)
+
+
+def test_agent_private_knowledge_policy_targets_agent_not_human_owner(monkeypatch):
+    writes = []
+    policies = []
+    context = {
+        "agent_id": "AG_1", "principal_id": "HP_OWNER", "organization_id": "ORG_ENG",
+        "organization_chain": [], "responsible_groups": [], "execution_groups": [],
+    }
+    monkeypatch.setattr(knowledge_api, "execute", lambda sql, params: writes.append((sql, params)) or 1)
+    monkeypatch.setattr(
+        knowledge_api, "set_access_policy",
+        lambda entity_id, scope, actor, **kwargs: policies.append((entity_id, scope, actor, kwargs)) or {},
+    )
+    result = knowledge_api.capture_agent_knowledge_context(
+        "K_1", "AG_1", sharing_scope="PRINCIPAL_PRIVATE", context=context,
+    )
+    assert result["sharing_scope"] == "PRINCIPAL_PRIVATE"
+    assert policies[0][2] == "AG_1"
+    assert policies[0][3]["principal_id"] == "AG_1"
+
+
+def test_organization_level_agent_knowledge_forwards_depth(monkeypatch):
+    policies = []
+    context = {
+        "agent_id": "AG_1", "principal_id": "HP_OWNER", "organization_id": "ORG_ENG",
+        "organization_chain": [], "responsible_groups": [], "execution_groups": [],
+    }
+    monkeypatch.setattr(knowledge_api, "execute", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(
+        knowledge_api, "set_access_policy",
+        lambda entity_id, scope, actor, **kwargs: policies.append(kwargs) or {},
+    )
+    knowledge_api.capture_agent_knowledge_context(
+        "K_1", "AG_1", sharing_scope="ORGANIZATION_LEVEL", hierarchy_depth=2, context=context,
+    )
+    assert policies[0]["hierarchy_depth"] == 2
