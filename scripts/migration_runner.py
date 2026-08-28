@@ -54,10 +54,12 @@ from live_db_validator import (
     V448_MIGRATION_SCRIPTS,
     V449_MIGRATION_SCRIPTS,
     V410_MIGRATION_SCRIPTS,
+    migration_scripts_for_edition,
     V410_MODEL_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_REQUIRED_COLUMNS,
     validate_v449_static_contract,
+    validate_v410_static_contract,
     V443_SECURITY_DOMAIN_TABLES,
     V443_SECURITY_DOMAIN_REQUIRED_COLUMNS,
     _load_database_config,
@@ -650,16 +652,26 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             v43_static_contract = validate_v446_static_contract(database, full_scripts)
         elif MIGRATION_VERSION == "4.4.9":
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, "50_v4_4_9_security_boundary_repair.sql").parent
-            full_scripts = [deploy_dir / name for name in V449_MIGRATION_SCRIPTS]
+            required_scripts = migration_scripts_for_edition(V449_MIGRATION_SCRIPTS, MIGRATION_EDITION)
+            full_scripts = [deploy_dir / name for name in required_scripts]
             if database == "pg":
                 full_scripts.append(deploy_dir / "51_v4_4_9_identity_boundary_repair.sql")
                 full_scripts.append(deploy_dir / "53_v4_4_9_pg_runtime_boundary.sql")
-            v43_static_contract = validate_v449_static_contract(database, full_scripts)
+            v43_static_contract = validate_v449_static_contract(
+                database, full_scripts, MIGRATION_EDITION
+            )
         elif MIGRATION_VERSION == "4.4.10":
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, "55_v4_4_10_model_usage_wallboard.sql").parent
-            full_scripts = [deploy_dir / name for name in V410_MIGRATION_SCRIPTS]
-            missing = [name for name in V410_MIGRATION_SCRIPTS if not (deploy_dir / name).is_file()]
-            v43_static_contract = {"database": database, "v410_model_usage_wallboard": {"scripts_required": list(V410_MIGRATION_SCRIPTS), "scripts_missing": missing, "passed": not missing}, "passed": not missing}
+            required_scripts = migration_scripts_for_edition(V410_MIGRATION_SCRIPTS, MIGRATION_EDITION)
+            full_scripts = [deploy_dir / name for name in required_scripts]
+            if database == "pg":
+                full_scripts.extend((
+                    deploy_dir / "51_v4_4_9_identity_boundary_repair.sql",
+                    deploy_dir / "53_v4_4_9_pg_runtime_boundary.sql",
+                ))
+            v43_static_contract = validate_v410_static_contract(
+                database, full_scripts, MIGRATION_EDITION
+            )
     passed = bool(identity) and capabilities.get("apache_age_available", True)
     if withdrawn_schema_detected:
         passed = False

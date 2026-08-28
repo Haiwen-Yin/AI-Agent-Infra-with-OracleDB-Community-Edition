@@ -36,6 +36,15 @@ def _load_bootstrap_cli():
     return module
 
 
+def test_install_platform_prefers_package_virtual_environment():
+    runtime_root, package_root, packaged = _layout()
+    installer = runtime_root / "install_platform.sh" if packaged else package_root / "shared" / "install_platform.sh"
+    source = installer.read_text(encoding="utf-8")
+    assert 'VENV_PYTHON="${CX_VENV_DIR:-$ROOT_DIR/.venv}/bin/python"' in source
+    assert '[[ -z "${PYTHON_BIN:-}" && -x "$VENV_PYTHON" ]]' in source
+    assert 'PYTHON_BIN="$VENV_PYTHON"' in source
+
+
 def _packaged_database(root: Path) -> str:
     manifest = root / "build-manifest.json"
     if not manifest.is_file():
@@ -127,6 +136,8 @@ def test_oracle_v449_security_repair_is_schema_owner_independent():
     assert "AIADMIN." not in source
     assert "<> 'AIADMIN'" not in source
     assert "SYS_CONTEXT('USERENV', 'CURRENT_USER')" in source
+    assert "CREATE OR REPLACE PACKAGE SET_AGENT_CONTEXT AS" in source
+    assert source.index("CREATE OR REPLACE PACKAGE SET_AGENT_CONTEXT AS") < source.index("CREATE OR REPLACE PACKAGE BODY SET_AGENT_CONTEXT AS")
     expected_select = "SELECT ORA_END_USER_CONTEXT.USERNAME INTO V_END_USER FROM " + "DU" + "AL"
     assert expected_select in source
     assert "UPPER(V_END_USER)" in source
@@ -322,6 +333,8 @@ class _OraclePreflightCursor:
         if "USER_TS_QUOTAS" in self.sql:
             return (-1,)
         if "USER_ROLE_PRIVS" in self.sql:
+            if "DEEP_SEC_SESSION_ROLE" in self.sql:
+                return (1,)
             return ("CTXAPP",)
         if "CTXSYS" in self.sql and "CTX_DDL" in self.sql:
             return (1,)
@@ -331,7 +344,11 @@ class _OraclePreflightCursor:
 
     def fetchall(self):
         if "SESSION_PRIVS" in self.sql:
-            return [(item,) for item in sorted(deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES)]
+            required = (
+                deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES
+                | deployment_orchestrator.ORACLE_ENTERPRISE_OWNER_PRIVILEGES
+            )
+            return [(item,) for item in sorted(required)]
         if "USER_TAB_PRIVS_RECD" in self.sql:
             return [
                 ("SYS", "DBMS_CRYPTO", "EXECUTE"),
@@ -482,6 +499,7 @@ def test_yashandb_prerequisite_and_preflight_require_agent_user_rotation():
         pytest.skip("YashanDB package contract")
     deploy = runtime_root / "deploy" if packaged else package_root / "adapters" / "yashandb" / "deploy"
     prerequisite = (deploy / "0_yashandb_database_prerequisites.sql").read_text(encoding="utf-8").upper()
+    assert "CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE, CREATE JOB" in prerequisite
     assert "GRANT CREATE USER TO &&SCHEMA_OWNER" in prerequisite
     assert "GRANT ALTER USER TO &&SCHEMA_OWNER" in prerequisite
     assert "CREATE ROLE DEEP_SEC_SESSION_ROLE" in prerequisite
@@ -490,6 +508,7 @@ def test_yashandb_prerequisite_and_preflight_require_agent_user_rotation():
     source = Path(deployment_orchestrator.__file__).read_text(encoding="utf-8")
     assert 'YASHAN_OWNER_BASE_PRIVILEGES = frozenset({' in source
     assert '"CREATE USER", "ALTER USER"' in source
+    assert '"CREATE PROCEDURE", "CREATE TRIGGER", "CREATE TYPE", "CREATE JOB"' in source
     assert '"YASHAN_AGENT_ROLE_ADMIN"' in source
     assert '"USER_SYS_PRIVS" if database == "yashandb" else "SESSION_PRIVS"' in source
     assert "ADMIN_OPTION='Y'" in source
@@ -517,18 +536,33 @@ def test_oracle_preflight_requires_partitioning(monkeypatch, value, passed):
     assert result["passed"] is passed
 
 
-def test_oracle_enterprise_preflight_requires_data_grant_privilege(monkeypatch):
+@pytest.mark.parametrize("edition", ("community", "enterprise"))
+def test_oracle_preflight_requires_data_grant_privilege(monkeypatch, edition):
+    connection = _OraclePreflightConnection("TRUE")
+    original = connection.cursor_instance.fetchall
+
+    def fetchall():
+        if "SESSION_PRIVS" in connection.cursor_instance.sql:
+            return [(item,) for item in sorted(deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES)]
+        return original()
+
+    connection.cursor_instance.fetchall = fetchall
     monkeypatch.setattr(
         deployment_orchestrator, "_connect",
-        lambda _database, _config: _OraclePreflightConnection("TRUE"),
+        lambda _database, _config: connection,
     )
     result = deployment_orchestrator.preflight(
         "oracle", {"user": "owner", "password": "secret", "dsn": "db/service"},
-        require_empty=True, edition="enterprise",
+        require_empty=True, edition=edition,
     )
     owner = next(item for item in result["checks"] if item["code"] == "OWNER_PRIVILEGES")
     assert owner["state"] == "BLOCKED"
     assert set(owner["detail"]["missing"]) == deployment_orchestrator.ORACLE_ENTERPRISE_OWNER_PRIVILEGES
+
+
+def test_oracle_preflight_accepts_native_yes_admin_option():
+    source = Path(deployment_orchestrator.__file__).read_text(encoding="utf-8")
+    assert "ADMIN_OPTION IN ('Y','YES')" in source
 
 
 def test_oracle_preflight_blocks_missing_create_trigger(monkeypatch):
@@ -539,7 +573,9 @@ def test_oracle_preflight_blocks_missing_create_trigger(monkeypatch):
         if "SESSION_PRIVS" in connection.cursor_instance.sql:
             return [
                 (item,) for item in sorted(
-                    deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES - {"CREATE TRIGGER"}
+                    (deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES
+                     | deployment_orchestrator.ORACLE_ENTERPRISE_OWNER_PRIVILEGES)
+                    - {"CREATE TRIGGER"}
                 )
             ]
         return original()

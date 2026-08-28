@@ -26,6 +26,9 @@ class GatewayError(ValueError):
 def _compliance_allows(agent_id: str, operation: str) -> bool:
     """Recheck the current authoritative control state for every Gateway use."""
     try:
+        from . import edition_features
+        if not edition_features.has_feature("compliance"):
+            return True
         from . import compliance_api
         return bool(compliance_api.control_allows(agent_id, operation))
     except ImportError:
@@ -261,6 +264,9 @@ def heartbeat_instance(agent_id: str, instance_id: str) -> bool:
     ) > 0
     if changed:
         try:
+            from . import edition_features
+            if not edition_features.has_feature("compliance"):
+                return changed
             from . import compliance_api
             compliance_api.observe_gateway_heartbeat(agent_id, instance_id)
         except ImportError:

@@ -42,6 +42,13 @@ bash scripts/install_platform.sh initialize --version 4.4.10 \
   --config config.json
 ```
 
+Community initialization omits Enterprise compliance migrations 29 and 30.
+External Agent enrollment and credential-proof activation remain core
+capabilities and must not reference posture, evidence, finding, or remediation
+tables. Community activation records the authenticated enrollment boundary and
+returns posture state `NOT_APPLICABLE`; Enterprise continues to require its
+database-authoritative posture and activation evidence.
+
 After migration, start with direct mode enabled and gateway mode disabled.
 Configure `CX_PUBLIC_BASE_URL` when necessary, then enable gateway routing only
 on selected LLM Provider Profile rows and record a compliance reason. Direct

@@ -546,7 +546,12 @@ def issue_containment(actor: str, agent_id: str, instance_id: str, requested_sta
     # support replay evidence, while an authenticated Agent can reconstruct
     # the signed envelope without a second secret-delivery channel.
     nonce = command_id
-    expiry_at = datetime.now(timezone.utc) + timedelta(seconds=max(60, min(int(expires_seconds), 3600)))
+    # Adapter schemas use TIMESTAMP without time zone. Match the same local
+    # wall-clock basis used by Agent tokens so Oracle-compatible databases do
+    # not interpret a UTC-aware value as an already-expired local timestamp.
+    expiry_at = datetime.now().astimezone().replace(tzinfo=None) + timedelta(
+        seconds=max(60, min(int(expires_seconds), 3600))
+    )
     expiry = expiry_at.isoformat()
     payload = containment.command_payload(instance_id, next_generation, nonce, actor, reason, expiry, state)
     from .connection_crypto import get_master_key

@@ -6,7 +6,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/python_runtime.sh"
-if ! PYTHON_BIN="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
+VENV_PYTHON="${CX_VENV_DIR:-$ROOT_DIR/.venv}/bin/python"
+if [[ -z "${PYTHON_BIN:-}" && -x "$VENV_PYTHON" ]]; then
+  PYTHON_BIN="$VENV_PYTHON"
+elif ! PYTHON_BIN="$(cx_resolve_python "${PYTHON_BIN:-}")"; then
   echo "Python 3.14+ is required; set PYTHON_BIN to an accessible interpreter." >&2
   exit 1
 fi

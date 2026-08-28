@@ -833,9 +833,13 @@ def bind(actor: str, binding_scope: str, binding_subject_id: str, profile_id: st
         params = {"p_binding_id": binding_id, "p_scope": scope, "p_subject": subject, "p_profile_id": profile_id or None,
                   "p_space_id": space_id or None, "p_version": version, "p_actor": actor, "p_reason": _text(reason, 2000)}
         if existing:
+            update_params = {
+                key: value for key, value in params.items()
+                if key not in {"p_scope", "p_subject"}
+            }
             tx.execute(
                 "UPDATE CX_EMBEDDING_BINDINGS SET PROFILE_ID=:p_profile_id,SPACE_ID=:p_space_id,STATUS='ACTIVE',VERSION=:p_version,"
-                "APPROVED_BY=:p_actor,REASON=:p_reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE BINDING_ID=:p_binding_id", params,
+                "APPROVED_BY=:p_actor,REASON=:p_reason,UPDATED_AT=CURRENT_TIMESTAMP WHERE BINDING_ID=:p_binding_id", update_params,
             )
         else:
             tx.execute(

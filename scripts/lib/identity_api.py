@@ -129,6 +129,14 @@ class IdentityError(ValueError):
     """A safe, non-enumerating identity boundary error."""
 
 
+def _compliance_enabled() -> bool:
+    try:
+        from . import edition_features
+        return bool(edition_features.has_feature("compliance"))
+    except (ImportError, AttributeError):
+        return True
+
+
 def _dialect() -> str:
     return str(getattr(connection, "DATABASE_DIALECT", "") or "").lower()
 
@@ -2320,12 +2328,13 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
             {"agent_id": generated_agent_id, "grant_id": row["grant_id"]},
         )
         tx.execute("INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID, PRINCIPAL_TYPE, STATUS) VALUES (:agent_id, 'AGENT', :status)", {"agent_id": generated_agent_id, "status": status})
-        tx.execute(
-            "INSERT INTO CX_AGENT_POSTURES(POSTURE_ID, AGENT_ID, REGISTRATION_STATE, RUNTIME_STATE, POSTURE_STATE, "
-            "CONTROL_STATE, EVIDENCE_STRENGTH, VERSION) VALUES (:posture_id, :agent_id, :registration_state, "
-            "'NEVER_SEEN', 'UNKNOWN', 'NORMAL', 'BOUNDARY_ONLY', 1)",
-            {"posture_id": _id("POST"), "agent_id": generated_agent_id, "registration_state": status},
-        )
+        if _compliance_enabled():
+            tx.execute(
+                "INSERT INTO CX_AGENT_POSTURES(POSTURE_ID, AGENT_ID, REGISTRATION_STATE, RUNTIME_STATE, POSTURE_STATE, "
+                "CONTROL_STATE, EVIDENCE_STRENGTH, VERSION) VALUES (:posture_id, :agent_id, :registration_state, "
+                "'NEVER_SEEN', 'UNKNOWN', 'NORMAL', 'BOUNDARY_ONLY', 1)",
+                {"posture_id": _id("POST"), "agent_id": generated_agent_id, "registration_state": status},
+            )
         if row.get("security_domain_id"):
             tx.execute(
                 "INSERT INTO CX_DOMAIN_MEMBERS(MEMBERSHIP_ID, SECURITY_DOMAIN_ID, PRINCIPAL_ID, MEMBERSHIP_TIER, STATUS) "
@@ -2355,6 +2364,51 @@ def redeem_enrollment(token: str, agent_id: str = "", *, runtime: str = "", envi
         raise IdentityError("Agent database identity provisioning failed") from exc
     _audit(result["owner_principal_id"], "AGENT_ENROLLMENT_REDEEM", "AGENT", result["agent_id"], "ALLOW", "one-time token consumed")
     return result
+
+
+def activate_community_agent(agent_id: str, security_domain_id: str, baseline: Dict[str, Any]) -> Dict[str, Any]:
+    """Activate a credential-proven Community Agent without Enterprise posture state."""
+    if _compliance_enabled():
+        raise IdentityError("Community activation is unavailable in Enterprise Edition")
+    if not agent_id or not isinstance(baseline, dict):
+        raise IdentityError("Agent activation identity and baseline are required")
+    serialized = _json(baseline)
+    if len(serialized) > 100_000:
+        raise IdentityError("Agent activation baseline is too large")
+    activation_id = _id("ACT")
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def work(tx: Any) -> Dict[str, Any]:
+        agent = _row(tx.query_one(
+            "SELECT PRINCIPAL_ID,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:agent_id "
+            "AND PRINCIPAL_TYPE='AGENT' FOR UPDATE", {"agent_id": agent_id},
+        ))
+        if not agent or str(agent.get("status") or "").upper() != "PENDING_ACTIVATION":
+            raise IdentityError("Agent is not awaiting activation")
+        enrollment = _row(tx.query_one(
+            "SELECT SECURITY_DOMAIN_ID FROM CX_ENROLLMENT_GRANTS WHERE AGENT_ID=:agent_id "
+            "AND STATUS='ACTIVE' ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY",
+            {"agent_id": agent_id},
+        ))
+        if not enrollment:
+            raise IdentityError("Enrollment authority is unavailable")
+        expected_domain = str(enrollment.get("security_domain_id") or "")
+        if security_domain_id and expected_domain and security_domain_id != expected_domain:
+            raise IdentityError("Activation domain does not match enrollment")
+        changed = tx.execute(
+            "UPDATE CX_PRINCIPALS SET STATUS='ACTIVE',UPDATED_AT=CURRENT_TIMESTAMP "
+            "WHERE PRINCIPAL_ID=:agent_id AND STATUS='PENDING_ACTIVATION'",
+            {"agent_id": agent_id},
+        )
+        if changed != 1:
+            raise IdentityError("Agent activation changed concurrently")
+        _audit_tx(tx, agent_id, "COMMUNITY_GATEWAY_ACTIVATE", "AGENT", agent_id, "ALLOW",
+                  "registered credential proof and enrollment boundary verified")
+        return {"activation_id": activation_id, "agent_id": agent_id,
+                "baseline_digest": digest, "activation_state": "ACTIVE",
+                "posture_state": "NOT_APPLICABLE"}
+
+    return connection.execute_transaction_callback(work)
 
 
 def list_enrollment_grants(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -2502,7 +2556,7 @@ def set_agent_status(actor_principal_id: str, agent_id: str, status: str, reason
         ))
         if not agent:
             return False
-        if target == "ACTIVE" and str(agent.get("status") or "").upper() != "ACTIVE":
+        if _compliance_enabled() and target == "ACTIVE" and str(agent.get("status") or "").upper() != "ACTIVE":
             activation = _row(tx.query_one(
                 "SELECT ACTIVATION_ID FROM CX_AGENT_ACTIVATIONS WHERE AGENT_ID = :agent_id "
                 "AND STATUS = 'ACTIVE' FOR UPDATE",

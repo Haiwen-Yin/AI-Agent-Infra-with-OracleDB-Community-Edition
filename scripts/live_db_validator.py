@@ -208,6 +208,19 @@ V410_MIGRATION_SCRIPTS = V449_MIGRATION_SCRIPTS + (
     "64_v4_4_10_external_agent_context_repair.sql",
     "65_v4_4_10_external_agent_domain_context.sql",
 )
+ENTERPRISE_ONLY_MIGRATION_SCRIPTS = frozenset({
+    "29_v4_3_4_agent_compliance.sql",
+    "30_v4_3_4_compliance_hardening.sql",
+})
+
+
+def migration_scripts_for_edition(
+    scripts: Sequence[str], edition: str,
+) -> tuple[str, ...]:
+    """Return the mandatory release chain for the packaged edition."""
+    if edition.lower() == "enterprise":
+        return tuple(scripts)
+    return tuple(name for name in scripts if name not in ENTERPRISE_ONLY_MIGRATION_SCRIPTS)
 V410_MODEL_TABLES = (
     "CX_MODEL_GATEWAY_CREDENTIALS", "CX_MODEL_REQUESTS", "CX_MODEL_PRICING",
     "CX_MODEL_USAGE", "CX_WALLBOARD_DEFINITIONS", "CX_MODEL_ROUTING_POLICIES",
@@ -1451,7 +1464,9 @@ def validate_v448_static_contract(database: str, scripts: Sequence[Path]) -> dic
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
-def validate_v449_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
+def validate_v449_static_contract(
+    database: str, scripts: Sequence[Path], edition: str = "enterprise",
+) -> dict[str, Any]:
     """Validate the v4.4.9 repair scripts without treating v4.4.8 as a baseline."""
     selected = {path.name: path for path in scripts}
     repair = selected.get("50_v4_4_9_security_boundary_repair.sql")
@@ -1470,9 +1485,10 @@ def validate_v449_static_contract(database: str, scripts: Sequence[Path]) -> dic
         "SESSION_USER", "REVOKE ALL PRIVILEGES", "CX_PLATFORM_KNOWLEDGE",
         "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_COMMANDS",
     }
+    required_scripts = migration_scripts_for_edition(V449_MIGRATION_SCRIPTS, edition)
     control = {
-        "scripts_required": list(V449_MIGRATION_SCRIPTS),
-        "scripts_missing": [name for name in V449_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "scripts_required": list(required_scripts),
+        "scripts_missing": [name for name in required_scripts if name not in selected or not selected[name].is_file()],
         "repair_markers_missing": sorted(marker for marker in markers if marker not in repair_text),
         "identity_markers_missing": sorted(marker for marker in identity_markers if marker not in identity_text) if database == "pg" else [],
         "runtime_boundary_markers_missing": sorted(marker for marker in runtime_boundary_markers if marker not in runtime_boundary_text) if database == "pg" else [],
@@ -1483,8 +1499,10 @@ def validate_v449_static_contract(database: str, scripts: Sequence[Path]) -> dic
     return {"database": database, "v449_security_boundary_repair": control, "passed": bool(control["passed"])}
 
 
-def validate_v410_static_contract(database: str, scripts: Sequence[Path]) -> dict[str, Any]:
-    base = validate_v449_static_contract(database, scripts)
+def validate_v410_static_contract(
+    database: str, scripts: Sequence[Path], edition: str = "enterprise",
+) -> dict[str, Any]:
+    base = validate_v449_static_contract(database, scripts, edition)
     selected = {path.name: path for path in scripts}
     migration = selected.get("55_v4_4_10_model_usage_wallboard.sql")
     repair = selected.get("56_v4_4_10_runtime_repair.sql")
@@ -1501,9 +1519,10 @@ def validate_v410_static_contract(database: str, scripts: Sequence[Path]) -> dic
     markers = set(V410_MODEL_TABLES) | {"CX_PLATFORM_CAPABILITIES", "WALLBOARD", "IDEMPOTENCY_KEY", "IDX_MODEL_ROUTE_SCOPE_UQ", "CX_KNOWLEDGE_CONTEXTS", "ORGANIZATION_CHAIN_JSON", "GRAPH_SNAPSHOT_DIGEST", "ORGANIZATION_CHANGE", "CX_AGENT_RELATIONSHIP_HISTORY", "CX_EMBEDDING_ACCESS_GRANTS", "MAX_BATCH_SIZE", "MAX_INPUT_CHARS"}
     if database == "pg":
         markers |= {"FORCE ROW LEVEL SECURITY", "PUBLIC.CURRENT_AGENT_IDENTITY()", "CX_MODEL_CREDENTIALS_OWNER"}
+    required_scripts = migration_scripts_for_edition(V410_MIGRATION_SCRIPTS, edition)
     control = {
-        "scripts_required": list(V410_MIGRATION_SCRIPTS),
-        "scripts_missing": [name for name in V410_MIGRATION_SCRIPTS if name not in selected or not selected[name].is_file()],
+        "scripts_required": list(required_scripts),
+        "scripts_missing": [name for name in required_scripts if name not in selected or not selected[name].is_file()],
         "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
         "obsolete_pg_principal_guc_absent": database != "pg" or "APP.CURRENT_PRINCIPAL_ID" not in repair_source,
     }
@@ -2082,9 +2101,11 @@ def main() -> int:
     if requires_v43:
         for database in available_databases:
             if requires_v410:
-                migration_scripts, validator = V410_MIGRATION_SCRIPTS, validate_v410_static_contract
+                migration_scripts = migration_scripts_for_edition(V410_MIGRATION_SCRIPTS, edition)
+                validator = lambda database, scripts: validate_v410_static_contract(database, scripts, edition)
             elif requires_v449:
-                migration_scripts, validator = V449_MIGRATION_SCRIPTS, validate_v449_static_contract
+                migration_scripts = migration_scripts_for_edition(V449_MIGRATION_SCRIPTS, edition)
+                validator = lambda database, scripts: validate_v449_static_contract(database, scripts, edition)
             elif requires_v448:
                 migration_scripts, validator = V448_MIGRATION_SCRIPTS, validate_v448_static_contract
             elif requires_v446:

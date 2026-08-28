@@ -468,3 +468,29 @@ def test_all_adapters_declare_fingerprint_and_space_isolation():
         source = script.read_text(encoding="utf-8").upper()
         for marker in ("CX_DEPLOYMENT_RUNS", "CX_EMBEDDING_PROFILES", "MODEL_FINGERPRINT", "EMBEDDING_SPACE_ID", "EMBEDDING_CONTRACT_ID"):
             assert marker in source
+
+
+def test_existing_embedding_binding_uses_only_referenced_oracle_binds(monkeypatch):
+    class StrictTx:
+        def query_one(self, _sql, _params):
+            return {"binding_id": "EB_DEFAULT", "version": 1}
+
+        def execute(self, sql, params):
+            placeholders = set(re.findall(r":([A-Za-z][A-Za-z0-9_]*)", sql))
+            assert set(params) == placeholders
+            return 1
+
+    tx = StrictTx()
+    monkeypatch.setattr(embedding_governance, "_profile_row", lambda _id: {"profile_id": "EP_DEFAULT"})
+    monkeypatch.setattr(embedding_governance, "_space_row", lambda _id: {"space_id": "ES_DEFAULT"})
+    monkeypatch.setattr(
+        embedding_governance.connection,
+        "execute_transaction_callback",
+        lambda callback: callback(tx),
+    )
+    result = embedding_governance.bind(
+        "SYSTEM_BOOTSTRAP", "PLATFORM", "DEFAULT", "EP_DEFAULT", "ES_DEFAULT",
+        "Resume bootstrap binding",
+    )
+    assert result["binding_id"] == "EB_DEFAULT"
+    assert result["version"] == 2

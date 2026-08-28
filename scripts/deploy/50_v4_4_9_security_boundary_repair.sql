@@ -72,6 +72,11 @@ END;
 -- session assert an unrelated Agent identity. The deployment Owner remains
 -- the only administrative exception; normal Agent sessions must match the
 -- current End User.
+CREATE OR REPLACE PACKAGE SET_AGENT_CONTEXT AS
+    PROCEDURE set_agent_id(p_agent_id VARCHAR2);
+    PROCEDURE clear_context;
+END SET_AGENT_CONTEXT;
+/
 CREATE OR REPLACE PACKAGE BODY SET_AGENT_CONTEXT AS
     PROCEDURE set_agent_id(p_agent_id VARCHAR2) IS
         v_end_user VARCHAR2(128);

@@ -222,6 +222,12 @@ empty file, or group/other permissions fails closed. Remove the plaintext
 secret file after successful initialization according to the deployment
 environment's secret-handling policy.
 
+After `scripts/install_offline.sh` creates the package-local `.venv`, standard
+package entrypoints automatically prefer `.venv/bin/python` when `PYTHON_BIN`
+is unset. This keeps initialization on the same Python 3.14 dependency set
+that passed the offline gate. Set `PYTHON_BIN` only to deliberately select
+another verified Python 3.14 environment.
+
 ```bash
 bash scripts/install_platform.sh initialize \
   --version 4.4.10 --database <oracle|pg|yashandb> \
@@ -851,7 +857,8 @@ policies.
 Before initialization, run `scripts/deploy/0_yashandb_database_prerequisites.sql`
 as the YashanDB administrator in the dedicated application PDB after setting
 `SCHEMA_OWNER`. It grants only `CREATE USER` and `ALTER USER` for independent
-Business Agent login creation and credential rotation, creates the bounded
+Business Agent login creation and credential rotation plus the direct schema
+DDL and `CREATE JOB` privileges required by the packaged baseline, creates the bounded
 `DEEP_SEC_SESSION_ROLE`, and grants its `ADMIN OPTION` to the Owner. The
 Bootstrap manifest then applies `6_deep_sec_policy.sql` as the Owner. Preflight
 blocks when any part is missing; the platform never substitutes the Schema
@@ -862,8 +869,9 @@ One-time Enrollment redemption now synchronizes the external Agent into
 database credential before the Agent can activate. Migrations 63 and 64 close
 the Gateway object privileges and PostgreSQL compliance/evidence RLS policies.
 After applying v4.4.10, validate redemption, activation, Gateway Token,
-database-endpoint discovery, Heartbeat, Evidence, Events, and a subsequent
-administrator login as one flow for the selected database adapter.
+database-endpoint discovery, Heartbeat, Events, and a subsequent administrator
+login as one flow. Enterprise also validates posture Evidence and remediation;
+Community reports those Enterprise-only capabilities as not applicable.
 
 ### Runtime Roles
 

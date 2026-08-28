@@ -60,8 +60,6 @@ _ENTERPRISE_COMPLIANCE_PATHS = (
     "/api/agents/{agent_id}/compliance-profile",
     "/api/agents/{agent_id}/compliance-control",
     "/api/agents/{agent_id}/compliance-violation",
-    "/api/gateway/activate",
-    "/api/agent-gateway/activate",
     "/api/gateway/evidence",
     "/api/gateway/remediations/{case_id}/respond",
 )
@@ -5618,6 +5616,11 @@ def gateway_activate(body: GatewayActivationBody) -> Dict[str, Any]:
     if not credential:
         raise HTTPException(status_code=401, detail="Agent activation credential is invalid")
     try:
+        features = _edition_features()
+        if features is not None and not features.has_feature("compliance"):
+            return identity_api.activate_community_agent(
+                body.agent_id, body.security_domain_id, body.baseline,
+            )
         return compliance_api.activate_from_gateway(
             body.agent_id, body.baseline, credential_type=str(credential.get("credential_type") or ""),
             runtime="", environment="", security_domain_id=body.security_domain_id,

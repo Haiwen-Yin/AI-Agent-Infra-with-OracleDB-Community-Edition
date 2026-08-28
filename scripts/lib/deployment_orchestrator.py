@@ -39,7 +39,8 @@ ORACLE_OWNER_OBJECT_PRIVILEGES = frozenset({
     ("SYS", "UTL_HTTP", "EXECUTE"),
 })
 YASHAN_OWNER_BASE_PRIVILEGES = frozenset({
-    "CREATE TABLE", "CREATE PROCEDURE", "CREATE SEQUENCE",
+    "CREATE SESSION", "CREATE TABLE", "CREATE VIEW", "CREATE SEQUENCE",
+    "CREATE PROCEDURE", "CREATE TRIGGER", "CREATE TYPE", "CREATE JOB",
     "CREATE USER", "ALTER USER",
 })
 
@@ -404,7 +405,7 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                         required = set(YASHAN_OWNER_BASE_PRIVILEGES)
                     else:
                         required = {"CREATE TABLE", "CREATE PROCEDURE", "CREATE SEQUENCE"}
-                    if database == "oracle" and str(edition).lower() == "enterprise":
+                    if database == "oracle":
                         required.update(ORACLE_ENTERPRISE_OWNER_PRIVILEGES)
                     missing = sorted(required - privileges)
                     checks.append(_check("OWNER_PRIVILEGES", "PASS" if not missing else "BLOCKED", "Deployment owner privileges",
@@ -412,6 +413,26 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                 except Exception:
                     checks.append(_check("OWNER_PRIVILEGES", "WARN", "Deployment owner privileges could not be verified",
                                          "Verify schema-owner privileges before deployment."))
+                if database == "oracle":
+                    try:
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM USER_ROLE_PRIVS "
+                            "WHERE GRANTED_ROLE='DEEP_SEC_SESSION_ROLE' AND ADMIN_OPTION IN ('Y','YES')"
+                        )
+                        role_admin = int(cursor.fetchone()[0] or 0) > 0
+                        checks.append(_check(
+                            "ORACLE_END_USER_ROLE_ADMIN",
+                            "PASS" if role_admin else "BLOCKED",
+                            "Oracle End User session-role management",
+                            "Run deploy/0_oracle_database_prerequisites.sql as SYSDBA in the target PDB.",
+                            {"owner_admin_option": role_admin},
+                        ))
+                    except Exception:
+                        checks.append(_check(
+                            "ORACLE_END_USER_ROLE_ADMIN", "BLOCKED",
+                            "Oracle End User session-role prerequisites could not be verified",
+                            "Run deploy/0_oracle_database_prerequisites.sql as SYSDBA in the target PDB.",
+                        ))
                 if database == "yashandb":
                     try:
                         cursor.execute(

@@ -46,6 +46,18 @@ def test_v410_scripts_are_selected_for_all_adapters():
         assert (ROOT / "adapters" / database / "deploy" / names[-1]).is_file()
 
 
+def test_migration_runner_imports_the_v410_static_validator():
+    assert migration_runner.validate_v410_static_contract is live_db_validator.validate_v410_static_contract
+
+
+def test_v410_preflight_includes_postgres_security_repair_overlays():
+    source = RUNNER_SOURCE.read_text(encoding="utf-8")
+    block = source.split('elif MIGRATION_VERSION == "4.4.10":', 1)[1].split('passed = bool(identity)', 1)[0]
+    assert 'if database == "pg":' in block
+    assert '51_v4_4_9_identity_boundary_repair.sql' in block
+    assert '53_v4_4_9_pg_runtime_boundary.sql' in block
+
+
 @pytest.mark.skipif(GENERATED, reason="cross-adapter identity implementation is a unified-source gate")
 def test_external_enrollment_provisions_identity_and_uses_request_scoped_context():
     identity_source = (ROOT / "shared" / "lib" / "identity_api.py").read_text(encoding="utf-8")
@@ -183,12 +195,26 @@ def test_notification_deadline_binds_as_cross_adapter_datetime():
     assert ":level" not in function
 
 
-def test_containment_signs_iso_but_binds_native_expiry():
+def test_containment_signs_iso_but_binds_local_database_expiry():
     source = (LIB_SOURCE / "admin_management.py").read_text(encoding="utf-8")
     function = source.split("def issue_containment", 1)[1].split("def pull_containment_command", 1)[0]
-    assert "expiry_at = datetime.now(timezone.utc)" in function
+    assert "datetime.now().astimezone().replace(tzinfo=None)" in function
     assert "expiry = expiry_at.isoformat()" in function
     assert '"expires": expiry_at' in function
+
+
+def test_community_external_agent_activation_avoids_enterprise_posture_tables():
+    identity = (LIB_SOURCE / "identity_api.py").read_text(encoding="utf-8")
+    redeem = identity.split("def redeem_enrollment", 1)[1].split("def activate_community_agent", 1)[0]
+    community = identity.split("def activate_community_agent", 1)[1].split("def list_enrollment_grants", 1)[0]
+    assert "if _compliance_enabled():" in redeem
+    assert "CX_AGENT_POSTURES" in redeem
+    assert "CX_AGENT_POSTURES" not in community
+    assert "COMMUNITY_GATEWAY_ACTIVATE" in community
+    web = WEB_APP_SOURCE.read_text(encoding="utf-8")
+    enterprise_paths = web.split("_ENTERPRISE_COMPLIANCE_PATHS =", 1)[1].split(")", 1)[0]
+    assert '"/api/gateway/activate"' not in enterprise_paths
+    assert "identity_api.activate_community_agent" in web
 
 
 @pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "pg", reason="PostgreSQL package contract")
@@ -368,6 +394,69 @@ def test_live_validator_selects_and_checks_the_v410_contract():
             scripts.extend([deploy / "51_v4_4_9_identity_boundary_repair.sql", deploy / "53_v4_4_9_pg_runtime_boundary.sql"])
         result = live_db_validator.validate_v410_static_contract(database, scripts)
         assert result["passed"] is True, result
+
+
+@pytest.mark.skipif(GENERATED, reason="cross-edition validator closure is a unified-source gate")
+def test_v410_community_static_contract_omits_enterprise_compliance_overlay():
+    deploy = ROOT / "adapters" / "oracle" / "deploy"
+    scripts = [
+        deploy / name
+        for name in live_db_validator.migration_scripts_for_edition(
+            live_db_validator.V410_MIGRATION_SCRIPTS, "community"
+        )
+    ]
+    result = live_db_validator.validate_v410_static_contract(
+        "oracle", scripts, "community"
+    )
+    control = result["v410_model_usage_wallboard"]
+    assert result["passed"] is True, result
+    assert "29_v4_3_4_agent_compliance.sql" not in control["scripts_required"]
+    assert "30_v4_3_4_compliance_hardening.sql" not in control["scripts_required"]
+
+
+@pytest.mark.skipif(GENERATED, reason="cross-edition validator closure is a unified-source gate")
+def test_v410_enterprise_static_contract_still_requires_compliance_overlay():
+    deploy = ROOT / "adapters" / "oracle" / "deploy"
+    scripts = [
+        deploy / name
+        for name in live_db_validator.V410_MIGRATION_SCRIPTS
+        if name not in live_db_validator.ENTERPRISE_ONLY_MIGRATION_SCRIPTS
+    ]
+    result = live_db_validator.validate_v410_static_contract(
+        "oracle", scripts, "enterprise"
+    )
+    missing = result["v410_model_usage_wallboard"]["scripts_missing"]
+    assert result["passed"] is False
+    assert set(missing) == live_db_validator.ENTERPRISE_ONLY_MIGRATION_SCRIPTS
+
+
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "oracle", reason="Oracle package contract")
+def test_oracle_external_gateway_migration_supports_community_data_roles():
+    deploy = DEPLOY_SOURCE if GENERATED else ROOT / "adapters" / "oracle" / "deploy"
+    source = (deploy / "63_v4_4_10_external_agent_gateway_grants.sql").read_text(encoding="utf-8").upper()
+    assert "CREATE DATA ROLE AGENT_DATA_ROLE" in source
+    assert "CREATE DATA ROLE POOL_AGENT_DATA_ROLE" in source
+    assert source.count("SQLCODE != -52514") == 2
+    assert "GRANT DEEP_SEC_SESSION_ROLE TO AGENT_DATA_ROLE" in source
+    assert "USER_TABLES WHERE TABLE_NAME='CX_AGENT_POSTURES'" in source
+    assert "USER_TABLES WHERE TABLE_NAME='CX_AGENT_POSTURE_EVIDENCE'" in source
+
+
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "pg", reason="PostgreSQL package contract")
+def test_pg_external_context_repair_treats_compliance_as_enterprise_overlay():
+    deploy = DEPLOY_SOURCE if GENERATED else ROOT / "adapters" / "pg" / "deploy"
+    source = (deploy / "64_v4_4_10_external_agent_context_repair.sql").read_text(encoding="utf-8").lower()
+    assert "to_regclass('public.cx_agent_postures') is not null" in source
+    assert "to_regclass('public.cx_agent_posture_evidence') is not null" in source
+    assert "force row level security" in source
+
+
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "yashandb", reason="YashanDB package contract")
+def test_yashandb_security_repair_uses_the_configured_schema_owner():
+    deploy = DEPLOY_SOURCE if GENERATED else ROOT / "adapters" / "yashandb" / "deploy"
+    source = (deploy / "50_v4_4_9_security_boundary_repair.sql").read_text(encoding="utf-8").upper()
+    assert "AIADMIN." not in source
+    assert "ON CX_PLATFORM_KNOWLEDGE FROM DEEP_SEC_SESSION_ROLE" in source
 
 
 def test_v410_live_contract_requires_external_embedding_authorization_table():
