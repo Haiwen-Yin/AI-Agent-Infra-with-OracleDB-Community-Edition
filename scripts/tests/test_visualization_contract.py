@@ -105,6 +105,14 @@ def test_portal_agent_lifecycle_is_isolated_by_node():
     assert "AGENT_ID LIKE 'AGENT_POOL_%'" not in content
 
 
+def test_portal_pool_config_can_be_serialized_after_database_round_trip():
+    """Oracle/YashanDB NUMBER values return as Decimal during Portal claim."""
+    for adapter in ("oracle", "pg", "yashandb"):
+        source = (Path(__file__).resolve().parents[2] / "adapters" / adapter / "agent_api.py").read_text(encoding="utf-8")
+        register = source.split("def register_agent(", 1)[1].split("def ", 1)[0]
+        assert "json.dumps(config, default=str)" in register
+
+
 def test_portal_agent_registration_does_not_reject_existing_identity():
     content = SERVER_PATH.read_text(encoding="utf-8")
     registration = (SERVER_PATH.parent.parent / "lib" / "agent_registration.py").read_text(encoding="utf-8")
@@ -736,6 +744,18 @@ def test_experimental_graph_filters_cover_registered_and_node_types():
     assert "graphApi('/api/graph-types')" in graph
     assert "data-execution-graph-type" in graph
     assert "data-execution-node-type" in graph
+
+
+def test_react_graph_explorer_uses_authoritative_definition_and_type_fields():
+    graph_page = (Path(__file__).resolve().parents[1] / "web" / "src" / "pages" / "GraphPage.tsx").read_text(encoding="utf-8")
+    assert 'field(row, ["graph_name", "name", "title"])' in graph_page
+    assert 'field(row, ["description", "summary"])' in graph_page
+    assert 'field(row, ["owner_ref", "owner"])' in graph_page
+    assert 'field(row, ["type_version", "version"])' in graph_page
+    assert 'field(row, ["graph_version_id", "version_id"])' in graph_page
+    assert 'text("说明", "Description")' in graph_page
+    assert 'text("版本", "Version")' in graph_page
+    assert 'text("类型", "Type")' not in graph_page.split('view === "definitions"', 1)[1].split('view === "types"', 1)[0]
 
 
 def test_experimental_graph_risk_levels_are_localized():

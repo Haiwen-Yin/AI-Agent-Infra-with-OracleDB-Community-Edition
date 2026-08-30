@@ -1529,6 +1529,7 @@ function PlatformPoolGovernancePanel({
 }: { lang: Lang; text: (zh: string, en: string) => string; onNotice: (value: string) => void }) {
   const [data, setData] = useState<Row>({ policy: {}, profiles: [], nodes: [], storage: [], bindings: [], onboardings: [], endpoints: [], enhancements: [] });
   const [busy, setBusy] = useState(false);
+  const [policySaved, setPolicySaved] = useState(false);
   const [bootstrap, setBootstrap] = useState<Row | null>(null);
   const load = async () => {
     try {
@@ -1554,7 +1555,8 @@ function PlatformPoolGovernancePanel({
     const form = new FormData(event.currentTarget);
     const selected = (data.profiles || []).filter((item: Row) => form.get(`profile_${item.profile_id}`) === "on").map((item: Row) => String(item.profile_id));
     setBusy(true);
-    try { await api("/api/platform/portal-llm-policy", { method: "PUT", body: JSON.stringify({ default_profile_id: String(form.get("default_profile_id") || ""), allowed_profile_ids: selected, expected_version: Number(data.policy?.policy?.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("Portal Agent Pool LLM 策略已保存", "Portal Agent Pool LLM policy saved")); }
+    setPolicySaved(false);
+    try { await api("/api/platform/portal-llm-policy", { method: "PUT", body: JSON.stringify({ default_profile_id: String(form.get("default_profile_id") || ""), allowed_profile_ids: selected, expected_version: Number(data.policy?.policy?.version || 1), reason: String(form.get("reason") || "") }) }); await load(); setPolicySaved(true); onNotice(text("Portal Agent Pool LLM 策略已保存", "Portal Agent Pool LLM policy saved")); }
     catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const startBootstrap = async (event: FormEvent<HTMLFormElement>) => {
@@ -1625,7 +1627,7 @@ function PlatformPoolGovernancePanel({
   const poolNodes = nodesFor("AGENT_POOL");
   const checkedIn = (data.onboardings || []).filter((item: Row) => String(item.status || "").toUpperCase() === "CHECKED_IN");
   const bootstrapCommand = bootstrap ? `python3.14 scripts/agent_pool_node.py --platform-url ${window.location.origin} --onboarding-id ${bootstrap.onboarding_id} --token ${bootstrap.bootstrap_token} --shared-path <pool-shared-path> --agent-info-path <agent-info-root> --heartbeat-seconds 60` : "";
-  return <div className="agent-pool-page"><InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
+  return <div className="agent-pool-page">{policySaved && <div className="cx-form-notice" role="status">{text("Portal Agent Pool LLM 策略已保存并立即生效。", "Portal Agent Pool LLM policy saved and applied immediately.")}</div>}<InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
     <p className="cx-form-hint">{text("按照主机方式接入时，必须完成登记、连通性验证、一次性引导回执、Agent Pool 运行时共享目录绑定、Agent 信息根目录绑定和管理员激活。每个 Agent 的本地文件必须位于其独立子目录，不能把目录内容当作授权。MaaS、SaaS、虚拟化等场景通过部署适配器接入；当前页面只提供适配器边界，不虚构通用自动部署。", "For host onboarding, complete registration, reachability validation, one-time bootstrap receipt, bindings for both the Agent Pool shared runtime directory and the Agent information root, and administrator activation. Each Agent's local files must stay in its own subdirectory; directory contents never grant authority. MaaS, SaaS, and virtualization connect through deployment adapters; this page exposes the adapter boundary and does not claim generic automatic deployment.")}</p>
     <form className="pool-config-block pool-llm-policy-form" onSubmit={savePolicy}><strong>{text("Portal Agent Pool LLM 允许列表", "Portal Agent Pool LLM allowlist")}</strong><p className="cx-form-hint">{text("Portal 只能切换到下方允许的 LLM。默认配置必须在允许列表中。", "Portal can switch only to LLMs allowed below. The default must be allowlisted.")}</p><div className="pool-llm-allowlist">{(data.profiles || []).length ? (data.profiles || []).map((item: Row) => <label className="checkbox-field" key={String(item.profile_id)}><input type="checkbox" name={`profile_${item.profile_id}`} defaultChecked={allowed.has(String(item.profile_id))} />{String(item.profile_key)} · {String(item.model_id)} · {String(item.health_state || "UNKNOWN")}</label>) : <p className="cx-form-hint">{text("请先在部署与模型中配置并测试 LLM。", "Configure and test an LLM in Deployment & models first.")}</p>}</div><div className="pool-policy-fields"><ConfigField label={text("默认 LLM", "Default LLM")} hint={text("只能选择已允许的配置。", "Choose an allowlisted profile.")}><select name="default_profile_id" defaultValue={String(data.policy?.policy?.default_profile_id || "")} required><option value="">{text("请选择", "Select")}</option>{(data.profiles || []).map((item: Row) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select></ConfigField><ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后立即应用。", "Applied after saving.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></ConfigField></div></form>
     <InfoPanel title={text("主机节点登记", "Host node registration")} text={text}><form className="configuration-form compact-configuration-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("Agent Pool 主机节点已登记，请继续验证可达性。", "Agent Pool host node registered. Validate reachability next.")); }}>
@@ -4244,6 +4246,28 @@ function OrganizationCanvas({
   const container = useRef<HTMLDivElement | null>(null);
   const network = useRef<VisNetwork | null>(null);
   const [error, setError] = useState("");
+  const [networkReady, setNetworkReady] = useState(false);
+
+  // Keep the organization view useful while the optional vis-network bundle
+  // is loading (or unavailable on a restricted network).  This SVG view is
+  // deliberately small and deterministic; vis-network takes over when ready.
+  const fallbackNodes = [...nodes].sort((a, b) =>
+    organizationNodeLabel(a).localeCompare(organizationNodeLabel(b)),
+  );
+  const fallbackWidth = orientation === "UD" ? 700 : Math.max(700, fallbackNodes.length * 190);
+  const fallbackHeight = orientation === "UD" ? Math.max(260, Math.ceil(fallbackNodes.length / 3) * 120) : 260;
+  const fallbackPosition = (node: Row, index: number) => {
+    const id = organizationNodeId(node);
+    const parent = node.parent_id ? String(node.parent_id) : "";
+    const parentIndex = fallbackNodes.findIndex((candidate) => organizationResourceId(candidate) === parent);
+    if (orientation === "UD") {
+      const depth = parentIndex >= 0 ? 1 : 0;
+      const siblings = fallbackNodes.filter((candidate) => (candidate.parent_id ? String(candidate.parent_id) : "") === parent);
+      const siblingIndex = Math.max(0, siblings.findIndex((candidate) => organizationNodeId(candidate) === id));
+      return { x: 120 + (parentIndex >= 0 ? siblingIndex * 220 : index * 220), y: 55 + depth * 130 };
+    }
+    return { x: 110 + (parentIndex >= 0 ? 1 : 0) * 260, y: 45 + index * 85 };
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -4366,6 +4390,7 @@ function OrganizationCanvas({
           },
         );
         network.current = instance;
+        setNetworkReady(true);
         instance.on("click", (params) => {
           const selected = nodes.find(
             (node) => organizationNodeId(node) === String(params.nodes?.[0]),
@@ -4421,6 +4446,7 @@ function OrganizationCanvas({
       cancelled = true;
       network.current?.destroy();
       network.current = null;
+      setNetworkReady(false);
     };
   }, [nodes, edges, orientation, editable, layoutVersion]);
 
@@ -4443,6 +4469,22 @@ function OrganizationCanvas({
               )}
         </div>
       ) : null}
+      {!networkReady && nodes.length > 0 && (
+        <svg className="organization-canvas-fallback" viewBox={`0 0 ${fallbackWidth} ${fallbackHeight}`} role="img" aria-label={text("组织架构示意图", "Organization structure diagram")}>
+          {edges.map((edge, index) => {
+            const from = fallbackNodes.findIndex((node) => organizationNodeId(node) === String(edge.from ?? edge.source ?? edge.parent_id));
+            const to = fallbackNodes.findIndex((node) => organizationNodeId(node) === String(edge.to ?? edge.target ?? edge.child_id));
+            if (from < 0 || to < 0) return null;
+            const a = fallbackPosition(fallbackNodes[from], from);
+            const b = fallbackPosition(fallbackNodes[to], to);
+            return <line key={String(edge.id || index)} x1={a.x} y1={a.y + 22} x2={b.x} y2={b.y - 22} />;
+          })}
+          {fallbackNodes.map((node, index) => {
+            const point = fallbackPosition(node, index);
+            return <g key={organizationNodeId(node)} transform={`translate(${point.x - 78},${point.y - 22})`}><rect width="156" height="44" rx="4" /><text x="78" y="27" textAnchor="middle">{organizationCanvasLabel(node, text).slice(0, 18)}</text></g>;
+          })}
+        </svg>
+      )}
       <div ref={container} className="organization-canvas" />
     </div>
   );
@@ -5084,14 +5126,16 @@ function OrganizationPage({
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("undo")}><Undo2 size={13} />{text("撤销", "Undo")}</button>
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("redo")}><Redo2 size={13} />{text("重做", "Redo")}</button>
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("validate")}><Check size={13} />{text("校验与影响分析", "Validate and analyze")}</button>
-                    <button className="small-button" disabled={!draft || busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("validate-submit")}><Send size={13} />{text("校验并提交审批", "Validate and submit")}</button>
+                    <button className="small-button" disabled={!draft || busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("validate-submit")}><Send size={13} />{(capabilities.features || []).includes("approvals") ? text("校验并提交审批", "Validate and submit") : text("校验并发布（COM）", "Validate and publish (COM)")}</button>
                   </>}
                   {String(draft?.status || "").toUpperCase() === "VALIDATED" && <>
                     <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布低风险变更", "Publish low-risk change")}</button>
                     <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("submit")}><ShieldCheck size={13} />{text("提交审批", "Submit for approval")}</button>
                   </>}
-                  {String(draft?.status || "").toUpperCase() === "PENDING_APPROVAL" &&
-                    <button className="small-button danger" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("withdraw")}><X size={13} />{text("撤回审批", "Withdraw approval")}</button>}
+                  {String(draft?.status || "").toUpperCase() === "PENDING_APPROVAL" && <>
+                    {!(capabilities.features || []).includes("approvals") && <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布（COM）", "Publish directly (COM)")}</button>}
+                    <button className="small-button danger" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("withdraw")}><X size={13} />{text("撤回审批", "Withdraw approval")}</button>
+                  </>}
                 </div>
                 <div className="organization-operation-list">
                   {operations.map((row, index) => <div key={String(row.operation_id || index)}><b>{displayRowValue(lang, row.operation_type || row.type)}</b><small>{String(row.subject_id || row.organization_id || "-")} → {String(row.target_id || row.new_parent_id || "-")}</small></div>)}

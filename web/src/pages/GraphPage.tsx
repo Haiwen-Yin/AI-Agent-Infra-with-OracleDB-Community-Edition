@@ -111,6 +111,28 @@ export default function GraphPage({ lang, text, onNotice }: Props) {
   const [detail, setDetail] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
   const display = (value: unknown) => String(value ?? "-").replaceAll("_", " ");
+  const graphTypeKind = (value: unknown) => {
+    const kind = String(value || "").toUpperCase();
+    const labels: Record<string, [string, string]> = {
+      NODE: ["节点", "Node"],
+      DECISION: ["决策", "Decision"],
+      REDUCER: ["归并器", "Reducer"],
+      EVALUATOR: ["评估器", "Evaluator"],
+    };
+    return labels[kind] ? `${text(...labels[kind])} (${kind})` : display(value);
+  };
+  const graphTypeName = (value: unknown) => {
+    const name = String(value || "").toUpperCase();
+    const labels: Record<string, [string, string]> = {
+      START: ["起始", "Start"], END: ["结束", "End"], AGENT: ["智能体", "Agent"],
+      MODEL: ["模型", "Model"], LOOP: ["循环", "Loop"], SKILL: ["技能", "Skill"],
+      TOOL: ["工具", "Tool"], HUMAN: ["人工节点", "Human"], TIMER: ["定时器", "Timer"],
+      SUBGRAPH: ["子图", "Subgraph"], FIXED: ["固定决策", "Fixed"],
+      EXPRESSION: ["表达式决策", "Expression"], REPLACE: ["替换", "Replace"],
+      APPEND: ["追加", "Append"], SET_UNION: ["集合并集", "Set union"], SUM: ["求和", "Sum"],
+    };
+    return labels[name] ? `${text(...labels[name])} (${name})` : display(value);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -153,9 +175,9 @@ export default function GraphPage({ lang, text, onNotice }: Props) {
     <div className="view-toggle" role="tablist">{tabs.map(([key, label, Icon]) => <button type="button" role="tab" aria-selected={view === key} className={view === key ? "active" : ""} key={key} onClick={() => changeView(key)}><Icon size={14} /><span>{label}</span></button>)}</div>
     {loading ? <div className="empty-state cx-data-loading" role="status"><span className="cx-loader spinner" /><span>{text("正在读取数据库", "Reading database")}</span></div> : <>
       {view === "overview" && <div className="metric-grid">{[[text("图定义", "Graph definitions"), graphs.length], [text("图类型", "Graph types"), types.length], [text("运行记录", "Runs"), runs.length], [text("实体关系", "Relationships"), (relations.edges || []).length]].map(([label, value]) => <div className="metric" key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}</div>}
-      {view === "definitions" && <section className="info-panel"><div className="panel-title"><h2>{text("图定义", "Graph definitions")}</h2></div>{table(["ID", text("名称", "Name"), text("类型", "Type"), text("状态", "Status")], graphs.map((row) => [detailButton(row, field(row, ["graph_id", "definition_id", "id"])), display(field(row, ["name", "title"])), display(field(row, ["kind", "type", "graph_type"])), display(field(row, ["status"]))]), text("暂无图定义", "No Graph definitions"))}</section>}
-      {view === "types" && <section className="info-panel"><div className="panel-title"><h2>{text("图类型", "Graph types")}</h2></div>{table([text("类型", "Type"), text("名称", "Name"), text("状态", "Status")], types.map((row) => [display(field(row, ["type_kind", "kind", "type", "graph_type"])), display(field(row, ["type_name", "name", "title"])), display(field(row, ["status"]))]), text("暂无图类型", "No Graph types"))}</section>}
-      {view === "runs" && <section className="info-panel"><div className="panel-title"><h2>{text("运行记录", "Graph runs")}</h2></div>{table(["ID", text("图", "Graph"), text("状态", "Status"), text("更新时间", "Updated")], runs.map((row) => [detailButton(row, field(row, ["run_id", "id"])), String(field(row, ["graph_id", "definition_id"])), display(field(row, ["status"])), String(field(row, ["updated_at", "created_at"]))]), text("暂无运行记录", "No runs"))}</section>}
+      {view === "definitions" && <section className="info-panel"><div className="panel-title"><h2>{text("图定义", "Graph definitions")}</h2></div>{table(["ID", text("名称", "Name"), text("说明", "Description"), text("所有者", "Owner"), text("状态", "Status")], graphs.map((row) => [detailButton(row, field(row, ["graph_id", "definition_id", "id"])), display(field(row, ["graph_name", "name", "title"])), display(field(row, ["description", "summary"])), display(field(row, ["owner_ref", "owner"])), display(field(row, ["status"]))]), text("暂无图定义", "No Graph definitions"))}</section>}
+      {view === "types" && <section className="info-panel"><div className="panel-title"><h2>{text("图类型", "Graph types")}</h2></div>{table([text("类型", "Type"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status")], types.map((row) => [graphTypeKind(field(row, ["type_kind", "kind", "type", "graph_type"])), graphTypeName(field(row, ["type_name", "name", "title"])), display(field(row, ["type_version", "version"])), display(field(row, ["status"]))]), text("暂无图类型", "No Graph types"))}</section>}
+      {view === "runs" && <section className="info-panel"><div className="panel-title"><h2>{text("运行记录", "Graph runs")}</h2></div>{table(["ID", text("图版本", "Graph version"), text("状态", "Status"), text("更新时间", "Updated")], runs.map((row) => [detailButton(row, field(row, ["run_id", "id"])), String(field(row, ["graph_version_id", "version_id"])), display(field(row, ["status"])), String(field(row, ["updated_at", "created_at"]))]), text("暂无运行记录", "No runs"))}</section>}
       {view === "relationships" && <section className="info-panel"><div className="panel-title"><h2>{text("实体关系图", "Entity relationship graph")}</h2><span>{(relations.nodes || []).length} {text("节点", "nodes")} · {(relations.edges || []).length} {text("关系", "relationships")}</span></div><RelationshipGraph nodes={relations.nodes || []} edges={relations.edges || []} text={text} onSelect={setDetail} /></section>}
     </>}
     {detail && <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}><aside className="detail-drawer" role="dialog" aria-modal="true"><div className="subhead"><h2>{text("图数据详情", "Graph data detail")}</h2><button className="icon-button" onClick={() => setDetail(null)} aria-label={text("关闭", "Close")}><X size={16} /></button></div><pre>{JSON.stringify(detail, null, 2)}</pre></aside></div>}

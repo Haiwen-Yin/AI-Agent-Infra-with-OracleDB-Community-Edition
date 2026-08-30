@@ -1296,6 +1296,28 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   width: 100%;
   height: 590px;
 }
+.organization-canvas-fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.organization-canvas-fallback line {
+  stroke: var(--muted);
+  stroke-width: 2;
+  opacity: .75;
+}
+.organization-canvas-fallback rect {
+  fill: var(--brand);
+  stroke: var(--brand-deep);
+  stroke-width: 1.5;
+}
+.organization-canvas-fallback text {
+  fill: #fff;
+  font: 12px "Noto Sans SC", "Source Sans 3", sans-serif;
+}
 .organization-canvas-help {
   min-height: 39px;
   margin: 0;

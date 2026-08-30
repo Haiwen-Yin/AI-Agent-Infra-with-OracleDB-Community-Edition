@@ -52,6 +52,18 @@ MAX_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_IMPORT_RECORDS = 100_000
 
 
+def _approvals_enabled() -> bool:
+    """Use the edition boundary for organization publication decisions."""
+    try:
+        from lib import edition_features
+    except ModuleNotFoundError:
+        try:
+            from shared.lib import edition_features
+        except ModuleNotFoundError:
+            return True
+    return bool(edition_features.has_feature("approvals"))
+
+
 class OrganizationError(ValueError):
     """Safe organization service error that does not enumerate hidden facts."""
 
@@ -1014,8 +1026,16 @@ def cancel_change_set(actor_principal_id: str, change_id: str, reason: str) -> D
 
 
 def submit_change_set(actor_principal_id: str, change_id: str) -> Dict[str, Any]:
-    """Freeze a validated draft and atomically enqueue its approval request."""
+    """Submit a change, or publish low-risk changes directly in Community."""
     _access(actor_principal_id, SUBMIT_ACTION)
+    if not _approvals_enabled():
+        change = _change_for_actor(change_id, actor_principal_id)
+        if str(change.get("status") or "").upper() != "VALIDATED":
+            raise OrganizationConflict("organization change must be validated before submission")
+        return publish_low_risk(
+            actor_principal_id, change_id,
+            "Community edition direct publication of validated low-risk organization change",
+        )
     approval_id = _id("APR")
 
     def work(tx: Any) -> Dict[str, Any]:
@@ -1560,6 +1580,31 @@ def publish_low_risk(actor_principal_id: str, change_id: str, reason: str) -> Di
     """Publish a validated low-risk change without placing it in the approval queue."""
     _access(actor_principal_id, PUBLISH_ACTION)
     return _publish_change(actor_principal_id, change_id, reason, expected_status="VALIDATED", low_risk_only=True)
+
+
+def publish_com_pending(actor_principal_id: str, change_id: str, reason: str) -> Dict[str, Any]:
+    """Recover a legacy Community pending request without exposing ENT approvals."""
+    if _approvals_enabled():
+        raise OrganizationError("Community direct publication is unavailable")
+    _access(actor_principal_id, PUBLISH_ACTION)
+    reason = _text(reason, "reason", 2000, required=True)
+    change = _change_for_actor(change_id, actor_principal_id, lock=False)
+    if str(change.get("status") or "").upper() != "PENDING_APPROVAL":
+        raise OrganizationConflict("organization change is not awaiting Community recovery")
+    if _risk_for(_operations(change_id)) != "LOW":
+        raise OrganizationError("organization change requires Enterprise approval")
+    request = _row(connection.execute_query_one(
+        "SELECT APPROVAL_ID FROM APPROVAL_REQUESTS WHERE ENTITY_TYPE='ORGANIZATION_CHANGE' "
+        "AND ENTITY_ID=:change_id AND APPROVAL_STATUS='PENDING' ORDER BY CREATED_AT DESC " + _limit("one_row"),
+        {"change_id": change_id, "one_row": 1},
+    ))
+    if not request:
+        raise OrganizationConflict("organization approval request is missing")
+    return _publish_change(
+        actor_principal_id, change_id, reason,
+        expected_status="PENDING_APPROVAL", low_risk_only=True,
+        approval_id=str(request["approval_id"]),
+    )
 
 
 def approve_change(actor_principal_id: str, approval_id: str, reason: str) -> Dict[str, Any]:

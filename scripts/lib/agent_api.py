@@ -71,8 +71,8 @@ def register_agent(
             UPDATE SET AGENT_NAME = :aname,
                        LAST_SEEN_AT = SYSTIMESTAMP
     """
-    caps_val = json.dumps(capabilities) if isinstance(capabilities, (dict, list)) else capabilities
-    cfg_val = json.dumps(config) if isinstance(config, (dict, list)) else config
+    caps_val = json.dumps(capabilities, default=str) if isinstance(capabilities, (dict, list)) else capabilities
+    cfg_val = json.dumps(config, default=str) if isinstance(config, (dict, list)) else config
     execute(sql, {
         "aid": agent_id,
         "aname": agent_name,

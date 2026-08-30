@@ -227,6 +227,19 @@ def test_pg_external_agent_domain_context_is_database_scoped():
     assert "CX_SECURITY_DOMAINS_AGENT_MEMBER" in sql
 
 
+@pytest.mark.skipif(GENERATED and GENERATED_DATABASE != "pg", reason="PostgreSQL package contract")
+def test_pg_agent_database_role_is_namespaced_by_database():
+    source = (
+        (LIB_SOURCE / "agent_api.py") if GENERATED
+        else (ROOT / "adapters" / "pg" / "agent_api.py")
+    ).read_text(encoding="utf-8")
+    function = source.split("def _agent_role_name", 1)[1].split("def _provision_agent_login", 1)[0]
+    assert "database_name" in function
+    assert 'f"{namespace}\\0{agent_id}"' in function
+    provision = source.split("def _provision_agent_login", 1)[1].split("def ensure_external_agent_identity", 1)[0]
+    assert "_agent_role_name(agent_id, db_cfg.dbname)" in provision
+
+
 @pytest.mark.skipif(GENERATED, reason="cross-adapter authorization migration is a unified-source gate")
 def test_external_embedding_authorization_is_declared_for_all_adapters():
     markers = {

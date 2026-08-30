@@ -4174,7 +4174,13 @@ def organization_change_action(
         elif action == "submit":
             result = organization_api.submit_change_set(actor, change_id)
         elif action == "publish":
-            result = organization_api.publish_low_risk(actor, change_id, body.reason)
+            pending = organization_api.get_change_set(actor, change_id)
+            features = _edition_features()
+            if (str(pending.get("status") or "").upper() == "PENDING_APPROVAL"
+                    and not (features and features.has_feature("approvals"))):
+                result = organization_api.publish_com_pending(actor, change_id, body.reason)
+            else:
+                result = organization_api.publish_low_risk(actor, change_id, body.reason)
         elif action == "withdraw":
             result = organization_api.withdraw_change_set(actor, change_id, body.reason)
         elif action == "discard":
