@@ -656,6 +656,22 @@ textarea {
   background: color-mix(in srgb, var(--brand) 14%, var(--surface));
   color: var(--brand-deep);
 }
+.detail-drawer .primary-button,
+.detail-drawer .small-button {
+  width: max-content;
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.detail-drawer .confirm-drawer-button {
+  justify-self: start;
+}
+.permission-picker .primary-button {
+  width: max-content;
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
 .text-button {
   padding: 0;
   border: 0;

@@ -1,4 +1,11 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.10
+# Deployment Guide - AI Agent Infra with DB v4.4.11
+
+Before selecting a Linux host, apply the two-level baseline in
+`docs/linux-platform-compatibility.md`: a host may support the Web/database
+control plane while remaining ineligible for `VERIFIED` local Agent execution.
+Oracle Linux 9.8 x86_64 is the only strong-isolation host currently verified by
+this project; other distributions require the packaged gate on their exact
+image and patch level.
 
 v4.4.10 adds optional model forwarding, usage/cost accounting, per-profile
 routing, and an authenticated read-only executive wallboard. It is the clean
@@ -181,7 +188,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.10 --database <oracle|pg|yashandb> \
+  --version 4.4.11 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -212,7 +219,7 @@ an Argon2id hash is stored.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.10 --database <oracle|pg|yashandb> \
+  --version 4.4.11 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json
 ```
 
@@ -230,7 +237,7 @@ another verified Python 3.14 environment.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.10 --database <oracle|pg|yashandb> \
+  --version 4.4.11 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json \
   --admin-password-file /run/secrets/chuanxu-initial-admin
 ```
@@ -351,22 +358,17 @@ only for the service process; it does not change `~/.bashrc`. Set
 `CX_YASHAN_LIB_DIR` only when an approved shared client-library location is
 required.
 
-The offline dependency set may contain both the upstream
-`cryptography==49.0.0` `manylinux_2_34` wheel and a source-built
-`manylinux_2_28` wheel for this server's RHEL 8/glibc 2.28 baseline. `pip` and
-`scripts/verify_deps.py` select the compatible file automatically. The source
-build is only required when producing the RHEL 8 compatibility wheel; customers
-on newer operating systems use the upstream wheel. See
-`cryptography-build.md` for the build and auditwheel requirements.
+The offline dependency set contains the upstream
+`cryptography==49.0.0` `manylinux_2_34` wheel. Full functionality requires
+RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent host with glibc 2.34 or newer; RHEL 8 and its
+`manylinux_2_28` compatibility wheel are retired and unsupported.
 The same wheelhouse must include `argon2-cffi==25.1.0`, its mandatory
 `argon2-cffi-bindings` wheel, `annotated-doc==0.0.4`, and `fastapi==0.120.4`.
-The verifier checks wheel metadata, Python/platform compatibility, and RECORD
-integrity before install. The current v4.3.5 artifact includes the verified
-glibc 2.28 compatibility wheel; `verify_deps.py` still fails closed if no
-compatible wheel is available.
+The verifier checks wheel metadata, Python/platform compatibility, glibc 2.34+
+host baseline, and RECORD integrity before install.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.10`. The current `production`
+through `migration_runner.py --version 4.4.11`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
@@ -897,6 +899,9 @@ Register Admin, Compliance, and Agent Pool hosts as managed nodes before using
 them as runtime targets. For an Agent Pool host, the Dashboard sequence is:
 
 1. Register the host, role, SSH port, operating-system user, and failure domain.
+   When SSH mutual trust is unavailable, choose `ONE_USE_PASSWORD` and enter
+   the masked password. It is accepted for this request only and discarded by
+   the API; it is never a reusable platform credential.
 2. Run bounded reachability validation. This does not become a remote shell.
 3. Issue a short-lived one-time bootstrap token and run the packaged
    `scripts/agent_pool_node.py` on the target host.
@@ -918,6 +923,13 @@ The binding is audited and describes a runtime storage location only; it does
 not grant data, database, Skill, Tool, or Channel access. MaaS, SaaS, and
 virtualization targets use deployment adapters rather than the Host bootstrap
 path. Removing a binding also requires an audited reason.
+
+Host onboarding is coordinated by the platform but executed on the target:
+the platform registers metadata, validates reachability, issues the one-time
+token, verifies the receipt, and records activation. The target Host Manager
+and `agent_pool_node.py` perform installation, lifecycle checks, and callback;
+the administrator explicitly starts the generated command and approves final
+activation. No step grants the platform an arbitrary root shell.
 
 #### Retiring a node or draining work
 
@@ -966,7 +978,7 @@ Agent instead of an external Skill runtime:
 
 ```bash
 bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --version 4.4.10 --config config.json
+  --edition <community|enterprise> --version 4.4.11 --config config.json
 ```
 
 The command verifies a strictly empty target, records a database-managed
@@ -1023,3 +1035,63 @@ plus external-Agent Memory Candidate submission, Human promotion, Agent-private
 Knowledge write/read, and company-wide publication denial. Store only the
 redacted combined evidence; never persist enrollment tokens, Client Secrets,
 Gateway tokens, database passwords, Provider keys, prompts, or model output.
+
+## v4.4.11 Deployment Gate
+
+Deploy v4.4.11 migrations 66-68 after the complete v4.4.10 chain and run
+package-local validators with Python 3.14. A Deployment
+Adapter may admit only the isolation level supported by verified evidence.
+Bundled reference adapters remain `UNVERIFIED`.
+
+Kubernetes/MaaS/SaaS connectors record tenant ID, namespace, service account,
+default-deny network policy, quota, storage binding, and KMS key. Reject host
+root paths and Docker/containerd/CRI sockets. Validate drift heartbeat before
+sending executable work.
+
+The local Linux implementation is `shared.lib.deployment_adapters.LinuxRuntimeAdapter`.
+It launches an argv-only bubblewrap sandbox through a transient systemd unit,
+loads a libseccomp BPF policy, applies cgroup v2 CPU/memory/PID limits, and
+records policy/rootfs digests plus host-observed evidence. It can report
+`VERIFIED` when the actual sandbox process proves all required boundaries; it
+remains `UNVERIFIED` and fails admission when host enforcement or evidence is
+unavailable. Network is default deny. A non-empty egress allowlist is rejected
+until a privileged firewall backend is configured. Container, VM, MaaS, and
+SaaS adapters are deferred until those environments are selected.
+
+On a fresh RHEL 9.8+ (Oracle Linux 9.8+) runtime host, create the management account
+and run the Host Manager bootstrap as root:
+
+```bash
+bash scripts/install_host_manager.sh --management-user chuanxu-admin
+```
+
+This installs the root-owned Unix-socket service and verifies management-user
+access, but does not automatically disable root SSH. After the separate
+provision/start/stop/revoke gate creates evidence with `passed=true` and
+`lifecycle_passed=true`, record the console or cloud recovery channel and
+finish the handoff:
+
+```bash
+bash scripts/install_host_manager.sh \
+  --management-user chuanxu-admin \
+  --verification-evidence /root/chuanxu-host-verification.json \
+  --recovery-channel "cloud-console:host-id" \
+  --disable-root-ssh
+```
+
+Agent Pool activation then requires a `VERIFIED` Runtime Host Profile and
+allocates a database-recorded non-root UID/GID lease per Agent Instance.
+
+The 2026-08-31 Oracle Linux 9.8 gate evidence is
+`release_evidence/v4.4.11-linux-runtime-isolation-ol98.json`. It covers private
+process and namespaces, filesystem and credentials, default-deny network,
+resource limits, ptrace denial, cross-Agent negatives, and revoke termination;
+it is not a VM, cloud-tenant, or capacity certification.
+The bounded 2026-08-31 performance evidence is
+`release_evidence/v4.4.11-platform-performance.json`; it covers authenticated
+concurrent wallboard aggregation across relational, full-text, vector, graph,
+JSON, and mixed multimodal paths and is not a capacity certification.
+
+On Oracle PDBs where Oracle Text or Deep Data Security is not installed, the
+optional Text index and DATA GRANT overlay are skipped with explicit evidence;
+core schema, application authorization, and migration ledger remain required.

@@ -1,4 +1,4 @@
-# Python Runtime Policy - AI Agent Infra with DB v4.4.10
+# Python Runtime Policy - AI Agent Infra with DB v4.4.11
 
 The release requires an accessible CPython **3.14 or newer** interpreter.
 There is no preferred vendor or installation source.
@@ -80,13 +80,11 @@ tags, and validates the hashes and sizes recorded in `dist-info/RECORD`.
 The current YashanDB package contains a `yaspy` CPython 3.14 native module;
 Python 3.15+ requires a matching driver module before that edition can run.
 
-The offline installer also checks the host glibc floor. The release may carry
-both the upstream `cryptography==49.0.0` `manylinux_2_34` wheel and a verified
-source-built `manylinux_2_28` wheel. The latter must be built on a glibc 2.28
-baseline and verified with `auditwheel`; it must never be created by renaming
-the upstream wheel. The current v4.3.2 package contains both verified wheels,
-so `verify_deps.py` selects the glibc 2.28 artifact on this host and the
-`manylinux_2_34` artifact on newer systems.
+The offline installer also checks the host glibc floor. v4.4.11 and later
+require glibc 2.34 or newer, matching the RHEL 9.8+ (Oracle Linux 9.8+) baseline. Each release
+contains only the upstream `cryptography==49.0.0` `manylinux_2_34` wheel; the
+former RHEL 8 `manylinux_2_28` compatibility wheel is retired and must not be
+reintroduced into release archives.
 
 The release build runs this offline dependency gate by default after all six
 archives are generated. `--skip-dependency-validate` is available only for

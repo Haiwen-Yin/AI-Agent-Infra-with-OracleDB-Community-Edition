@@ -1,0 +1,24 @@
+[Unit]
+Description=Chuanxu Root-owned Host Manager
+After=local-fs.target
+Before=chuanxu-web.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=@PYTHON_BIN@ @SERVICE_SCRIPT@ --uid-min @UID_MIN@ --uid-max @UID_MAX@ --socket-group chuanxu-admin
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/run/chuanxu /var/lib/chuanxu-runtime
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

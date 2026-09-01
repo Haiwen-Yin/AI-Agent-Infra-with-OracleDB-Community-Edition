@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.10
+# Security - AI Agent Infra with DB v4.4.11
 
 ## v4.4.10 Model Usage Boundary
 
@@ -806,3 +806,24 @@ owner separation and service scope. Effective-date defaults use the database
 clock, preventing host/database timezone drift from delaying policy activation.
 Wallboard validation rejects unknown fields, unsafe scope IDs, and oversized
 or non-allow-listed configuration.
+
+## v4.4.11 Runtime Isolation Security
+
+`DEDICATED_CONTAINER` and `DEDICATED_VM` require verified evidence for all six
+runtime boundaries. Namespace observation, a UI label, or Agent Card metadata
+does not prove isolation. Reference adapters remain `UNVERIFIED`.
+
+The local Linux adapter can return `VERIFIED` only after a real sandbox process
+proves private namespaces and `/proc`, non-root identity, seccomp,
+no-new-privileges, zero effective capabilities, read-only rootfs, cgroup
+CPU/memory/PID limits, default-deny network, and an evidence reference. The
+Oracle Linux 9.8 gate additionally proves cross-Agent process, workspace, and
+credential denial, ptrace denial, and revoke termination. Non-empty egress
+allowlists fail closed because selective firewall enforcement is not included
+in v4.4.11.
+
+An active contract is checked during Gateway Token authentication and event
+claim. Drift changes it to `DRAIN`; isolate, terminate, and revoke transitions
+revoke Tokens, and terminal transitions fence the Agent Instance. Tenant
+bindings reject host root paths and container runtime sockets. Host root and
+cloud infrastructure administrators remain outside this guarantee.

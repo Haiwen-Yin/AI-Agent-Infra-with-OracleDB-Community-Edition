@@ -1,12 +1,12 @@
 # AI-Agent-Infra-with-OracleDB-Community-Edition
 
-> **v4.4.10 · Community Edition · Oracle**
+> **v4.4.11 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
 ![License](https://img.shields.io/badge/License-Apache_2.0-green)
 
-## v4.4.10 Release Highlights
+## v4.4.11 Release Highlights
 
 The current release establishes a fresh deployment baseline with an optional
 model gateway and an authenticated, read-only executive wallboard. Each LLM
@@ -169,7 +169,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.4.10. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.4.11. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -180,7 +180,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.4.10.md   # release notes for this version
+├── RELEASE_NOTES_v4.4.11.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -228,7 +228,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
     ├── tests/                # pytest suite
     ├── tools/                # runtime encryption and release build helpers
     │   ├── encrypt_config.py
-    │   └── build_cryptography_wheel.sh # optional RHEL 8 wheel build
+    │   └── build_cryptography_wheel.sh # retired legacy builder (fails closed)
     └── visualization/
         ├── server.py         # HTTP server
         ├── static/
@@ -255,11 +255,9 @@ For offline environments, use the bundled `vendor/` wheels:
 ./scripts/install_offline.sh
 ```
 
-The release may carry two `cryptography==49.0.0` wheels: a source-built
-`manylinux_2_28` wheel for RHEL 8/glibc 2.28 and the upstream `manylinux_2_34`
-wheel for newer systems. `pip` and `scripts/verify_deps.py` select the wheel
-that matches the host. See `docs/cryptography-build.md` for the reproducible
-RHEL 8 build procedure; customers on newer systems do not need to rebuild it.
+The release carries the upstream `cryptography==49.0.0` `manylinux_2_34` wheel.
+Full functionality requires RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent Linux host with glibc
+2.34 or newer; RHEL 8 compatibility artifacts are not shipped.
 The verifier also walks the mandatory `Requires-Dist` metadata of selected
 wheels. Any transitive wheel required by the base installation must therefore
 be present and compatible, even when it is not repeated as a direct pin in
@@ -328,7 +326,7 @@ Environment variables override `config.json` values (see `config.py`).
 ### Database schema
 
 ```bash
-bash scripts/install_platform.sh initialize --version v4.4.10 --database oracle --edition <community|enterprise> --config config.json
+bash scripts/install_platform.sh initialize --version v4.4.11 --database oracle --edition <community|enterprise> --config config.json
 ```
 
 The interactive command prompts twice for a deployment-specific initial
@@ -417,7 +415,8 @@ not commit or package the real configuration.
 See `docs/` for in-depth material: `architecture.md`, `api-reference.md`,
 `security.md`, `deployment.md`, `minimum-privileges.md`, `migration.md`,
 `visualization.md`, `workspace.md`, `harness.md`, `loop-engineering.md`,
-`poc-readiness.md`, `cryptography-build.md`, `python-runtime.md`.
+`poc-readiness.md`, `cryptography-build.md`, `python-runtime.md`,
+`linux-platform-compatibility.md`, and `runtime-isolation.md`.
 
 For AI agents working on this codebase, see `docs/AGENTS.md`.
 
@@ -432,3 +431,11 @@ remain enabled and is unknown unless the gateway or a trusted adapter observes
 it. v4.4.10 is the fresh-deployment baseline; historical migration scripts are
 retained for reproducibility, not presented as customer upgrade paths. v4.4.8
 is withdrawn.
+
+## v4.4.11 Runtime Isolation And DB4A2A Boundary
+
+v4.4.11 adds evidence-bound Agent Instance isolation contracts, drift-driven
+lifecycle, and database-mediated task references with governed child-Branch
+provenance. Reference adapters remain `UNVERIFIED` and do not claim to create
+an OS sandbox, container, VM, or cloud boundary. Database authorization remains
+mandatory for every data operation.

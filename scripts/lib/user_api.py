@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.10 - Community Edition - User Management API
+"""AI Agent Infra v4.4.11 - Community Edition - User Management API
 
 User registration, profile, and user-scoped content retrieval.
 """

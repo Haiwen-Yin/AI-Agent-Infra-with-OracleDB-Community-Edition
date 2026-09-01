@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Optional
 
-from . import connection, identity_api, native_agent_api
+from . import connection, identity_api, native_agent_api, host_provisioning
 from .execution_evidence import build_execution_evidence
 
 
@@ -854,6 +854,11 @@ def register_node(actor: str, body: Dict[str, Any]) -> Dict[str, Any]:
     trust = str(body.get("trust_mode") or "MUTUAL_TRUST").upper()
     if trust not in {"MUTUAL_TRUST", "ONE_USE_PASSWORD"}:
         raise AgentPoolError("unsupported SSH trust mode")
+    # A password may be supplied only for this request when mutual trust is
+    # unavailable. It is intentionally never written to CX_MANAGED_NODES,
+    # audit records, or any other persistent store.
+    if trust == "ONE_USE_PASSWORD" and not str(body.get("ssh_password") or ""):
+        raise AgentPoolError("one-use SSH password is required for this connection mode")
     roles = {str(item).strip().upper() for item in (body.get("roles") or []) if str(item).strip()}
     local_path = str(body.get("agent_info_path") or "").strip()
     if ("ADMIN_AGENT" in roles or "AGENT_POOL" in roles) and not local_path:
@@ -1022,11 +1027,26 @@ def _verify_onboarding_token(onboarding_id: str, token: str, *, allow_active: bo
     return record
 
 
-def node_onboarding_checkin(onboarding_id: str, token: str, runtime_version: str, hostname: str, shared_path: str = "", agent_info_path: str = "") -> Dict[str, Any]:
+def node_onboarding_checkin(onboarding_id: str, token: str, runtime_version: str, hostname: str,
+                            shared_path: str = "", agent_info_path: str = "", *,
+                            runtime_preflight: Optional[Dict[str, Any]] = None,
+                            lifecycle_passed: bool = False,
+                            root_remote_login: str = "",
+                            recovery_channel: str = "") -> Dict[str, Any]:
     """Accept a bounded, token-authenticated receipt from the target host."""
     record = _verify_onboarding_token(onboarding_id, token, allow_active=False)
     if not str(runtime_version or "").strip() or not str(hostname or "").strip():
         raise AgentPoolError("runtime version and hostname are required for node check-in")
+    try:
+        host_receipt = host_provisioning.record_authenticated_host_receipt(
+            str(record["node_id"]), runtime_preflight or {},
+            lifecycle_passed=lifecycle_passed,
+            root_remote_login=root_remote_login,
+            recovery_channel=recovery_channel,
+            host_manager_version=runtime_version,
+        )
+    except host_provisioning.HostProvisioningError as exc:
+        raise AgentPoolError(str(exc)) from exc
     evidence = {"hostname": str(hostname)[:128], "shared_path": str(shared_path or "")[:512], "agent_info_path": str(agent_info_path or "")[:512], "receipt": "host_bootstrap"}
     connection.execute_transaction_callback(lambda tx: (
         tx.execute(
@@ -1037,11 +1057,12 @@ def node_onboarding_checkin(onboarding_id: str, token: str, runtime_version: str
         ),
         identity_api._audit_tx(tx, "POOL_NODE:" + str(record["node_id"]), "AGENT_POOL_NODE_CHECKIN", "AGENT_POOL_NODE_ONBOARDING", str(record["onboarding_id"]), "ALLOW", "host bootstrap receipt"),
     )[0])
-    return {"onboarding_id": record["onboarding_id"], "status": "CHECKED_IN", "next_step": "administrator_activation"}
+    return {"onboarding_id": record["onboarding_id"], "status": "CHECKED_IN",
+            "runtime_host": host_receipt, "next_step": "administrator_activation"}
 
 
 def activate_node_onboarding(actor: str, onboarding_id: str, reason: str) -> Dict[str, Any]:
-    """Activate only a checked-in Pool node with a dedicated storage binding."""
+    """Activate only a checked-in, runtime-verified Pool node."""
     _require_admin(actor)
     if len(str(reason or "").strip()) < 3:
         raise AgentPoolError("an activation reason is required")
@@ -1051,6 +1072,13 @@ def activate_node_onboarding(actor: str, onboarding_id: str, reason: str) -> Dic
     ))
     if not record or str(record.get("status") or "").upper() != "CHECKED_IN":
         raise AgentPoolError("a checked-in Agent Pool node onboarding is required")
+    runtime_host = _row(connection.execute_query_one(
+        "SELECT BOOTSTRAP_STATE,ROOT_REMOTE_LOGIN FROM CX_RUNTIME_HOST_PROFILES WHERE NODE_ID=:node",
+        {"node": record["node_id"]},
+    ))
+    if (not runtime_host or str(runtime_host.get("bootstrap_state") or "").upper() != "VERIFIED"
+            or str(runtime_host.get("root_remote_login") or "").upper() != "DISABLED"):
+        raise AgentPoolError("complete verified Host Manager bootstrap and disable remote root login before activation")
     bindings = _rows(connection.execute_query(
         "SELECT s.STORAGE_PURPOSE FROM CX_MANAGED_NODE_STORAGE_BINDINGS b "
         "JOIN CX_SHARED_STORAGE_PROFILES s ON s.STORAGE_ID=b.STORAGE_ID "

@@ -8,8 +8,8 @@ attrs==26.1.0
 certifi==2026.6.17
 cffi==2.1.0
 click==8.4.2
-# vendor/ may carry both a RHEL 8 manylinux_2_28 build and the upstream
-# manylinux_2_34 build; the pinned version must remain identical.
+# Release vendor/ contains the single supported manylinux_2_34 build. Full
+# functionality requires RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent glibc 2.34+ host.
 cryptography==49.0.0
 h11==0.16.0
 httpcore==1.0.9

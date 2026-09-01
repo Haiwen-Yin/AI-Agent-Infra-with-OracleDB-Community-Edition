@@ -32,13 +32,13 @@ def test_platform_floor_understands_legacy_and_modern_manylinux_tags():
     assert verify_deps._wheel_platform_floor("pkg-1-py3-none-any.whl") is None
 
 
-def test_rhel8_rejects_only_the_newer_cryptography_wheel():
-    rhel8 = (2, 28)
-    compatible = "cryptography-49.0.0-cp311-abi3-manylinux_2_28_x86_64.whl"
-    newer_only = "cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl"
-
-    assert verify_deps._wheel_is_platform_compatible(compatible, rhel8)
-    assert not verify_deps._wheel_is_platform_compatible(newer_only, rhel8)
+def test_full_platform_baseline_is_glibc_2_34():
+    assert verify_deps.MIN_GLIBC == (2, 34)
+    legacy = "cryptography-49.0.0-cp314-abi3-manylinux_2_28_x86_64.whl"
+    current = "cryptography-49.0.0-cp311-abi3-manylinux_2_34_x86_64.whl"
+    assert verify_deps._wheel_is_platform_compatible(current, (2, 34))
+    assert not verify_deps._wheel_is_platform_compatible(current, (2, 33))
+    assert verify_deps._wheel_is_platform_compatible(legacy, (2, 34))
 
 
 def test_newer_host_can_use_the_upstream_cryptography_wheel():

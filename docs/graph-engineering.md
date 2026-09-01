@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.4.10
+# Graph Engineering - AI Agent Infra with DB v4.4.11
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -188,3 +188,12 @@ admission. The requested Version and Plan must match before Ready work exists.
 Forking a plan with a non-repeatable external effect creates a paused child;
 approval or compensation evidence is required before resuming it. Agent Card
 and protocol metadata remain descriptive and cannot grant capabilities.
+
+## v4.4.11 DB4A2A Branch Provenance
+
+Within one trusted database boundary, DB4A2A sends a Context reference,
+snapshot digest, expected version, and scope instead of copying a large prompt
+payload. The receiver authenticates independently and reads only its authorized
+projection. `READ_ONLY` is the default; `CHILD_BRANCH_WRITE` forks through the
+existing Branch service and records source provenance. Merge remains governed.
+Standard A2A remains the cross-boundary fallback.

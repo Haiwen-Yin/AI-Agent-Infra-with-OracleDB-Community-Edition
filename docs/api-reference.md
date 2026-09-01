@@ -1,4 +1,24 @@
-# API Reference - AI Agent Infra with DB v4.4.10
+# API Reference - AI Agent Infra with DB v4.4.11
+
+## Runtime Host Provisioning APIs
+
+- `POST /api/platform/managed-nodes` registers a managed host. Set
+  `trust_mode=ONE_USE_PASSWORD` to submit an `ssh_password` for this request
+  only; the service validates presence and never persists or audits the secret.
+- `GET /api/platform/runtime-hosts` lists credential-free Host Manager and
+  bootstrap status.
+- `POST /api/platform/managed-nodes/{node_id}/runtime-preflight` records
+  structured Host Manager evidence and its digest.
+- `POST /api/platform/managed-nodes/{node_id}/complete-runtime-bootstrap`
+  records verified bootstrap, recovery channel, disabled remote root login,
+  and the reserved UID/GID range.
+- `POST /api/platform/runtime-identity-leases` allocates one non-root runtime
+  identity to an Agent Instance.
+- `DELETE /api/platform/runtime-identity-leases/{lease_id}` releases an
+  identity only after its runtime contract is no longer active.
+
+These endpoints require `hosts.read` or `hosts.manage`. They never expose a
+root credential or arbitrary shell operation.
 
 ## v4.4.10 Model Usage And Wallboard APIs
 
@@ -1103,3 +1123,18 @@ and rollback require `wallboard.manage`; `GET /api/wallboard` is read-only and
 returns only the authorized current publication. Every v4.4.10 error contains
 `code`, `message`, `correlation_id`, and `retryable` plus a matching
 `X-Correlation-ID` header.
+
+## v4.4.11 Runtime Isolation And DB4A2A APIs
+
+- `POST /api/runtime-isolation/contracts` validates and records one Agent
+  Instance isolation contract. Verified container/VM claims require all six
+  process, filesystem, IPC, network, resource, and credential boundaries.
+- `GET /api/runtime-isolation/contracts/{agent_id}/{instance_id}` reads the
+  current contract; `POST .../transition` applies version-fenced lifecycle changes.
+- `POST /api/gateway/runtime-heartbeat` compares runtime identity, policy, and
+  rootfs digests. Drift enters `DRAIN`; later Token and work admission fails.
+- `POST|GET /api/db4a2a/dispatches` writes or lists reference-oriented tasks.
+  `POST /api/db4a2a/dispatches/{dispatch_id}/branch` creates a governed child Branch.
+
+A context reference never grants access. The receiver's Principal, Agent
+Instance, organization, Security Domain, and database policies remain active.

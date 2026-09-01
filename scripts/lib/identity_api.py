@@ -73,6 +73,13 @@ ROLE_FALLBACKS = {
         },
         "scopes": {"ORG_SUBTREE"},
     },
+    "HOST_PROVISIONER": {
+        "permissions": {
+            "hosts.read", "hosts.manage", "agents.read", "agents.manage",
+            "agents.operate", "approvals.read", "audit.read",
+        },
+        "scopes": {"ALL"},
+    },
     "ORG_MANAGER": {
         "permissions": {
             "organizations.read", "organizations.manage",

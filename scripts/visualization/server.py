@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.10 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.11 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -56,7 +56,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.10"
+VERSION = "4.4.11"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -168,13 +168,14 @@ def _graph_operation_capability(path):
         return 'otel_export'
     if normalized.startswith('/api/graph-dynamic') or normalized.endswith('/migrate'):
         return 'graph_dynamic_migration'
-    if normalized.endswith('/replay') or (normalized.startswith('/api/graph/events/inbox/') and normalized.endswith('/replay')):
+    if normalized.startswith(('/api/graph/', '/api/graphs/', '/api/graph-')) and normalized.endswith('/replay'):
         return 'graph_replay'
-    if normalized.endswith('/fork'):
+    if normalized.startswith(('/api/graph/', '/api/graphs/', '/api/graph-')) and normalized.endswith('/fork'):
         return 'graph_checkpoint_fork'
     if normalized.startswith('/api/graph-assurance'):
         return 'graph_slo_readonly'
-    if normalized.startswith('/api/graph-manifest') or normalized.startswith('/api/graph-compat'):
+    if (normalized.startswith('/api/graph-manifest') or normalized.startswith('/api/graph-compat')
+            or normalized.startswith('/api/graphs/') and normalized.endswith('/import')):
         return 'graph_manifest_draft_import'
     if normalized.startswith(('/api/graphs', '/api/graph-', '/api/graph/')):
         return 'graph_runtime_core'
@@ -4936,8 +4937,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.10', VERSION)
-            html = html.replace('2026-08-27', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.11', VERSION)
+            html = html.replace('2026-08-31', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

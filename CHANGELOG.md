@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.4.11 - 2026-08-31
+
+- Added evidence-bound Runtime isolation admission and drift detection.
+- Added DB4A2A reference dispatch, snapshot consistency, and child-Branch provenance.
+- Added migration 66 and authenticated APIs across Oracle, PostgreSQL, and YashanDB.
+- Kept reference adapters explicitly unverified and retained closed Graph interoperability boundaries.
+
 ## v4.4.10 - 2026-08-27
 
 - Validates all three Enterprise editions from dedicated zero-object targets:

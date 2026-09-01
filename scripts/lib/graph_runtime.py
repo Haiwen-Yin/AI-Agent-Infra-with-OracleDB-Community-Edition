@@ -1904,7 +1904,7 @@ def fork_replay_decision(plan: Dict[str, Any]) -> Dict[str, Any]:
     non_repeatable = sorted({
         str(node.get("node_key") or "")
         for node in nodes if isinstance(node, dict)
-        and str(node.get("side_effect_class") or "NONE").upper() == "NON_IDEMPOTENT"
+        and str(node.get("side_effect_class") or "NONE").upper() not in {"NONE", "IDEMPOTENT_EXTERNAL"}
         and str(node.get("node_key") or "").strip()
     })
     return {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Chuanxu v4.4.10 - AI Agent Infra v4.4.10 - {{EDITION_LABEL}} unified FastAPI/Uvicorn server controller.
+# Chuanxu v4.4.11 - AI Agent Infra v4.4.11 - Oracle Community unified FastAPI/Uvicorn server controller.
 
 set -euo pipefail
 
@@ -34,7 +34,7 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR/scripts:$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export CX_DATABASE_DIALECT="$DB_DIALECT"
 export CX_RUNTIME_PROFILE="$PROFILE"
-export AI_AGENT_RELEASE_DATE="2026-08-24"
+export AI_AGENT_RELEASE_DATE="2026-08-31"
 
 read_config() {
   "$PYTHON" - "$1" "$2" <<'PY'
@@ -68,6 +68,14 @@ is_running() {
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
 }
 
+health_ready() {
+  "$PYTHON" - "$HOST" "$PORT" <<'PY' >/dev/null 2>&1
+import sys, urllib.request
+host, port = sys.argv[1:]
+urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1).read()
+PY
+}
+
 stop_server() {
   if ! is_running; then
     rm -f "$PID_FILE"
@@ -95,6 +103,11 @@ start_server() {
     echo "Chuanxu is already running (PID $(<"$PID_FILE"))."
     return 0
   fi
+  rm -f "$PID_FILE"
+  if health_ready; then
+    echo "Port $PORT is already serving an untracked process; stop it before starting Chuanxu." >&2
+    return 1
+  fi
   if [[ -x "$SCRIPT_DIR/scripts/config_wizard.sh" && ! -f "$SCRIPT_DIR/config.json" && -z "${CX_CONFIG_PATH:-}" ]]; then
     "$SCRIPT_DIR/scripts/config_wizard.sh"
   fi
@@ -106,20 +119,21 @@ start_server() {
     echo "FastAPI and Uvicorn are not installed for the selected Python. Run scripts/install_offline.sh with the same Python 3.14+ interpreter, then retry." >&2
     exit 1
   fi
-  echo "Starting Chuanxu v4.4.10 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
+  echo "Starting Chuanxu v4.4.11 ($DB_DIALECT, $PROFILE) on $HOST:$PORT"
   setsid nohup "$PYTHON" -m uvicorn web_app:app --host "$HOST" --port "$PORT" \
     --proxy-headers --no-access-log >>"$LOG_FILE" 2>&1 &
   echo "$!" >"$PID_FILE"
   for _ in {1..40}; do
     if is_running; then
-      if "$PYTHON" - "$HOST" "$PORT" <<'PY' >/dev/null 2>&1
-import sys, urllib.request
-host, port = sys.argv[1:]
-urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1).read()
-PY
-      then
-        echo "Chuanxu started (PID $(<"$PID_FILE"))."
-        return 0
+      if health_ready; then
+        # A different process may own the port while this child is still
+        # failing startup. Require the launched PID to survive beyond the
+        # health response before reporting success.
+        sleep 0.5
+        if is_running; then
+          echo "Chuanxu started (PID $(<"$PID_FILE"))."
+          return 0
+        fi
       fi
     fi
     sleep 0.5

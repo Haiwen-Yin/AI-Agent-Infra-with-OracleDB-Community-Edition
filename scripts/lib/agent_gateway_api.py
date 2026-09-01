@@ -145,6 +145,12 @@ def issue_access_token(agent_id: str, instance_id: str, scopes: Iterable[str], *
     if (not instance or str(instance.get("status") or "").upper() != "ACTIVE"
             or str(instance.get("agent_status") or "").upper() != "ACTIVE"):
         raise GatewayError("agent instance is unavailable")
+    isolation = identity_api._row(connection.execute_query_one(
+        "SELECT STATUS FROM CX_RUNTIME_ISOLATION_CONTRACTS WHERE AGENT_ID=:agent_id AND INSTANCE_ID=:instance_id",
+        {"agent_id": agent_id, "instance_id": instance_id},
+    ))
+    if isolation and str(isolation.get("status") or "").upper() != "ACTIVE":
+        raise GatewayError("runtime isolation contract blocks token issuance")
     scope_list = sorted({str(scope).strip() for scope in scopes if str(scope).strip()})
     operation = "remediation" if scope_list and set(scope_list) <= {"compliance.evidence", "compliance.remediation"} else "token"
     if not _compliance_allows(agent_id, operation):
@@ -351,7 +357,12 @@ def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: s
         "AND t.AGENT_ID = i.AGENT_ID "
         "AND t.EXPIRES_AT > CURRENT_TIMESTAMP AND i.STATUS = 'ACTIVE' "
         "AND i.LEASE_EXPIRES_AT > CURRENT_TIMESTAMP AND p.STATUS = 'ACTIVE' "
-        "AND t.FENCING_TOKEN = i.FENCING_TOKEN", {"digest": _digest(raw_token, "agent-access-token")},
+        "AND t.FENCING_TOKEN = i.FENCING_TOKEN "
+        "AND (NOT EXISTS (SELECT 1 FROM CX_RUNTIME_ISOLATION_CONTRACTS ric "
+        "WHERE ric.AGENT_ID=t.AGENT_ID AND ric.INSTANCE_ID=t.INSTANCE_ID) OR EXISTS "
+        "(SELECT 1 FROM CX_RUNTIME_ISOLATION_CONTRACTS ric WHERE ric.AGENT_ID=t.AGENT_ID "
+        "AND ric.INSTANCE_ID=t.INSTANCE_ID AND ric.STATUS='ACTIVE'))",
+        {"digest": _digest(raw_token, "agent-access-token")},
     ))
     if not row or (agent_id and str(row.get("agent_id")) != agent_id) or (instance_id and str(row.get("instance_id")) != instance_id):
         return None
@@ -388,6 +399,10 @@ def claim_events(agent_id: str, instance_id: str, limit: int = 50) -> list[Dict[
         "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = d.AGENT_ID "
         "WHERE d.AGENT_ID = :agent_id AND d.INSTANCE_ID = :instance_id AND i.STATUS = 'ACTIVE' "
         "AND p.STATUS = 'ACTIVE' AND i.LEASE_EXPIRES_AT > CURRENT_TIMESTAMP "
+        "AND (NOT EXISTS (SELECT 1 FROM CX_RUNTIME_ISOLATION_CONTRACTS ric "
+        "WHERE ric.AGENT_ID=d.AGENT_ID AND ric.INSTANCE_ID=d.INSTANCE_ID) OR EXISTS "
+        "(SELECT 1 FROM CX_RUNTIME_ISOLATION_CONTRACTS ric WHERE ric.AGENT_ID=d.AGENT_ID "
+        "AND ric.INSTANCE_ID=d.INSTANCE_ID AND ric.STATUS='ACTIVE')) "
         "AND (d.FENCING_TOKEN IS NULL OR d.FENCING_TOKEN = i.FENCING_TOKEN) "
         "AND d.ATTEMPT_COUNT < d.MAX_ATTEMPTS AND (d.STATUS = 'PENDING' OR "
         "(d.STATUS = 'CLAIMED' AND d.VISIBILITY_UNTIL <= CURRENT_TIMESTAMP)) "

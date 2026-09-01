@@ -99,7 +99,7 @@ cx_validate_explicit_python() {
         return 1
     }
     if [[ ! -x "$resolved" ]]; then
-        echo "[python] executable is not accessible or executable: $candidate" >&2
+        echo "[python] executable is not accessible or executable: $candidate (Python 3.14+ is required)" >&2
         return 1
     fi
     if ! cx_python_supported "$resolved"; then

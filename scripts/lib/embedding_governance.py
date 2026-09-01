@@ -1005,7 +1005,7 @@ def gateway_embeddings(actor: str, input_value: Any, *, requested_model: str = "
     request_params = {
         "id": request_id, "actor": actor, "agent": actor,
         "profile": str(profile.get("profile_id") or ""), "model": model_id,
-        "key": key or None, "digest": input_digest,
+        "key": key or request_id, "digest": input_digest,
         "correlation": _text(correlation_id, 128) or request_id,
     }
     connection.execute(

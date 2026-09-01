@@ -280,7 +280,7 @@ def forward(actor: str, provider_profile_id: str, messages: List[Dict[str, Any]]
     if replay is not None:
         return replay
     _reserve_idempotency(actor, idempotency_key, input_digest)
-    connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'AUTHORIZED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or None, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
+    connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'AUTHORIZED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or request_id, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
     try:
         quota = model_governance_api.reserve_quota(request_id, actor, context["credential_id"], agent_id, provider_profile_id, str(profile.get("model_id") or ""))
     except model_governance_api.QuotaExceeded:
@@ -325,7 +325,7 @@ def stream_forward(actor: str, provider_profile_id: str, messages: List[Dict[str
     if not profile: raise ModelUsageError("LLM provider profile is unavailable")
     request_id, started, input_digest = _id("LMR"), time.monotonic(), _digest(messages)
     _reserve_idempotency(actor, idempotency_key, input_digest)
-    connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'DISPATCHED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or None, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
+    connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'DISPATCHED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or request_id, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
     try:
         model_governance_api.reserve_quota(request_id, actor, context["credential_id"], agent_id, provider_profile_id, str(profile.get("model_id") or ""))
     except model_governance_api.QuotaExceeded:

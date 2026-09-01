@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.4.10
+# Architecture - AI Agent Infra with DB v4.4.11
 
 ## v4.4.10 Model Usage And Executive Visibility Plane
 
@@ -786,3 +786,27 @@ published projection to the read-only viewer. Widget/dimension registries are
 allowlists, versions are immutable, and scope is pushed into aggregates.
 External activity is observable only through gateway facts or a trusted signed
 adapter; unknown direct activity remains unknown.
+
+## v4.4.11 Runtime And Collaboration Planes
+
+Runtime isolation and database authorization are independent authorities.
+`CX_RUNTIME_ISOLATION_CONTRACTS` records adapter evidence for process,
+filesystem, IPC, network, resource, and credential boundaries. RLS/Data Grant
+still decides which rows the runtime may access. Identity, policy, or rootfs
+drift enters `DRAIN` and blocks new Gateway admission.
+
+For local Linux, a transient systemd unit provides per-Agent UID/GID and cgroup
+v2 limits while bubblewrap provides private namespaces, read-only rootfs,
+private work/secrets, zero capabilities, seccomp, and default-deny networking.
+Only evidence from the actual sandbox PID can promote the contract to
+`VERIFIED`; selective egress is fail closed until a firewall backend exists.
+Container, VM, MaaS, and SaaS adapters remain target-specific future work.
+Linux distribution support is evidence-based rather than name-based. The
+control plane may run on a wider glibc/Python baseline, while an untrusted local
+Agent requires unified cgroup v2, systemd, namespaces, seccomp, an enforcing
+LSM, and a passing host isolation gate. See
+`docs/linux-platform-compatibility.md`.
+
+DB4A2A keeps small control events in Agent protocol while Context, Knowledge,
+Memory, Artifact, Graph, and Branch data remain in the governed database. A
+writable dispatch creates a child Branch with source provenance.

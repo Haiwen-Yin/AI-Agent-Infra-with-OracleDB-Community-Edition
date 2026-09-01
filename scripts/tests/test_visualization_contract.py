@@ -107,8 +107,11 @@ def test_portal_agent_lifecycle_is_isolated_by_node():
 
 def test_portal_pool_config_can_be_serialized_after_database_round_trip():
     """Oracle/YashanDB NUMBER values return as Decimal during Portal claim."""
-    for adapter in ("oracle", "pg", "yashandb"):
-        source = (Path(__file__).resolve().parents[2] / "adapters" / adapter / "agent_api.py").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[2]
+    sources = ([root / "scripts" / "lib" / "agent_api.py"] if (root / "build-manifest.json").is_file()
+               else [root / "adapters" / adapter / "agent_api.py" for adapter in ("oracle", "pg", "yashandb")])
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
         register = source.split("def register_agent(", 1)[1].split("def ", 1)[0]
         assert "json.dumps(config, default=str)" in register
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.14
-"""AI Agent Infra v4.4.10 - Config Encryption CLI Tool
+"""AI Agent Infra v4.4.11 - Config Encryption CLI Tool
 
 Encrypts/decrypts/rotates/verifies sensitive sections in config.json.
 Supports database, security, llm, and model_routing sections.

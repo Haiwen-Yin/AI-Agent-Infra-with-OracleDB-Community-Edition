@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.10 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.11 Unified Repository Guide
 
-> **v4.4.10** - The unified single-source repository that generates all 6 release
+> **v4.4.11** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -213,11 +213,17 @@ Never hardcode version numbers in source — `build.py` rewrites them.
 "$PYTHON_BIN" spec_validator.py --json                   # machine-readable
 ```
 
-The dependency wheelhouse can carry multiple platform wheels for one pinned
-package version. In particular, `cryptography==49.0.0` uses a source-built
-`manylinux_2_28` wheel for RHEL 8/glibc 2.28 and the upstream
-`manylinux_2_34` wheel on newer systems. Keep both when cutting a release and
-run `docs/cryptography-build.md` plus `scripts/verify_deps.py` before packaging.
+The dependency wheelhouse carries one current platform wheel per pinned
+package. `cryptography==49.0.0` uses the upstream `manylinux_2_34` wheel.
+Release validation requires RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent glibc 2.34+ host; the
+retired RHEL 8 wheel must not be restored. Run `scripts/verify_deps.py` before
+packaging.
+
+Linux control-plane compatibility and verified local-Agent isolation are
+separate release claims. Use `docs/linux-platform-compatibility.md` and require
+the packaged host gate before marking an exact distribution image as suitable
+for strong same-host isolation. A vendor family name or newer version number is
+not evidence.
 The build runs this gate by default and also verifies wheel METADATA,
 Requires-Python, platform tags, and RECORD hashes. Use
 `--skip-dependency-validate` only for a diagnostic build with an intentionally
@@ -392,7 +398,7 @@ the protected baseline database.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.10`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.11`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

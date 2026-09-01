@@ -51,11 +51,20 @@ def test_migration_runner_imports_the_v410_static_validator():
 
 
 def test_v410_preflight_includes_postgres_security_repair_overlays():
-    source = RUNNER_SOURCE.read_text(encoding="utf-8")
-    block = source.split('elif MIGRATION_VERSION == "4.4.10":', 1)[1].split('passed = bool(identity)', 1)[0]
-    assert 'if database == "pg":' in block
+    import inspect
+    block = inspect.getsource(migration_runner._v449_script_names)
+    assert 'if database == "pg"' in block
     assert '51_v4_4_9_identity_boundary_repair.sql' in block
     assert '53_v4_4_9_pg_runtime_boundary.sql' in block
+
+
+@pytest.mark.skipif(GENERATED, reason="cross-adapter YashanDB compatibility gate")
+def test_yashandb_model_request_repair_backfills_empty_idempotency_keys():
+    sql = (ROOT / "adapters" / "yashandb" / "deploy" /
+           "56_v4_4_10_runtime_repair.sql").read_text(encoding="utf-8").upper()
+    assert "SET IDEMPOTENCY_KEY='AUTO:' || REQUEST_ID WHERE IDEMPOTENCY_KEY IS NULL" in sql
+    source = (ROOT / "shared" / "lib" / "model_usage_api.py").read_text(encoding="utf-8")
+    assert '"key": idempotency_key[:160] or request_id' in source
 
 
 @pytest.mark.skipif(GENERATED, reason="cross-adapter identity implementation is a unified-source gate")

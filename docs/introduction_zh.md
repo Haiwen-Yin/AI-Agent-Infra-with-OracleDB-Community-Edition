@@ -1,6 +1,6 @@
-# AI Agent Infra with OracleDB — 社区版 v4.4.10
+# AI Agent Infra with OracleDB — 社区版 v4.4.11
 
-**版本**: v4.4.10 | **日期**: 2026-08-27 | **作者**: 尹海文 | **许可**: Apache License 2.0
+**版本**: v4.4.11 | **日期**: 2026-08-31 | **作者**: 尹海文 | **许可**: Apache License 2.0
 
 📄 **官方网站：https://db4agent.cn**
 

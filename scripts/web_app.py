@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.10 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.11 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -35,16 +35,16 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
-    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, platform_governance_graph as governance_graph_module
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.10"
+VERSION = "4.4.11"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -229,13 +229,14 @@ def _graph_operation_capability(path: str) -> Optional[str]:
         return "otel_export"
     if normalized.startswith("/api/graph-dynamic") or normalized.endswith("/migrate"):
         return "graph_dynamic_migration"
-    if normalized.endswith("/replay") or normalized.startswith("/api/graph/events/inbox/") and normalized.endswith("/replay"):
+    if normalized.startswith(("/api/graph/", "/api/graphs/", "/api/graph-")) and normalized.endswith("/replay"):
         return "graph_replay"
-    if normalized.endswith("/fork"):
+    if normalized.startswith(("/api/graph/", "/api/graphs/", "/api/graph-")) and normalized.endswith("/fork"):
         return "graph_checkpoint_fork"
     if normalized.startswith("/api/graph-assurance"):
         return "graph_slo_readonly"
-    if normalized.startswith("/api/graph-manifest") or normalized.startswith("/api/graph-compat"):
+    if (normalized.startswith("/api/graph-manifest") or normalized.startswith("/api/graph-compat")
+            or normalized.startswith("/api/graphs/") and normalized.endswith("/import")):
         return "graph_manifest_draft_import"
     if normalized.startswith(("/api/graphs", "/api/graph-", "/api/graph/")):
         return "graph_runtime_core"
@@ -1511,7 +1512,30 @@ class ManagedNodeBody(BaseModel):
     roles: list[str] = Field(default_factory=list, max_length=8)
     failure_domain: str = Field(default="", max_length=128)
     trust_mode: str = Field(default="MUTUAL_TRUST", max_length=32)
+    # Accepted only for a one-use verification request; register_node never persists it.
+    ssh_password: str = Field(default="", max_length=2048)
     agent_info_path: str = Field(default="", max_length=512)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class RuntimeHostPreflightBody(BaseModel):
+    evidence: Dict[str, Any]
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class RuntimeHostBootstrapBody(BaseModel):
+    host_manager_version: str = Field(min_length=1, max_length=128)
+    recovery_channel: str = Field(min_length=3, max_length=512)
+    root_remote_login: str = Field(default="DISABLED", max_length=16)
+    uid_min: int = Field(default=200000, ge=100000, le=2000000000)
+    uid_max: int = Field(default=299999, ge=100001, le=2000000000)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class RuntimeIdentityLeaseBody(BaseModel):
+    node_id: str = Field(min_length=1, max_length=128)
+    agent_id: str = Field(min_length=1, max_length=128)
+    instance_id: str = Field(min_length=1, max_length=128)
     reason: str = Field(min_length=3, max_length=2000)
 
 
@@ -1547,6 +1571,10 @@ class AgentPoolNodeCheckinBody(BaseModel):
     hostname: str = Field(min_length=1, max_length=128)
     shared_path: str = Field(default="", max_length=512)
     agent_info_path: str = Field(default="", max_length=512)
+    runtime_preflight: Dict[str, Any]
+    lifecycle_passed: bool
+    root_remote_login: str = Field(max_length=16)
+    recovery_channel: str = Field(min_length=3, max_length=512)
 
 
 class AgentPoolNodeHeartbeatBody(BaseModel):
@@ -1670,6 +1698,49 @@ class NativeAgentRequestBody(BaseModel):
 class NativeAgentDecisionBody(BaseModel):
     decision: str = Field(min_length=1, max_length=32)
     reason: str = Field(min_length=3, max_length=2000)
+
+
+class RuntimeIsolationContractBody(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=128)
+    instance_id: str = Field(min_length=1, max_length=128)
+    isolation_level: str = Field(min_length=1, max_length=32)
+    enforcement_mode: str = Field(min_length=1, max_length=32)
+    runtime_adapter: str = Field(min_length=1, max_length=128)
+    runtime_identity: str = Field(default="", max_length=256)
+    boundaries: list[str] = Field(default_factory=list, max_length=16)
+    policy_digest: str = Field(default="", max_length=256)
+    rootfs_digest: str = Field(default="", max_length=256)
+    evidence_ref: str = Field(default="", max_length=512)
+    external_agent: bool = False
+
+
+class RuntimeIsolationHeartbeatBody(BaseModel):
+    runtime_identity: str = Field(min_length=1, max_length=256)
+    policy_digest: str = Field(default="", max_length=256)
+    rootfs_digest: str = Field(default="", max_length=256)
+
+
+class RuntimeIsolationTransitionBody(BaseModel):
+    target_state: str = Field(min_length=1, max_length=32)
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class DB4A2ADispatchBody(BaseModel):
+    receiver_agent_id: str = Field(min_length=1, max_length=128)
+    task_id: str = Field(min_length=1, max_length=256)
+    context_ref: str = Field(min_length=1, max_length=256)
+    snapshot_digest: str = Field(min_length=1, max_length=256)
+    expected_version: int = Field(ge=1)
+    scope_ref: str = Field(min_length=1, max_length=256)
+    source_branch: str = Field(default="", max_length=256)
+    branch_policy: str = Field(default="READ_ONLY", max_length=32)
+    transport: str = Field(default="DB_MEDIATED", max_length=32)
+
+
+class DB4A2ABranchBody(BaseModel):
+    branch_name: str = Field(min_length=1, max_length=256)
+    purpose: str = Field(min_length=1, max_length=500)
 
 
 class NativeAgentActivationBody(BaseModel):
@@ -1859,7 +1930,31 @@ def _browser_session_expiry(value: Any) -> str:
 
 def _session_from_request(request: Request, scope: str = "DASHBOARD") -> Optional[Dict[str, Any]]:
     normalized_scope = str(scope or "").upper()
-    raw = request.cookies.get(_cookie_name(normalized_scope, request.url.port))
+    # Deployments may be reverse-proxied or exposed on an arbitrary port.  In
+    # that case Starlette's parsed URL port can differ from the port used when
+    # the login response minted the cookie.  Resolve the exact current name
+    # first, then the configured port and finally the historical unqualified
+    # cookie names so compatibility routes share the same session as modern
+    # FastAPI routes.
+    prefix = "portal_session_id" if normalized_scope == "PORTAL" else "dashboard_session_id"
+    candidate_names = []
+    for candidate_port in (
+        request.url.port,
+        os.environ.get("MEMORY_SERVER_PORT"),
+        request.headers.get("x-forwarded-port"),
+    ):
+        if candidate_port is None:
+            continue
+        name = f"{prefix}_{str(candidate_port).strip()}"
+        if name not in candidate_names:
+            candidate_names.append(name)
+    candidate_names.extend((prefix,))
+    raw = next((request.cookies.get(name) for name in candidate_names if request.cookies.get(name)), None)
+    if not raw:
+        # Last-resort compatibility for proxies that rewrite cookie suffixes;
+        # only accept the scope-specific prefix and never a foreign session.
+        raw = next((value for name, value in request.cookies.items()
+                    if str(name).startswith(prefix + "_") and value), None)
     if not raw:
         return None
     cached = getattr(request.state, "cx_session_cache", None)
@@ -2731,6 +2826,139 @@ def deployment_targets(
         raise _identity_http_error(exc, "Deployment targets are unavailable") from exc
 
 
+@app.post("/api/runtime-isolation/contracts")
+def runtime_isolation_contract(
+    body: RuntimeIsolationContractBody,
+    session: Dict[str, Any] = Depends(require_action("agents.manage")),
+) -> Dict[str, Any]:
+    try:
+        contract = runtime_isolation.RuntimeIsolationContract(
+            isolation_level=body.isolation_level,
+            enforcement_mode=body.enforcement_mode,
+            runtime_adapter=body.runtime_adapter,
+            runtime_identity=body.runtime_identity,
+            evidence_ref=body.evidence_ref,
+            boundaries=frozenset(body.boundaries),
+            policy_digest=body.policy_digest,
+            rootfs_digest=body.rootfs_digest,
+        )
+        admission = runtime_isolation.validate_admission(
+            contract, requested_level=body.isolation_level,
+            external_agent=body.external_agent,
+        )
+        persisted = runtime_isolation.persist_contract(
+            str(session["principal_id"]), body.agent_id, body.instance_id, contract,
+        )
+        return {**persisted, "admission": admission}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Runtime isolation contract was denied") from exc
+
+
+@app.get("/api/runtime-isolation/contracts/{agent_id}/{instance_id}")
+def runtime_isolation_contract_get(
+    agent_id: str,
+    instance_id: str,
+    session: Dict[str, Any] = Depends(require_action("agents.read")),
+) -> Dict[str, Any]:
+    try:
+        return runtime_isolation.get_contract(agent_id, instance_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Runtime isolation contract is unavailable") from exc
+
+
+@app.post("/api/runtime-isolation/contracts/{agent_id}/{instance_id}/transition")
+def runtime_isolation_contract_transition(
+    agent_id: str,
+    instance_id: str,
+    body: RuntimeIsolationTransitionBody,
+    session: Dict[str, Any] = Depends(require_action("agents.manage")),
+) -> Dict[str, Any]:
+    try:
+        return runtime_isolation.transition_contract(
+            str(session["principal_id"]), agent_id, instance_id, body.target_state,
+            body.reason, body.expected_version,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "Runtime isolation transition was denied") from exc
+
+
+@app.post("/api/db4a2a/dispatches")
+def db4a2a_dispatch(
+    body: DB4A2ADispatchBody,
+    session: Dict[str, Any] = Depends(require_action("agents.operate")),
+) -> Dict[str, Any]:
+    try:
+        reference = db4a2a.ContextReference(
+            body.context_ref, body.snapshot_digest, body.expected_version,
+            body.scope_ref, body.source_branch,
+        )
+        envelope = db4a2a.build_dispatch(
+            task_id=body.task_id, context=reference,
+            branch_policy=body.branch_policy, transport=body.transport,
+        )
+        return db4a2a.persist_dispatch(
+            str(session["principal_id"]), body.receiver_agent_id, envelope,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "DB4A2A dispatch was denied") from exc
+
+
+@app.get("/api/db4a2a/dispatches")
+def db4a2a_dispatches(
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("tasks.read")),
+) -> Dict[str, Any]:
+    try:
+        return db4a2a.list_dispatches(str(session["principal_id"]), limit)
+    except Exception as exc:
+        raise _identity_http_error(exc, "DB4A2A dispatches are unavailable") from exc
+
+
+@app.post("/api/db4a2a/dispatches/{dispatch_id}/branch")
+def db4a2a_dispatch_branch(
+    dispatch_id: str,
+    body: DB4A2ABranchBody,
+    session: Dict[str, Any] = Depends(require_action("agents.operate")),
+) -> Dict[str, Any]:
+    try:
+        return db4a2a.create_dispatch_branch(
+            str(session["principal_id"]), dispatch_id, body.branch_name, body.purpose,
+        )
+    except Exception as exc:
+        raise _identity_http_error(exc, "DB4A2A branch was denied") from exc
+
+
+@app.get("/api/graph-assurance/invariants")
+def graph_assurance_invariants(
+    session: Dict[str, Any] = Depends(require_action("graphs.read")),
+) -> Dict[str, Any]:
+    """Return bounded read-only Graph Runtime integrity findings."""
+    module = _optional_module("graph_assurance")
+    if module is None:
+        raise HTTPException(status_code=404, detail="Graph assurance is unavailable")
+    try:
+        return module.invariant_scan()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Graph assurance scan unavailable") from exc
+
+
+@app.get("/api/graph-assurance/evidence")
+def graph_assurance_evidence(
+    run_id: str = "",
+    limit: int = 100,
+    session: Dict[str, Any] = Depends(require_action("graphs.read")),
+) -> Dict[str, Any]:
+    """Return bounded recovery evidence without mutation or failpoint access."""
+    module = _optional_module("graph_assurance")
+    if module is None:
+        raise HTTPException(status_code=404, detail="Graph assurance is unavailable")
+    try:
+        items = module.list_evidence(run_id=run_id or None, limit=max(1, min(int(limit), 500)))
+        return {"items": items, "count": len(items), "read_only": True}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Graph assurance evidence unavailable") from exc
+
+
 @app.get("/api/native-manifests")
 def native_manifests(
     limit: int = 100,
@@ -3473,6 +3701,59 @@ def managed_node_validate(node_id: str, session: Dict[str, Any] = Depends(requir
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/platform/runtime-hosts")
+def runtime_hosts(session: Dict[str, Any] = Depends(require_action("hosts.read"))) -> Dict[str, Any]:
+    try:
+        return {"items": host_provisioning.list_runtime_hosts(str(session["principal_id"]))}
+    except (host_provisioning.HostProvisioningError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/managed-nodes/{node_id}/runtime-preflight")
+def runtime_host_preflight(node_id: str, body: RuntimeHostPreflightBody,
+                           session: Dict[str, Any] = Depends(require_action("hosts.manage"))) -> Dict[str, Any]:
+    try:
+        return host_provisioning.record_preflight(
+            str(session["principal_id"]), node_id, body.evidence, body.reason)
+    except (host_provisioning.HostProvisioningError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/managed-nodes/{node_id}/complete-runtime-bootstrap")
+def runtime_host_bootstrap(node_id: str, body: RuntimeHostBootstrapBody,
+                           session: Dict[str, Any] = Depends(require_action("hosts.manage"))) -> Dict[str, Any]:
+    try:
+        return host_provisioning.complete_bootstrap(
+            str(session["principal_id"]), node_id,
+            host_manager_version=body.host_manager_version,
+            recovery_channel=body.recovery_channel,
+            root_remote_login=body.root_remote_login,
+            uid_min=body.uid_min, uid_max=body.uid_max, reason=body.reason)
+    except (host_provisioning.HostProvisioningError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/platform/runtime-identity-leases")
+def runtime_identity_allocate(body: RuntimeIdentityLeaseBody,
+                              session: Dict[str, Any] = Depends(require_action("hosts.manage"))) -> Dict[str, Any]:
+    try:
+        return host_provisioning.allocate_identity(
+            str(session["principal_id"]), body.node_id, body.agent_id,
+            body.instance_id, body.reason)
+    except (host_provisioning.HostProvisioningError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/platform/runtime-identity-leases/{lease_id}")
+def runtime_identity_release(lease_id: str, body: RetirementBody,
+                             session: Dict[str, Any] = Depends(require_action("hosts.manage"))) -> Dict[str, Any]:
+    try:
+        return host_provisioning.release_identity(
+            str(session["principal_id"]), lease_id, body.reason)
+    except (host_provisioning.HostProvisioningError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.delete("/api/platform/managed-nodes/{node_id}")
 def managed_node_retire(node_id: str, body: RetirementBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
     try:
@@ -3508,7 +3789,14 @@ def agent_pool_node_onboarding_activate(onboarding_id: str, body: AgentPoolNodeA
 @app.post("/api/agent-pool/node-onboardings/{onboarding_id}/check-in")
 def agent_pool_node_onboarding_checkin(onboarding_id: str, body: AgentPoolNodeCheckinBody) -> Dict[str, Any]:
     try:
-        return platform_agent_pool.node_onboarding_checkin(onboarding_id, body.token, body.runtime_version, body.hostname, body.shared_path, body.agent_info_path)
+        return platform_agent_pool.node_onboarding_checkin(
+            onboarding_id, body.token, body.runtime_version, body.hostname,
+            body.shared_path, body.agent_info_path,
+            runtime_preflight=body.runtime_preflight,
+            lifecycle_passed=body.lifecycle_passed,
+            root_remote_login=body.root_remote_login,
+            recovery_channel=body.recovery_channel,
+        )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail="Agent Pool node check-in was rejected") from exc
     except platform_agent_pool.AgentPoolError as exc:
@@ -5807,6 +6095,33 @@ def gateway_heartbeat(request: Request) -> Dict[str, Any]:
         return {"success": agent_gateway_api.heartbeat_instance(str(context["agent_id"]), str(context["instance_id"]))}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Agent instance service unavailable") from exc
+
+
+@app.post("/api/gateway/runtime-heartbeat")
+@app.post("/api/agent-gateway/runtime-heartbeat")
+@_gateway_request_context
+def gateway_runtime_heartbeat(body: RuntimeIsolationHeartbeatBody, request: Request) -> Dict[str, Any]:
+    """Validate runtime identity and immediately drain a drifted instance."""
+    context = _gateway_context(
+        request, operation="heartbeat", attach_agent_database_context=False,
+    )
+    try:
+        report = runtime_isolation.heartbeat_contract(
+            str(context["agent_id"]), str(context["instance_id"]),
+            {"runtime_identity": body.runtime_identity, "policy_digest": body.policy_digest,
+             "rootfs_digest": body.rootfs_digest},
+        )
+        if report.get("accepted"):
+            report["lease_renewed"] = agent_gateway_api.heartbeat_instance(
+                str(context["agent_id"]), str(context["instance_id"]),
+            )
+        else:
+            report["lease_renewed"] = False
+        return report
+    except runtime_isolation.IsolationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Runtime isolation heartbeat unavailable") from exc
 
 
 @app.get("/api/gateway/containment")

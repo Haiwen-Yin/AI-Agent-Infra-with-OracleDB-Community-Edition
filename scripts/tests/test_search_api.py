@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.10 - Search API Tests"""
+"""AI Agent Infra v4.4.11 - Search API Tests"""
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

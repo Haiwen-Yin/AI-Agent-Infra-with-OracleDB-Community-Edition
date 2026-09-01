@@ -17,7 +17,7 @@ import time
 from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
-from . import connection, identity_api, native_agent_api
+from . import connection, deployment_adapters, identity_api, native_agent_api, runtime_isolation
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +192,51 @@ def _finish(execution_id: str, worker_id: str, node_id: str, fencing_token: int,
          "failure": failure[:2000] or None, "id": execution_id, "worker": worker_id,
          "node": node_id, "token": fencing_token},
     )
+
+
+def _admit_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
+    """Fail closed before model work when the target cannot prove isolation."""
+    target = _row(connection.execute_query_one(
+        "SELECT TARGET_ID,TARGET_TYPE,STATUS FROM CX_DEPLOYMENT_TARGETS WHERE TARGET_ID=:id",
+        {"id": execution.get("target_id")},
+    ))
+    if not target or str(target.get("status") or "").upper() != "ACTIVE":
+        raise RuntimeError("Deployment target is unavailable")
+    target_type = str(target.get("target_type") or "").upper()
+    adapter = deployment_adapters.reference_adapters().get(target_type)
+    if adapter is None:
+        raise RuntimeError("Deployment target has no verified runtime adapter")
+    observed = adapter.evidence(execution).evidence
+    contract = runtime_isolation.RuntimeIsolationContract(
+        isolation_level=str(execution.get("isolation_level") or ""),
+        enforcement_mode=str(observed.get("enforcement_mode") or "UNVERIFIED"),
+        runtime_adapter=target_type,
+        runtime_identity=str(observed.get("runtime_identity") or ""),
+        evidence_ref="runtime-execution:" + str(execution.get("execution_id") or ""),
+        boundaries=frozenset(observed.get("boundaries") or []),
+    )
+    try:
+        admission = runtime_isolation.validate_admission(
+            contract, requested_level=str(execution.get("isolation_level") or ""),
+            adapter_capabilities=observed,
+        )
+        evidence = {**observed, "admitted": True, "decision": "ALLOW"}
+    except runtime_isolation.IsolationError:
+        evidence = {**observed, "admitted": False, "decision": "DENY"}
+        connection.execute(
+            "UPDATE CX_RUNTIME_EXECUTIONS SET ISOLATION_EVIDENCE_JSON=:evidence,"
+            "ISOLATION_EVIDENCE_REF=:ref,UPDATED_AT=CURRENT_TIMESTAMP WHERE EXECUTION_ID=:id",
+            {"evidence": json.dumps(evidence, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+             "ref": contract.evidence_ref, "id": execution.get("execution_id")},
+        )
+        raise
+    connection.execute(
+        "UPDATE CX_RUNTIME_EXECUTIONS SET ISOLATION_EVIDENCE_JSON=:evidence,ISOLATION_EVIDENCE_REF=:ref,"
+        "ISOLATION_ADMITTED_AT=CURRENT_TIMESTAMP,UPDATED_AT=CURRENT_TIMESTAMP WHERE EXECUTION_ID=:id",
+        {"evidence": json.dumps(evidence, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+         "ref": contract.evidence_ref, "id": execution.get("execution_id")},
+    )
+    return admission
 
 
 def _channel_dispatch(input_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -454,6 +499,7 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
     input_payload: Dict[str, Any] = {}
     agent: Optional[Dict[str, Any]] = None
     try:
+        _admit_execution(execution)
         agent = _row(connection.execute_query_one(
             "SELECT AGENT_ID,STATUS,LLM_PROFILE_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id",
             {"id": execution.get("agent_id")},

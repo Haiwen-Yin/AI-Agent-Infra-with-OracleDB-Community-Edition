@@ -208,6 +208,11 @@ V410_MIGRATION_SCRIPTS = V449_MIGRATION_SCRIPTS + (
     "64_v4_4_10_external_agent_context_repair.sql",
     "65_v4_4_10_external_agent_domain_context.sql",
 )
+V411_MIGRATION_SCRIPTS = V410_MIGRATION_SCRIPTS + (
+    "66_v4_4_11_runtime_isolation_db4a2a.sql",
+    "67_v4_4_11_runtime_execution_admission.sql",
+    "68_v4_4_11_host_provisioning.sql",
+)
 ENTERPRISE_ONLY_MIGRATION_SCRIPTS = frozenset({
     "29_v4_3_4_agent_compliance.sql",
     "30_v4_3_4_compliance_hardening.sql",
@@ -233,6 +238,34 @@ V410_MODEL_TABLES = (
     "CX_WALLBOARD_DEF_VERSIONS", "CX_WALLBOARD_PUBLICATIONS",
     "CX_EMBEDDING_ACCESS_GRANTS",
 )
+V411_RUNTIME_TABLES = (
+    "CX_RUNTIME_ISOLATION_CONTRACTS", "CX_DB4A2A_DISPATCHES",
+    "CX_RUNTIME_HOST_PROFILES", "CX_RUNTIME_UID_LEASES",
+)
+V411_RUNTIME_REQUIRED_COLUMNS = {
+    "CX_RUNTIME_EXECUTIONS": frozenset({
+        "EXECUTION_ID", "ISOLATION_LEVEL", "ISOLATION_EVIDENCE_JSON",
+        "ISOLATION_EVIDENCE_REF", "ISOLATION_ADMITTED_AT",
+    }),
+    "CX_RUNTIME_ISOLATION_CONTRACTS": frozenset({
+        "CONTRACT_ID", "AGENT_ID", "INSTANCE_ID", "ISOLATION_LEVEL", "ENFORCEMENT_MODE",
+        "RUNTIME_ADAPTER", "RUNTIME_IDENTITY", "BOUNDARIES_JSON", "POLICY_DIGEST",
+        "ROOTFS_DIGEST", "EVIDENCE_REF", "STATUS", "VERSION",
+    }),
+    "CX_DB4A2A_DISPATCHES": frozenset({
+        "DISPATCH_ID", "TASK_ID", "SENDER_PRINCIPAL_ID", "RECEIVER_AGENT_ID", "CONTEXT_REF",
+        "SNAPSHOT_DIGEST", "EXPECTED_VERSION", "SCOPE_REF", "SOURCE_BRANCH", "BRANCH_POLICY",
+        "TRANSPORT", "STATUS", "CHILD_BRANCH_ID",
+    }),
+    "CX_RUNTIME_HOST_PROFILES": frozenset({
+        "NODE_ID", "HOST_MANAGER_VERSION", "BOOTSTRAP_STATE", "ROOT_REMOTE_LOGIN",
+        "RECOVERY_CHANNEL", "UID_MIN", "UID_MAX", "PREFLIGHT_DIGEST",
+    }),
+    "CX_RUNTIME_UID_LEASES": frozenset({
+        "LEASE_ID", "NODE_ID", "AGENT_ID", "INSTANCE_ID", "RUNTIME_UID",
+        "RUNTIME_GID", "STATUS", "CREATED_BY", "REASON",
+    }),
+}
 V448_PLATFORM_AGENT_ISOLATION_TABLES = (
     "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
     "CX_PLATFORM_MAINTENANCE_TASKS", "CX_PLATFORM_MAINTENANCE_ATTEMPTS",
@@ -1531,6 +1564,35 @@ def validate_v410_static_contract(
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v411_static_contract(
+    database: str, scripts: Sequence[Path], edition: str = "enterprise",
+) -> dict[str, Any]:
+    base = validate_v410_static_contract(database, scripts, edition)
+    selected = {path.name: path for path in scripts}
+    migrations = (selected.get("66_v4_4_11_runtime_isolation_db4a2a.sql"),
+                  selected.get("67_v4_4_11_runtime_execution_admission.sql"),
+                  selected.get("68_v4_4_11_host_provisioning.sql"))
+    source = "\n".join(item.read_text(encoding="utf-8").upper()
+                       for item in migrations if item and item.is_file())
+    markers = set(V411_RUNTIME_TABLES) | {
+        "ISOLATION_LEVEL", "ENFORCEMENT_MODE", "RUNTIME_IDENTITY", "BOUNDARIES_JSON",
+        "SNAPSHOT_DIGEST", "EXPECTED_VERSION", "BRANCH_POLICY", "CHILD_BRANCH_ID",
+        "ISOLATION_EVIDENCE_JSON", "ISOLATION_ADMITTED_AT",
+        "BOOTSTRAP_STATE", "ROOT_REMOTE_LOGIN", "RUNTIME_UID", "RUNTIME_GID",
+    }
+    if database == "pg":
+        markers |= {"ENABLE ROW LEVEL SECURITY", "FORCE ROW LEVEL SECURITY"}
+    required_scripts = migration_scripts_for_edition(V411_MIGRATION_SCRIPTS, edition)
+    control = {
+        "scripts_required": list(required_scripts),
+        "scripts_missing": [name for name in required_scripts if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
+    }
+    control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"]
+    return {"database": database, "v410": base, "v411_runtime_isolation_db4a2a": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1588,7 +1650,7 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
         + tuple(V440_SDD_REQUIRED_COLUMNS) + tuple(V441_ADMIN_HA_REQUIRED_COLUMNS)
         + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
         + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS) + tuple(V445_GRAPH_RUN_REQUIRED_COLUMNS)
-        + tuple(V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS)
+        + tuple(V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS) + tuple(V411_RUNTIME_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1677,6 +1739,7 @@ class ProbeResult:
     v445_graph_run_contract: dict[str, Any] = field(default_factory=dict)
     v446_identity_portal_graph_contract: dict[str, Any] = field(default_factory=dict)
     v410_model_usage_wallboard_contract: dict[str, Any] = field(default_factory=dict)
+    v411_runtime_isolation_db4a2a_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1691,6 +1754,18 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
         "tables_missing": sorted(set(V410_MODEL_TABLES) - set(snapshot["tables"])),
     }
     result.v410_model_usage_wallboard_contract["passed"] = not result.v410_model_usage_wallboard_contract["tables_missing"]
+    result.v411_runtime_isolation_db4a2a_contract = {
+        "tables_missing": sorted(set(V411_RUNTIME_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V411_RUNTIME_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v411_runtime_isolation_db4a2a_contract["passed"] = not any((
+        result.v411_runtime_isolation_db4a2a_contract["tables_missing"],
+        result.v411_runtime_isolation_db4a2a_contract["columns_missing"],
+    ))
     result.v431_organization_contract = _capture_v431_organization(cursor, database)
     result.v434_compliance_contract = {
         "tables_missing": sorted(set(V434_COMPLIANCE_TABLES) - set(snapshot["tables"])),
@@ -2097,10 +2172,14 @@ def main() -> int:
     requires_v448 = target_version.startswith("4.4.8")
     requires_v449 = target_version.startswith("4.4.9")
     requires_v410 = at_least((4, 4, 10))
+    requires_v411 = at_least((4, 4, 11))
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v410:
+            if requires_v411:
+                migration_scripts = migration_scripts_for_edition(V411_MIGRATION_SCRIPTS, edition)
+                validator = lambda database, scripts: validate_v411_static_contract(database, scripts, edition)
+            elif requires_v410:
                 migration_scripts = migration_scripts_for_edition(V410_MIGRATION_SCRIPTS, edition)
                 validator = lambda database, scripts: validate_v410_static_contract(database, scripts, edition)
             elif requires_v449:
@@ -2210,6 +2289,7 @@ def main() -> int:
                 and (not requires_v445 or result.v445_graph_run_contract.get("passed") is True)
                 and (not requires_v446 or result.v446_identity_portal_graph_contract.get("passed") is True)
                 and (not requires_v410 or result.v410_model_usage_wallboard_contract.get("passed") is True)
+                and (not requires_v411 or result.v411_runtime_isolation_db4a2a_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

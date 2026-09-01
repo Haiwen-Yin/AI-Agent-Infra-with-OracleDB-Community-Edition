@@ -22,6 +22,10 @@ import zipfile
 from email.parser import Parser
 
 MIN_PYTHON = (3, 14)
+# Full platform support baseline: RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent Linux host.
+# This corresponds to glibc 2.34+, required by the supported native wheels
+# and the Linux runtime-isolation adapter.
+MIN_GLIBC = (2, 34)
 
 
 def _runtime_python() -> tuple[int, int]:
@@ -150,10 +154,8 @@ def _wheel_is_platform_compatible(
 ) -> bool:
     """Return whether a wheel's declared Linux/glibc floor fits this host.
 
-    A package may intentionally carry more than one wheel for the same version,
-    for example a source-built ``manylinux_2_28`` wheel alongside the upstream
-    ``manylinux_2_34`` wheel.  Pip makes the final tag decision during install;
-    this verifier must make the same decision before installation.
+    Release packages carry one supported wheel per dependency. The verifier
+    evaluates its declared glibc floor before installation.
     """
     if not _wheel_is_python_compatible(filename, runtime):
         return False
@@ -709,9 +711,8 @@ def main():
                 continue
             required[name] = specifier
 
-    # Parse vendor/ wheels.  More than one wheel for a package is intentional:
-    # the release can carry an upstream manylinux_2_34 wheel for newer systems
-    # and a source-built manylinux_2_28 wheel for RHEL 8/glibc 2.28.
+    # Parse vendor wheels. Legacy RHEL 8 compatibility artifacts are not
+    # release inputs; each pinned dependency uses a current supported artifact.
     wheels: dict[str, list[dict]] = {}
     parse_errors = 0
     for whl_path in glob.glob(os.path.join(vendor_dir, "*.whl")):
@@ -741,6 +742,14 @@ def main():
     errors = parse_errors
     warnings = 0
     host_glibc = _glibc_version()
+    if host_glibc is None or host_glibc < MIN_GLIBC:
+        detected = ".".join(str(part) for part in host_glibc) if host_glibc else "unknown"
+        print(
+            f"[FAIL] RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent Linux host is required for full "
+            f"functionality (glibc >= {MIN_GLIBC[0]}.{MIN_GLIBC[1]}); detected {detected}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     selected_roots: dict[str, dict] = {}
 
     wheel_file_count = sum(len(candidates) for candidates in wheels.values())
