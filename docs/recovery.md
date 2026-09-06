@@ -1,4 +1,4 @@
-# Recovery and High Availability - AI Agent Infra with DB v4.4.11
+# Recovery and High Availability - AI Agent Infra with DB v4.4.12
 
 ## v4.4.1 Management Plane Recovery
 

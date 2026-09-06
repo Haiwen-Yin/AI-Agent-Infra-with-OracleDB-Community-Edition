@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.11 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.12 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -44,7 +44,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.11"
+VERSION = "4.4.12"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -246,6 +246,11 @@ def _graph_operation_capability(path: str) -> Optional[str]:
 @app.middleware("http")
 async def enforce_platform_capability(request: Request, call_next):
     capability = _path_capability(request.url.path)
+    # Serve the SPA shell before authentication/capability checks.  The shell
+    # contains the login form; API requests remain governed below, so an
+    # unavailable optional capability must not make the login page unreachable.
+    if request.url.path.startswith("/app/"):
+        capability = None
     if capability:
         try:
             enabled = platform_capabilities.is_enabled(capability)
@@ -506,6 +511,13 @@ def _build_legacy_handler(method: str, path: str, query: str, headers: Dict[str,
     handler.path = path + (("?" + query) if query else "")
     handler.requestline = f"{method} {handler.path} HTTP/1.1"
     handler.client_address = (headers.get("x-forwarded-for", "127.0.0.1"), 0)
+    # Match FastAPI's Host-derived request port, without mutating process-wide
+    # configuration shared by simultaneous compatibility requests.
+    try:
+        handler._cx_cookie_port = str(urlsplit("//" + str(handler.headers.get("Host", ""))).port
+                                      or os.environ.get("MEMORY_SERVER_PORT", "8000"))
+    except ValueError:
+        handler._cx_cookie_port = os.environ.get("MEMORY_SERVER_PORT", "8000")
     handler.server = type("CompatServer", (), {
         "server_name": "chuanxu",
         "server_port": int(os.environ.get("MEMORY_SERVER_PORT", "8000")),
@@ -515,12 +527,17 @@ def _build_legacy_handler(method: str, path: str, query: str, headers: Dict[str,
 
 
 def _run_legacy_handler(handler: Any, method: str) -> None:
-    if method == "GET":
-        handler.do_GET()
-    elif method == "POST":
-        handler.do_POST()
-    else:
-        handler.do_GET()
+    legacy = _legacy_module()
+    token = legacy._request_cookie_port.set(handler._cx_cookie_port)
+    try:
+        if method == "GET":
+            handler.do_GET()
+        elif method == "POST":
+            handler.do_POST()
+        else:
+            handler.do_GET()
+    finally:
+        legacy._request_cookie_port.reset(token)
 
 
 def _parse_legacy_response_head(head: bytes) -> tuple[int, Dict[str, str]]:
@@ -6413,14 +6430,24 @@ def gateway_action(channel_id: str, body: ActionCardBody, request: Request) -> D
 def runtime_profile() -> Dict[str, Any]:
     profile = _runtime_profile()
     features = _edition_features()
+    try:
+        with _schema_owner_context():
+            governance = platform_capabilities.governance_status()
+    except platform_capabilities.CapabilityServiceUnavailable as exc:
+        governance = {"source": "database", "status": "unavailable", "reason_code": exc.reason_code}
+    except Exception:
+        governance = {"source": "database", "status": "unavailable", "reason_code": "verification_failed"}
+    effective = governance.pop("effective_capabilities", {})
     return {
         "profile": profile,
+        "startup_mode": profile,
+        "governance": governance,
         "capabilities": {
-            "channels": True,
-            "barriers": True,
-            "graph_preview": profile in {"graph-preview", "development", "experimental-4.2"},
-            "production_ready": profile == "production",
-            "graph_engineering": bool(getattr(features, "GRAPH_ENGINEERING_ENABLED", True)),
+            "channels": effective.get("channels", False),
+            "barriers": effective.get("barriers", False),
+            "graph_preview": bool(effective.get("graph", False) and profile in {"graph-preview", "development", "experimental-4.2"}),
+            "production_ready": None,
+            "graph_engineering": bool(effective.get("graph", False) and getattr(features, "GRAPH_ENGINEERING_ENABLED", True)),
         },
     }
 

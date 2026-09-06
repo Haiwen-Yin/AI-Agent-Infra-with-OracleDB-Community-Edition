@@ -8,9 +8,11 @@ references never grant data, Tool, Skill, Model, or export authority.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import secrets
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Mapping
 
 
@@ -111,6 +113,114 @@ def child_branch_provenance(envelope: Mapping[str, Any], branch_id: str) -> dict
     }
 
 
+def context_snapshot(context_data: Any) -> str:
+    """Version 1 hashes canonical stored JSON, not client prose or transport bytes."""
+    if hasattr(context_data, "read"):
+        context_data = context_data.read()
+    if isinstance(context_data, (str, bytes)):
+        context_data = json.loads(context_data, parse_float=Decimal)
+
+    def canonical(value):
+        if value is None or isinstance(value, (str, bool)):
+            return [type(value).__name__, value]
+        if isinstance(value, (int, float, Decimal)):
+            number = Decimal(str(value))
+            if not number.is_finite():
+                raise DB4A2AError("context contains a non-finite number")
+            sign, digits, exponent = number.as_tuple()
+            text = "".join(str(digit) for digit in digits).rstrip("0")
+            if not text:
+                return ["number", "0"]
+            exponent += len(digits) - len(text)
+            return ["number", ("-" if sign else "") + text + "e" + str(exponent)]
+        if isinstance(value, list):
+            return ["array", [canonical(item) for item in value]]
+        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            return ["object", [[key, canonical(value[key])] for key in sorted(value)]]
+        raise DB4A2AError("context contains an unsupported JSON value")
+
+    encoded = json.dumps(canonical(context_data), sort_keys=True, ensure_ascii=True,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _check_context_reader(receiver: str, context_id: str) -> None:
+    """Use the receiver's real database identity, never the control-plane Owner."""
+    from . import connection
+
+    previous = connection.get_current_agent_id()
+    try:
+        connection.set_agent_context(receiver)
+        table = ("CX_AGENT_CONTEXT_READ" if connection.DATABASE_DIALECT in {"yashandb", "yashan"}
+                 else "WORKSPACE_CONTEXT")
+        visible = connection.execute_query_one(
+            f"SELECT CONTEXT_ID FROM {table} WHERE CONTEXT_ID=:id", {"id": context_id})
+        if not visible:
+            raise PermissionError("receiver cannot read the referenced database context")
+    finally:
+        connection.set_agent_context(previous)
+
+
+def _lock_reader_policy(tx: Any, reader: str, context_id: str) -> None:
+    """Serialize principal disable and explicit-share deletion with dispatch."""
+    from . import connection
+
+    principal = tx.query_one(
+        "SELECT PRINCIPAL_ID,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE",
+        {"id": reader})
+    principal = {str(k).lower(): v for k, v in dict(principal or {}).items()}
+    if principal.get("status") != "ACTIVE":
+        raise PermissionError("DB4A2A participant is inactive or unknown")
+    if connection.DATABASE_DIALECT in {"yashandb", "yashan"}:
+        tx.query_one("SELECT CONTEXT_ID FROM CX_CONTEXT_READ_GRANTS "
+                     "WHERE CONTEXT_ID=:context AND AGENT_ID=:agent FOR UPDATE",
+                     {"context": context_id, "agent": reader})
+
+
+def _check_context(tx: Any, envelope: Mapping[str, Any]) -> dict[str, Any]:
+    row = tx.query_one(
+        "SELECT CONTEXT_ID,WORKSPACE_ID,CONTEXT_DATA,BRANCH_ID,AGENT_ID FROM WORKSPACE_CONTEXT "
+        "WHERE CONTEXT_ID=:context FOR UPDATE", {"context": envelope["context_ref"]})
+    item = {str(key).lower(): value for key, value in dict(row or {}).items()}
+    if not item:
+        raise DB4A2AError("referenced workspace context is unavailable")
+    workspace = tx.query_one("SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID=:workspace "
+                             "AND STATUS='ACTIVE'", {"workspace": item["workspace_id"]})
+    if not workspace:
+        raise DB4A2AError("referenced workspace is unavailable")
+    validate_reference_access(envelope, authenticated=True, authorized=True,
+                              observed_version=1, observed_digest=context_snapshot(item["context_data"]))
+    if envelope["scope_ref"] != "workspace:" + str(item["workspace_id"]):
+        raise DB4A2AError("context workspace scope mismatch")
+    if str(envelope.get("source_branch") or "") != str(item.get("branch_id") or ""):
+        raise DB4A2AError("context source branch mismatch")
+    return item
+
+
+def _check_context_sender(tx: Any, actor: str, context: Mapping[str, Any]) -> None:
+    """Receiver visibility never delegates a sender's context authority."""
+    from . import identity_api
+
+    principal = tx.query_one(
+        "SELECT PRINCIPAL_TYPE,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:actor",
+        {"actor": actor})
+    principal = {str(k).lower(): v for k, v in dict(principal or {}).items()}
+    if principal.get("status") != "ACTIVE":
+        raise PermissionError("DB4A2A sender is inactive or unknown")
+    if principal.get("principal_type") == "AGENT":
+        _check_context_reader(actor, str(context["context_id"]))
+        return
+    if principal.get("principal_type") != "HUMAN":
+        raise PermissionError("DB4A2A sender identity is unsupported")
+    if identity_api.effective_access(actor, "agents.manage.all").get("decision") == "ALLOW":
+        return
+    workspace = tx.query_one(
+        "SELECT WORKSPACE_ID FROM WORKSPACES WHERE WORKSPACE_ID=:workspace AND OWNER_USER_ID=:actor",
+        {"workspace": context["workspace_id"], "actor": actor})
+    if not workspace:
+        raise PermissionError("DB4A2A sender does not own the referenced workspace")
+
+
 def persist_dispatch(actor: str, receiver_agent_id: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
     """Persist a validated reference dispatch in the database control plane."""
     from . import connection, identity_api
@@ -137,17 +247,13 @@ def persist_dispatch(actor: str, receiver_agent_id: str, envelope: Mapping[str, 
         raise DB4A2AError("invalid branch policy")
     if normalized["transport"] not in {"DB_MEDIATED", "A2A_PAYLOAD"}:
         raise DB4A2AError("invalid collaboration transport")
-    if normalized["transport"] == "DB_MEDIATED":
-        context = identity_api._row(connection.execute_query_one(
-            "SELECT c.CONTEXT_ID,c.WORKSPACE_ID FROM WORKSPACE_CONTEXT c "
-            "JOIN WORKSPACES w ON w.WORKSPACE_ID=c.WORKSPACE_ID "
-            "WHERE c.CONTEXT_ID=:context AND w.STATUS='ACTIVE'",
-            {"context": normalized["context_ref"]},
-        ))
-        if not context:
-            raise PermissionError("DB4A2A context is unavailable in the authorized database scope")
-
     def work(tx: Any) -> None:
+        if normalized["transport"] == "DB_MEDIATED":
+            for participant in sorted({actor, receiver}):
+                _lock_reader_policy(tx, participant, normalized["context_ref"])
+            context = _check_context(tx, normalized)
+            _check_context_reader(receiver, normalized["context_ref"])
+            _check_context_sender(tx, actor, context)
         tx.execute(
             "INSERT INTO CX_DB4A2A_DISPATCHES(DISPATCH_ID,TASK_ID,SENDER_PRINCIPAL_ID,RECEIVER_AGENT_ID,"
             "CONTEXT_REF,SNAPSHOT_DIGEST,EXPECTED_VERSION,SCOPE_REF,SOURCE_BRANCH,BRANCH_POLICY,TRANSPORT,STATUS) "
@@ -185,44 +291,56 @@ def list_dispatches(actor: str, limit: int = 100) -> dict[str, Any]:
 
 
 def create_dispatch_branch(actor: str, dispatch_id: str, branch_name: str, purpose: str) -> dict[str, Any]:
-    """Fork the referenced workspace Context through the existing Branch API."""
+    """Lock, verify and fork a reference in one database transaction."""
     from . import branch_api, connection, identity_api
 
     if identity_api.effective_access(actor, "agents.operate").get("decision") != "ALLOW":
         raise PermissionError("DB4A2A branch permission denied")
-    row = connection.execute_query_one(
+    dispatch_id = _required(dispatch_id, "dispatch id")
+
+    def work(tx: Any) -> dict[str, Any]:
+        row = tx.query_one(
         "SELECT DISPATCH_ID,SENDER_PRINCIPAL_ID,RECEIVER_AGENT_ID,CONTEXT_REF,SNAPSHOT_DIGEST,EXPECTED_VERSION,"
-        "SCOPE_REF,BRANCH_POLICY,STATUS,CHILD_BRANCH_ID "
-        "FROM CX_DB4A2A_DISPATCHES WHERE DISPATCH_ID=:id",
-        {"id": _required(dispatch_id, "dispatch id")},
-    )
-    item = {str(key).lower(): value for key, value in dict(row or {}).items()}
-    if not item:
-        raise DB4A2AError("DB4A2A dispatch is unavailable")
-    if item.get("child_branch_id"):
-        return {"dispatch_id": dispatch_id, "branch_id": item["child_branch_id"], "idempotent": True}
-    if str(item.get("branch_policy") or "").upper() != "CHILD_BRANCH_WRITE":
-        raise DB4A2AError("branch policy does not permit child writes")
-    context = connection.execute_query_one(
-        "SELECT WORKSPACE_ID FROM WORKSPACE_CONTEXT WHERE CONTEXT_ID=:context",
-        {"context": item["context_ref"]},
-    )
-    context_row = {str(key).lower(): value for key, value in dict(context or {}).items()}
-    if not context_row.get("workspace_id"):
-        raise DB4A2AError("referenced workspace context is unavailable")
-    branch_id = branch_api.fork_branch(
-        workspace_id=str(context_row["workspace_id"]), fork_context_id=str(item["context_ref"]),
-        branch_name=_required(branch_name, "branch name"), branch_type="DB4A2A",
-        agent_id=str(item.get("receiver_agent_id") or actor),
-        source_agent_id=str(item.get("sender_principal_id") or actor),
-        purpose=str(purpose or "")[:500],
-    )
-    changed = connection.execute_transaction_callback(lambda tx: tx.execute(
+        "SCOPE_REF,SOURCE_BRANCH,TRANSPORT,BRANCH_POLICY,STATUS,CHILD_BRANCH_ID "
+        "FROM CX_DB4A2A_DISPATCHES WHERE DISPATCH_ID=:id "
+        "AND (SENDER_PRINCIPAL_ID=:actor OR RECEIVER_AGENT_ID=:actor) FOR UPDATE",
+        {"id": dispatch_id, "actor": actor})
+        item = {str(key).lower(): value for key, value in dict(row or {}).items()}
+        if not item or actor not in (item.get("sender_principal_id"), item.get("receiver_agent_id")):
+            raise DB4A2AError("DB4A2A dispatch is unavailable")
+        if str(item.get("status") or "").upper() not in {"DISPATCHED", "BRANCHED"}:
+            raise DB4A2AError("DB4A2A dispatch is not active")
+        if item.get("branch_policy") != "CHILD_BRANCH_WRITE":
+            raise DB4A2AError("branch policy does not permit child writes")
+        if item.get("transport") != "DB_MEDIATED":
+            raise DB4A2AError("payload dispatch cannot fork a database reference")
+        for participant in sorted({str(item["sender_principal_id"]), str(item["receiver_agent_id"])}):
+            _lock_reader_policy(tx, participant, str(item["context_ref"]))
+        context = _check_context(tx, item)
+        _check_context_reader(str(item["receiver_agent_id"]), str(item["context_ref"]))
+        _check_context_sender(tx, str(item["sender_principal_id"]), context)
+        if item.get("child_branch_id"):
+            return {"dispatch_id": dispatch_id, "branch_id": item["child_branch_id"], "idempotent": True}
+        if item["status"] != "DISPATCHED":
+            raise DB4A2AError("DB4A2A branched dispatch is missing its branch")
+        name = str(branch_name or "").strip()
+        if not name or len(name) > 256:
+            raise DB4A2AError("invalid branch name")
+        branch_id = branch_api.fork_branch_tx(
+            tx, workspace_id=context["workspace_id"], fork_context_id=item["context_ref"],
+            branch_name=name, agent_id=item["receiver_agent_id"],
+            source_agent_id=context.get("agent_id"), purpose=str(purpose or "")[:500],
+            parent_branch_id=context.get("branch_id"))
+        changed = tx.execute(
         "UPDATE CX_DB4A2A_DISPATCHES SET CHILD_BRANCH_ID=:branch,STATUS='BRANCHED',UPDATED_AT=CURRENT_TIMESTAMP "
-        "WHERE DISPATCH_ID=:id AND CHILD_BRANCH_ID IS NULL",
-        {"branch": branch_id, "id": dispatch_id},
-    ))
-    if int(changed or 0) != 1:
-        raise DB4A2AError("DB4A2A branch was created concurrently")
-    return {"dispatch_id": dispatch_id, "branch_id": branch_id,
-            "provenance": child_branch_provenance(item, branch_id), "idempotent": False}
+        "WHERE DISPATCH_ID=:id AND CHILD_BRANCH_ID IS NULL AND STATUS='DISPATCHED' "
+        "AND (SENDER_PRINCIPAL_ID=:actor OR RECEIVER_AGENT_ID=:actor)",
+        {"branch": branch_id, "id": dispatch_id, "actor": actor})
+        if int(changed or 0) != 1:
+            raise DB4A2AError("DB4A2A dispatch changed while branching")
+        identity_api._audit_tx(tx, actor, "DB4A2A_BRANCH", "DB4A2A_DISPATCH", dispatch_id,
+                               "ALLOW", "verified reference branch")
+        return {"dispatch_id": dispatch_id, "branch_id": branch_id,
+                "provenance": child_branch_provenance(item, branch_id), "idempotent": False}
+
+    return connection.execute_transaction_callback(work)

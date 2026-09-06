@@ -1,0 +1,11 @@
+{
+  "version": "4.4.12",
+  "database": "oracle",
+  "fresh_install": true,
+  "deployment": "bootstrap-deployment-agent",
+  "required_terminal_migration": "78_v4_4_12_gateway_credential_write_boundary.sql",
+  "historical_chain": "retained-for-audit",
+  "withdrawn_upgrade_sources": [
+    "4.4.8"
+  ]
+}

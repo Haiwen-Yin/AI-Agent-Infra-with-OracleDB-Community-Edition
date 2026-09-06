@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.11
+# Security - AI Agent Infra with DB v4.4.12
 
 ## v4.4.10 Model Usage Boundary
 
@@ -808,6 +808,32 @@ Wallboard validation rejects unknown fields, unsafe scope IDs, and oversized
 or non-allow-listed configuration.
 
 ## v4.4.11 Runtime Isolation Security
+
+### v4.4.12 Context Read Repair
+
+Committed two-client tests found that YashanDB object-level grants alone did
+not isolate private workspace contexts. Migration 69 revokes business access
+to `WORKSPACE_CONTEXT` and the legacy `WORKSPACE_MANAGER`/`BRANCH_MANAGER`
+packages. `CX_AGENT_CONTEXT_READ` binds the database `SESSION_USER` to an
+Owner-managed `CX_AGENT_DB_IDENTITIES` row and an active principal. Readers
+can see their own contexts, PUBLIC contexts, and SHARED contexts explicitly
+assigned in `CX_CONTEXT_READ_GRANTS`. SHARED alone does not grant access.
+Those two control tables are not granted to business users. DBA-added roles
+or privileges remain outside the supported least-privilege contract.
+
+Independent YashanDB users do not receive direct context DML permissions.
+Context writes use authenticated platform entry points; do not restore broad
+table/package grants to make an older direct SQL client work. Existing Agent
+identity mappings are reconciled by the authorized registration provisioner;
+missing mappings deny reads. The prerequisite role needs CREATE SESSION and
+ALTER SESSION. Failed independent login never falls back to the Owner.
+
+DB4A2A rechecks receiver database visibility before creating or returning a
+branch. Its SOURCE_AGENT_ID is the original context author, not a Human
+Principal; the Human sender stays in the dispatch record and audit. These
+checks do not prove all business tables are isolated, nor do they eliminate
+concurrent revocation races across separate database sessions. Those remain
+release audit requirements.
 
 `DEDICATED_CONTAINER` and `DEDICATED_VM` require verified evidence for all six
 runtime boundaries. Namespace observation, a UI label, or Agent Card metadata

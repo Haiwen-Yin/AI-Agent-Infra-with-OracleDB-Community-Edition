@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.4.11
+# Architecture - AI Agent Infra with DB v4.4.12
 
 ## v4.4.10 Model Usage And Executive Visibility Plane
 

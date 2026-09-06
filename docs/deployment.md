@@ -1,4 +1,26 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.11
+# Deployment Guide - AI Agent Infra with DB v4.4.12
+
+## Startup Mode And Database Governance
+
+监控页分别显示“实例启动模式”和“平台治理配置状态”。启动模式来自
+`CX_RUNTIME_PROFILE`，未设置时使用发行包的 `PROFILE`；生产部署应设置为
+`production`。该值仅描述本进程的启动模式，不修改数据库治理记录，也不代表
+已经通过生产验收。
+
+平台治理配置来自数据库 `CX_PLATFORM_CAPABILITIES`：记录完整且必需能力和
+依赖一致时显示“配置正常”，必需能力关闭或依赖不一致显示“配置异常”，数据库
+不可达、记录缺失或字段无效显示“不可用”。监控页仅保留状态摘要；有平台配置
+权限的用户可通过“查看治理配置”链接直接进入“平台配置 → 能力与策略 → 功能开关”，
+查看和管理具体能力。“配置正常”只表示治理配置检查通过，不是生产就绪认证。
+图工程的细分能力仍由 `CX_GRAPH_CAPABILITY_MATRIX` 控制；其中 `PRODUCTION`
+是图工程治理配置键，不是整个部署环境的认证记录。环境变量不能扩大数据库、
+发行版本或当前身份允许的权限。
+
+`GET /api/runtime/profile` returns `startup_mode` (with the legacy `profile`
+alias) and `governance: {source: "database", status: ...}`. Governance status is
+`available`, `degraded`, or `unavailable`. The legacy `production_ready` field
+is `null`: this endpoint does not certify production readiness. `/api/health`
+checks process liveness; `/api/ready` checks database readiness.
 
 Before selecting a Linux host, apply the two-level baseline in
 `docs/linux-platform-compatibility.md`: a host may support the Web/database
@@ -188,7 +210,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.11 --database <oracle|pg|yashandb> \
+  --version 4.4.12 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -219,7 +241,7 @@ an Argon2id hash is stored.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.11 --database <oracle|pg|yashandb> \
+  --version 4.4.12 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json
 ```
 
@@ -237,7 +259,7 @@ another verified Python 3.14 environment.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.11 --database <oracle|pg|yashandb> \
+  --version 4.4.12 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json \
   --admin-password-file /run/secrets/chuanxu-initial-admin
 ```
@@ -358,6 +380,26 @@ only for the service process; it does not change `~/.bashrc`. Set
 `CX_YASHAN_LIB_DIR` only when an approved shared client-library location is
 required.
 
+Install `binutils` before YashanDB client setup (`dnf install binutils` on
+Oracle Linux/RHEL, or `apt-get install binutils` on Debian-derived hosts).
+The installer reads each library's ELF SONAME: the bundled `*.so.1.4.100`
+files require `.so.0` links, not links inferred from the filename's first
+number. It also verifies `ctypes.CDLL('libyascli.so')`; importing `yaspy`
+alone cannot establish client readiness.
+
+For a local validation service, keep the owner-only configuration outside the
+package and export its absolute path as `CX_CONFIG_PATH` before running
+`start_web_server.sh`. Run the package's offline installer first: directly
+starting Uvicorn skips native-client setup. An absent `.runtime` directory in
+a clean archive is not a missing vendor payload; the YashanDB installer creates
+it from `vendor/yaspy/client_lib`. Do not copy another release's runtime or
+place development database credentials into an archive. Require `/api/ready`
+and an authenticated API check, not `/api/health` alone, for acceptance.
+
+When using systemd under SELinux enforcing, use a Python 3.14 environment at
+an approved persistent location. An executable symlink under `/tmp` can be
+denied before Python starts (`203/EXEC`); do not disable SELinux to bypass it.
+
 The offline dependency set contains the upstream
 `cryptography==49.0.0` `manylinux_2_34` wheel. Full functionality requires
 RHEL 9.8+ (Oracle Linux 9.8+) or an equivalent host with glibc 2.34 or newer; RHEL 8 and its
@@ -368,7 +410,7 @@ The verifier checks wheel metadata, Python/platform compatibility, glibc 2.34+
 host baseline, and RECORD integrity before install.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.11`. The current `production`
+through `migration_runner.py --version 4.4.12`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
@@ -978,7 +1020,7 @@ Agent instead of an external Skill runtime:
 
 ```bash
 bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --version 4.4.11 --config config.json
+  --edition <community|enterprise> --version 4.4.12 --config config.json
 ```
 
 The command verifies a strictly empty target, records a database-managed

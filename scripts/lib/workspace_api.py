@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Community Edition - Workspace API
+"""AI Agent Infra v4.4.12 - Community Edition - Workspace API
 
 Workspace lifecycle management, context chains, agent handoff sessions,
 workspace recovery, and task linking.
@@ -135,6 +135,8 @@ def update_workspace(workspace_id: str, **kwargs: Any) -> bool:
 
 
 def _sanitize_context_data(data: Any) -> Any:
+    if isinstance(data, list):
+        return [_sanitize_context_data(item) for item in data]
     if not isinstance(data, dict):
         return data
     sensitive_keys = {
@@ -148,10 +150,8 @@ def _sanitize_context_data(data: Any) -> Any:
         kl = k.lower()
         if any(sk in kl for sk in sensitive_keys):
             sanitized[k] = '[REDACTED]'
-        elif isinstance(v, dict):
-            sanitized[k] = _sanitize_context_data(v)
         else:
-            sanitized[k] = v
+            sanitized[k] = _sanitize_context_data(v)
     return sanitized
 
 
@@ -200,23 +200,24 @@ def get_context_chain(
     branch_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Return the latest context entries for a workspace."""
+    table = _context_read_table()
     if branch_id:
-        sql = """
+        sql = f"""
             SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
                    CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
-            FROM WORKSPACE_CONTEXT
+            FROM {table}
             WHERE WORKSPACE_ID = :wid AND BRANCH_ID = :vbrid
             ORDER BY CREATED_AT DESC
             FETCH FIRST :lim ROWS ONLY
         """
         rows = execute_query(sql, {"wid": workspace_id, "lim": limit, "vbrid": branch_id})
     else:
-        sql = """
+        sql = f"""
             SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
                    CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
                    TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
-            FROM WORKSPACE_CONTEXT
+            FROM {table}
             WHERE WORKSPACE_ID = :wid
             ORDER BY CREATED_AT DESC
             FETCH FIRST :lim ROWS ONLY
@@ -225,13 +226,20 @@ def get_context_chain(
     return [_row_to_dict(r) for r in rows]
 
 
+def _context_read_table() -> str:
+    from .connection import get_current_agent_id
+    if DATABASE_DIALECT in {"yashandb", "yashan"} and get_current_agent_id():
+        return "CX_AGENT_CONTEXT_READ"
+    return "WORKSPACE_CONTEXT"
+
+
 def get_latest_context(workspace_id: str) -> Optional[Dict[str, Any]]:
     """Return the single most recent context entry for a workspace."""
-    sql = """
+    sql = f"""
         SELECT CONTEXT_ID, WORKSPACE_ID, AGENT_ID, SESSION_ID,
                CONTEXT_TYPE, CONTEXT_DATA, PARENT_CONTEXT_ID,
                TO_CHAR(CREATED_AT, 'YYYY-MM-DD HH24:MI:SS') AS CREATED_AT
-        FROM WORKSPACE_CONTEXT
+        FROM {_context_read_table()}
         WHERE WORKSPACE_ID = :wid
         ORDER BY CREATED_AT DESC
         FETCH FIRST 1 ROWS ONLY

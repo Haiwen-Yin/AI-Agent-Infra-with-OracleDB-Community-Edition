@@ -36,6 +36,29 @@ def _load_bootstrap_cli():
     return module
 
 
+@pytest.mark.parametrize("pre_ok,post_ok", [(True, True), (True, False), (False, True), (False, False)])
+def test_verify_returns_failure_status_for_failed_checks(monkeypatch, tmp_path, pre_ok, post_ok):
+    engine = deployment_orchestrator
+    monkeypatch.setattr(engine, "release_baseline", lambda *_: {"required_terminal_migration": "68.sql"})
+    monkeypatch.setattr(engine, "release_version", lambda *_: "4.4.12")
+    monkeypatch.setattr(engine, "_read_config", lambda *_: {})
+    monkeypatch.setattr(engine, "_resolve_sensitive_config", lambda raw: raw)
+    monkeypatch.setattr(engine, "_database_config", lambda *_: {})
+    monkeypatch.setattr(engine, "_activate_runtime_config", lambda *_: None)
+    monkeypatch.setattr(engine, "_deployment_database_status", lambda *_: {"status": "RETIRED"})
+    monkeypatch.setattr(engine, "preflight", lambda *_, **__: {"passed": pre_ok})
+    monkeypatch.setattr(engine, "postflight", lambda *_: {"passed": post_ok})
+    result = engine.run("verify", database="pg", edition="community", config_path=tmp_path / "config.json", root=tmp_path)
+    assert result["status"] == ("VERIFIED" if pre_ok and post_ok else "FAILED")
+
+
+def test_verify_cli_has_nonzero_exit_for_failed_result(monkeypatch):
+    cli = _load_bootstrap_cli()
+    monkeypatch.setattr(cli, "run", lambda *_, **__: {"status": "FAILED", "postflight": {"passed": False}})
+    monkeypatch.setattr(sys, "argv", ["bootstrap", "verify", "--database", "pg", "--edition", "community"])
+    assert cli.main() == 1
+
+
 def test_install_platform_prefers_package_virtual_environment():
     runtime_root, package_root, packaged = _layout()
     installer = runtime_root / "install_platform.sh" if packaged else package_root / "shared" / "install_platform.sh"
@@ -95,19 +118,27 @@ def test_oracle_prerequisite_script_is_bounded_and_pdb_scoped():
     assert "CREATE TRIGGER" in deployment_orchestrator.ORACLE_OWNER_BASE_PRIVILEGES
 
 
-def test_baseline_declares_v410_terminal_knowledge_context():
+def test_baseline_declares_packaged_version_and_terminal():
     root = Path(__file__).resolve().parents[2]
     manifest_path = root / "build-manifest.json"
     if manifest_path.is_file():
         package = json.loads(manifest_path.read_text(encoding="utf-8"))
         databases = (str(package["database"]["key"]),)
+        version = package["version"]
     else:
         databases = ("oracle", "pg", "yashandb")
+        version = "4.4.10"
+    terminal = ("68_v4_4_11_host_provisioning.sql" if version in {"4.4.11", "4.4.12"}
+                else "65_v4_4_10_external_agent_domain_context.sql")
     for database in databases:
+        if version == "4.4.12" and database in {"oracle", "yashandb"}:
+            terminal = "69_v4_4_12_context_read_isolation.sql"
+        if version == "4.4.12":
+            terminal = "78_v4_4_12_gateway_credential_write_boundary.sql"
         baseline = deployment_orchestrator.release_baseline(database, root)
-        assert baseline["version"] == "4.4.10"
+        assert baseline["version"] == version
         assert baseline["deployment"] == "bootstrap-deployment-agent"
-        assert baseline["required_terminal_migration"] == "65_v4_4_10_external_agent_domain_context.sql"
+        assert baseline["required_terminal_migration"] == terminal
 
 
 def test_oracle_fresh_baseline_memory_migrations_do_not_require_crypto_grant():
@@ -149,7 +180,9 @@ def test_oracle_v449_security_repair_is_schema_owner_independent():
 def test_release_version_rejects_requested_package_mismatch():
     root = Path(__file__).resolve().parents[2]
     database = _packaged_database(root)
-    assert deployment_orchestrator.release_version(database, root, "4.4.10") == "4.4.10"
+    manifest = root / "build-manifest.json"
+    expected = json.loads(manifest.read_text())["version"] if manifest.is_file() else "4.4.10"
+    assert deployment_orchestrator.release_version(database, root, expected) == expected
     with pytest.raises(deployment_orchestrator.DeploymentError, match="does not match"):
         deployment_orchestrator.release_version(database, root, "4.3.7")
 
@@ -503,6 +536,7 @@ def test_yashandb_prerequisite_and_preflight_require_agent_user_rotation():
     assert "GRANT CREATE USER TO &&SCHEMA_OWNER" in prerequisite
     assert "GRANT ALTER USER TO &&SCHEMA_OWNER" in prerequisite
     assert "CREATE ROLE DEEP_SEC_SESSION_ROLE" in prerequisite
+    assert "GRANT ALTER SESSION TO DEEP_SEC_SESSION_ROLE" in prerequisite
     assert "GRANT DEEP_SEC_SESSION_ROLE TO &&SCHEMA_OWNER WITH ADMIN OPTION" in prerequisite
     assert "GRANT DBA" not in prerequisite
     source = Path(deployment_orchestrator.__file__).read_text(encoding="utf-8")

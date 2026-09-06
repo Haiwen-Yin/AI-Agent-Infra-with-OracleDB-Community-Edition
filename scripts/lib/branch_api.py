@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Context Branching API
+"""AI Agent Infra v4.4.12 - Context Branching API
 
 Context branch lifecycle management: fork, merge, abandon, pause, resume,
 branch comparison, conflict detection, and lesson extraction from abandoned branches.
@@ -46,7 +46,7 @@ def fork_branch(
     purpose: Optional[str] = None,
     fork_session_id: Optional[str] = None,
 ) -> str:
-    if oracledb is not None:
+    if DATABASE_DIALECT == "oracle" and oracledb is not None:
         try:
             with get_connection() as conn:
                 cur = conn.cursor()
@@ -124,6 +124,37 @@ def fork_branch(
             )
         except Exception as e2:
             logger.error(f"fork_branch fallback failed: {e2}")
+            raise
+    return branch_id
+
+
+def fork_branch_tx(tx, *, workspace_id: str, fork_context_id: str,
+                   branch_name: str, agent_id: str, source_agent_id: str,
+                   purpose: str, parent_branch_id=None) -> str:
+    """Insert a native parallel branch without committing the caller's transaction."""
+    import uuid
+
+    params = dict(workspace=workspace_id, context=fork_context_id, name=branch_name,
+                  agent=agent_id, purpose=purpose, parent=parent_branch_id)
+    if DATABASE_DIALECT in {"postgresql", "pg"}:
+        row = tx.query_one(
+            "INSERT INTO CONTEXT_BRANCHES (WORKSPACE_ID,SOURCE_CONTEXT_ID,BRANCH_NAME,"
+            "AGENT_ID,DESCRIPTION,PARENT_BRANCH_ID,BRANCH_TYPE,STATUS) "
+            "VALUES (:workspace,:context,:name,:agent,:purpose,:parent,'PARALLEL','ACTIVE') "
+            "RETURNING BRANCH_ID", params)
+        if not row:
+            raise RuntimeError("branch insertion did not return an identifier")
+        return str(next(value for key, value in row.items() if key.lower() == "branch_id"))
+    if DATABASE_DIALECT not in {"oracle", "yashandb", "yashan"}:
+        raise RuntimeError("unsupported branch database dialect")
+    branch_id = "BR_" + uuid.uuid4().hex[:24]
+    params.update(id=branch_id, source=source_agent_id)
+    changed = tx.execute(
+        "INSERT INTO CONTEXT_BRANCHES (BRANCH_ID,WORKSPACE_ID,FORK_CONTEXT_ID,BRANCH_NAME,"
+        "AGENT_ID,BRANCH_PURPOSE,PARENT_BRANCH_ID,SOURCE_AGENT_ID,BRANCH_TYPE,BRANCH_STATUS) "
+        "VALUES (:id,:workspace,:context,:name,:agent,:purpose,:parent,:source,'PARALLEL','ACTIVE')", params)
+    if changed != 1:
+        raise RuntimeError("branch insertion did not persist one row")
     return branch_id
 
 

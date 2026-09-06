@@ -124,7 +124,9 @@ def test_system_admin_barrier_inventory_avoids_lob_distinct_and_membership_scope
 
 
 def test_server_controller_exports_the_resolved_cookie_port():
-    controller = Path(identity_api.__file__).resolve().parents[1] / "start_web_server.sh"
+    scripts = Path(identity_api.__file__).resolve().parents[1]
+    root = scripts.parent if (scripts.parent / "build-manifest.json").is_file() else scripts
+    controller = root / "start_web_server.sh"
     source = controller.read_text(encoding="utf-8")
     assert 'export MEMORY_SERVER_PORT="$PORT"' in source
 

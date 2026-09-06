@@ -12,6 +12,12 @@ def test_knowledge_scope_predicate_uses_authoritative_organization_facts():
     assert "ORGANIZATION_SUBTREE" in sql
     assert "ORGANIZATION_LEVEL" in sql
     assert "PRINCIPAL_PRIVATE" in sql
+    assert "CX_AGENT_RELATIONSHIPS" in sql
+    assert "PRIMARY_OWNER" in sql
+    assert "KR.ENDED_AT" in sql
+    assert "KH.STATUS='ACTIVE'" in sql
+    assert "MO.STATUS='ACTIVE'" in sql
+    assert "VISIBILITY IN ('PUBLIC','SHARED')" not in sql
 
 
 def test_policy_validation_requires_correct_group_target(monkeypatch):
@@ -66,6 +72,7 @@ def test_agent_knowledge_context_resolves_single_line_org_chain_and_groups(monke
     assert context["responsible_groups"][0]["group_id"] == "RG_ENGINEERING"
     assert context["execution_groups"][0]["group_id"] == "CG_GRAPH"
     assert any("CX_ORGANIZATION_CLOSURE" in sql for sql, _ in calls)
+    assert any("m.MEMBERSHIP_KIND='PRIMARY'" in sql for sql, _ in calls)
 
 
 def test_agent_private_knowledge_policy_targets_agent_not_human_owner(monkeypatch):

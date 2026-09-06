@@ -441,12 +441,16 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
                         )
                         role_admin = int(cursor.fetchone()[0] or 0) > 0
                         role_exists = role_admin
+                        cursor.execute("SELECT PRIVILEGE FROM ROLE_SYS_PRIVS WHERE ROLE='DEEP_SEC_SESSION_ROLE'")
+                        role_privileges = {str(item[0]).upper() for item in cursor.fetchall()}
+                        missing_session = sorted({"CREATE SESSION", "ALTER SESSION"} - role_privileges)
                         checks.append(_check(
                             "YASHAN_AGENT_ROLE_ADMIN",
-                            "PASS" if role_exists and role_admin else "BLOCKED",
+                            "PASS" if role_exists and role_admin and not missing_session else "BLOCKED",
                             "YashanDB independent Agent session-role management",
                             "Run deploy/0_yashandb_database_prerequisites.sql as the database administrator in the target PDB.",
-                            {"role_exists": role_exists, "owner_admin_option": role_admin},
+                            {"role_exists": role_exists, "owner_admin_option": role_admin,
+                             "missing_session_privileges": missing_session},
                         ))
                     except Exception:
                         checks.append(_check(
@@ -639,7 +643,9 @@ def _migration_apply(target_version: str, database: str, edition: str, config_pa
         results.append({"script": name, "passed": bool(result.passed), "ledger_status": result.ledger_status,
                         "checksum": result.checksum, "error": result.error_type})
         if not result.passed:
-            raise DeploymentError(f"migration failed: {name}: {result.error_type or result.ledger_status}")
+            raise DeploymentError(
+                f"migration failed: {name}: {result.error_type or result.ledger_status}; "
+                f"code={result.error_code or 'unknown'}; statement={result.failed_statement}")
     return results
 
 
@@ -1051,9 +1057,14 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     if mode in {"STATUS", "VERIFY"}:
         durable = _deployment_database_status(database, config, run_id)
         verified = postflight(database, edition, config, terminal_migration) if mode == "VERIFY" else None
-        return {"run_id": journal.run_id, "mode": mode, "version": target_version,
+        prerequisites = preflight(database, config, require_empty=False, edition=edition)
+        status = "STATUS"
+        if mode == "VERIFY":
+            passed = prerequisites.get("passed") is True and verified.get("passed") is True
+            status = "VERIFIED" if passed else "FAILED"
+        return {"run_id": journal.run_id, "mode": mode, "version": target_version, "status": status,
                 "terminal_migration": terminal_migration,
-                "preflight": preflight(database, config, require_empty=False, edition=edition),
+                "preflight": prerequisites,
                 "postflight": verified, "deployment": durable}
     resuming = mode == "RESUME"
     resume_from_handoff = False

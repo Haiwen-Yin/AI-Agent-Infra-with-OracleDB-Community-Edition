@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Collaboration Group API Tests"""
+"""AI Agent Infra v4.4.12 - Collaboration Group API Tests"""
 
 import sys
 import os

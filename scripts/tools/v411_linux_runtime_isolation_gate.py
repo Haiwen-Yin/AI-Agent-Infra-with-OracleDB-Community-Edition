@@ -64,6 +64,7 @@ def ensure_identity(uid: int, name: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--version", default="4.4.11")
     parser.add_argument("--base", type=Path, default=Path("/var/lib/chuanxu-runtime-gate"))
     parser.add_argument("--output", type=Path, default=Path("/tmp/v4.4.11-linux-runtime-isolation.json"))
     parser.add_argument(
@@ -178,7 +179,7 @@ sleep 20
                              check=False, capture_output=True, text=True).stdout.strip() != "active"
     checks["revocation_stops_unit"] = stopped
     payload = {
-        "schema": "chuanxu-v411-linux-runtime-isolation/v1", "version": "4.4.11",
+        "schema": "chuanxu-v411-linux-runtime-isolation/v1", "version": args.version,
         "generated_at": datetime.now(timezone.utc).isoformat(), "host": os.uname().nodename,
         "checks": checks, "evidence": evidence, "passed": all(checks.values()),
         "capacity_claim": False,

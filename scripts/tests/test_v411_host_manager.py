@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from shared.lib import host_manager
-from shared.lib import host_provisioning
+try:
+    from shared.lib import host_manager, host_provisioning
+except ModuleNotFoundError:  # generated edition package
+    from lib import host_manager, host_provisioning
 
 
 def request(action, **values):

@@ -42,7 +42,7 @@ def main() -> int:
     parser.add_argument("--token", required=True, help="single-use token; never write it to disk")
     parser.add_argument("--shared-path", default="", help="local path of the already-mounted Pool shared directory")
     parser.add_argument("--agent-info-path", default="", help="local root for Agent metadata and per-Agent runtime subdirectories")
-    parser.add_argument("--runtime-version", default="v4.4.11")
+    parser.add_argument("--runtime-version", default="v4.4.12")
     parser.add_argument("--host-manager-socket", default="/run/chuanxu/host-manager.sock")
     parser.add_argument("--host-evidence-dir", default="/var/lib/chuanxu-runtime/evidence")
     parser.add_argument("--heartbeat-seconds", type=int, default=0, help="send periodic heartbeats after activation")

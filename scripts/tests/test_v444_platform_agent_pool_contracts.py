@@ -88,11 +88,29 @@ def test_portal_llm_control_plane_reads_clear_agent_context():
         assert "connection.get_current_agent_id()" in function
 
 
-def test_v444_node_credentials_are_not_part_of_persisted_contract():
-    source = (LIB_ROOT / "platform_agent_pool.py").read_text(encoding="utf-8")
-    assert "ssh_password" not in source
-    assert "ONE_USE_PASSWORD" in source
-    assert "ROLE_JSON" in source
+def test_v444_node_credentials_are_not_part_of_persisted_contract(monkeypatch):
+    try:
+        from shared.lib import platform_agent_pool as pool
+    except ModuleNotFoundError:
+        from lib import platform_agent_pool as pool
+    captured = []
+    class Transaction:
+        def execute(self, sql, binds):
+            captured.append((sql, dict(binds)))
+            return 1
+    monkeypatch.setattr(pool, "_require_admin", lambda *_: None)
+    monkeypatch.setattr(pool.connection, "execute_transaction_callback", lambda fn: fn(Transaction()))
+    monkeypatch.setattr(pool.identity_api, "_audit_tx", lambda *args: captured.append(args[1:]))
+    result = pool.register_node("admin", {
+        "node_key": "test-node", "host_reference": "node.example.invalid",
+        "reason": "regression test", "trust_mode": "ONE_USE_PASSWORD",
+        "ssh_password": "sentinel-one-use-secret", "roles": [],
+    })
+    persisted = repr(captured) + repr(result)
+    assert "sentinel-one-use-secret" not in persisted
+    assert "ssh_password" not in persisted
+    assert "ONE_USE_PASSWORD" in persisted
+    assert "ROLE_JSON" in persisted
 
 
 def test_v444_managed_resources_have_governed_retirement_contracts():

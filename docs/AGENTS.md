@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.11 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.12 Unified Repository Guide
 
-> **v4.4.11** - The unified single-source repository that generates all 6 release
+> **v4.4.12** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -9,12 +9,19 @@
 
 ## 1. Repository Layout
 
-## v4.4.10 Fresh Baseline And Current Product Boundaries
+## Fresh Baseline And Current Product Boundaries
 
-v4.4.10 is the current fresh-deployment baseline. Use each adapter's
-`deploy/baseline_v4_4_10.json` ordered chain through migration 65; earlier
-numbered scripts remain for journal/checksum reproducibility, not as a customer
-upgrade promise. v4.4.8 is withdrawn.
+Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
+deployment contract, not the historical source template filename. The build
+must align its version, adapter and terminal migration with the package:
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78.
+Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
+Historical scripts remain for
+journal/checksum reproducibility, not as a customer upgrade promise.
+v4.4.8 is withdrawn. v4.4.12 includes entity isolation, organization knowledge
+policies and native credential write restrictions through migration 78.
+Release acceptance is determined by the current package-bound evidence;
+the migration terminal alone does not establish production readiness.
 
 The model gateway is optional. Direct and gateway routes can coexist per LLM
 Provider Profile. The gateway provides bounded streaming/non-streaming
@@ -55,8 +62,9 @@ Initialization creates `SYSTEM_PLATFORM_ADMIN_AGENT` in every edition and
 `SYSTEM_COMPLIANCE_ADMIN_AGENT` only in Enterprise. These are separate Agent
 Principals and never reuse the human `admin` session or a Schema Owner
 credential. Bootstrap is idempotent and does not call an external Agent or
-LLM. Business Agents are requested by an authorized human, approved by a
-different Principal, deployed through a selected target, and remain pending
+LLM. Business Agents are requested by an authorized human, follow the edition's
+governance flow (separate approval in Enterprise, authorized direct execution
+in Community), are deployed through a selected target, and remain pending
 until an approved LLM profile and runtime health are available.
 
 External Agents remain Skill-first: `SKILL.md` enrollment, Gateway
@@ -73,7 +81,9 @@ secret references, and model conversation state.
 ├── spec_validator.py        # validates build output against openspec specs
 ├── CHANGELOG.md             # project-wide changelog (English, reverse chrono)
 ├── openspec/
-│   └── config.yaml          # store pointer to AI-Agent-Infra-Specs
+│   ├── config.yaml          # local spec-driven workflow
+│   ├── specs/               # accepted requirements
+│   └── changes/             # proposals, designs, tasks and spec deltas
 ├── editions/                # 6 per-edition JSON configs (one per release)
 │   ├── oracle-community.json
 │   ├── oracle-enterprise.json
@@ -112,7 +122,8 @@ For each edition, `build.py`:
    - `adapters/<db>/agent_api.py`   → `scripts/lib/agent_api.py`
    - `adapters/<db>/deploy/`        → `scripts/deploy/`
    - `adapters/<db>/deploy_<db>.py` → `scripts/deploy_<db>.py`
-4. Generates `config.json`, `requirements.txt`, `LICENSE*`, and `NOTICE`.
+4. Generates `config.example.json`, `requirements.txt`, `LICENSE*`, and `NOTICE`.
+   Runtime secrets belong to the operator's private configuration, not the package.
 5. Injects the version string into every `.py`, `.sql`, `.md`, `.html`, `.sh`.
 6. Zips the directory to `build_output/<edition>-v<VERSION>.zip`.
 
@@ -138,13 +149,13 @@ orchestrator).
 
 - `build.py` (`--version` flag falls back to `VERSION`)
 - `spec_validator.py` (parsed and reported)
-- Generated `config.json` → `security.secret_key`
+- Generated package and deployment manifests (never used to derive secrets)
 - All injected docstrings/markdown headers via `inject_version()`
 
 To cut a new release:
 
 ```bash
-echo "4.3.5" > VERSION
+# Update VERSION only after the current release gates are satisfied.
 source shared/scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
@@ -152,16 +163,13 @@ cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" spec_validator.py --build-output "build_output/v$(tr -d '[:space:]' < VERSION)" --release
 ```
 
-## v4.3.0 Integrated Profiles
+## Integrated Profiles
 
-The working source targets the version in `VERSION`; the final package date is assigned only
-when the final archives are built. The prior published baseline is `v4.3.4`
-dated `2026-08-04`.
-Graph Engineering work from the internal v4.2.1 closure is integrated into this
-release and is not published as a separate v4.2.1 archive. The stable v4.1.x
-line remains available as a downloadable compatibility baseline and receives
-only critical security or data-loss fixes. The complete v4.3.0 production
-replacement evidence gate has passed.
+The default build version comes from `VERSION`; explicit development builds
+may use `--version` without declaring a release. The final package date and
+approval must refer to the actual validated artifacts. Historical release
+evidence does not prove the current version is ready. The v4.2.1 milestone
+remains internal history, not a separately published release.
 
 `production` contains the integrated stable-core release surface and is the
 recommended runtime profile for production. Current capability availability is
@@ -171,10 +179,9 @@ draft import, read-only SLO views, and checkpoint fork are `CONTROLLED`; replay,
 Dynamic Graph migration, framework-adapter execution, A2A, and OTLP are
 `DISABLED`. No capability label changes database, API, Skill, Tool, model, or
 export authorization boundaries.
-The v4.3.0 release evidence manifest reports `PASS` and `passed: true`; its
-associated closure manifest reports `releasable: true`. v4.1.x remains
-downloadable as the previous baseline, not the current production
-recommendation.
+Inspect the current database capability matrix before exposing a controlled
+operation. DB4A2A is a database-mediated dispatch mechanism, not proof of
+standard A2A interoperability.
 
 The non-`stable-4.1` migration tail contains nine common scripts:
 `9_v4_2_0_graph_engineering.sql`, `10_v4_2_0_graph_runtime.sql`,
@@ -245,20 +252,21 @@ Exit code is non-zero on any failure, so it can gate CI.
 
 ## 5. OpenSpec Store
 
-The shared specs live in a separate store, not inside this repo:
+The authoritative specs live inside this repository:
 
 ```
-/root/AI-Agent-Infra-Specs/openspec/specs/
+/root/ai-agent-infra/openspec/specs/
 ├── api-contract/spec.md            # REST endpoints every edition must serve
 ├── database-adaptation/spec.md     # connection.py public API + per-DB schema
 ├── documentation-format/spec.md    # CHANGELOG/RELEASE_NOTES/SKILL.md rules
 └── test-requirements/spec.md       # minimum test counts + per-DB quirks
 ```
 
-`openspec/config.yaml` in this repo points at that store (`store: ai-agent-infra`).
-Proposals that affect all 6 editions must be made there; the build then has to
-satisfy them. Use `spec_validator.py` as the bridge between the specs and the
-built artifacts.
+Put proposals and deltas in `openspec/changes/`, and validate them with
+`openspec validate <change> --strict`. Accepted requirements are in
+`openspec/specs/`. Do not edit a historical external clone and assume this
+repository or its builds have been updated. Use `spec_validator.py` to check
+the generated artifacts as well.
 
 ## 6. Test Infrastructure
 
@@ -286,11 +294,12 @@ Example:
 AIAGENT_TEST_DB=oracle "$PYTHON_BIN" -m pytest scripts/tests/ -q
 ```
 
-The adapter runtime reads its database connection from `config.json` in the
-generated package root. `AIAGENT_*_CONFIG` only feeds the shared pytest
-fixture and does not replace that runtime file. For a real package run, first
-complete the config wizard or place a temporary owner-only (`0600`) config in
-the package root; never commit that file or include it in a release archive.
+The adapter runtime reads `CX_CONFIG_PATH` when provided, otherwise the
+package configuration. Test-fixture overrides alone do not replace runtime
+configuration. Use a temporary owner-only (`0600`) config, run from the
+generated package directory, and set its `scripts` on PYTHONPATH. Never commit
+that config or include it in a release archive. Source/offline skips are not
+live database test passes.
 
 ### Running the full suite post-build
 
@@ -354,7 +363,7 @@ must be handled by an operator capacity decision.
 - **Never hardcode versions** — `build.py:inject_version()` rewrites them
   from `VERSION`.
 - **Database-specific changes go in `adapters/<db>/`**, never in `shared/`.
-- **Spec changes go in the store** (`/root/AI-Agent-Infra-Specs/openspec`),
+- **Spec changes go in this repository** (`openspec/changes` and `openspec/specs`),
   then re-run `spec_validator.py`.
 - **Community vs Enterprise divergence** is driven by `extra_features` in the
   edition JSON and the `inject_version()` edition-label rewrite of
@@ -367,12 +376,12 @@ Every release validation database or PDB must be explicitly classified as
 browser, recovery, and capacity tests use temporary objects only. Their names
 and sanitized lifecycle evidence are recorded outside the release archive.
 
-Before the next version upgrade, stop validation services, remove all
-temporary PostgreSQL databases and Oracle/YashanDB PDBs, clean associated
-test-only roles/jobs where applicable, and re-query all inventories. A zero
-temporary-object result is a release prerequisite. If an object cannot be
-classified confidently, the upgrade is blocked; do not guess and do not drop
-the protected baseline database.
+Before cleanup, obtain operator authorization and resolve exact targets.
+Stop their validation services, retire only confirmed obsolete test objects,
+and re-query inventories. Preserve baseline/system databases and explicitly
+protected TEST PDBs; ambiguous names remain untouched pending clarification.
+Current-version test databases may remain for ongoing validation. Do not
+drop cluster-wide roles merely because one database was retired.
 
 ## v4.0.0 Lessons Learned (CRITICAL - Read Before Any Code Change)
 
@@ -392,13 +401,18 @@ the protected baseline database.
 - All `typeof` checks MUST handle both: `typeof id === 'string' || typeof id === 'number'`
 
 ### Session Cookie Isolation
-- Each server MUST use `session_id_{port}` as cookie name
+- In-process legacy handlers bind the actual request port with a ContextVar
+  and reset it in `finally`. Never fix a request by changing process-wide
+  `MEMORY_SERVER_PORT`; direct Uvicorn and proxy ports may differ from config.
+- Use the implemented `dashboard_session_id_{request_port}` and
+  `portal_session_id_{request_port}` names; request ports may differ from defaults.
 - Cookie MUST include `SameSite=Lax` attribute
-- Auto-logout JS timer (`_aloSec`) MUST equal `config.server.session_timeout` (300 seconds by default)
+- Session expiry must follow the server-issued lease and leave without a
+  manual logout confirmation; dashboard and portal sessions remain distinct.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.11`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.12`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration
@@ -411,18 +425,30 @@ the protected baseline database.
   `deepseek-v4-flash-0731`), but arbitrary suffixes remain a mismatch.
 - Retiring an LLM profile is blocked while it remains referenced by Portal,
   an active native Agent, or a pending Business Agent request.
-- Add `reasoning_effort: "none"` for reasoning models
+- Provider-specific reasoning parameters must be supported by that provider;
+  do not inject an arbitrary value into every model request.
 - Streaming: only yield `content` tokens, skip `reasoning_content`
 - Non-streaming: fall back to `reasoning_content` if `content` empty
 
 ### PG Schema Differences
+- Parent RLS does not protect direct leaf-partition queries. Entity partitions
+  must not receive direct business-role grants, including during registration
+  after historical GRANT ON ALL TABLES. Test parent and partition paths with
+  actual independent logins; preserve migration 53's SESSION_USER binding.
 - `skill_meta`: PG has `skill_id`/`status`, Oracle has `entity_id`/`skill_status`
 - `compliance_log`: PG has `severity` (INFO/WARNING/ERROR/CRITICAL), `policy_violation` (boolean)
 - `context_audit_log`: MUST be created manually in PG (not in 1_schema.sql)
 - `workspace_context.context_id`: PG is BIGINT IDENTITY, Oracle/YashanDB is VARCHAR
 
 ### YashanDB Limitations
+- Migration 70 replaces raw entity/metadata/embedding/edge access with
+  SESSION_USER-bound views and a minimal private-write package. Legacy definer
+  packages are not business-Agent APIs. See the adapter's native-data-security
+  document; never fall back to Owner or broaden SHARED to bypass denied SQL.
 - No `GRAPH_ALGORITHMS` PL/SQL package (implement in Python)
-- `yaspy` driver: no connection pooling, fresh connection per query
-- VECTOR type: returns `array.array`, convert to string immediately (GC segfault)
-- Use systemd `Restart=always` due to yaspy instability
+- The adapter owns its connection lifecycle; inspect `connection.py` rather
+  than assuming native pooling semantics from its facade name.
+- Normalize native VECTOR values at the adapter boundary and test the actual
+  driver version. Do not treat historical driver failures as a universal limit.
+- Service restart policy does not substitute for transaction recovery,
+  database readiness or driver fault investigation.

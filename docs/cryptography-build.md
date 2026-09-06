@@ -1,4 +1,4 @@
-# Cryptography Wheel Policy - AI Agent Infra with DB v4.4.11
+# Cryptography Wheel Policy - AI Agent Infra with DB v4.4.12
 
 The platform uses `cryptography==49.0.0` for configuration and credential
 encryption. v4.4.11 and later target RHEL 9.8+ (Oracle Linux 9.8+), or an

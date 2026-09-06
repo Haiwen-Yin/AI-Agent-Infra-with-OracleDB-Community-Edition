@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Community Edition - Knowledge API
+"""AI Agent Infra v4.4.12 - Community Edition - Knowledge API
 
 Knowledge CRUD, graph edges, spaced-review, and tagging.
 Operates on ENTITIES (ENTITY_TYPE='KNOWLEDGE') + KNOWLEDGE_META + ENTITY_EDGES.
@@ -36,8 +36,11 @@ def get_agent_knowledge_context(agent_id: str) -> Dict[str, Any]:
     if not agent:
         raise ValueError("agent_id is required")
     owner = execute_query_one(
-        "SELECT PRINCIPAL_ID, RESPONSIBLE_GROUP_ID FROM CX_AGENT_RELATIONSHIPS "
-        "WHERE AGENT_ID=:agent_id AND RELATIONSHIP_ROLE='PRIMARY_OWNER' AND STATUS='ACTIVE'",
+        "SELECT r.PRINCIPAL_ID, r.RESPONSIBLE_GROUP_ID FROM CX_AGENT_RELATIONSHIPS r "
+        "JOIN CX_PRINCIPALS h ON h.PRINCIPAL_ID=r.PRINCIPAL_ID "
+        "WHERE r.AGENT_ID=:agent_id AND r.RELATIONSHIP_ROLE='PRIMARY_OWNER' AND r.STATUS='ACTIVE' "
+        "AND (r.ENDED_AT IS NULL OR r.ENDED_AT>CURRENT_TIMESTAMP) "
+        "AND h.PRINCIPAL_TYPE='HUMAN' AND h.STATUS='ACTIVE'",
         {"agent_id": agent},
     ) or {}
     principal_id = str(owner.get("principal_id") or "")
@@ -46,7 +49,9 @@ def get_agent_knowledge_context(agent_id: str) -> Dict[str, Any]:
         "FROM CX_ORGANIZATION_MEMBERS m "
         "JOIN CX_ORGANIZATION_CLOSURE c ON c.DESCENDANT_ID=m.ORGANIZATION_ID "
         "JOIN CX_ORGANIZATIONS o ON o.ORGANIZATION_ID=c.ANCESTOR_ID "
-        "WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' "
+        "WHERE m.PRINCIPAL_ID=:principal_id AND m.STATUS='ACTIVE' AND m.MEMBERSHIP_KIND='PRIMARY' "
+        "AND o.STATUS='ACTIVE' AND o.VALID_FROM<=CURRENT_TIMESTAMP "
+        "AND (o.VALID_UNTIL IS NULL OR o.VALID_UNTIL>CURRENT_TIMESTAMP) "
         "AND m.VALID_FROM<=CURRENT_TIMESTAMP AND (m.VALID_UNTIL IS NULL OR m.VALID_UNTIL>CURRENT_TIMESTAMP) "
         "ORDER BY c.DEPTH DESC, o.ORGANIZATION_ID",
         {"principal_id": principal_id},
@@ -185,8 +190,8 @@ def list_organization_policies(organization_id: str, limit: int = 100) -> List[D
 def knowledge_access_predicate(entity_alias: str = "e", principal_expr: str = ":principal_id") -> str:
     """Database-authoritative visibility predicate; unknown policies fail closed.
 
-    Legacy rows without a policy retain PUBLIC/SHARED or owner-private behavior
-    so the v4.4.10 baseline can be adopted without rewriting existing content.
+    Legacy rows without a policy retain PUBLIC or owner-private behavior.
+    A SHARED marker alone does not identify any authorized recipient.
     Organization membership and closure are evaluated at read time.
     """
     entity_id = f"CAST({entity_alias}.ENTITY_ID AS VARCHAR(128))" if DATABASE_DIALECT == "postgresql" else f"{entity_alias}.ENTITY_ID"
@@ -199,13 +204,25 @@ def knowledge_access_predicate(entity_alias: str = "e", principal_expr: str = ":
            OR (kap.SCOPE_TYPE IN ('ORGANIZATION_SUBTREE','ORGANIZATION_LEVEL') AND EXISTS (
              SELECT 1 FROM CX_ORGANIZATION_MEMBERS kmem
              JOIN CX_ORGANIZATION_CLOSURE kcl ON kcl.DESCENDANT_ID=kmem.ORGANIZATION_ID
-             WHERE kmem.PRINCIPAL_ID={principal_expr} AND kmem.STATUS='ACTIVE'
+             JOIN CX_PRINCIPALS kh ON kh.PRINCIPAL_ID=kmem.PRINCIPAL_ID
+             JOIN CX_ORGANIZATIONS mo ON mo.ORGANIZATION_ID=kmem.ORGANIZATION_ID
+             JOIN CX_ORGANIZATIONS ko ON ko.ORGANIZATION_ID=kap.ORGANIZATION_ID
+             WHERE (kmem.PRINCIPAL_ID={principal_expr} OR EXISTS (
+               SELECT 1 FROM CX_AGENT_RELATIONSHIPS kr
+               JOIN CX_PRINCIPALS ka ON ka.PRINCIPAL_ID=kr.AGENT_ID AND ka.STATUS='ACTIVE'
+               WHERE kr.AGENT_ID={principal_expr} AND kr.PRINCIPAL_ID=kmem.PRINCIPAL_ID
+                 AND kr.RELATIONSHIP_ROLE='PRIMARY_OWNER' AND kr.STATUS='ACTIVE'
+                 AND (kr.ENDED_AT IS NULL OR kr.ENDED_AT>CURRENT_TIMESTAMP)))
+               AND kmem.STATUS='ACTIVE' AND kh.PRINCIPAL_TYPE='HUMAN' AND kh.STATUS='ACTIVE'
+               AND mo.STATUS='ACTIVE' AND ko.STATUS='ACTIVE'
+               AND mo.VALID_FROM<=CURRENT_TIMESTAMP AND (mo.VALID_UNTIL IS NULL OR mo.VALID_UNTIL>CURRENT_TIMESTAMP)
+               AND ko.VALID_FROM<=CURRENT_TIMESTAMP AND (ko.VALID_UNTIL IS NULL OR ko.VALID_UNTIL>CURRENT_TIMESTAMP)
                AND kmem.VALID_FROM <= CURRENT_TIMESTAMP AND (kmem.VALID_UNTIL IS NULL OR kmem.VALID_UNTIL > CURRENT_TIMESTAMP)
                AND kcl.ANCESTOR_ID=kap.ORGANIZATION_ID
                AND (kap.SCOPE_TYPE='ORGANIZATION_SUBTREE' OR kcl.DEPTH <= kap.HIERARCHY_DEPTH))))
       )
       OR (NOT EXISTS (SELECT 1 FROM CX_KNOWLEDGE_ACCESS_POLICIES kp0 WHERE kp0.ENTITY_ID={entity_id})
-          AND ({entity_alias}.VISIBILITY IN ('PUBLIC','SHARED') OR {entity_alias}.OWNED_BY_AGENT={principal_expr}))
+          AND ({entity_alias}.VISIBILITY='PUBLIC' OR {entity_alias}.OWNED_BY_AGENT={principal_expr}))
     )"""
 
 

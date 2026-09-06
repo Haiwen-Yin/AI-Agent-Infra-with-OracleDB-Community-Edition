@@ -58,6 +58,17 @@ def validate_manifest(root: Path, manifest_path: Path, *, expected_version: str 
     errors.extend(f"required evidence missing: {key}" for key in missing)
     if manifest.get("schema") != "ai-agent-infra-release-evidence/v1":
         errors.append("unsupported release evidence schema")
+    if manifest.get('releasable') is not True:
+        errors.append('release is not approved: releasable must be true')
+    if manifest.get('release_status') not in {'PASS', 'PASS_WITH_CONSTRAINED_CLAIMS'}:
+        errors.append('release status is not approved')
+    gates = manifest.get('current_package_gates')
+    if not isinstance(gates, list) or not gates:
+        errors.append('current_package_gates evidence is required')
+    else:
+        for index, gate in enumerate(gates):
+            if not isinstance(gate, dict) or str(gate.get('result') or '').upper() != 'PASS':
+                errors.append(f'current_package_gates[{index}] is not PASS')
     version = str(manifest.get("version") or "")
     if expected_version and version != expected_version:
         errors.append("manifest version does not match requested version")

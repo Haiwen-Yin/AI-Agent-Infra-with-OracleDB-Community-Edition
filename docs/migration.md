@@ -1,4 +1,4 @@
-# Migration Guide - AI Agent Infra with DB v4.4.11
+# Migration Guide - AI Agent Infra with DB v4.4.12
 
 ## v4.4.10 Fresh Deployment Baseline
 

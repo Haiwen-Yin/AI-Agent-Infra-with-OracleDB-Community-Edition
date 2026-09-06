@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Pytest Configuration and Shared Fixtures
+"""AI Agent Infra v4.4.12 - Pytest Configuration and Shared Fixtures
 
 Provides parameterized database fixtures so the same test suite can run
 against Oracle, PostgreSQL, and YashanDB backends without duplication.
@@ -36,6 +36,14 @@ if str(LIB_ROOT) not in sys.path:
     sys.path.insert(0, str(LIB_ROOT))
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PACKAGED_EDITION = not (PACKAGE_ROOT / "adapters").is_dir()
+
+# Package suites share a temporary UI link. Serialize sessions in this exact
+# package so a short live suite cannot remove it underneath an offline suite.
+_PACKAGE_TEST_LOCK = None
+if PACKAGED_EDITION and sys.platform.startswith("linux"):
+    import fcntl
+    _PACKAGE_TEST_LOCK = os.open(PACKAGE_ROOT, os.O_RDONLY)
+    fcntl.flock(_PACKAGE_TEST_LOCK, fcntl.LOCK_EX)
 
 # Generated packages keep the production React application at ``web/`` while
 # a number of source contracts resolve paths relative to ``scripts/tests``.
@@ -234,7 +242,7 @@ def db_connection(db_type: str, _db_reachable):
 def pytest_report_header(config) -> List[str]:
     """Add backend info to the pytest header."""
     lines = [
-        "AI Agent Infra v4.4.11 - parameterized DB fixtures",
+        "AI Agent Infra v4.4.12 - parameterized DB fixtures",
         f"  Active backends: {_active_backends()}",
     ]
     forced = os.environ.get("AIAGENT_TEST_DB")
@@ -263,6 +271,8 @@ def pytest_sessionfinish(session, exitstatus):
     """Remove the generated-package-only UI path compatibility link."""
     if _PACKAGE_WEB_COMPAT.is_symlink():
         _PACKAGE_WEB_COMPAT.unlink()
+    if _PACKAGE_TEST_LOCK is not None:
+        os.close(_PACKAGE_TEST_LOCK)
 
 
 def pytest_collection_modifyitems(config, items):

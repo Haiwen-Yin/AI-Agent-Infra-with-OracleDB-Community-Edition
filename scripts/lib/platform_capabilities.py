@@ -19,6 +19,10 @@ class CapabilityConflict(CapabilityError):
 class CapabilityServiceUnavailable(RuntimeError):
     """The authoritative capability registry cannot be read."""
 
+    def __init__(self, message: str, reason_code: str = "database_unavailable"):
+        super().__init__(message)
+        self.reason_code = reason_code
+
 
 REGISTRY: Dict[str, Dict[str, Any]] = {
     "identity": {"zh": "身份认证", "en": "Identity", "mandatory": True, "page": ""},
@@ -141,6 +145,55 @@ def page_states() -> Dict[str, bool]:
     return {
         str(meta["page"]): configured[key] and _edition_available(key)
         for key, meta in REGISTRY.items() if meta.get("page")
+    }
+
+
+def governance_status() -> Dict[str, Any]:
+    """Summarize registry integrity, without claiming deployment readiness."""
+    try:
+        rows = _rows(connection.execute_query(
+            "SELECT CAPABILITY_KEY,ENABLED,MANDATORY FROM CX_PLATFORM_CAPABILITIES"
+        ))
+    except Exception as exc:
+        raise CapabilityServiceUnavailable("Platform capability registry is unavailable") from exc
+    states = {str(row.get("capability_key") or ""): row for row in rows}
+    if len(states) != len(rows) or any(key not in states for key in REGISTRY):
+        raise CapabilityServiceUnavailable("Platform capability registry is incomplete", "registry_incomplete")
+    enabled = {}
+    items = []
+    for key, meta in REGISTRY.items():
+        row = states[key]
+        if row.get("enabled") not in {"Y", "N"} or row.get("mandatory") not in {"Y", "N"}:
+            raise CapabilityServiceUnavailable("Platform capability registry is invalid", "registry_invalid")
+        available = _edition_available(key)
+        enabled[key] = row["enabled"] == "Y" and available
+        items.append({
+            "capability_key": key,
+            "display_name_zh": meta["zh"], "display_name_en": meta["en"],
+            "mandatory": bool(meta.get("mandatory") or row["mandatory"] == "Y"),
+            "configured_enabled": row["enabled"] == "Y",
+            "edition_available": available, "effective_enabled": enabled[key],
+        })
+    for item in items:
+        item["missing_dependencies"] = [
+            key for key in DEPENDENCIES.get(item["capability_key"], ())
+            if item["effective_enabled"] and not enabled[key]
+        ]
+    mandatory = [item for item in items if item["mandatory"]]
+    required_enabled = sum(item["effective_enabled"] for item in mandatory)
+    dependency_issues = sum(bool(item["missing_dependencies"]) for item in items)
+    return {
+        "source": "database",
+        "status": "degraded" if required_enabled != len(mandatory) or dependency_issues else "available",
+        "summary": {
+            "total": len(items), "required_total": len(mandatory),
+            "required_enabled": required_enabled, "enabled": sum(enabled.values()),
+            "disabled": sum(item["edition_available"] and not item["configured_enabled"] for item in items),
+            "edition_unavailable": sum(not item["edition_available"] for item in items),
+            "dependency_issues": dependency_issues,
+        },
+        "items": items,
+        "effective_capabilities": enabled,
     }
 
 

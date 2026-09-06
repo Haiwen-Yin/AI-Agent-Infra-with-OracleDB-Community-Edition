@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.11 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.12 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -22,6 +22,7 @@ import urllib.request
 import urllib.error
 from decimal import Decimal
 from http.cookies import SimpleCookie
+from contextvars import ContextVar
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -56,7 +57,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.11"
+VERSION = "4.4.12"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -215,12 +216,15 @@ def _is_admin_role(role):
     return str(role or '').strip().upper() in {'ADMIN', 'ADMINISTRATOR'}
 
 
+_request_cookie_port = ContextVar('legacy_request_cookie_port', default=None)
+
+
 def _get_cookie_name(scope='PORTAL'):
     """Return entry-scoped, port-specific cookie name for Web sessions."""
     # FastAPI is the network entrypoint from v4.3.0 onward.  Legacy page/API
     # handlers run in-process behind it, so they must use its runtime port
     # rather than the packaged config.json default (normally 8000).
-    port = os.environ.get('MEMORY_SERVER_PORT', '').strip()
+    port = _request_cookie_port.get() or os.environ.get('MEMORY_SERVER_PORT', '').strip()
     if not port:
         port = str(_load_server_config().port)
     normalized = str(scope or '').upper()
@@ -4937,8 +4941,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.11', VERSION)
-            html = html.replace('2026-08-31', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.12', VERSION)
+            html = html.replace('2026-09-05', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

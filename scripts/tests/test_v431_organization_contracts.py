@@ -282,7 +282,9 @@ def test_create_organization_rejects_existing_or_self_parent_id(service):
         )
 
 
-def test_submission_atomically_creates_one_organization_approval(service):
+@pytest.mark.parametrize("approvals_enabled", [True, False])
+def test_submission_respects_edition_approval_capability(service, monkeypatch, approvals_enabled):
+    monkeypatch.setattr(organization_api, "_approvals_enabled", lambda: approvals_enabled)
     db = service
     db.change["status"] = "VALIDATED"
     db.operations.append({
@@ -291,6 +293,10 @@ def test_submission_atomically_creates_one_organization_approval(service):
         "expected_row_version": 2, "command_json": '{"organization_name":"Renamed"}', "status": "ACTIVE",
     })
     result = organization_api.submit_change_set("admin", "change-1")
+    if not approvals_enabled:
+        assert result["status"] == "PUBLISHED"
+        assert not db.approvals
+        return
     assert result["status"] == "PENDING_APPROVAL"
     assert result["approval_id"] == "APR_test"
     assert db.approvals["APR_test"]["entity_type"] == "ORGANIZATION_CHANGE"

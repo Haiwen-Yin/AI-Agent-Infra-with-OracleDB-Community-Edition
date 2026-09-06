@@ -200,7 +200,8 @@ def test_v411_gateway_exposes_drift_heartbeat_and_lifecycle_routes():
 
 
 def test_web_startup_rejects_untracked_listener_and_rechecks_child_liveness():
-    source = (Path(__file__).resolve().parents[1] / "start_web_server.sh").read_text(
+    controller_root = ROOT if GENERATED else Path(__file__).resolve().parents[1]
+    source = (controller_root / "start_web_server.sh").read_text(
         encoding="utf-8"
     )
     assert "already serving an untracked process" in source
@@ -215,10 +216,10 @@ def test_db4a2a_branch_call_matches_branch_service_contract():
     except ModuleNotFoundError:
         from lib import branch_api, db4a2a
 
-    parameters = inspect.signature(branch_api.fork_branch).parameters
-    assert {"workspace_id", "fork_context_id", "branch_name", "branch_type", "agent_id"} <= set(parameters)
+    parameters = inspect.signature(branch_api.fork_branch_tx).parameters
+    assert {"tx", "workspace_id", "fork_context_id", "branch_name", "agent_id"} <= set(parameters)
     source = inspect.getsource(db4a2a.create_dispatch_branch)
-    assert 'branch_type="DB4A2A"' in source
+    assert "branch_api.fork_branch_tx(" in source
     assert "created_by_agent" not in source
 
 

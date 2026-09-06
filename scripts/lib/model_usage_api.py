@@ -244,16 +244,43 @@ def _usage(result: Dict[str, Any]) -> Dict[str, Optional[int]]:
     prompt, completion = n("prompt_tokens", "input_tokens"), n("completion_tokens", "output_tokens")
     total = n("total_tokens")
     if total is None and prompt is not None and completion is not None: total = prompt + completion
-    return {"prompt_tokens": prompt, "completion_tokens": completion, "cached_tokens": n("cached_tokens", "cache_read_input_tokens"), "reasoning_tokens": n("reasoning_tokens"), "total_tokens": total}
+    def detail(parent: str, field: str) -> Optional[int]:
+        value = usage.get(parent)
+        if not isinstance(value, dict) or value.get(field) is None:
+            return None
+        try:
+            return max(0, int(value[field]))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    cached = n("cached_tokens", "cache_read_input_tokens")
+    if cached is None:
+        cached = detail("prompt_tokens_details", "cached_tokens")
+    reasoning = n("reasoning_tokens")
+    if reasoning is None:
+        reasoning = detail("completion_tokens_details", "reasoning_tokens")
+    return {"prompt_tokens": prompt, "completion_tokens": completion, "cached_tokens": cached, "reasoning_tokens": reasoning, "total_tokens": total}
 
 
 def _price(provider: str, model: str, usage: Dict[str, Optional[int]]) -> Dict[str, Any]:
     row = _row(connection.execute_query_one("SELECT PRICE_ID,PRICING_VERSION,CURRENCY,INPUT_PER_MILLION,OUTPUT_PER_MILLION,CACHE_PER_MILLION,REASONING_PER_MILLION FROM CX_MODEL_PRICING WHERE PROVIDER_KEY=:provider AND MODEL_ID=:model AND STATUS='ACTIVE' AND EFFECTIVE_FROM<=CURRENT_TIMESTAMP AND (EFFECTIVE_TO IS NULL OR EFFECTIVE_TO>CURRENT_TIMESTAMP) ORDER BY EFFECTIVE_FROM DESC FETCH FIRST 1 ROWS ONLY", {"provider": provider[:128], "model": model[:256]}))
     if not row: return {"cost": None, "currency": "", "pricing_version": ""}
     cost = Decimal("0")
-    for field, rate in (("prompt_tokens", "input_per_million"), ("completion_tokens", "output_per_million"), ("cached_tokens", "cache_per_million"), ("reasoning_tokens", "reasoning_per_million")):
-        if usage.get(field) is not None and row.get(rate) is not None:
-            cost += Decimal(str(usage[field])) * Decimal(str(row[rate])) / Decimal("1000000")
+    # Chat-completion detail counts are subsets of input/output totals.
+    # A missing detail tariff keeps those tokens on the ordinary tariff.
+    for total_field, detail_field, ordinary_rate, detail_rate in (
+        ("prompt_tokens", "cached_tokens", "input_per_million", "cache_per_million"),
+        ("completion_tokens", "reasoning_tokens", "output_per_million", "reasoning_per_million"),
+    ):
+        total_count = usage.get(total_field)
+        detail_count = usage.get(detail_field) or 0
+        if total_count is None or detail_count < 0 or detail_count > total_count:
+            return {"cost": None, "currency": str(row.get("currency") or ""), "pricing_version": str(row.get("pricing_version") or "")}
+        split = detail_count if row.get(detail_rate) is not None else 0
+        for count, rate in ((total_count - split, ordinary_rate), (split, detail_rate)):
+            if count and row.get(rate) is None:
+                return {"cost": None, "currency": str(row.get("currency") or ""), "pricing_version": str(row.get("pricing_version") or "")}
+            if count:
+                cost += Decimal(str(count)) * Decimal(str(row[rate])) / Decimal("1000000")
     return {"cost": str(cost.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)), "currency": str(row.get("currency") or ""), "pricing_version": str(row.get("pricing_version") or "")}
 
 

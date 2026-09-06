@@ -3395,7 +3395,7 @@ function DataPage({
             <p className="cx-form-hint">
               {text("组织子树和层级策略会随组织成员关系实时生效。选择组织即可形成研发、财务、行政等知识分组；不同组织默认互不可见。", "Subtree and level policies follow current organization membership. Selecting an organization creates groups such as R&D, Finance, or Administration; sibling groups are isolated by default.")}
             </p>
-            <form key={`${String(knowledgePolicy?.policy_id || "new")}:${String(knowledgePolicy?.scope_type || "PUBLIC_COMPANY")}`} className="configuration-form compact-configuration-form" onSubmit={async (event) => {
+            <form key={`${String(knowledgePolicy?.policy_id || "new")}:${String(knowledgePolicy?.scope_type || "PUBLIC_COMPANY")}`} className="configuration-form compact-configuration-form knowledge-policy-form" onSubmit={async (event) => {
               event.preventDefault();
               const row: Row = Object.fromEntries(new FormData(event.currentTarget).entries());
               const entityId = String(rowField(detail, ["entity_id", "knowledge_id", "id"]));
@@ -5557,6 +5557,8 @@ function MonitorPage({
           ? error.message
           : text("监控加载失败", "Monitor loading failed"),
       );
+      setProfile({});
+      setData({});
       setNotifications([]);
     } finally {
       setLoading(false);
@@ -5580,10 +5582,11 @@ function MonitorPage({
       );
     }
   };
-  const profileName = String(profile.profile || "production").toLowerCase();
+  const profileName = String(profile.startup_mode || profile.profile || "unknown").toLowerCase();
   const profileLabel = (value: string) => {
     const labels: Record<string, [string, string]> = {
       production: ["生产", "Production"],
+      unknown: ["未知", "Unknown"],
       "graph-preview": ["图工程预览", "Graph Engineering preview"],
       development: ["开发实验", "Development experiments"],
       "experimental-4.2": ["4.2 实验兼容", "4.2 experimental compatibility"],
@@ -5602,15 +5605,21 @@ function MonitorPage({
     ],
     [text("运行循环", "Running Loops"), data.tasks?.running_loops ?? "-"],
     [text("停滞智能体", "Stalled Agents"), data.stalled_count ?? "-"],
-    [text("当前运行配置", "Runtime Profile"), profileLabel(profileName)],
+    [text("实例启动模式", "Instance startup mode"), profileLabel(profileName)],
+    [text("平台治理配置状态", "Platform governance configuration"),
+      profile.governance?.status === "available"
+        ? text("配置正常", "Consistent")
+        : profile.governance?.status === "degraded"
+          ? text("配置异常", "Inconsistent")
+          : text("不可用", "Unavailable"), "governance"],
   ];
   return (
     <section>
       <SectionHeading
         title={text("监控", "Monitor")}
         subtitle={text(
-          "查看智能体、会话、任务计划、循环和停滞实例，并确认当前运行配置。",
-          "Review Agents, sessions, task plans, Loops, and stalled instances, and confirm the current runtime profile.",
+          "智能体、会话、任务计划、循环、停滞实例与平台治理状态。",
+          "Agents, sessions, task plans, Loops, stalled instances, and platform governance status.",
         )}
         text={text}
       />
@@ -5619,10 +5628,15 @@ function MonitorPage({
       ) : (
         <>
           <div className="metric-grid">
-            {metrics.map(([label, value]) => (
+            {metrics.map(([label, value, metricKey]) => (
               <div className="metric" key={String(label)}>
                 <span>{label}</span>
                 <strong>{String(value)}</strong>
+                {metricKey === "governance" && capabilities?.pages?.includes("platform") && canAction(capabilities, "platform.manage") && (
+                  <a className="monitor-governance-link" href="/app/platform?config=capabilities&section=capabilities">
+                    {text("查看治理配置", "View governance configuration")}<ChevronRight size={14} aria-hidden="true" />
+                  </a>
+                )}
               </div>
             ))}
           </div>

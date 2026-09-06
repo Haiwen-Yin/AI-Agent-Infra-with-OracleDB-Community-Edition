@@ -305,6 +305,18 @@ a {
   gap: 12px;
   margin: 25px 0 18px;
 }
+.monitor-governance-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--brand-deep);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.monitor-governance-link svg {
+  flex-shrink: 0;
+}
 .metric-value {
   display: block;
   margin: 4px 0 8px;
@@ -2475,6 +2487,18 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .compact-configuration-form {
   gap: 7px 10px;
   margin-top: 9px;
+}
+.knowledge-policy-form .config-field {
+  grid-template-rows: auto auto minmax(22px, auto);
+  align-content: start;
+  gap: 6px;
+}
+.knowledge-policy-form .config-field > span {
+  white-space: normal;
+  overflow: visible;
+}
+.knowledge-policy-form .inline-field-pair {
+  align-self: start;
 }
 .embedding-grant-form {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));

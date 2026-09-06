@@ -1,4 +1,4 @@
-# Model Usage Gateway And Executive Wallboard - v4.4.11
+# Model Usage Gateway And Executive Wallboard - v4.4.12
 
 ## Purpose And Boundary
 
@@ -149,3 +149,13 @@ v4.4.10 is the fresh-deployment baseline. Historical migration steps remain in
 the package for deterministic ordering, checksum evidence, and source audit;
 they are not a promise of in-place customer upgrades from an earlier v4.4.x
 package. v4.4.8 is withdrawn and must not be used as a source.
+# v4.4.12 Usage Accounting Contract
+
+The chat-completion gateway normalizes cached tokens as a subset of input and
+reasoning tokens as a subset of output. A configured detail tariff replaces
+the ordinary tariff for that subset; it is not an additional charge on top of
+the same tokens. Missing detail tariffs use ordinary rates. Missing totals or
+details exceeding totals leave calculated cost unknown for reconciliation.
+Provider schemas with exclusive cache counts need an explicit adapter before
+using this inclusive contract. Provider bills remain the settlement source.
+Existing ledger entries are not rewritten by this source change.
