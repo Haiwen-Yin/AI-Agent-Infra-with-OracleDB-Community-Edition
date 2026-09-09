@@ -154,8 +154,10 @@ def test_llm_profile_form_keeps_a_stable_form_reference_across_await():
 def test_v444_management_channel_drain_is_typed_and_approval_bound():
     native = (LIB_ROOT / "native_agent_api.py").read_text(encoding="utf-8")
     web = WEB_APP_PATH.read_text(encoding="utf-8")
-    assert 'command_type == "AGENT_DRAIN"' in native
-    assert "source node, destination node, and reason" in native
+    pool = (LIB_ROOT / "platform_agent_pool.py").read_text(encoding="utf-8")
+    assert 'platform_agent_pool.parse_channel_command(actor, stripped)' in native
+    assert 'kind == "AGENT_DRAIN"' in pool
+    assert 'values.get("source_node_id"' in pool and 'values.get("destination_node_id"' in pool
     assert "execute_approved_command" in web
 
 

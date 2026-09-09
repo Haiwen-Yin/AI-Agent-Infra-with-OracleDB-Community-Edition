@@ -88,9 +88,10 @@ def test_channel_composer_keeps_controls_aligned_when_hints_or_feedback_expand()
     css = (root / "web" / "src" / "app.css").read_text(encoding="utf-8")
     composer = css.split(".message-compose {", 1)[1].split(".message-compose textarea", 1)[0]
     controls = css.split(".compose-controls {", 1)[1].split(".decision-box", 1)[0]
-    assert "grid-template-columns: minmax(0, 1fr) minmax(245px, 30%)" in composer
+    assert "grid-template-columns: minmax(0, 1fr)" in composer
     assert "align-items: start" in composer
-    assert "padding-top: 20px" in controls
+    assert "display: flex" in controls
+    assert "padding-top: 0" in controls
 
 
 def test_channel_pinning_route_requires_the_existing_lifecycle_permission():
@@ -160,7 +161,8 @@ def test_health_read_exposes_bounded_control_plane_summary_and_typo_alias():
     runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
     assert '"managed_nodes"' in pool and '"native_agents"' in pool
     assert '"llm_profiles"' in pool and '"active_executions"' in pool
-    assert 'command_type == "HEATH_READ"' in native
+    assert 'kind == "HEATH_READ"' in pool
+    assert 'platform_agent_pool.parse_channel_command(actor, stripped)' in native
     assert 'database_dialect' in runtime and 'checked_at' in runtime
 
 

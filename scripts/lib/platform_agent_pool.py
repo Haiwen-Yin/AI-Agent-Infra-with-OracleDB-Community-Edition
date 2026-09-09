@@ -132,7 +132,7 @@ def list_command_catalog(actor: str, channel_id: str = "CH_PLATFORM_ADMINISTRATI
         raise AgentPoolError("platform commands are limited to the Platform Administration Channel")
     rows = _rows(connection.execute_query(
         "SELECT c.COMMAND_ID,c.COMMAND_KEY,c.VERSION,c.STATUS,c.RISK_LEVEL,c.EXECUTION_MODE,c.EXAMPLE_TEXT,"
-        "c.LOCALIZED_METADATA,e.STATE AS EXECUTOR_STATE FROM CX_PLATFORM_COMMANDS c "
+        "c.LOCALIZED_METADATA,c.PARAMETER_SCHEMA,e.STATE AS EXECUTOR_STATE FROM CX_PLATFORM_COMMANDS c "
         "LEFT JOIN CX_PLATFORM_COMMAND_EXECUTORS e ON e.COMMAND_KEY=c.COMMAND_KEY AND e.COMMAND_VERSION=c.VERSION "
         "WHERE c.STATUS='PUBLISHED' ORDER BY c.COMMAND_KEY",
     ))
@@ -499,10 +499,50 @@ def _command_contract(command_type: str) -> Dict[str, Any]:
 def _validate_command_parameters(contract: Dict[str, Any], target: Dict[str, Any], parameters: Dict[str, Any]) -> None:
     schema = _parse(contract.get("parameter_schema"), {"type": "object", "properties": {}})
     values = {**(target or {}), **(parameters or {})}
+    if str(contract.get("command_key") or "") == "AGENT_DRAIN":
+        if "node_id" in values:
+            values["source_node_id"] = values.pop("node_id")
+        if "target_node_id" in values:
+            values["destination_node_id"] = values.pop("target_node_id")
     required = schema.get("required") if isinstance(schema.get("required"), list) else []
     missing = [name for name in required if not str(values.get(name) or "").strip()]
     if missing:
         raise AgentPoolError("COMMAND_PARAMETER_REQUIRED:" + str(missing[0]))
+    properties = schema.get("properties") or {}
+    if set(values) - set(properties):
+        raise AgentPoolError("COMMAND_PARAMETER_UNKNOWN")
+    for key, value in values.items():
+        rule = properties[key]
+        if rule.get("type") == "string" and (not isinstance(value, str) or len(value) < int(rule.get("minLength", 0)) or len(value) > int(rule.get("maxLength", 2000))):
+            raise AgentPoolError("COMMAND_PARAMETER_INVALID:" + key)
+
+
+def parse_channel_command(actor: str, body: str) -> Dict[str, Any]:
+    """Read parameters from the same closed registry used by action creation."""
+    _require_admin(actor)
+    prefix = body.strip().split(None, 2)
+    if len(prefix) < 2 or prefix[0].lower() != "/platform":
+        raise AgentPoolError("UNKNOWN_PLATFORM_COMMAND")
+    kind = prefix[1].upper()
+    if kind == "HEATH_READ":
+        kind = "HEALTH_READ"
+    contract = _command_contract(kind)
+    schema = _parse(contract.get("parameter_schema"), {})
+    names = schema.get("required") or []
+    remainder = prefix[2] if len(prefix) > 2 else ""
+    if kind == "HELP":
+        return {"kind": kind, "help_key": remainder.strip()}
+    parts = remainder.split(None, len(names)) if remainder else []
+    values = {name: parts[index] for index, name in enumerate(names) if index < len(parts)}
+    reason = parts[len(names)] if len(parts) > len(names) else ""
+    target, parameters = values, {}
+    if kind == "AGENT_DRAIN":
+        target = {"node_id": values.get("source_node_id", "")}
+        parameters = {"target_node_id": values.get("destination_node_id", "")}
+    _validate_command_parameters(contract, target, parameters)
+    if not reason and contract.get("execution_mode") == "DIRECT_READ":
+        reason = "Management channel read request"
+    return {"kind": kind, "target": target, "parameters": parameters, "reason": reason}
 
 
 def _command_parameters_complete(contract: Dict[str, Any], target: Dict[str, Any], parameters: Dict[str, Any], reason: str) -> bool:
@@ -654,7 +694,8 @@ def create_command(actor: str, command_type: str, target: Dict[str, Any], parame
         action = identity_api.create_action_card(
             actor, "CH_PLATFORM_ADMINISTRATION", "PLATFORM_ADMIN_COMMAND",
             {"command_id": command_id, "command_type": kind, "target": target, "parameters": parameters,
-             "security_domain_id": security_domain_id or "DEFAULT"}, reason, "ADMIN_COMMAND:" + command_id)
+             "security_domain_id": security_domain_id or "DEFAULT", "requested_by": actor,
+             "contract_digest": _digest(_json(contract)), "contract_version": int(contract.get("version") or 1)}, reason, "ADMIN_COMMAND:" + command_id)
     return {"command_id": command_id, "command_type": kind, "status": state, "expires_at": expires.isoformat(), "result": result, "action_card": action}
 
 
@@ -666,12 +707,25 @@ def execute_approved_command(actor: str, command_id: str, action_id: str) -> Dic
             "SELECT ACTION_ID,ACTION_TYPE,PAYLOAD_JSON,STATUS FROM CX_ACTION_CARDS WHERE ACTION_ID=:id FOR UPDATE",
             {"id": action_id}))
         command = _row(tx.query_one(
-            "SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,STATUS,EXPIRES_AT "
+            "SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,SECURITY_DOMAIN_ID,REQUESTED_BY,STATUS,EXPIRES_AT "
             "FROM CX_PLATFORM_ADMIN_COMMANDS WHERE COMMAND_ID=:id FOR UPDATE",
             {"id": command_id}))
         if not action or str(action.get("status") or "").upper() != "CONFIRMED":
             raise AgentPoolError("the platform Action Card is not confirmed")
         command_status = str((command or {}).get("status") or "").upper()
+        payload = _parse(action.get("payload_json"), {})
+        if not command or str(action.get("action_type") or "") != "PLATFORM_ADMIN_COMMAND" or str(payload.get("command_id") or "") != command_id:
+            raise AgentPoolError("the platform Action Card does not match the requested command")
+        for key in ("command_type", "security_domain_id", "requested_by"):
+            if payload.get(key) != command.get(key):
+                raise AgentPoolError("the platform command changed after approval")
+        if payload.get("target") != _parse(command.get("target_json"), {}) or payload.get("parameters") != _parse(command.get("parameters_json"), {}):
+            raise AgentPoolError("the platform command parameters changed after approval")
+        _require_admin(str(command.get("requested_by") or ""))
+        contract = _command_contract(str(command.get("command_type") or ""))
+        if payload.get("contract_digest") != _digest(_json(contract)):
+            raise AgentPoolError("the platform command contract changed after approval")
+        _validate_command_parameters(contract, payload["target"], payload["parameters"])
         if command_status in {"COMPLETED", "PROPOSAL_CONFIRMED"}:
             return {"command_id": command_id, "status": command_status, "idempotent": True}
         if not command or command_status != "PENDING_APPROVAL":

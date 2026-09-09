@@ -20,9 +20,8 @@ def test_stream_delta_contract_sends_chunks_without_dropping_the_final_chunk():
     root = Path(__file__).resolve().parents[1]
     runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
     stream = runtime.split("def _stream_llm", 1)[1].split("def _set_profile_health", 1)[0]
-    assert "Callers receive only the new delta" in stream
-    assert "The complete output" in stream
-    assert "The provider may finish before the throttle interval elapses" in stream
+    assert stream.index('content_security.enforce(content, "OUTPUT")') < stream.index("on_delta(pending)")
+    assert "if not completed:" in stream
 
 
 def test_stream_flushes_final_piece_when_throttle_interval_is_not_reached(monkeypatch):
@@ -45,7 +44,7 @@ def test_stream_flushes_final_piece_when_throttle_interval_is_not_reached(monkey
     monkeypatch.setattr(native_runtime.time, "monotonic", lambda: next(ticks))
     deltas = []
     result = native_runtime._stream_llm(
-        {"provider_url": "http://llm.example", "model_id": "demo"}, [], deltas.append,
+        {"provider_url": "http://llm.example", "model_id": "demo"}, [{"role": "user", "content": "hello"}], deltas.append,
     )
     assert result["content"] == "hello"
     assert "".join(deltas) == "hello"

@@ -124,7 +124,7 @@ IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
 PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
 RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS = frozenset({"4.4.9"})
 MODEL_USAGE_WALLBOARD_MIGRATION_VERSIONS = frozenset({"4.4.10"})
-RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12"})
+RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12", "4.4.13"})
 SUPPORTED_V449_BASELINE_VERSION = "4.4.7"
 WITHDRAWN_SCHEMA_VERSION = "4.4.8"
 JOURNALED_MIGRATION_VERSIONS = (
@@ -1235,6 +1235,17 @@ def _graph_v421_closure_present(cursor: Any, database: str) -> bool:
 
 
 def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
+    """Verify live objects rather than trusting migration ledger status."""
+    if script.name == "79_v4_4_13_portal_knowledge_policy.sql":
+        if "CX_PORTAL_KNOWLEDGE_POLICY" not in _schema_tables(cursor, database):
+            return False
+        try:
+            mode_column = '"MODE"' if database == "oracle" else "MODE"
+            cursor.execute("SELECT " + mode_column + ",ALLOW_MODEL_SUPPLEMENT,VERSION FROM CX_PORTAL_KNOWLEDGE_POLICY WHERE POLICY_ID='DEFAULT'")
+            row = cursor.fetchone()
+            return bool(row and row[0] in {"KNOWLEDGE_FIRST", "KNOWLEDGE_ONLY"} and row[1] in {"Y", "N"} and int(row[2]) > 0)
+        except Exception:
+            return False
     """Verify the objects owned by an already-journaled additive step.
 
     A prior runner can leave an ``APPLIED`` row after a process interruption or
@@ -1718,14 +1729,15 @@ def release_script_names(version: str, database: str, config_path: Path, edition
         "4.4.10": _v410_script_names,
         "4.4.11": _v411_script_names,
         "4.4.12": _v411_script_names,
+        "4.4.13": _v411_script_names,
     }
     selector = selectors.get(str(version or "").strip())
     if selector is None:
         raise ValueError(f"unsupported package bootstrap version: {version}")
     names = selector(database, config_path, edition)
-    if version == "4.4.12" and database in {"oracle", "yashandb"}:
+    if version in {"4.4.12", "4.4.13"} and database in {"oracle", "yashandb"}:
         names.append("69_v4_4_12_context_read_isolation.sql")
-    if version == "4.4.12":
+    if version in {"4.4.12", "4.4.13"}:
         names.append("70_v4_4_12_entity_read_isolation.sql")
         names.append("71_v4_4_12_knowledge_policy_constraints.sql")
         names.append("72_v4_4_12_agent_control_write_boundary.sql")
@@ -1735,6 +1747,8 @@ def release_script_names(version: str, database: str, config_path: Path, edition
         names.append("76_v4_4_12_native_organization_owner.sql")
         names.append("77_v4_4_12_organization_fact_grants.sql")
         names.append("78_v4_4_12_gateway_credential_write_boundary.sql")
+    if version == "4.4.13":
+        names.append("79_v4_4_13_portal_knowledge_policy.sql")
     return names
 
 

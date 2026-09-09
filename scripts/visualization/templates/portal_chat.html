@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.12">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.13">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.12 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.4.13 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -16,6 +16,7 @@
     <span class="cx-chat-platform"><span data-zh>AI Agent 管理平台</span><span data-en>AI Agent Management Platform</span></span>
   </div>
   <div class="actions">
+    <button class="action-btn" onclick="openKnowledge()"><span data-zh>我的知识</span><span data-en>My knowledge</span></button>
     <label class="portal-llm-switch"><span data-zh>LLM</span><span data-en>LLM</span><select id="portalLlmSelect" onchange="switchPortalLlm(this.value)" aria-label="LLM"><option value="">--</option></select></label>
     <button class="action-btn" onclick="window.open('/portal/login','_self')"><span data-zh>切换用户</span><span data-en>Switch User</span></button>
     <button class="action-btn danger" onclick="releaseAgent()"><span data-zh>退出</span><span data-en>Exit</span></button>
@@ -53,6 +54,12 @@
     </div>
   </div>
 </div>
+<dialog id="knowledgeDialog" aria-labelledby="knowledgeTitle">
+  <form method="dialog"><h3 id="knowledgeTitle"><span data-zh>我的知识</span><span data-en>My knowledge</span></h3><button aria-label="Close" title="Close">×</button></form>
+  <form onsubmit="event.preventDefault();searchKnowledge()"><input id="knowledgeQuery" aria-label="Search knowledge" type="search"><button><span data-zh>搜索</span><span data-en>Search</span></button></form>
+  <div id="knowledgeResults" role="status"></div>
+  <pre id="knowledgeContent"></pre>
+</dialog>
 
 <script src="/static/marked.min.js"></script>
 <script src="/static/purify.min.js"></script>
@@ -171,6 +178,7 @@ function appendMessage(role,content,ts,messageId){
 }
 
 function sendMessage(){
+  if(document.getElementById('sendBtn').disabled)return;
   var input=document.getElementById('msgInput');
   var msg=input.value.trim();
   if(!msg)return;
@@ -205,7 +213,8 @@ function sendMessage(){
               try{
                 var d=JSON.parse(line.substring(6));
                 if(d.type==='token'){fullText+=d.content;if(agentBubble){agentBubble.innerHTML=renderMarkdown(fullText)+'<div class="time">'+escapeHtml(formatTime(new Date().toISOString()))+'</div>';var mc=document.getElementById('messages');if(mc)mc.scrollTop=mc.scrollHeight;}}
-                if(d.type==='done'){finishStream();}
+                if(d.type==='done'){renderCitations(agentBubble,d.citations||[],d.answer_source);finishStream();}
+                if(d.type==='error'){agentBubble.textContent=d.error||'Answer unavailable';finishStream();}
               }catch(e){}
             }
           });
@@ -218,7 +227,7 @@ function sendMessage(){
         document.getElementById('sendBtn').disabled=false;
         document.getElementById('typingIndicator').style.display='none';
         if(d.success){
-          appendMessage('agent',d.reply,d.timestamp);
+          var bubble=appendMessage('agent',d.reply,d.timestamp);renderCitations(bubble,d.citations||[],d.answer_source);
           loadSessions();
         }else{
           appendMessage('agent','Error: '+(d.error||'Unknown error'),new Date().toISOString());
@@ -231,6 +240,38 @@ function sendMessage(){
     document.getElementById('typingIndicator').style.display='none';
     appendMessage('agent','Connection error',new Date().toISOString());
   });
+}
+
+function openKnowledge(){
+  document.getElementById('knowledgeDialog').showModal();
+  searchKnowledge();
+}
+async function searchKnowledge(){
+  var container=document.getElementById('knowledgeResults');container.textContent='...';
+  document.getElementById('knowledgeContent').textContent='';
+  try{
+    var response=await portalFetch('/portal/api/knowledge?q='+encodeURIComponent(document.getElementById('knowledgeQuery').value));
+    var result=await response.json();if(!response.ok)throw new Error(result.error||'Knowledge unavailable');
+    container.textContent='';
+    (result.items||[]).forEach(function(item){var button=document.createElement('button');button.type='button';button.textContent=item.title;button.onclick=function(){showKnowledge(item)};container.appendChild(button);});
+    if(!result.items||!result.items.length)container.textContent=document.documentElement.getAttribute('data-lang')==='zh'?'暂无匹配知识':'No matching knowledge';
+  }catch(error){container.textContent=error.message;}
+}
+async function showKnowledge(item){
+  var dialog=document.getElementById('knowledgeDialog');if(!dialog.open)dialog.showModal();
+  var content=document.getElementById('knowledgeContent');content.textContent='...';
+  try{
+    var response=await portalFetch('/portal/api/knowledge/'+encodeURIComponent(item.entity_id)+'?digest='+encodeURIComponent(item.digest||''));
+    var result=await response.json();if(!response.ok)throw new Error(result.error||'Knowledge unavailable');
+    content.textContent=result.item.title+'\n\n'+result.item.content;
+  }catch(error){content.textContent=error.message;}
+}
+function renderCitations(bubble,items,source){
+  if(!bubble)return;
+  var links=document.createElement('div');links.className='knowledge-citations';
+  items.forEach(function(item,index){var button=document.createElement('button');button.type='button';button.textContent='['+(index+1)+'] '+item.title;button.onclick=function(){showKnowledge(item)};links.appendChild(button);});
+  if(source==='MODEL_SUPPLEMENT'){var label=document.createElement('small');label.textContent=document.documentElement.getAttribute('data-lang')==='zh'?'模型常识补充':'General model knowledge';links.appendChild(label);}
+  bubble.appendChild(links);
 }
 
 function handleKey(e){

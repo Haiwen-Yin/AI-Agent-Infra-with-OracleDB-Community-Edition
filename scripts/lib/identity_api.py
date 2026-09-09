@@ -3837,13 +3837,24 @@ def update_channel_agent_response(agent_id: str, channel_id: str, body: str, *, 
     """
     if not execution_id or len(body) > 100000:
         raise IdentityError("managed Agent response is invalid")
+    from . import content_security
+    content_security.enforce(body, "OUTPUT")
     message_id = _channel_agent_response_message_id(channel_id, execution_id)
-    changed = connection.execute(
-        "UPDATE CX_CHANNEL_MESSAGES SET BODY_TEXT=:body,MESSAGE_TYPE=:message_type WHERE MESSAGE_ID=:message_id "
-        "AND CHANNEL_ID=:channel_id AND PRINCIPAL_ID=:agent",
-        {"body": body, "message_type": "AGENT_RESPONSE" if completed else "AGENT_RESPONSE_STREAMING",
-         "message_id": message_id, "channel_id": channel_id, "agent": agent_id},
-    )
+    def work(tx: Any) -> int:
+        principal = _row(tx.query_one("SELECT STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:agent FOR UPDATE", {"agent": agent_id}))
+        if not principal or principal.get("status") != "ACTIVE":
+            raise PermissionError("Agent response authority was revoked")
+        execution = _row(tx.query_one("SELECT STATUS FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:execution AND AGENT_ID=:agent FOR UPDATE", {"execution": execution_id, "agent": agent_id}))
+        if not execution or execution.get("status") != "CLAIMED":
+            raise PermissionError("Agent response execution is no longer active")
+        return tx.execute(
+            "UPDATE CX_CHANNEL_MESSAGES SET BODY_TEXT=:body,MESSAGE_TYPE=:message_type WHERE MESSAGE_ID=:message_id "
+            "AND CHANNEL_ID=:channel_id AND PRINCIPAL_ID=:agent AND EXISTS (SELECT 1 FROM CX_CHANNEL_MEMBERS cm "
+            "WHERE cm.CHANNEL_ID=:channel_id AND cm.PRINCIPAL_ID=:agent AND cm.STATUS='ACTIVE' "
+            "AND (cm.VALID_UNTIL IS NULL OR cm.VALID_UNTIL>CURRENT_TIMESTAMP))",
+            {"body": body, "message_type": "AGENT_RESPONSE" if completed else "AGENT_RESPONSE_STREAMING",
+             "message_id": message_id, "channel_id": channel_id, "agent": agent_id})
+    changed = connection.execute_transaction_callback(work)
     if changed != 1:
         raise IdentityError("managed Agent response is unavailable")
     connection.execute("UPDATE CX_CHANNELS SET UPDATED_AT=CURRENT_TIMESTAMP WHERE CHANNEL_ID=:channel_id", {"channel_id": channel_id})

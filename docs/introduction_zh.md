@@ -1,6 +1,6 @@
-# 川序：Oracle AI Database 26ai 社区版 v4.4.12 中文介绍
+# 川序：Oracle AI Database 26ai 社区版 v4.4.13 中文介绍
 
-**版本**: v4.4.12
+**版本**: v4.4.13
 **日期**: 2026-09-05
 **许可**: Apache License 2.0
 
@@ -57,7 +57,7 @@ Graph Runtime 核心和图检查按权限提供。Manifest Draft Import、SLO �
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.4.12 --database oracle \
+  --version 4.4.13 --database oracle \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status

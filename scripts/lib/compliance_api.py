@@ -39,6 +39,10 @@ class ComplianceError(ValueError):
     """Safe compliance-domain error."""
 
 
+class ProfileConflict(ComplianceError):
+    """The caller edited a stale or immutable profile version."""
+
+
 def _id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(20)}"
 
@@ -150,6 +154,8 @@ def _canonical_profile_content(content: Dict[str, Any]) -> Dict[str, Any]:
     locked = content.get("locked_fields", [])
     if not isinstance(locked, list) or any(not isinstance(item, str) or not item.strip() for item in locked):
         raise ComplianceError("Profile locked_fields must be a string list")
+    if "controls" in content and not isinstance(content["controls"], dict):
+        raise ComplianceError("Profile controls must be an object")
     return json.loads(serialized)
 
 
@@ -164,7 +170,11 @@ def _profile_content(value: Any) -> Dict[str, Any]:
 
 def _validate_profile_publication_tx(tx: Any, version: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve a bounded parent chain and enforce parent locked fields."""
-    content = _canonical_profile_content(_profile_content(version.get("content_json")))
+    return _resolve_profile_tx(tx, version)["effective_content"]
+
+
+def _resolve_profile_tx(tx: Any, version: Dict[str, Any]) -> Dict[str, Any]:
+    chain = [version]
     parent_id = str(version.get("parent_version_id") or "")
     visited = {str(version.get("profile_version_id") or "")}
     depth = 0
@@ -174,16 +184,103 @@ def _validate_profile_publication_tx(tx: Any, version: Dict[str, Any]) -> Dict[s
             raise ComplianceError("Profile inheritance cycle or excessive depth")
         visited.add(parent_id)
         parent = _row(tx.query_one(
-            "SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,CONTENT_JSON,STATUS FROM CX_AGENT_PROFILE_VERSIONS "
+            "SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,CONTENT_JSON,CONTENT_DIGEST,STATUS FROM CX_AGENT_PROFILE_VERSIONS "
             "WHERE PROFILE_VERSION_ID=:id", {"id": parent_id}))
         if not parent or str(parent.get("status") or "").upper() != "PUBLISHED":
             raise ComplianceError("Profile parent must be published")
-        parent_content = _canonical_profile_content(_profile_content(parent.get("content_json")))
-        for field in parent_content.get("locked_fields", []):
-            if field in content and content[field] != parent_content.get(field):
-                raise ComplianceError("Profile changes a parent locked field")
+        chain.append(parent)
         parent_id = str(parent.get("parent_version_id") or "")
-    return content
+    effective: Dict[str, Any] = {}
+    sources: Dict[str, str] = {}
+    locked: set[str] = set()
+    aliases = {"database_access": "database", "network_egress": "network", "approval_policy": "approval",
+               "audit_retention": "audit", "allowed_tools": "tools", "allowed_skills": "skills"}
+    def normalized(field: str) -> str:
+        key = field.removeprefix("controls.")
+        return aliases.get(key, key)
+    for item in reversed(chain):
+        raw = item.get("content_json")
+        content = _canonical_profile_content(_profile_content(raw))
+        digest = str(item.get("content_digest") or "")
+        if not digest or hashlib.sha256((raw if isinstance(raw, str) else _json(content)).encode("utf-8")).hexdigest() != digest:
+            raise ComplianceError("Profile digest mismatch")
+        controls = dict(effective.get("controls", {}))
+        for field, value in content.items():
+            if field == "locked_fields":
+                continue
+            values = value.items() if field == "controls" else [(field, value)]
+            for key, setting in values:
+                path = f"controls.{key}" if field == "controls" else key
+                prior = [(k, v) for k, v in controls.items() if normalized(k) == normalized(key)]
+                prior += [(k, v) for k, v in effective.items() if k not in {"controls", "locked_fields"} and normalized(k) == normalized(key)]
+                if "controls" in locked and field == "controls" and (key not in controls or controls[key] != setting):
+                    raise ComplianceError("Profile changes a parent locked field")
+                if normalized(key) in locked and (not prior or any(v != setting for _, v in prior)):
+                    raise ComplianceError("Profile changes a parent locked field")
+                if field == "controls":
+                    controls[key] = setting
+                else:
+                    effective[key] = setting
+                sources[path] = str(item["profile_version_id"])
+        effective["controls"] = controls
+        locked.update(normalized(field) for field in content.get("locked_fields", []))
+        effective["locked_fields"] = sorted(locked)
+    return {"effective_content": effective, "field_sources": sources,
+            "parent_chain": [{"profile_version_id": item["profile_version_id"], "status": item["status"],
+                              "content_digest": item["content_digest"]} for item in chain[1:]]}
+
+
+def get_profile_version(actor: str, profile_version_id: str) -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.read")
+    def work(tx: Any) -> Dict[str, Any]:
+        version = _row(tx.query_one(
+            "SELECT v.PROFILE_VERSION_ID,v.PROFILE_ID,v.VERSION_LABEL,v.PARENT_VERSION_ID,v.CONTENT_JSON,"
+            "v.CONTENT_DIGEST,v.STATUS,v.CREATED_AT,v.PUBLISHED_AT,p.PROFILE_KEY,p.DISPLAY_NAME "
+            "FROM CX_AGENT_PROFILE_VERSIONS v JOIN CX_AGENT_PROFILES p ON p.PROFILE_ID=v.PROFILE_ID "
+            "WHERE v.PROFILE_VERSION_ID=:id", {"id": profile_version_id}))
+        if not version:
+            raise ComplianceError("Profile version is unavailable")
+        content = _canonical_profile_content(_profile_content(version["content_json"]))
+        raw = version["content_json"]
+        if hashlib.sha256((raw if isinstance(raw, str) else _json(content)).encode("utf-8")).hexdigest() != version["content_digest"]:
+            raise ComplianceError("Profile digest mismatch")
+        try:
+            resolved = {**_resolve_profile_tx(tx, version), "validation": {"status": "VALID"}}
+        except ComplianceError as exc:
+            # An invalid old draft must remain inspectable and repairable;
+            # never present its unresolved contents as effective policy.
+            resolved = {"effective_content": None, "field_sources": {}, "parent_chain": [],
+                        "validation": {"status": "INVALID", "reason": str(exc)}}
+        content = _profile_content(version.pop("content_json"))
+        return {**version, "content": content, **resolved}
+    return connection.execute_transaction_callback(work)
+
+
+def update_profile_draft(actor: str, profile_version_id: str, content: Dict[str, Any],
+                         expected_digest: str, reason: str) -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.manage")
+    if not reason.strip() or not expected_digest:
+        raise ComplianceError("Expected digest and reason are required")
+    canonical = _json(_canonical_profile_content(content))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    def work(tx: Any) -> Dict[str, Any]:
+        version = _row(tx.query_one(
+            "SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST "
+            "FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
+        if not version or version["status"] != "DRAFT" or version["content_digest"] != expected_digest:
+            raise ProfileConflict("Profile draft changed or is immutable; reload before editing")
+        _validate_profile_publication_tx(tx, {**version, "content_json": canonical, "content_digest": digest})
+        changed = tx.execute(
+            "UPDATE CX_AGENT_PROFILE_VERSIONS SET CONTENT_JSON=:content,CONTENT_DIGEST=:digest "
+            "WHERE PROFILE_VERSION_ID=:id AND STATUS='DRAFT' AND CONTENT_DIGEST=:expected",
+            {"id": profile_version_id, "content": canonical, "digest": digest, "expected": expected_digest})
+        if changed != 1:
+            raise ProfileConflict("Profile draft changed concurrently")
+        _audit_tx(tx, actor, "COMPLIANCE_PROFILE_EDIT", "AGENT_PROFILE", profile_version_id, "ALLOW", reason)
+        return {"profile_version_id": profile_version_id, "content_digest": digest, "status": "DRAFT"}
+    return connection.execute_transaction_callback(work)
 
 
 def _active_profile_tx(tx: Any, agent_id: str) -> str:
@@ -272,22 +369,26 @@ def list_profiles(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
 def list_profiles_cursor(actor: str, *, page_size: int = 20, cursor: str = "") -> Dict[str, Any]:
     enterprise_required()
     _require(actor, "agents.read")
-    context = cursor_pagination.resolve(actor, "compliance_profiles", {}, "profile_id:asc", page_size, cursor)
-    context.update({"principal_id": actor, "resource_key": "compliance_profiles", "sort_key": "profile_id:asc"})
+    sort_key = "profile_id:asc,profile_version_id:asc"
+    context = cursor_pagination.resolve(actor, "compliance_profiles", {}, sort_key, page_size, cursor)
+    context.update({"principal_id": actor, "resource_key": "compliance_profiles", "sort_key": sort_key})
     params: Dict[str, Any] = {"limit": int(context["page_size"]) + 1}
     after = str(context["position"].get("profile_id") or "")
-    clause = " WHERE p.PROFILE_ID>:after" if after else ""
+    clause = " WHERE (p.PROFILE_ID>:after OR (p.PROFILE_ID=:after AND v.PROFILE_VERSION_ID>:after_version))" if after else ""
     if after:
         params["after"] = after
+        params["after_version"] = str(context["position"].get("profile_version_id") or "")
     rows = connection.execute_query(
         "SELECT p.PROFILE_ID,p.PROFILE_KEY,p.DISPLAY_NAME,p.STATUS,v.PROFILE_VERSION_ID,v.VERSION_LABEL,v.CONTENT_DIGEST,"
         "v.STATUS AS VERSION_STATUS,v.PUBLISHED_AT,v.CREATED_AT FROM CX_AGENT_PROFILES p LEFT JOIN CX_AGENT_PROFILE_VERSIONS v "
         "ON v.PROFILE_ID=p.PROFILE_ID" + clause + " ORDER BY p.PROFILE_ID,v.PROFILE_VERSION_ID" +
         _limit(int(context["page_size"]) + 1)[0], params,
     )
-    result = cursor_pagination.page(_rows(rows), context, lambda item: {"profile_id": str(item["profile_id"])})
+    result = cursor_pagination.page(_rows(rows), context, lambda item: {
+        "profile_id": str(item["profile_id"]), "profile_version_id": str(item.get("profile_version_id") or "")})
     try:
-        total = _row(connection.execute_query_one("SELECT COUNT(*) AS CNT FROM CX_AGENT_PROFILES", {}))
+        total = _row(connection.execute_query_one(
+            "SELECT COUNT(*) AS CNT FROM CX_AGENT_PROFILES p LEFT JOIN CX_AGENT_PROFILE_VERSIONS v ON v.PROFILE_ID=p.PROFILE_ID", {}))
         result["total_items"] = int((total or {}).get("cnt") or 0)
     except Exception:
         pass
@@ -436,7 +537,7 @@ def publish_profile(actor: str, profile_version_id: str, reason: str) -> Dict[st
     if not reason.strip():
         raise ComplianceError("Publication reason is required")
     def work(tx: Any) -> Dict[str, Any]:
-        version = _row(tx.query_one("SELECT PROFILE_VERSION_ID,PROFILE_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
+        version = _row(tx.query_one("SELECT PROFILE_VERSION_ID,PROFILE_ID,PARENT_VERSION_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
         if not version or str(version.get("status") or "").upper() != "DRAFT":
             raise ComplianceError("Profile draft is unavailable")
         _validate_profile_publication_tx(tx, version)
@@ -1000,6 +1101,10 @@ def set_control(actor: str, agent_id: str, control_state: str, reason: str, expe
     if state == "NORMAL":
         _require(actor, "agents.manage")
     def work(tx: Any) -> Dict[str, Any]:
+        principal = _row(tx.query_one(
+            "SELECT PRINCIPAL_TYPE,STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE", {"id": agent_id}))
+        if not principal or principal.get("principal_type") != "AGENT":
+            raise ComplianceError("Agent is unavailable")
         posture = _ensure_posture_tx(tx, agent_id)
         if expected_version is not None and int(posture.get("version") or 0) != int(expected_version):
             raise ComplianceError("Posture changed concurrently")
@@ -1009,14 +1114,17 @@ def set_control(actor: str, agent_id: str, control_state: str, reason: str, expe
                 "AND STATUS IN ('OPEN','ACKNOWLEDGED','REMEDIATING') FOR UPDATE", {"agent_id": agent_id}))
             if open_case:
                 raise ComplianceError("Open remediation must be reviewed before restoration")
-        tx.execute("UPDATE CX_AGENT_POSTURES SET CONTROL_STATE=:state,UPDATED_AT=CURRENT_TIMESTAMP,VERSION=VERSION+1 WHERE POSTURE_ID=:posture_id AND VERSION=:version", {"state": state, "posture_id": posture["posture_id"], "version": posture["version"]})
+        changed = tx.execute("UPDATE CX_AGENT_POSTURES SET CONTROL_STATE=:state,UPDATED_AT=CURRENT_TIMESTAMP,VERSION=VERSION+1 WHERE POSTURE_ID=:posture_id AND VERSION=:version", {"state": state, "posture_id": posture["posture_id"], "version": posture["version"]})
+        if changed != 1:
+            raise ComplianceError("Posture changed concurrently")
         if state in {"QUARANTINED", "DISABLED"}:
             tx.execute("UPDATE CX_AGENT_ACCESS_TOKENS SET REVOKED_AT=CURRENT_TIMESTAMP WHERE AGENT_ID=:agent_id AND REVOKED_AT IS NULL", {"agent_id": agent_id})
             tx.execute("UPDATE CX_AGENT_INSTANCES SET STATUS='QUARANTINED',REVOKED_AT=CURRENT_TIMESTAMP,REVOKE_REASON=:reason,FENCING_TOKEN=FENCING_TOKEN+1 WHERE AGENT_ID=:agent_id AND STATUS='ACTIVE'", {"agent_id": agent_id, "reason": reason[:1000]})
-        if state == "DISABLED":
-            tx.execute("UPDATE CX_PRINCIPALS SET STATUS='DISABLED',UPDATED_AT=CURRENT_TIMESTAMP WHERE PRINCIPAL_ID=:agent_id AND PRINCIPAL_TYPE='AGENT'", {"agent_id": agent_id})
+        if state in {"QUARANTINED", "DISABLED"}:
+            tx.execute("UPDATE CX_PRINCIPALS SET STATUS=:state,PERMISSION_VERSION=PERMISSION_VERSION+1,UPDATED_AT=CURRENT_TIMESTAMP WHERE PRINCIPAL_ID=:agent_id AND PRINCIPAL_TYPE='AGENT'", {"agent_id": agent_id, "state": state})
+            tx.execute("UPDATE CX_RUNTIME_EXECUTIONS SET STATUS='FAILED',FAILURE_REASON='Agent control revoked',FENCING_TOKEN=FENCING_TOKEN+1,COMPLETED_AT=CURRENT_TIMESTAMP,UPDATED_AT=CURRENT_TIMESTAMP WHERE AGENT_ID=:agent_id AND STATUS IN ('PENDING','CLAIMED')", {"agent_id": agent_id})
         elif state == "NORMAL":
-            tx.execute("UPDATE CX_PRINCIPALS SET STATUS='ACTIVE',UPDATED_AT=CURRENT_TIMESTAMP WHERE PRINCIPAL_ID=:agent_id AND PRINCIPAL_TYPE='AGENT' AND STATUS='DISABLED'", {"agent_id": agent_id})
+            tx.execute("UPDATE CX_PRINCIPALS SET STATUS='ACTIVE',PERMISSION_VERSION=PERMISSION_VERSION+1,UPDATED_AT=CURRENT_TIMESTAMP WHERE PRINCIPAL_ID=:agent_id AND PRINCIPAL_TYPE='AGENT' AND STATUS IN ('DISABLED','QUARANTINED')", {"agent_id": agent_id})
         _audit_tx(tx, actor, "COMPLIANCE_CONTROL_" + state, "AGENT", agent_id, "ALLOW", reason)
         return {"agent_id": agent_id, "control_state": state, "version": int(posture.get("version") or 0) + 1}
     return connection.execute_transaction_callback(work)

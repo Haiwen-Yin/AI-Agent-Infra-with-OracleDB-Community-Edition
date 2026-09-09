@@ -17,7 +17,7 @@ import time
 from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
-from . import connection, deployment_adapters, identity_api, native_agent_api, runtime_isolation
+from . import connection, deployment_adapters, identity_api, native_agent_api, runtime_isolation, content_security
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ def _llm_profile(profile_id: str) -> Optional[Dict[str, Any]]:
 
 def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Call an OpenAI-compatible endpoint without logging prompt or secrets."""
+    content_security.inspect_messages(messages)
     provider_url = str(profile.get("provider_url") or "").strip().rstrip("/")
     parsed = urlsplit(provider_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
@@ -81,12 +82,14 @@ def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[s
     content = str((message or {}).get("content") or "")
     if not content:
         raise RuntimeError("LLM provider returned no content")
+    content_security.enforce(content, "OUTPUT")
     return {"content": content,
             "model": result.get("model") or model}
 
 
 def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delta: Any) -> Dict[str, Any]:
     """Stream OpenAI-compatible deltas without retaining or logging prompts."""
+    content_security.inspect_messages(messages)
     provider_url = str(profile.get("provider_url") or "").strip().rstrip("/")
     parsed = urlsplit(provider_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
@@ -105,7 +108,7 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
     request = urllib.request.Request(provider_url + "/chat/completions", data=payload, headers=headers, method="POST")
     content = ""
     pending = ""
-    last_emit = time.monotonic()
+    completed = False
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             for raw_line in response:
@@ -114,11 +117,14 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                     continue
                 item = line[5:].strip()
                 if item == "[DONE]":
+                    completed = True
                     break
                 try:
                     payload_item = json.loads(item)
                     choices = payload_item.get("choices") or []
                     delta = (choices[0] or {}).get("delta") if choices else {}
+                    if choices and (choices[0] or {}).get("finish_reason") == "stop":
+                        completed = True
                     piece = str((delta or {}).get("content") or "")
                 except (TypeError, ValueError):
                     continue
@@ -128,18 +134,15 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                 pending += piece
                 if len(content.encode("utf-8")) > 100000:
                     raise RuntimeError("LLM provider response is too large")
-                now = time.monotonic()
-                if now - last_emit >= 0.25:
-                    # Callers receive only the new delta. The complete output
-                    # remains local for persistence and integrity checks.
-                    on_delta(pending)
-                    pending = ""
-                    last_emit = now
-            # The provider may finish before the throttle interval elapses.
-            # Flush the bounded remainder so the client never needs the final
-            # persisted response to discover text that was not streamed.
+            # Inspect the complete bounded output before releasing any bytes;
+            # credentials can be split across arbitrary provider chunks.
+            if not completed:
+                raise RuntimeError("LLM provider stream ended before completion")
+            content_security.enforce(content, "OUTPUT")
             if pending:
                 on_delta(pending)
+    except content_security.ContentDenied:
+        raise
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise RuntimeError("LLM provider streaming request failed") from exc
     if not content:
@@ -184,7 +187,7 @@ def enqueue(actor: str, agent_id: str, messages: List[Dict[str, Any]], reason: s
 def _finish(execution_id: str, worker_id: str, node_id: str, fencing_token: int,
             status: str, output: Optional[Dict[str, Any]] = None,
             failure: str = "") -> None:
-    connection.execute(
+    changed = connection.execute(
         "UPDATE CX_RUNTIME_EXECUTIONS SET STATUS=:status,OUTPUT_JSON=:output,FAILURE_REASON=:failure,"
         "COMPLETED_AT=CURRENT_TIMESTAMP,UPDATED_AT=CURRENT_TIMESTAMP WHERE EXECUTION_ID=:id "
         "AND WORKER_ID=:worker AND NODE_ID=:node AND FENCING_TOKEN=:token AND STATUS='CLAIMED'",
@@ -192,6 +195,8 @@ def _finish(execution_id: str, worker_id: str, node_id: str, fencing_token: int,
          "failure": failure[:2000] or None, "id": execution_id, "worker": worker_id,
          "node": node_id, "token": fencing_token},
     )
+    if changed != 1 and status == "COMPLETED":
+        raise PermissionError("Runtime execution authority was revoked")
 
 
 def _admit_execution(execution: Dict[str, Any]) -> Dict[str, Any]:

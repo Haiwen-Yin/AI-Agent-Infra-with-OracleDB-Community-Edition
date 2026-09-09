@@ -1723,7 +1723,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .message-compose {
   display: grid;
   grid-row: 4;
-  grid-template-columns: minmax(0, 1fr) minmax(245px, 30%);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 9px;
   padding: 13px 19px 17px;
@@ -1732,6 +1732,32 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .message-compose textarea {
   min-height: 47px;
 }
+.channel-composer-input {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+}
+.channel-composer-input textarea { width: 100%; resize: vertical; }
+.profile-version-meta dd { margin: 0 0 12px; overflow-wrap: anywhere; }
+.profile-json-editor { min-height: 260px; font-family: monospace; }
+.profile-create > summary { padding: 12px 0; cursor: pointer; }
+.cx-form .profile-copy-toggle { display: flex; align-items: center; gap: 8px; }
+.cx-form .profile-copy-toggle input { width: 16px; min-height: 16px; margin: 0; }
+.channel-completions {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 6px;
+}
+.channel-completions button { min-width: 0; text-align: left; }
+.channel-completions button span { min-width: 0; overflow-wrap: anywhere; }
+.channel-completions button small { white-space: normal; overflow-wrap: anywhere; }
+.channel-completions button[aria-selected="true"] { background: var(--surface-hover, var(--line)); }
+.channel-completions button span small { display: block; }
 .mention-menu {
   display: grid;
   gap: 2px;
@@ -1831,13 +1857,14 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .mention-menu button:hover { background: var(--surface-soft); }
 .mention-menu small { color: var(--muted); }
 .compose-controls {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding-top: 20px;
+  padding-top: 0;
 }
+.compose-controls select { min-width: 0; flex: 1; }
+.compose-controls .icon-button { width: 32px; height: 32px; flex: 0 0 32px; padding: 6px; }
 .decision-box {
   margin-top: 13px;
   padding: 11px;

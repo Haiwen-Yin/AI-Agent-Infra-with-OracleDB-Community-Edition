@@ -44,6 +44,8 @@ import {
   X,
 } from "lucide-react";
 import "./app.css";
+import ChannelComposer from "./ChannelComposer";
+import ComplianceProfileDetail from "./ComplianceProfileDetail";
 
 const GraphRoutePage = lazy(() => import("./pages/GraphPage"));
 
@@ -1511,7 +1513,7 @@ function PlatformPoolGovernancePanelLegacy({
     try { await api("/api/platform/portal-llm-policy", { method: "PUT", body: JSON.stringify({ default_profile_id: defaultId, allowed_profile_ids: selected, expected_version: Number(policy.policy?.version || 1), reason: String(form.get("reason") || "") }) }); await load(); onNotice(text("Portal Agent Pool LLM 策略已保存", "Portal Agent Pool LLM policy saved")); }
     catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
-  const post = async (url: string, form: HTMLFormElement, message: string) => { const values: Row = Object.fromEntries(new FormData(form).entries()); if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean); if ("tls_required" in values) values.tls_required = values.tls_required === "on"; setBusy(true); try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); if (url === "/api/platform/managed-nodes") setPoolTrustMode("MUTUAL_TRUST"); await load(); onNotice(message); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
+  const post = async (url: string, form: HTMLFormElement, message: string) => { const values: Row = Object.fromEntries(new FormData(form).entries()); if (typeof values.roles === "string") values.roles = values.roles.split(",").map((item: string) => item.trim()).filter(Boolean); if ("tls_required" in values) values.tls_required = values.tls_required === "on"; setBusy(true); try { await api(url, { method: "POST", body: JSON.stringify(values) }); form.reset(); await load(); onNotice(message); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   const validateResource = async (kind: "node" | "storage", id: string) => { setBusy(true); try { const result = await api<Row>(`/api/platform/${kind === "node" ? "managed-nodes" : "shared-storage"}/${encodeURIComponent(id)}/validate`, { method: "POST", body: "{}" }); await load(); onNotice(`${text("验证结果", "Validation result")}: ${displayRowValue(lang, result.validation_state)} · ${result.detail || ""}`); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   const retireResource = async (kind: "node", id: string, label: string) => { const reason = promptInput(text(`请输入移除“${label}”的原因（至少三个字符）`, `Enter a reason to retire “${label}” (at least 3 characters)`), ""); if (!reason || reason.trim().length < 3) return; setBusy(true); try { await api(`/api/platform/managed-nodes/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ reason: reason.trim() }) }); await load(); onNotice(text("受管节点已归档，历史记录已保留", "Managed node retired; history was retained")); } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); } };
   return <div className="agent-pool-page"><InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
@@ -5132,14 +5134,14 @@ function OrganizationPage({
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("undo")}><Undo2 size={13} />{text("撤销", "Undo")}</button>
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("redo")}><Redo2 size={13} />{text("重做", "Redo")}</button>
                     <button className="small-button" disabled={!draft || busy} onClick={() => void draftAction("validate")}><Check size={13} />{text("校验与影响分析", "Validate and analyze")}</button>
-                    <button className="small-button" disabled={!draft || busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("validate-submit")}><Send size={13} />{(capabilities.features || []).includes("approvals") ? text("校验并提交审批", "Validate and submit") : text("校验并发布（COM）", "Validate and publish (COM)")}</button>
+                    <button className="small-button" disabled={!draft || busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("validate-submit")}><Send size={13} />{(capabilities?.features || []).includes("approvals") ? text("校验并提交审批", "Validate and submit") : text("校验并发布（COM）", "Validate and publish (COM)")}</button>
                   </>}
                   {String(draft?.status || "").toUpperCase() === "VALIDATED" && <>
                     <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布低风险变更", "Publish low-risk change")}</button>
                     <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("submit")}><ShieldCheck size={13} />{text("提交审批", "Submit for approval")}</button>
                   </>}
                   {String(draft?.status || "").toUpperCase() === "PENDING_APPROVAL" && <>
-                    {!(capabilities.features || []).includes("approvals") && <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布（COM）", "Publish directly (COM)")}</button>}
+                    {!(capabilities?.features || []).includes("approvals") && <button className="small-button" disabled={busy || !canAction(capabilities, "organizations.changes.publish")} onClick={() => void draftAction("publish")}><Check size={13} />{text("直接发布（COM）", "Publish directly (COM)")}</button>}
                     <button className="small-button danger" disabled={busy || !canAction(capabilities, "organizations.changes.submit")} onClick={() => void draftAction("withdraw")}><X size={13} />{text("撤回审批", "Withdraw approval")}</button>
                   </>}
                 </div>
@@ -5823,6 +5825,24 @@ function CompliancePage({
       onNotice(error instanceof Error ? error.message : text("例外决定失败", "Exception decision failed"));
     } finally { setBusy(false); }
   };
+  const openProfile = async (id: string) => {
+    try { setSelected({ ...await api<Row>(`/api/compliance/profiles/${encodeURIComponent(id)}`), kind: "profile" }); }
+    catch (error) { onNotice(error instanceof Error ? error.message : text("模板详情加载失败", "Template detail failed to load")); }
+  };
+  const saveProfile = async (content: Row, reason: string) => {
+    if (!selected || selected.kind !== "profile") return;
+    await api(`/api/compliance/profiles/${encodeURIComponent(selected.profile_version_id)}`, {
+      method: "PATCH", body: JSON.stringify({ content, reason, expected_digest: selected.content_digest }),
+    });
+    await openProfile(selected.profile_version_id); await load();
+  };
+  const copyProfile = async (key: string, name: string, content: Row, reason: string) => {
+    if (!selected || selected.kind !== "profile") return;
+    const created = await api<Row>("/api/compliance/profiles", { method: "POST", body: JSON.stringify({
+      profile_key: key, display_name: name, content, reason, parent_version_id: selected.parent_version_id || "",
+    }) });
+    await openProfile(created.profile_version_id); await load();
+  };
   const createProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -5946,9 +5966,9 @@ function CompliancePage({
     {tab === "profiles" && <>
       <InfoPanel title={text("合规控制模板", "Compliance control templates")} text={text}>
         <p className="cx-form-hint">{text("配置限定已有权限，不会授予身份、数据、工具或数据库访问权。发布后的版本不可修改。", "Profiles constrain existing authority; they never grant identity, data, Tool, or database access. Published versions are immutable.")}</p>
-        <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16)])} text={text} empty={text("暂无合规控制模板", "No compliance control templates")} />
+        <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest"), text("操作", "Actions")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16), <button className="small-button" onClick={() => void openProfile(String(item.profile_version_id))}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规控制模板", "No compliance control templates")} />
       </InfoPanel>
-      {canAction(capabilities, "agents.manage") && <InfoPanel title={text("创建合规控制模板草稿", "Create Compliance control-template draft")} text={text}><p className="cx-form-hint">{text("控制模板限制既有权限，不能单独授予数据库、网络、技能或工具访问权。逗号分隔的技能、工具与锁定字段将作为结构化策略保存。", "A control template constrains existing authority and cannot independently grant database, network, Skill, or Tool access. Comma-separated Skills, Tools, and locked fields are stored as structured policy.")}</p><form className="configuration-form compliance-template-form" onSubmit={createProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一且可读的模板标识。", "A unique, readable template identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("显示名称", "Display name")} hint={text("用于审批、分配与审计显示。", "Shown in approval, assignment, and audit.")}><input name="display_name" required /></ConfigField><ConfigField label={text("父版本 ID", "Parent version ID")} hint={text("可选；父版本必须已发布。", "Optional; the parent version must be published.")}><input name="parent_version_id" /></ConfigField><ConfigField label={text("允许的技能", "Allowed Skills")} hint={text("用逗号分隔；留空表示不在此模板中额外限定。", "Comma separated; blank means this template adds no Skill restriction.")}><input name="allowed_skills" /></ConfigField><ConfigField label={text("允许的工具", "Allowed Tools")} hint={text("用逗号分隔；实际授权仍由身份策略决定。", "Comma separated; effective grants are still decided by identity policy.")}><input name="allowed_tools" /></ConfigField><ConfigField label={text("数据分类上限", "Data classification ceiling")} hint={text("限制此模板可处理的最高数据分类。", "Caps the highest data classification this template can handle.")}><select name="classification_ceiling" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("数据库访问方式", "Database access mode")} hint={text("数据库授权仍由账号、Schema 与网关执行。", "Database grants are still enforced by accounts, schemas, and the gateway.")}><select name="database_access" defaultValue="GATEWAY_ONLY"><option value="GATEWAY_ONLY">{text("仅网关", "Gateway only")}</option><option value="READ_SCOPED">{text("范围内只读", "Scoped read")}</option><option value="LEAST_PRIVILEGE">{text("最小权限", "Least privilege")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("网络出口策略", "Network egress policy")} hint={text("网络访问还需满足运行时与基础设施控制。", "Network access also remains subject to runtime and infrastructure controls.")}><select name="network_egress" defaultValue="ALLOWLIST"><option value="ALLOWLIST">{text("白名单", "Allowlist")}</option><option value="ISOLATED">{text("隔离", "Isolated")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("审批策略", "Approval policy")} hint={text("定义高风险操作的审批要求。", "Defines approval requirements for high-risk actions.")}><select name="approval_policy" defaultValue="REQUIRED"><option value="REQUIRED">{text("必须审批", "Required")}</option><option value="RISK_BASED">{text("按风险审批", "Risk based")}</option><option value="NONE">{text("无需审批", "None")}</option></select></ConfigField><ConfigField label={text("审计与留存策略", "Audit and retention policy")} hint={text("定义审计证据的最低留存要求。", "Defines the minimum retention requirement for audit evidence.")}><select name="audit_retention" defaultValue="EVIDENCE_REQUIRED"><option value="EVIDENCE_REQUIRED">{text("必须保留证据", "Evidence required")}</option><option value="STANDARD">{text("标准留存", "Standard")}</option><option value="EXTENDED">{text("延长留存", "Extended")}</option></select></ConfigField><ConfigField label={text("锁定字段", "Locked fields")} hint={text("用逗号分隔；子模板不可改写父模板同名锁定内容。", "Comma separated; child templates cannot override same-named locked parent content.")}><input name="locked_fields" /></ConfigField><ConfigField label={text("创建原因", "Creation reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("创建后为草稿，发布前仍可复核。", "Created as a draft and remains reviewable before publication.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></ConfigField></form></InfoPanel>}
+      {canAction(capabilities, "agents.manage") && <details className="profile-create"><summary>{text("新增模板", "New template")}</summary><InfoPanel title={text("创建合规控制模板草稿", "Create Compliance control-template draft")} text={text}><p className="cx-form-hint">{text("控制模板限制既有权限，不能单独授予数据库、网络、技能或工具访问权。逗号分隔的技能、工具与锁定字段将作为结构化策略保存。", "A control template constrains existing authority and cannot independently grant database, network, Skill, or Tool access. Comma-separated Skills, Tools, and locked fields are stored as structured policy.")}</p><form className="configuration-form compliance-template-form" onSubmit={createProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一且可读的模板标识。", "A unique, readable template identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("显示名称", "Display name")} hint={text("用于审批、分配与审计显示。", "Shown in approval, assignment, and audit.")}><input name="display_name" required /></ConfigField><ConfigField label={text("父版本 ID", "Parent version ID")} hint={text("可选；父版本必须已发布。", "Optional; the parent version must be published.")}><select name="parent_version_id"><option value="">{text("无父模板", "No parent")}</option>{profiles.filter((item) => item.version_status === "PUBLISHED").map((item) => <option key={item.profile_version_id} value={item.profile_version_id}>{item.display_name} · {item.version_label}</option>)}</select></ConfigField><ConfigField label={text("允许的技能", "Allowed Skills")} hint={text("用逗号分隔；留空表示不在此模板中额外限定。", "Comma separated; blank means this template adds no Skill restriction.")}><input name="allowed_skills" /></ConfigField><ConfigField label={text("允许的工具", "Allowed Tools")} hint={text("用逗号分隔；实际授权仍由身份策略决定。", "Comma separated; effective grants are still decided by identity policy.")}><input name="allowed_tools" /></ConfigField><ConfigField label={text("数据分类上限", "Data classification ceiling")} hint={text("限制此模板可处理的最高数据分类。", "Caps the highest data classification this template can handle.")}><select name="classification_ceiling" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("数据库访问方式", "Database access mode")} hint={text("数据库授权仍由账号、Schema 与网关执行。", "Database grants are still enforced by accounts, schemas, and the gateway.")}><select name="database_access" defaultValue="GATEWAY_ONLY"><option value="GATEWAY_ONLY">{text("仅网关", "Gateway only")}</option><option value="READ_SCOPED">{text("范围内只读", "Scoped read")}</option><option value="LEAST_PRIVILEGE">{text("最小权限", "Least privilege")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("网络出口策略", "Network egress policy")} hint={text("网络访问还需满足运行时与基础设施控制。", "Network access also remains subject to runtime and infrastructure controls.")}><select name="network_egress" defaultValue="ALLOWLIST"><option value="ALLOWLIST">{text("白名单", "Allowlist")}</option><option value="ISOLATED">{text("隔离", "Isolated")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("审批策略", "Approval policy")} hint={text("定义高风险操作的审批要求。", "Defines approval requirements for high-risk actions.")}><select name="approval_policy" defaultValue="REQUIRED"><option value="REQUIRED">{text("必须审批", "Required")}</option><option value="RISK_BASED">{text("按风险审批", "Risk based")}</option><option value="NONE">{text("无需审批", "None")}</option></select></ConfigField><ConfigField label={text("审计与留存策略", "Audit and retention policy")} hint={text("定义审计证据的最低留存要求。", "Defines the minimum retention requirement for audit evidence.")}><select name="audit_retention" defaultValue="EVIDENCE_REQUIRED"><option value="EVIDENCE_REQUIRED">{text("必须保留证据", "Evidence required")}</option><option value="STANDARD">{text("标准留存", "Standard")}</option><option value="EXTENDED">{text("延长留存", "Extended")}</option></select></ConfigField><ConfigField label={text("锁定字段", "Locked fields")} hint={text("用逗号分隔；子模板不可改写父模板同名锁定内容。", "Comma separated; child templates cannot override same-named locked parent content.")}><input name="locked_fields" /></ConfigField><ConfigField label={text("创建原因", "Creation reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("创建后为草稿，发布前仍可复核。", "Created as a draft and remains reviewable before publication.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></ConfigField></form></InfoPanel></details>}
     </>}
     {tab === "remediation" && <InfoPanel title={text("整改", "Remediation")} text={text}>
       <p className="cx-form-hint">{text("整改必须通过受认证网关提交结构化证据；普通频道聊天不会关闭整改。", "Remediation requires structured evidence through the authenticated Gateway; ordinary Channel chat never closes a case.")}</p>
@@ -5966,7 +5986,8 @@ function CompliancePage({
       <div className="empty-state">{text("最近租约节点：", "Last lease owner: ")}{summary.lease_owner || text("暂无", "None")}</div>
     </InfoPanel>}
     <DetailDrawer open={Boolean(selected)} title={text("合规详情", "Compliance details")} onClose={() => setSelected(null)} text={text} wide>
-      {selected && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
+      {selected?.kind === "profile" && <ComplianceProfileDetail key={`${selected.profile_version_id}:${selected.content_digest}`} profile={selected} editable={canAction(capabilities, "agents.manage")} text={text} onSave={saveProfile} onCopy={copyProfile} />}
+      {selected && selected.kind !== "profile" && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
     </DetailDrawer>
   </section>;
 }
@@ -6503,6 +6524,15 @@ function Channels({
   const [messageFeedback, setMessageFeedback] = useState("");
   const [commandCatalog, setCommandCatalog] = useState<Row[]>([]);
   const [showCommandPanel, setShowCommandPanel] = useState(false);
+  const channelEpoch = useRef(0);
+  const currentChannel = useRef("");
+  const sendLock = useRef(false);
+  const refreshTimers = useRef<number[]>([]);
+  const clearChannelRequests = () => {
+    channelEpoch.current++;
+    refreshTimers.current.forEach(window.clearTimeout);
+    refreshTimers.current = [];
+  };
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(false);
   const feedbackTimerRef = useRef<number | null>(null);
@@ -6544,11 +6574,16 @@ function Channels({
     } finally { setLoading(false); }
   };
   const selectChannel = (channel: Row | null) => {
+    clearChannelRequests();
+    currentChannel.current = String(channel?.channel_id || "");
     setSelected(channel);
     setSelectedChannelId(channel ? String(channel.channel_id) : "");
     setCommandCatalog([]);
   };
   const loadSelected = async (channel: Row) => {
+    const epoch = channelEpoch.current;
+    const isCurrent = () => epoch === channelEpoch.current && currentChannel.current === String(channel.channel_id);
+    if (!isCurrent()) return;
     const id = encodeURIComponent(String(channel.channel_id));
     const optional = async (path: string): Promise<Row> => {
       try {
@@ -6572,30 +6607,34 @@ function Channels({
       optional(`/api/channels/${id}/actions`),
       optional(`/api/channels/${id}/memory-candidates`),
     ]);
+    if (!isCurrent()) return;
     setMessages((messageValue.items || []).reverse());
     setMembers(memberValue.items || []);
     setThreads(threadValue.items || []);
     setSummary(summaryValue);
     setActions(actionValue.items || []);
     setCandidates(candidateValue.items || []);
-    setBridges((await optional("/api/bridges")).items || []);
+    const bridgeValue = await optional("/api/bridges");
+    if (!isCurrent()) return;
+    setBridges(bridgeValue.items || []);
     if (String(channel.channel_id) === "CH_PLATFORM_ADMINISTRATION") {
       try {
         const commandValue = await api<Row>(`/api/platform/admin-commands/catalog?channel_id=${encodeURIComponent(String(channel.channel_id))}`);
-        setCommandCatalog(commandValue.items || []);
+        if (isCurrent()) setCommandCatalog(commandValue.items || []);
       } catch {
-        setCommandCatalog([]);
+        if (isCurrent()) setCommandCatalog([]);
       }
     }
   };
   const loadIncremental = async (channel: Row) => {
+    const epoch = channelEpoch.current;
     try {
       // Streaming responses update one existing message in place. Filtering
       // by created_at would miss those updates because the row timestamp does
       // not change between chunks; refresh the bounded recent window instead.
       const value = await api<Row>(`/api/channels/${encodeURIComponent(String(channel.channel_id))}/messages?limit=100`);
       const incoming = ((value.items || []) as Row[]);
-      if (!incoming.length) return;
+      if (!incoming.length || epoch !== channelEpoch.current || currentChannel.current !== String(channel.channel_id)) return;
       setMessages((current) => {
         const byId = new Map(current.map((item) => [String(item.message_id), item]));
         incoming.forEach((item) => byId.set(String(item.message_id), item));
@@ -6609,6 +6648,11 @@ function Channels({
     void load();
   }, [pageSize]);
   useEffect(() => {
+    clearChannelRequests();
+    currentChannel.current = String(selected?.channel_id || "");
+    setMessages([]); setMembers([]); setThreads([]); setSummary({});
+    setActions([]); setCandidates([]); setBridges([]); setCommandCatalog([]);
+    setBody(""); setMessageFeedback("");
     if (selected) {
       setThreadId("");
       // Opening a Channel is an inbox action: show its most recent activity,
@@ -6617,7 +6661,8 @@ function Channels({
       followLatestRef.current = true;
       void loadSelected(selected);
     }
-  }, [selected]);
+    return () => { clearChannelRequests(); if (feedbackTimerRef.current) window.clearTimeout(feedbackTimerRef.current); };
+  }, [selected?.channel_id]);
   useEffect(() => {
     if (!selected || !messages.some((item) => String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING")) return;
     const timer = window.setInterval(() => {
@@ -6674,14 +6719,11 @@ function Channels({
       );
     }
   };
-  const send = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!selected || !body.trim()) return;
+  const send = async (mentions: string[] = []) => {
+    if (!selected || !body.trim() || sendLock.current) return;
+    sendLock.current = true;
+    const epoch = channelEpoch.current;
     followLatestRef.current = true;
-    const mentions = members.flatMap((member) => {
-      const displayName = String(member.display_name || "").trim();
-      return displayName && body.includes(`@${displayName}`) ? [String(member.principal_id)] : [];
-    });
     setSending(true);
     setMessageFeedback("");
     try {
@@ -6701,7 +6743,8 @@ function Channels({
           }),
         },
       );
-      setBody("");
+      if (epoch !== channelEpoch.current) return;
+      setBody((current) => current === body ? "" : current);
       // Keep the Channel visible immediately after the durable POST. Refreshing
       // the full Channel surface can be slower than sending, and the bounded
       // polling below already picks up Agent responses.
@@ -6716,19 +6759,19 @@ function Channels({
         ? text(`消息已发送，已提及 ${mentions.length} 位频道成员。`, `Message sent; mentioned ${mentions.length} Channel member(s).`)
         : text("消息已发送并已写入审计。", "Message sent and recorded in audit.");
       showTransientFeedback(message);
-      onNotice(message);
       if (dispatches.length) {
         // A model invocation can legitimately outlive a single HTTP refresh.
         // Bounded polling keeps the Channel current without creating a stream
         // or polling indefinitely when an upstream model is unavailable.
         [3000, 6000, 10000, 15000, 21000, 28000, 36000].forEach((delay) => {
-          window.setTimeout(() => { void loadSelected(selected); }, delay);
+          refreshTimers.current.push(window.setTimeout(() => { if (epoch === channelEpoch.current) void loadSelected(selected); }, delay));
         });
       }
     } catch (error) {
+      if (epoch !== channelEpoch.current) return;
       const message = error instanceof Error ? error.message : text("发送失败", "Send failed");
       showTransientFeedback(message, 8000); onNotice(message);
-    } finally { setSending(false); }
+    } finally { sendLock.current = false; setSending(false); }
   };
   const createThread = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -7018,32 +7061,7 @@ function Channels({
         </div>
       </section>
     );
-  const threadOptions = threads.map((item) => (
-    <option key={item.thread_id} value={item.thread_id}>
-      {displayRowValue(lang, item.thread_type)} · {item.thread_id}
-    </option>
-  ));
-  const mentionMatch = body.match(/(?:^|\s)@([^\s@]*)$/);
-  const mentionQuery = mentionMatch ? mentionMatch[1].toLowerCase() : "";
-  const mentionCandidates = mentionMatch ? members.filter((item) => {
-    const name = String(item.display_name || item.principal_id || "").toLowerCase();
-    const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => mentionQuery.includes(alias))
-      && String(item.principal_type || "").toUpperCase() === "AGENT";
-    return name.includes(mentionQuery) || agentAlias;
-  }).slice(0, 8) : [];
-  const insertMention = (member: Row) => {
-    const name = String(member.display_name || member.principal_id || "").trim();
-    if (!name || !mentionMatch) return;
-    setBody((value) => value.replace(/(?:^|\s)@([^\s@]*)$/, (matched) => `${matched.startsWith(" ") ? " " : ""}@${name} `));
-    showTransientFeedback(text(`已添加对 @${name} 的提及；发送消息后将写入频道审计。`, `Mention for @${name} added; it will be recorded in Channel audit when sent.`), 4000);
-  };
   const isAdministrationChannel = String(selected.channel_id) === "CH_PLATFORM_ADMINISTRATION";
-  const commandPrefixMatch = body === "/" || body.toLowerCase().startsWith("/p") || body.toLowerCase().startsWith("/platform");
-  const commandTokenMatch = body.match(/^\/platform(?:\s+([A-Z0-9_]*))?$/i);
-  const commandQuery = commandTokenMatch ? String(commandTokenMatch[1] || "").toUpperCase() : "";
-  const commandCandidates = isAdministrationChannel && commandPrefixMatch
-    ? (commandCatalog || []).filter((item) => !commandQuery || String(item.command_key).startsWith(commandQuery)).slice(0, 10)
-    : [];
   const insertCommand = (item: Row) => {
     setBody(String(item.example || `/platform ${item.command_key}`));
     showTransientFeedback(text("已插入命令模板。请替换尖括号参数后再发送。", "Command template inserted. Replace angle-bracket placeholders before sending."), 4000);
@@ -7178,24 +7196,10 @@ function Channels({
                 </div>
               )}
             </div>
-            <form className="message-compose" onSubmit={send}>
-              <label className="message-input-field"><span>{text("消息内容", "Message")}</span><textarea value={body} onChange={(event) => { const value = event.target.value; setBody(value); const match = value.match(/(?:^|\s)@([^\s@]*)$/); if (match && match[1].trim() && !members.some((member) => { const name = String(member.display_name || member.principal_id || "").toLowerCase(); const query = match[1].toLowerCase(); const agentAlias = ["管理", "智能体", "agent", "admin"].some((alias) => query.includes(alias)) && String(member.principal_type || "").toUpperCase() === "AGENT"; return name.includes(query) || agentAlias; })) { setMessageFeedback(text("当前频道没有匹配的可提及成员；提及不会扩大频道或数据访问范围。", "No matching mentionable member exists in this Channel; mentions never expand Channel or data access.")); } else { setMessageFeedback(""); } }} onKeyDown={(event) => { if (event.key === "Escape" && commandCandidates.length) { event.preventDefault(); setBody(""); } else if (commandCandidates.length && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) { event.preventDefault(); if (event.key === "Tab") insertCommand(commandCandidates[0]); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (commandCandidates.length && commandQuery) insertCommand(commandCandidates[0]); else void send(); } }} /><small>{text("按 Enter 发送，Shift+Enter 换行。输入 @ 可提及当前频道成员；在管理频道输入 / 可补全平台命令。提及与命令都不会自动获得额外权限。", "Press Enter to send and Shift+Enter for a new line. Type @ to mention a Channel member or / in the Administration Channel for platform commands. Mentions and commands never add authority by themselves.")}</small>{messageFeedback && <small className="operation-feedback" role="status">{messageFeedback}</small>}{commandCandidates.length > 0 && <div className="mention-menu platform-command-menu" role="listbox" aria-label={text("平台命令", "Platform commands")}>{commandCandidates.map((item) => <button type="button" role="option" key={String(item.command_id)} onClick={() => insertCommand(item)}><span>{item.command_key}<small>{String(item.metadata?.[lang === "zh" ? "name_zh" : "name_en"] || "")}</small></span><small>{displayRowValue(lang, item.risk_level)} · {displayRowValue(lang, item.execution_mode)}</small></button>)}</div>}{mentionCandidates.length > 0 && <div className="mention-menu" role="listbox" aria-label={text("提及成员", "Mention member")}>{mentionCandidates.map((member) => <button type="button" role="option" key={String(member.principal_id)} onClick={() => insertMention(member)}><span>{member.display_name || text("未命名主体", "Unnamed principal")}</span><small>{displayRowValue(lang, member.principal_type)}</small></button>)}</div>}</label>
-              <div className="compose-controls">
-                <select
-                  value={threadId}
-                  onChange={(event) => setThreadId(event.target.value)}
-                >
-                  <option value="">
-                    {text("频道消息", "Channel message")}
-                  </option>
-                  {threadOptions}
-                </select>
-                <button className="primary-button" disabled={!body.trim() || sending}>
-                  <ChevronRight className={sending ? "spin" : ""} size={16} />
-                  {sending ? text("发送中", "Sending") : text("发送", "Send")}
-                </button>
-              </div>
-            </form>
+            <ChannelComposer key={String(selected.channel_id)} body={body} setBody={setBody}
+              members={members} commands={isAdministrationChannel ? commandCatalog : []}
+              threads={threads} threadId={threadId} setThreadId={setThreadId}
+              sending={sending} feedback={messageFeedback} lang={lang} text={text} onSend={send} />
           </div>
         </div>
       )}

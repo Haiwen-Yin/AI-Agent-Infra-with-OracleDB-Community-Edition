@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.12 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.13 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -28,6 +28,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib import connection, memory_api, memory_lifecycle, knowledge_api, agent_api
+from lib import content_security, knowledge_grounding, portal_grounding
 from lib import task_plan_api, workspace_api, harness_api, graph_api
 from lib import spec_api, collab_api, branch_api, sdd_api, scm_adapter_api
 from lib import security, config, user_api
@@ -57,7 +58,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.12"
+VERSION = "4.4.13"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -4279,102 +4280,51 @@ class VisHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            selected_profile = self._portal_selected_llm(sess)
-            if selected_profile is None:
-                self._send_json({'success': False, 'error': 'Portal LLM policy has no usable default profile'}, 503)
-                return
-            if use_stream:
-                self._handle_chat_stream(message, agent_id, user_id, workspace_id, sess, ctx_id, selected_profile)
-            else:
-                _set_portal_agent_context(sess)
-                try:
-                    reply = native_runtime._call_llm(selected_profile, [{"role": "user", "content": message}])["content"]
-                except Exception:
-                    reply = None
-                if not reply:
-                    reply = _generate_sim_reply(message, agent_id, sess)
+            selected_profile = self._portal_selected_llm(sess) or {}
+            previous_agent = connection.get_current_agent_id()
+            try:
+                connection.set_agent_context(None)
+                answer = portal_grounding.answer(sess, message, selected_profile,
+                    supplement=data.get('model_supplement') is True, entity_ids=data.get('knowledge_ids'))
                 if workspace_id:
-                    reply_data = {'role': 'agent', 'content': reply, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
                     workspace_api.save_context(
-                        workspace_id=workspace_id,
-                        agent_id=agent_id or user_id,
+                        workspace_id=workspace_id, agent_id=agent_id or user_id,
                         context_type='CHAT_MESSAGE',
-                        context_data=reply_data,
-                    )
-                self._send_json({
-                    'success': True,
-                    'reply': reply,
-                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                    'user_context_id': ctx_id,
-                })
-        except Exception as e:
-            self._send_json({'success': False, 'error': str(e)}, 500)
+                        context_data={'role': 'agent', 'content': answer['reply'],
+                                      'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                                      'citations': answer['citations'], 'answer_source': answer['answer_source']})
+            finally:
+                connection.set_agent_context(previous_agent)
+            response = {'success': True, **answer, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                        'user_context_id': ctx_id}
+            if use_stream:
+                self._handle_chat_stream(response)
+            else:
+                self._send_json(response)
+        except PermissionError:
+            self._send_json({'success': False, 'error': 'Knowledge or Agent access is unavailable', 'code': 'ACCESS_DENIED'}, 403)
+        except content_security.ContentDenied as exc:
+            self._send_json({'success': False, 'error': 'Content security check rejected the request', 'code': exc.result['code']}, 422)
+        except Exception:
+            logger.warning('Portal grounded answer failed', exc_info=False)
+            self._send_json({'success': False, 'error': 'Knowledge answer service is unavailable', 'code': 'ANSWER_UNAVAILABLE'}, 503)
 
-    def _handle_chat_stream(self, message, agent_id, user_id, workspace_id, sess, ctx_id, selected_profile=None):
-        """Send chat reply as SSE stream with token-by-token output."""
+    def _handle_chat_stream(self, response):
+        """Emit only fully inspected, authorized answers, using the existing SSE contract."""
+        events = ({'type': 'token', 'content': response['reply']},
+                  {'type': 'done', **{key: value for key, value in response.items() if key != 'reply'}})
+        payloads = [("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode()
+                    for event in events]
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Connection', 'keep-alive')
         self.end_headers()
-
-        def send_sse(data):
-            self.wfile.write(f"data: {json.dumps(data, ensure_ascii=False)}\n\n".encode())
-            self.wfile.flush()
-
-        full_reply = ""
-        model = _select_model_for_task("standard")
-        stream = None
-        if selected_profile:
-            try:
-                events = queue.Queue()
-                sentinel = object()
-                def run_selected_profile():
-                    try:
-                        result = native_runtime._stream_llm(
-                            selected_profile, [{"role": "user", "content": message}],
-                            lambda delta: events.put(("delta", delta)),
-                        )
-                        events.put(("done", result))
-                    except Exception as exc:
-                        events.put(("error", exc))
-                    finally:
-                        events.put(("stop", sentinel))
-                threading.Thread(target=run_selected_profile, daemon=True).start()
-                def selected_events():
-                    while True:
-                        kind, value = events.get()
-                        if kind == "delta":
-                            yield str(value)
-                        elif kind == "error":
-                            raise value
-                        elif kind == "stop":
-                            return
-                stream = selected_events()
-            except Exception:
-                stream = None
-        if stream is None:
-            stream = _call_llm_stream([{"role": "user", "content": message}], model=model)
-
-        if stream is not None:
-            for token in stream:
-                full_reply += token
-                send_sse({"type": "token", "content": token})
-        else:
-            full_reply = _generate_sim_reply(message, agent_id, sess)
-            send_sse({"type": "token", "content": full_reply})
-
-        if workspace_id:
-            reply_data = {'role': 'agent', 'content': full_reply, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S')}
-            workspace_api.save_context(
-                workspace_id=workspace_id,
-                agent_id=agent_id or user_id,
-                context_type='CHAT_MESSAGE',
-                context_data=reply_data,
-            )
-
-        send_sse({"type": "done", "timestamp": time.strftime('%Y-%m-%dT%H:%M:%S')})
-        _set_portal_agent_context(sess)
+        try:
+            for payload in payloads:
+                self.wfile.write(payload)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def _handle_portal_chat_new(self):
         session_data = _get_session(self)
@@ -4571,7 +4521,27 @@ class VisHandler(BaseHTTPRequestHandler):
                 return
             sess = session_data[1]
         try:
-            if path == '/portal/api/user/profile':
+            if path == '/portal/api/knowledge' or path.startswith('/portal/api/knowledge/'):
+                if self._require_registered_session_agent() is None:
+                    return
+                previous_agent = connection.get_current_agent_id()
+                try:
+                    connection.set_agent_context(None)
+                    actor, agent = str(sess.get('principal_id') or ''), str(sess.get('agent_id') or '')
+                    if path == '/portal/api/knowledge':
+                        result = knowledge_grounding.search(actor, agent, str(qs.get('q', [''])[0]), limit=20)
+                        self._send_json({**result, 'items': [{k: v for k, v in item.items() if k != 'content'} for item in result['items']]})
+                    else:
+                        from urllib.parse import unquote
+                        item = knowledge_grounding.citation(actor, agent, unquote(path.rsplit('/', 1)[1]), str(qs.get('digest', [''])[0]))
+                        self._send_json({'item': item})
+                except PermissionError:
+                    self._send_json({'error': 'Knowledge is unavailable'}, 403)
+                except Exception:
+                    self._send_json({'error': 'Knowledge service unavailable'}, 503)
+                finally:
+                    connection.set_agent_context(previous_agent)
+            elif path == '/portal/api/user/profile':
                 session_data = _get_session(self)
                 if session_data:
                     connection.set_agent_context(None)
@@ -4941,7 +4911,7 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.12', VERSION)
+            html = html.replace('4.4.13', VERSION)
             html = html.replace('2026-09-05', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())

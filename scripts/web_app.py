@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.12 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.13 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -44,7 +44,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.12"
+VERSION = "4.4.13"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -1010,6 +1010,20 @@ class ComplianceAssignmentBody(BaseModel):
     profile_version_id: str = Field(min_length=1, max_length=128)
     environment: str = Field(default="production", min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=2000)
+
+
+class ComplianceProfileEditBody(BaseModel):
+    content: Dict[str, Any]
+    expected_digest: str = Field(min_length=64, max_length=64)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class PortalKnowledgePolicyBody(BaseModel):
+    mode: str = Field(pattern="^(KNOWLEDGE_FIRST|KNOWLEDGE_ONLY)$")
+    allow_model_supplement: bool = False
+    disclosure_profiles: List[str] = Field(default_factory=list, max_length=50)
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
 
 
 class ComplianceControlBody(BaseModel):
@@ -2069,6 +2083,10 @@ def _identity_http_error(exc: Exception, detail: str, *, identity_status: int = 
     # Governance conflicts are expected, auditable operator outcomes.  They
     # must not be presented as an unavailable identity service, otherwise a
     # rejected second binding looks like an infrastructure failure.
+    if isinstance(exc, compliance_api.ProfileConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, compliance_api.ComplianceError):
+        return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, security_domain_api.SecurityDomainConflict):
         return HTTPException(status_code=409, detail=str(exc) or detail)
     if isinstance(exc, security_domain_api.SecurityDomainError):
@@ -2337,6 +2355,8 @@ def logout(request: Request, session: Dict[str, Any] = Depends(require_csrf)) ->
             raw = request.cookies.get(_cookie_name(candidate_scope, request.url.port), "")
             if raw:
                 identity_api.revoke_session(raw, "logout")
+                if candidate_scope == "PORTAL":
+                    identity_api.release_portal_connection(raw, "logout")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Session service unavailable") from exc
     response = JSONResponse({"success": True})
@@ -5213,6 +5233,23 @@ def compliance_profile_create(body: ComplianceProfileBody, session: Dict[str, An
         raise _identity_http_error(exc, "Compliance Profile creation was denied") from exc
 
 
+@app.get("/api/compliance/profiles/{profile_version_id}")
+def compliance_profile_detail(profile_version_id: str, session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.get_profile_version(str(session["principal_id"]), profile_version_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile detail is unavailable") from exc
+
+
+@app.patch("/api/compliance/profiles/{profile_version_id}")
+def compliance_profile_edit(profile_version_id: str, body: ComplianceProfileEditBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.update_profile_draft(str(session["principal_id"]), profile_version_id,
+                                                   body.content, body.expected_digest, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile editing was denied") from exc
+
+
 @app.post("/api/compliance/profiles/{profile_version_id}/publish")
 def compliance_profile_publish(profile_version_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
     try:
@@ -6450,6 +6487,31 @@ def runtime_profile() -> Dict[str, Any]:
             "graph_engineering": bool(effective.get("graph", False) and getattr(features, "GRAPH_ENGINEERING_ENABLED", True)),
         },
     }
+
+
+@app.get("/api/platform/portal-knowledge-policy")
+def portal_knowledge_policy(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import portal_grounding
+    try:
+        return portal_grounding.policy()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Knowledge policy is unavailable") from exc
+
+
+@app.put("/api/platform/portal-knowledge-policy")
+def portal_knowledge_policy_update(body: PortalKnowledgePolicyBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import portal_grounding, knowledge_grounding
+    try:
+        return portal_grounding.set_policy(str(session["principal_id"]), body.mode, body.allow_model_supplement,
+            body.disclosure_profiles, body.expected_version, body.reason)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Knowledge policy update denied") from exc
+    except knowledge_grounding.GroundingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Knowledge policy update unavailable") from exc
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

@@ -144,9 +144,11 @@ def test_channel_mentions_are_member_bounded_and_message_display_uses_name():
     assert "_channel_principal_is_member(channel_id, subject)" in messages
     assert "COALESCE(p.DISPLAY_NAME, m.PRINCIPAL_ID) AS SENDER_DISPLAY_NAME" in listing
     assert "sender_display_name" in channels
-    assert "onKeyDown" in channels and "event.key === \"Enter\" && !event.shiftKey" in channels
+    composer = (root / "web" / "src" / "ChannelComposer.tsx").read_text(encoding="utf-8")
+    assert "<ChannelComposer" in channels
+    assert "onKeyDown" in composer and "event.key === \"Enter\" && !event.shiftKey" in composer
     assert "references: mentions.length ? { mentions } : {}" in channels
-    assert "mention-menu" in channels and "查看主体信息" in channels
+    assert "mention-menu" in composer and "查看主体信息" in channels
 
 
 def test_native_management_agents_have_readable_principal_display_names():

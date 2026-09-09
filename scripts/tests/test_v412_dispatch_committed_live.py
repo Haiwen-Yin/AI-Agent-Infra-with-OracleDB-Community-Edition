@@ -22,7 +22,7 @@ def reference():
     from lib.config import get_config
     cfg = get_config().database
     target = str(getattr(cfg, "dbname", "") or getattr(cfg, "dsn", "")).lower()
-    assert "cxv412" in target, "refusing non-isolated target"
+    assert target.rsplit("/", 1)[-1] in {"cxv412com", "cxv412ent", "cxv413com", "cxv413ent"}, "refusing non-isolated target"
     agents = connection.execute_query("SELECT AGENT_ID FROM AGENT_REGISTRY WHERE AGENT_ID LIKE :prefix ORDER BY AGENT_ID",
                                       {"prefix": "AGENT_V410_FULL%"})
     assert len(agents) >= 2, "run external enrollment tests first"

@@ -1,4 +1,4 @@
-# Security - AI Agent Infra with DB v4.4.12
+# Security - AI Agent Infra with DB v4.4.13
 
 ## v4.4.10 Model Usage Boundary
 
