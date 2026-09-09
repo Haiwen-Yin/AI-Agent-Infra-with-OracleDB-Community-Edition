@@ -23,6 +23,14 @@ class AgentPoolError(ValueError):
 _DISCOVERY_WINDOW: Dict[str, list[float]] = {}
 _DISCOVERY_LOCK = threading.Lock()
 _AGENT_INFO_DIRNAME = "AI-Agent-Infra-with-DB"
+COMPLIANCE_COMMANDS = frozenset({"AGENT_DIAGNOSIS_READ", "COMPLIANCE_FINDINGS_READ"})
+
+
+def _command_edition_available(key: str) -> bool:
+    if key not in COMPLIANCE_COMMANDS:
+        return True
+    from . import compliance_api
+    return compliance_api._enterprise_enabled()
 
 COMMAND_SEEDS = (
     ("HELP", "READ", "DIRECT_READ", "/platform HELP [COMMAND_KEY]",
@@ -36,6 +44,22 @@ COMMAND_SEEDS = (
     ("AGENT_STATUS_READ", "READ", "DIRECT_READ", "/platform AGENT_STATUS_READ [reason]",
      {"name_zh": "智能体状态读取", "summary_zh": "读取原生智能体活动状态计数。",
       "name_en": "Agent status read", "summary_en": "Read native Agent activity counts."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("AGENT_DIAGNOSIS_READ", "READ", "DIRECT_READ", "/platform AGENT_DIAGNOSIS_READ <agent_id> [reason]",
+     {"name_zh": "Agent 合规诊断", "summary_zh": "读取权限范围内指定 Agent 的注册、运行、控制与证据状态。",
+      "name_en": "Agent compliance diagnosis", "summary_en": "Read an authorized Agent's registration, runtime, control and evidence states."},
+     {"type": "object", "required": ["agent_id"], "properties": {"agent_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("COMPLIANCE_FINDINGS_READ", "READ", "DIRECT_READ", "/platform COMPLIANCE_FINDINGS_READ <agent_id> [reason]",
+     {"name_zh": "Agent 合规发现", "summary_zh": "读取指定 Agent 最近 20 条可见合规发现的状态摘要。",
+      "name_en": "Agent compliance findings", "summary_en": "Read up to 20 authorized compliance finding summaries for an Agent."},
+     {"type": "object", "required": ["agent_id"], "properties": {"agent_id": {"type": "string", "minLength": 1, "maxLength": 128}}}),
+    ("APPROVAL_STATUS_READ", "READ", "DIRECT_READ", "/platform APPROVAL_STATUS_READ [reason]",
+     {"name_zh": "管理频道审批状态", "summary_zh": "读取管理频道最近 20 张可见操作卡的审批状态，不返回操作载荷。",
+      "name_en": "Management approval status", "summary_en": "Read approval states of up to 20 visible management Action Cards without their payloads."},
+     {"type": "object", "required": [], "properties": {}}),
+    ("CAPABILITY_CATALOG_READ", "READ", "DIRECT_READ", "/platform CAPABILITY_CATALOG_READ [reason]",
+     {"name_zh": "管理能力目录", "summary_zh": "读取当前命令参数、执行器状态与审批要求。",
+      "name_en": "Management capability catalog", "summary_en": "Read command parameters, executor states and approval boundaries."},
      {"type": "object", "required": [], "properties": {}}),
     ("POOL_STATUS_READ", "READ", "DIRECT_READ", "/platform POOL_STATUS_READ [reason]",
      {"name_zh": "节点池状态读取", "summary_zh": "读取受管节点与验证状态计数。",
@@ -86,6 +110,8 @@ def ensure_platform_command_registry() -> Dict[str, Any]:
     def work(tx: Any) -> Dict[str, Any]:
         nonlocal seeded
         for key, risk, execution_mode, example, metadata, schema in COMMAND_SEEDS:
+            if not _command_edition_available(key):
+                continue
             existing = _row(tx.query_one(
                 "SELECT COMMAND_ID FROM CX_PLATFORM_COMMANDS WHERE COMMAND_KEY=:key AND VERSION=1 FOR UPDATE",
                 {"key": key},
@@ -140,6 +166,8 @@ def list_command_catalog(actor: str, channel_id: str = "CH_PLATFORM_ADMINISTRATI
     items = []
     for row in rows:
         key = str(row.get("command_key") or "")
+        if not _command_edition_available(key):
+            continue
         if term and term != "PLATFORM" and not key.startswith(term):
             continue
         metadata = _parse(row.get("localized_metadata"), {})
@@ -485,6 +513,8 @@ def _execute_safe_maintenance(task: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _command_contract(command_type: str) -> Dict[str, Any]:
+    if not _command_edition_available(str(command_type or "").upper()):
+        raise AgentPoolError("COMMAND_EDITION_UNAVAILABLE")
     row = _row(connection.execute_query_one(
         "SELECT c.COMMAND_ID,c.COMMAND_KEY,c.VERSION,c.STATUS,c.RISK_LEVEL,c.EXECUTION_MODE,c.PARAMETER_SCHEMA,"
         "c.EXPIRY_SECONDS,e.STATE AS EXECUTOR_STATE FROM CX_PLATFORM_COMMANDS c "
@@ -673,6 +703,7 @@ def create_command(actor: str, command_type: str, target: Dict[str, Any], parame
             raise AgentPoolError("COMMAND_REASON_REQUIRED")
         _validate_command_parameters(contract, target, parameters)
     mode = str(contract.get("execution_mode") or "").upper()
+    inspection = _inspect_command(contract, target, parameters)
     if mode in {"UNAVAILABLE", "PROPOSAL_ONLY"} and str(contract.get("risk_level")) not in {"PROPOSED_CHANGE", "SAFE_MAINTENANCE", "HIGH_RISK_CHANGE", "EMERGENCY_CONTAINMENT"}:
         raise AgentPoolError("COMMAND_EXECUTOR_UNAVAILABLE")
     state = "COMPLETED" if mode == "DIRECT_READ" else "PENDING_APPROVAL"
@@ -695,8 +726,23 @@ def create_command(actor: str, command_type: str, target: Dict[str, Any], parame
             actor, "CH_PLATFORM_ADMINISTRATION", "PLATFORM_ADMIN_COMMAND",
             {"command_id": command_id, "command_type": kind, "target": target, "parameters": parameters,
              "security_domain_id": security_domain_id or "DEFAULT", "requested_by": actor,
+             "inspection": inspection,
              "contract_digest": _digest(_json(contract)), "contract_version": int(contract.get("version") or 1)}, reason, "ADMIN_COMMAND:" + command_id)
     return {"command_id": command_id, "command_type": kind, "status": state, "expires_at": expires.isoformat(), "result": result, "action_card": action}
+
+
+def _inspect_command(contract: Dict[str, Any], target: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """Bind a structured action to its closed contract and immutable scan rules."""
+    from . import content_security
+    _validate_command_parameters(contract, target, parameters)
+    mode = str(contract.get("execution_mode") or "").upper()
+    if mode not in {"DIRECT_READ", "PROPOSAL_ONLY", "GOVERNED_EXECUTOR"}:
+        raise AgentPoolError("COMMAND_EXECUTOR_UNAVAILABLE")
+    result = content_security.enforce(_json({"command_key": contract.get("command_key"),
+        "target": target, "parameters": parameters}), "TOOL_RESULT")
+    return {"ruleset_digest": result["ruleset_digest"], "content_digest": result["content_digest"],
+            "decision": "REQUIRE_APPROVAL" if mode != "DIRECT_READ" else result["decision"],
+            "findings": result["findings"]}
 
 
 def execute_approved_command(actor: str, command_id: str, action_id: str) -> Dict[str, Any]:
@@ -726,6 +772,9 @@ def execute_approved_command(actor: str, command_id: str, action_id: str) -> Dic
         if payload.get("contract_digest") != _digest(_json(contract)):
             raise AgentPoolError("the platform command contract changed after approval")
         _validate_command_parameters(contract, payload["target"], payload["parameters"])
+        inspection = _inspect_command(contract, payload["target"], payload["parameters"])
+        if payload.get("inspection") != inspection:
+            raise AgentPoolError("the platform action inspection changed after approval")
         if command_status in {"COMPLETED", "PROPOSAL_CONFIRMED"}:
             return {"command_id": command_id, "status": command_status, "idempotent": True}
         if not command or command_status != "PENDING_APPROVAL":
@@ -782,18 +831,42 @@ def list_commands(actor: str, limit: int = 50) -> list[Dict[str, Any]]:
     suffix = " LIMIT :limit" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"} else " FETCH FIRST :limit ROWS ONLY"
     return _rows(connection.execute_query("SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,SECURITY_DOMAIN_ID,REQUESTED_BY,REASON,STATUS,EXPIRES_AT,CREATED_AT,UPDATED_AT FROM CX_PLATFORM_ADMIN_COMMANDS ORDER BY CREATED_AT DESC" + suffix, {"limit": max(1, min(int(limit), 200))}))
 
+def expire_commands(actor: str, limit: int = 100) -> Dict[str, Any]:
+    """Atomically close expired proposals; never expires confirmed commands."""
+    _require_admin(actor)
+    def work(tx: Any) -> Dict[str, Any]:
+        rows = tx.query("SELECT COMMAND_ID FROM CX_PLATFORM_ADMIN_COMMANDS WHERE STATUS IN ('PENDING_APPROVAL','REQUESTED') AND EXPIRES_AT<=CURRENT_TIMESTAMP FETCH FIRST :limit ROWS ONLY", {"limit": max(1, min(int(limit), 500))})
+        expired = []
+        for row in rows:
+            command_id = str(next(iter(row.values())))
+            changed = tx.execute("UPDATE CX_PLATFORM_ADMIN_COMMANDS SET STATUS='EXPIRED',UPDATED_AT=CURRENT_TIMESTAMP WHERE COMMAND_ID=:id AND STATUS IN ('PENDING_APPROVAL','REQUESTED') AND EXPIRES_AT<=CURRENT_TIMESTAMP", {"id": command_id})
+            if changed:
+                identity_api._audit_tx(tx, actor, "PLATFORM_ADMIN_COMMAND_EXPIRED", "ADMIN_COMMAND", command_id, "ALLOW", "expired proposal reclaimed")
+                expired.append(command_id)
+        return {"status": "COMPLETED", "expired": expired, "count": len(expired)}
+    return connection.execute_transaction_callback(work)
+
 
 def execute_read_command(actor: str, command_id: str) -> Dict[str, Any]:
     """Execute a closed, read-only command and return credential-free data."""
     _require_admin(actor)
     command = _row(connection.execute_query_one(
-        "SELECT COMMAND_ID,COMMAND_TYPE,STATUS,EXPIRES_AT FROM CX_PLATFORM_ADMIN_COMMANDS WHERE COMMAND_ID=:id",
+        "SELECT COMMAND_ID,COMMAND_TYPE,TARGET_JSON,PARAMETERS_JSON,STATUS,EXPIRES_AT FROM CX_PLATFORM_ADMIN_COMMANDS WHERE COMMAND_ID=:id",
         {"id": command_id}))
     if not command or str(command.get("status") or "").upper() != "COMPLETED":
         raise AgentPoolError("read command is unavailable")
     kind = str(command.get("command_type") or "").upper()
+    if not _command_edition_available(kind):
+        raise AgentPoolError("COMMAND_EDITION_UNAVAILABLE")
     if not kind.endswith("_READ"):
         raise AgentPoolError("only read commands can be executed directly")
+    target = _parse(command.get("target_json"), {})
+    parameters = _parse(command.get("parameters_json"), {})
+    if kind in {"AGENT_DIAGNOSIS_READ", "COMPLIANCE_FINDINGS_READ", "APPROVAL_STATUS_READ", "CAPABILITY_CATALOG_READ"}:
+        contract = _command_contract(kind)
+        if contract.get("execution_mode") != "DIRECT_READ" or contract.get("executor_state") != "ENABLED":
+            raise AgentPoolError("COMMAND_EXECUTOR_UNAVAILABLE")
+        _validate_command_parameters(contract, target, parameters)
     if kind == "HEALTH_READ":
         # Keep the health read credential-free, but useful enough to diagnose
         # the control plane without opening separate dashboard pages.
@@ -825,6 +898,24 @@ def execute_read_command(actor: str, command_id: str) -> Dict[str, Any]:
             "database_dialect": str(getattr(connection, "DATABASE_DIALECT", "unknown")),
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+    elif kind == "AGENT_DIAGNOSIS_READ":
+        from . import compliance_api
+        detail = compliance_api.posture_detail(actor, target["agent_id"])
+        result = {key: detail.get(key) for key in (
+            "agent_id", "registration_state", "runtime_state", "posture_state", "control_state",
+            "evidence_strength", "profile_version_id", "version")}
+    elif kind == "COMPLIANCE_FINDINGS_READ":
+        from . import compliance_api
+        findings = compliance_api.list_findings(actor, target["agent_id"], limit=20)
+        result = {"agent_id": target["agent_id"], "items": [{key: item.get(key) for key in (
+            "finding_id", "rule_code", "severity", "status", "first_observed_at", "last_observed_at")}
+            for item in findings]}
+    elif kind == "APPROVAL_STATUS_READ":
+        cards = identity_api.list_action_cards(actor, "CH_PLATFORM_ADMINISTRATION", limit=20)
+        result = {"items": [{key: item.get(key) for key in (
+            "action_id", "action_type", "status", "created_at", "updated_at")} for item in cards]}
+    elif kind == "CAPABILITY_CATALOG_READ":
+        result = list_command_catalog(actor)
     elif kind == "AGENT_STATUS_READ":
         result = {"active": _count("CX_NATIVE_AGENTS", "STATUS='ACTIVE'"), "inactive": _count("CX_NATIVE_AGENTS", "STATUS<>'ACTIVE'")}
     elif kind == "POOL_STATUS_READ":

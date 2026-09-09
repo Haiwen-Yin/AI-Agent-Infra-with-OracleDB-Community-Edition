@@ -96,6 +96,8 @@ def test_portal_agent_lifecycle_is_isolated_by_node():
     assert "MEMORY_SERVER_NODE_ID" in content
     assert "PORTAL_NODE_ID = :v_node_id" in content
     assert "agent_api.assign_random_pool_agent(str(user_id), node_id, attempted)" in content
+    assert "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = a.AGENT_ID" in content
+    assert "identity_api.effective_access(agent_id, 'knowledge.read')" in content
     assert "agent_api.hibernate_agent(agent_id, _portal_node_id())" in content
     assert "agent_api.reclaim_portal_agents(_portal_node_id())" in content
     assert "'user_id': str(user_id)" in content
@@ -103,6 +105,19 @@ def test_portal_agent_lifecycle_is_isolated_by_node():
     assert "ws_id = str(data.get('workspace_id') or '').strip()" in content
     assert "'workspace_id': str(r['workspace_id'])" in content
     assert "AGENT_ID LIKE 'AGENT_POOL_%'" not in content
+
+
+def test_portal_pool_assignment_requires_active_agent_principal():
+    root = Path(__file__).resolve().parents[2]
+    sources = ([root / "scripts" / "lib" / "agent_api.py"] if (root / "build-manifest.json").is_file()
+               else [root / "adapters" / adapter / "agent_api.py" for adapter in ("oracle", "pg", "yashandb")])
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
+        assignment = source.split("def assign_random_pool_agent", 1)[1].split("def ", 1)[0]
+        normalized = assignment.upper()
+        assert "JOIN " in normalized and "PRINCIPALS P ON P.PRINCIPAL_ID = A.AGENT_ID" in normalized
+        assert "P.PRINCIPAL_TYPE = 'AGENT'" in normalized
+        assert "P.STATUS = 'ACTIVE'" in normalized
 
 
 def test_portal_pool_config_can_be_serialized_after_database_round_trip():

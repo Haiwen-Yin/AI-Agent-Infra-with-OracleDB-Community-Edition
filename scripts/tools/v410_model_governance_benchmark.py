@@ -23,15 +23,15 @@ def percentile(values: list[float], percentage: float) -> float:
     return round(ordered[position], 3)
 
 
-def session(url: str) -> httpx.Client:
+def session(url: str, password: str = "admin") -> httpx.Client:
     client = httpx.Client(base_url=url.rstrip("/"), timeout=30)
-    response = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+    response = client.post("/api/login", json={"username": "admin", "password": password})
     response.raise_for_status()
     return client
 
 
-def run_service(name: str, url: str, workers: int, requests_per_worker: int) -> dict[str, Any]:
-    sample = session(url)
+def run_service(name: str, url: str, workers: int, requests_per_worker: int, password: str = "admin") -> dict[str, Any]:
+    sample = session(url, password)
     wallboard = sample.get("/api/wallboard")
     wallboard.raise_for_status()
     usage = sample.get("/api/model-usage/summary")
@@ -41,7 +41,7 @@ def run_service(name: str, url: str, workers: int, requests_per_worker: int) -> 
     sample.close()
 
     def worker(_index: int) -> tuple[list[float], list[int], list[int]]:
-        client = session(url)
+        client = session(url, password)
         latencies: list[float] = []
         statuses: list[int] = []
         sizes: list[int] = []
@@ -101,16 +101,23 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--requests-per-worker", type=int, default=10)
     parser.add_argument("--flow-evidence", type=Path)
+    parser.add_argument("--password-file", action="append", default=[])
     parser.add_argument("--output", type=Path, default=Path("/tmp/v410-model-governance-benchmark.json"))
+    parser.add_argument("--version", default="4.4.13")
+    parser.add_argument("--transport-only", action="store_true")
     args = parser.parse_args()
     services = args.service or ["oracle=http://127.0.0.1:18100", "pg=http://127.0.0.1:18101", "yashandb=http://127.0.0.1:18102"]
-    results = [run_service(*item.split("=", 1), max(1, min(args.workers, 32)), max(1, min(args.requests_per_worker, 100))) for item in services]
+    passwords = {Path(item.split("=", 1)[0]).name: Path(item.split("=", 1)[1]).read_text().strip() for item in args.password_file}
+    results = [run_service(name, url, max(1, min(args.workers, 32)), max(1, min(args.requests_per_worker, 100)), passwords.get(name, "admin")) for name, url in (item.split("=", 1) for item in services)]
     flow_metrics: dict[str, Any] = {}
     if args.flow_evidence and args.flow_evidence.is_file():
         source = json.loads(args.flow_evidence.read_text(encoding="utf-8"))
         flow_metrics = {str(item.get("service")): item.get("metrics", {}) for item in source.get("results", []) if item.get("service")}
+    if args.transport_only:
+        for item in results:
+            item["passed"] = item["error_count"] == 0 and item["requests"] > 0
     payload = {
-        "schema": "chuanxu-v410-model-governance-benchmark/v1", "version": "4.4.10",
+        "schema": "chuanxu-v410-model-governance-benchmark/v1", "version": args.version,
         "generated_at": datetime.now(timezone.utc).isoformat(), "results": results,
         "gateway_flow_metrics": flow_metrics, "passed": all(item["passed"] for item in results),
     }

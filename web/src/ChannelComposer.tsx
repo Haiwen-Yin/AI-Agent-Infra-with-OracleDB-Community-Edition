@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AtSign, Slash, Send } from "lucide-react";
 import { commandQuery, hasCommandPlaceholders, mentionQuery, rebaseMentions, selectedMentionIds } from "./channelCompletion";
 import type { Mention } from "./channelCompletion";
@@ -31,6 +31,9 @@ export default function ChannelComposer(props: Props) {
     `${item.command_key} ${item.metadata?.name_zh || ""} ${item.metadata?.name_en || ""} ${item.metadata?.summary_zh || ""}`.toLowerCase().includes(query)).slice(0, 10) : [];
   const items = dismissed ? [] : mention ? mentionItems : commandItems;
   const index = Math.min(active, Math.max(items.length - 1, 0));
+  useEffect(() => {
+    document.getElementById(`channel-completion-${index}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [index, body, dismissed]);
   const update = (next: string, position: number, nextMentions = rebaseMentions(body, next, mentions)) => {
     setBindings({ body: next, mentions: nextMentions });
     setBody(next); setCaret(position); setActive(0); setDismissed(false); setError("");
@@ -68,7 +71,7 @@ export default function ChannelComposer(props: Props) {
     <div className="channel-composer-input">
       {items.length > 0 && <div id="channel-completions" className="mention-menu channel-completions" role="listbox" aria-label={mention ? text("频道成员", "Channel members") : text("平台命令", "Platform commands")}>
         {items.map((item, i) => <button id={`channel-completion-${i}`} key={String(mention ? item.principal_id : item.command_key)} type="button" role="option" aria-selected={i === index} onMouseDown={(event) => event.preventDefault()} onClick={() => pick(item)}>
-          <span><b>{mention ? item.display_name || item.principal_id : item.command_key}</b><small>{mention ? item.principal_id : item.metadata?.[props.lang === "zh" ? "name_zh" : "name_en"]}</small></span>
+          <span><b>{mention ? item.display_name || item.principal_id : `/platform ${item.command_key}`}</b><small>{mention ? item.principal_id : item.metadata?.[props.lang === "zh" ? "name_zh" : "name_en"]}</small></span>
           <small>{mention ? item.principal_type : `${item.risk_level} · ${item.execution_mode}`}</small>
         </button>)}
       </div>}

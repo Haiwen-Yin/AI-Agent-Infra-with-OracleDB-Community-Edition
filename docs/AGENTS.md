@@ -14,13 +14,14 @@
 Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
 deployment contract, not the historical source template filename. The build
 must align its version, adapter and terminal migration with the package:
-v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 79.
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81.
 Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
 Historical scripts remain for
 journal/checksum reproducibility, not as a customer upgrade promise.
 v4.4.8 is withdrawn. v4.4.12 includes entity isolation, organization knowledge
 policies and native credential write restrictions through migration 78.
-v4.4.13 adds Portal knowledge policy controls through migration 79.
+v4.4.13 adds Portal knowledge policy controls in migration 79, built-in product
+knowledge in migration 80, and idempotent bilingual completion in migration 81.
 Release acceptance is determined by the current package-bound evidence;
 the migration terminal alone does not establish production readiness.
 

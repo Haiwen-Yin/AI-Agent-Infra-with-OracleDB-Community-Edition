@@ -375,6 +375,7 @@ def search_knowledge(
     limit: int = 100,
     offset: int = 0,
     principal_id: Optional[str] = None,
+    connected_first: bool = False,
 ) -> List[Dict[str, Any]]:
     conditions = ["e.ENTITY_TYPE = 'KNOWLEDGE'"]
     params: Dict[str, Any] = {"lim": limit, "off": offset}
@@ -402,7 +403,8 @@ def search_knowledge(
     # REST, MCP, and unified search pass the authenticated principal.  Keep
     # the legacy library call usable for migration tests, but never invent a
     # principal or apply a broken visibility predicate when none is supplied.
-    if principal_id and identity_api.effective_access(principal_id, "agents.read.all").get("decision") != "ALLOW":
+    full_inventory = bool(principal_id and identity_api.effective_access(principal_id, "agents.read.all").get("decision") == "ALLOW")
+    if principal_id and not full_inventory:
         legacy_scope = identity_api._agent_visibility_clause(principal_id)
         if ":principal_id" not in legacy_scope:
             conditions.append("1=1 /* SCOPE_CLAUSE: privileged constant scope */")
@@ -411,6 +413,17 @@ def search_knowledge(
             params["principal_id"] = principal_id
 
     where = " AND ".join(conditions)
+    order = "e.CREATED_AT DESC, e.ENTITY_ID"
+    if connected_first and principal_id:
+        # Rank by visible neighbours only; hidden relationships must not alter
+        # the graph window or leak through ordering.
+        if not full_inventory:
+            params["principal_id"] = principal_id
+        neighbour_access = "1=1" if full_inventory else knowledge_access_predicate("neighbour", ":principal_id")
+        order = ("CASE WHEN EXISTS (SELECT 1 FROM ENTITY_EDGES link JOIN ENTITIES neighbour "
+                 "ON ((link.SOURCE_ID=e.ENTITY_ID AND neighbour.ENTITY_ID=link.TARGET_ID) "
+                 "OR (link.TARGET_ID=e.ENTITY_ID AND neighbour.ENTITY_ID=link.SOURCE_ID)) "
+                 "WHERE neighbour.ENTITY_TYPE='KNOWLEDGE' AND " + neighbour_access + ") THEN 0 ELSE 1 END, " + order)
     sql = f"""
         SELECT e.ENTITY_ID, e.ENTITY_TYPE, e.TITLE, e.CONTENT, e.SUMMARY, e.CATEGORY,
                e.IMPORTANCE, e.STATUS, e.OWNED_BY_AGENT, e.SOURCE_AGENT, e.VISIBILITY,
@@ -424,7 +437,7 @@ def search_knowledge(
         JOIN KNOWLEDGE_META km ON km.ENTITY_ID = e.ENTITY_ID
                                AND km.ENTITY_TYPE = 'KNOWLEDGE'
         WHERE {where}
-        ORDER BY e.CREATED_AT DESC
+        ORDER BY {order}
         OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY
     """
     return [_row_to_dict(r) for r in execute_query(sql, params)]

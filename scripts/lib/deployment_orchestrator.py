@@ -1134,6 +1134,9 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         _record_step(journal.run_id, "migration-" + str(result["script"]), index, str(result["checksum"]), "COMPLETED", result)
     admin = _adopt_bootstrap_admin()
     _record_evidence(journal.run_id, "INITIAL_ADMIN", admin)
+    from . import graph_definition_api
+    graph_definition_api.ensure_builtin_types()
+    _record_evidence(journal.run_id, "BUILTIN_GRAPH_TYPES", {"count": len(graph_definition_api.list_types())})
     from . import native_agent_api
     native = native_agent_api.bootstrap_native_agents()
     knowledge_state = {

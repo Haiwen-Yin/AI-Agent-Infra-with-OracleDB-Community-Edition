@@ -35,13 +35,13 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
-    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
 VERSION = "4.4.13"
@@ -1010,6 +1010,7 @@ class ComplianceAssignmentBody(BaseModel):
     profile_version_id: str = Field(min_length=1, max_length=128)
     environment: str = Field(default="production", min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=2000)
+    approval_action_id: str = Field(default="", max_length=128)
 
 
 class ComplianceProfileEditBody(BaseModel):
@@ -1018,11 +1019,53 @@ class ComplianceProfileEditBody(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class ComplianceProfileValidateBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    content: Dict[str, Any]
+    expected_digest: str = Field(pattern="^[0-9a-f]{64}$")
+
+
+class ComplianceProfileCloneBody(ComplianceProfileValidateBody):
+    profile_key: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class CompliancePublicationRequestBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    expected_digest: str = Field(pattern="^[0-9a-f]{64}$")
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class CompliancePublicationBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    approval_action_id: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class PortalKnowledgePolicyBody(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
     mode: str = Field(pattern="^(KNOWLEDGE_FIRST|KNOWLEDGE_ONLY)$")
     allow_model_supplement: bool = False
     disclosure_profiles: List[str] = Field(default_factory=list, max_length=50)
     expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class BuiltinKnowledgePublishBody(BaseModel):
+    model_config = {"extra": "forbid"}
+    key: str = Field(min_length=1, max_length=128)
+    content: Dict[str, Any]
+    audience: str = Field(pattern="^(MANAGEMENT_AGENTS|COMPLIANCE_ADMIN|PUBLIC)$")
+    scope_type: str = Field(pattern="^(PLATFORM_GLOBAL|COMPLIANCE_AGENT|PUBLIC)$")
+    version: int = Field(ge=1)
+    dialect: str = Field(default="", max_length=32)
+    edition: str = Field(default="", max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class BuiltinKnowledgeWithdrawBody(BaseModel):
+    model_config = {"extra": "forbid"}
     reason: str = Field(min_length=3, max_length=2000)
 
 
@@ -1172,6 +1215,14 @@ class ComplianceRemediationBody(BaseModel):
     required_action: str = Field(min_length=1, max_length=128)
     reason: str = Field(min_length=1, max_length=2000)
     deadline_at: str = Field(default="", max_length=64)
+
+
+class ComplianceFindingReviewBody(BaseModel):
+    decision: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=3, max_length=2000)
+    evidence_ref: str = Field(default="", max_length=2000)
+    expected_status: str = Field(min_length=1, max_length=32)
+    expected_observed_at: str = Field(min_length=1, max_length=64)
 
 
 class ComplianceExceptionBody(BaseModel):
@@ -1327,6 +1378,22 @@ class BarrierRecoveryBody(BaseModel):
 class DecisionBody(BaseModel):
     decision: str = Field(default="RELEASE", max_length=32)
     reason: str = Field(min_length=1, max_length=2000)
+
+
+class ToolOpenAPIImportBody(BaseModel):
+    spec: Dict[str, Any]
+    namespace: str = Field(default="default", min_length=1, max_length=64)
+
+
+class ToolOpenAPIUrlBody(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    namespace: str = Field(default="default", min_length=1, max_length=64)
+    auth_header: str = Field(default="", max_length=2000)
+
+
+class ToolUpdateBody(BaseModel):
+    description: str = Field(default="", max_length=2000)
+    status: str = Field(default="ACTIVE", min_length=1, max_length=16)
 
 
 class RegistrationApprovalBody(DecisionBody):
@@ -1837,6 +1904,7 @@ class ContainmentCommandBody(BaseModel):
     requested_state: str = Field(min_length=1, max_length=32)
     reason: str = Field(min_length=3, max_length=2000)
     expires_seconds: int = Field(default=300, ge=60, le=3600)
+    approval_action_id: str = Field(default="", max_length=128)
 
 
 class ContainmentAcknowledgementBody(BaseModel):
@@ -2728,7 +2796,14 @@ def platform_containment(
     session: Dict[str, Any] = Depends(require_action("platform.manage")),
 ) -> Dict[str, Any]:
     try:
-        return admin_management.issue_containment(str(session["principal_id"]), body.agent_id, body.instance_id, body.requested_state, body.reason, body.expires_seconds)
+        state = str(body.requested_state or "").upper()
+        if state in {"QUARANTINE", "TERMINATE", "INFRA_TERMINATE"} and not body.approval_action_id:
+            action = admin_management.request_containment(str(session["principal_id"]), body.agent_id,
+                body.instance_id, state, body.reason, body.expires_seconds)
+            return {"status": "PENDING_APPROVAL", "action_card": action}
+        return admin_management.issue_containment(str(session["principal_id"]), body.agent_id,
+            body.instance_id, state, body.reason, body.expires_seconds,
+            approval_action_id=body.approval_action_id)
     except (admin_management.ManagementError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -3137,6 +3212,7 @@ def knowledge_graph(
             domain=domain or None, topic=topic or None, keyword=keyword or None,
             difficulty=difficulty or None, workspace_id=workspace_id or None,
             isolation_mode=isolation_mode or None, limit=amount, principal_id=actor,
+            connected_first=True,
         )
         by_id = {str(item.get("entity_id")): item for item in items if item.get("entity_id")}
         nodes = [{
@@ -3206,6 +3282,56 @@ def memory_inventory(
         raise HTTPException(status_code=422, detail="Memory cursor is invalid") from exc
     except Exception as exc:
         raise _identity_http_error(exc, "Memory inventory is unavailable") from exc
+
+
+@app.get("/api/tools")
+def tool_inventory(limit: int = 100, namespace: str = "", type: str = "", session: Dict[str, Any] = Depends(require_action("tools.read"))) -> Dict[str, Any]:
+    try:
+        return {"items": tool_registry.list_tools(namespace or None, type or None)[:max(1, min(int(limit), 500))]}
+    except Exception as exc:
+        raise _identity_http_error(exc, "Tool inventory is unavailable") from exc
+
+
+@app.post("/api/tools/import-openapi")
+def tool_import_openapi(body: ToolOpenAPIImportBody, session: Dict[str, Any] = Depends(require_action("tools.write"))) -> Dict[str, Any]:
+    try:
+        ids = tool_registry.import_openapi(body.spec, body.namespace)
+        return {"imported": ids, "count": len(ids)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "OpenAPI import was denied") from exc
+
+
+@app.post("/api/tools/import-url")
+def tool_import_url(body: ToolOpenAPIUrlBody, session: Dict[str, Any] = Depends(require_action("tools.write"))) -> Dict[str, Any]:
+    try:
+        ids = tool_registry.import_from_url(body.url, body.namespace, body.auth_header or None)
+        return {"imported": ids, "count": len(ids)}
+    except Exception as exc:
+        raise _identity_http_error(exc, "OpenAPI URL import was denied") from exc
+
+
+@app.patch("/api/tools/{tool_id}")
+def tool_update(tool_id: str, body: ToolUpdateBody, session: Dict[str, Any] = Depends(require_action("tools.write"))) -> Dict[str, Any]:
+    try:
+        if not tool_registry.update_tool(tool_id, description=body.description, status=body.status):
+            raise HTTPException(status_code=404, detail="Tool not found")
+        return {"tool": tool_registry.get_tool(tool_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _identity_http_error(exc, "Tool update was denied") from exc
+
+
+@app.delete("/api/tools/{tool_id}")
+def tool_retire(tool_id: str, session: Dict[str, Any] = Depends(require_action("tools.write"))) -> Dict[str, bool]:
+    try:
+        if not tool_registry.delete_tool(tool_id):
+            raise HTTPException(status_code=404, detail="Tool not found")
+        return {"retired": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _identity_http_error(exc, "Tool retirement was denied") from exc
 
 
 @app.get("/api/skills")
@@ -3638,6 +3764,13 @@ def portal_llm_policy_update(body: PortalLLMPolicyBody, session: Dict[str, Any] 
 def platform_admin_commands(limit: int = 50, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
     try:
         return {"items": platform_agent_pool.list_commands(str(session["principal_id"]), limit)}
+    except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/platform/admin-commands/expire")
+def platform_admin_commands_expire(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    try:
+        return platform_agent_pool.expire_commands(str(session["principal_id"]))
     except (platform_agent_pool.AgentPoolError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -5164,6 +5297,16 @@ def compliance_findings(agent_id: str = "", limit: int = 100, page_size: int = 0
         raise _identity_http_error(exc, "Compliance findings are unavailable", identity_status=403) from exc
 
 
+@app.post("/api/compliance/findings/{finding_id}/review")
+def compliance_finding_review(finding_id: str, body: ComplianceFindingReviewBody,
+                              session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.review_finding(str(session["principal_id"]), finding_id, body.decision,
+            body.reason, body.evidence_ref, body.expected_status, body.expected_observed_at)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance finding review was denied") from exc
+
+
 @app.get("/api/compliance/remediations")
 def compliance_remediations(limit: int = 100, page_size: int = 0, cursor: str = "", session: Dict[str, Any] = Depends(require_action("agents.read"))) -> Dict[str, Any]:
     try:
@@ -5250,20 +5393,63 @@ def compliance_profile_edit(profile_version_id: str, body: ComplianceProfileEdit
         raise _identity_http_error(exc, "Compliance Profile editing was denied") from exc
 
 
-@app.post("/api/compliance/profiles/{profile_version_id}/publish")
-def compliance_profile_publish(profile_version_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+@app.post("/api/compliance/profiles/{profile_version_id}/validate")
+def compliance_profile_validate(profile_version_id: str, body: ComplianceProfileValidateBody,
+                                session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
     try:
-        return compliance_api.publish_profile(str(session["principal_id"]), profile_version_id, body.reason)
+        return compliance_api.validate_profile_draft(str(session["principal_id"]), profile_version_id,
+                                                       body.content, body.expected_digest)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile validation was denied") from exc
+
+
+@app.post("/api/compliance/profiles/{profile_version_id}/clone")
+def compliance_profile_clone(profile_version_id: str, body: ComplianceProfileCloneBody,
+                             session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.create_profile_draft(str(session["principal_id"]), body.profile_key,
+            body.display_name, body.content, body.reason, source_version_id=profile_version_id,
+            expected_source_digest=body.expected_digest)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile cloning was denied") from exc
+
+
+@app.post("/api/compliance/profiles/{profile_version_id}/publish")
+def compliance_profile_publish(profile_version_id: str, body: CompliancePublicationBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.publish_profile(str(session["principal_id"]), profile_version_id, body.reason,
+                                               approval_action_id=body.approval_action_id)
     except Exception as exc:
         raise _identity_http_error(exc, "Compliance Profile publication was denied") from exc
+
+
+@app.post("/api/compliance/profiles/{profile_version_id}/publication-requests")
+def compliance_profile_publication_request(profile_version_id: str, body: CompliancePublicationRequestBody,
+                                           session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.request_profile_publication(str(session["principal_id"]), profile_version_id,
+                                                           body.expected_digest, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance Profile publication request was denied") from exc
 
 
 @app.post("/api/agents/{agent_id}/compliance-profile")
 def compliance_profile_assign(agent_id: str, body: ComplianceAssignmentBody, session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
     try:
-        return compliance_api.assign_profile(str(session["principal_id"]), agent_id, body.profile_version_id, body.environment, body.reason)
+        return compliance_api.assign_profile(str(session["principal_id"]), agent_id, body.profile_version_id, body.environment, body.reason,
+                                              approval_action_id=body.approval_action_id)
     except Exception as exc:
         raise _identity_http_error(exc, "Compliance Profile assignment was denied") from exc
+
+
+@app.post("/api/agents/{agent_id}/compliance-profile-requests")
+def compliance_assignment_request(agent_id: str, body: ComplianceAssignmentBody,
+                                  session: Dict[str, Any] = Depends(require_action("agents.manage"))) -> Dict[str, Any]:
+    try:
+        return compliance_api.request_profile_assignment(str(session["principal_id"]), agent_id,
+            body.profile_version_id, body.environment, body.reason)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Compliance assignment request was denied") from exc
 
 
 @app.post("/api/agents/{agent_id}/compliance-control")
@@ -5825,6 +6011,7 @@ def action_cards(channel_id: str, session: Dict[str, Any] = Depends(require_acti
 def action_decision(action_id: str, body: DecisionBody, session: Dict[str, Any] = Depends(require_action("channels.actions.decide"))) -> Dict[str, Any]:
     try:
         actor = str(session["principal_id"])
+        execution = None
         changed = identity_api.decide_action_card(actor, action_id, body.decision, body.reason)
         if str(body.decision or "").upper() in {"CONFIRM", "APPROVE", "RELEASE"}:
             action = {str(k).lower(): v for k, v in dict(connection.execute_query_one(
@@ -5837,10 +6024,27 @@ def action_decision(action_id: str, body: DecisionBody, session: Dict[str, Any] 
                 payload = json.loads(str(action.get("payload_json") or "{}"))
                 command_id = str(payload.get("command_id") or "")
                 if command_id:
-                    platform_agent_pool.execute_approved_command(actor, command_id, action_id)
+                    execution = platform_agent_pool.execute_approved_command(actor, command_id, action_id)
+            elif action.get("status") == "CONFIRMED" and action.get("action_type") == "PLATFORM_COMPLIANCE_PROFILE_PUBLISH":
+                payload = json.loads(str(action.get("payload_json") or "{}"))
+                execution = compliance_api.publish_profile(actor, str(payload.get("binding", {}).get("profile_version_id") or ""),
+                    body.reason, approval_action_id=action_id)
+            elif action.get("status") == "CONFIRMED" and action.get("action_type") == "PLATFORM_COMPLIANCE_PROFILE_ASSIGN":
+                binding = json.loads(str(action.get("payload_json") or "{}")).get("binding", {})
+                execution = compliance_api.assign_profile(actor, str(binding.get("agent_id") or ""),
+                    str(binding.get("profile_version_id") or ""), str(binding.get("environment") or ""),
+                    body.reason, approval_action_id=action_id)
+            elif action.get("status") == "CONFIRMED" and action.get("action_type") == "PLATFORM_AGENT_CONTAINMENT":
+                binding = json.loads(str(action.get("payload_json") or "{}")).get("binding", {})
+                execution = admin_management.issue_containment(actor, str(binding.get("agent_id") or ""),
+                    str(binding.get("instance_id") or ""), str(binding.get("requested_state") or ""),
+                    str(binding.get("reason") or ""), int(binding.get("expires_seconds") or 300),
+                    approval_action_id=action_id)
     except (identity_api.IdentityError, PermissionError) as exc:
         raise HTTPException(status_code=403, detail="Action decision failed") from exc
-    return {"success": changed, "action_id": action_id}
+    except (admin_management.ManagementError, compliance_api.ComplianceError, platform_agent_pool.AgentPoolError) as exc:
+        raise HTTPException(status_code=409, detail="Approved action could not execute; inspect the current resource and request approval again") from exc
+    return {"success": changed or execution is not None, "action_id": action_id, "execution": execution}
 
 
 @app.post("/api/barriers")
@@ -6496,6 +6700,54 @@ def portal_knowledge_policy(session: Dict[str, Any] = Depends(require_action("pl
         return portal_grounding.policy()
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Knowledge policy is unavailable") from exc
+
+
+@app.get("/api/platform/builtin-knowledge")
+def builtin_knowledge_list(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import builtin_knowledge
+    try:
+        items = builtin_knowledge.list_packages(str(session["principal_id"]))
+        return {"items": items, "count": len(items)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Built-in knowledge inventory unavailable") from exc
+
+
+@app.post("/api/platform/builtin-knowledge")
+def builtin_knowledge_publish(body: BuiltinKnowledgePublishBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import builtin_knowledge
+    try:
+        return builtin_knowledge.publish(str(session["principal_id"]), body.key, body.content,
+            audience=body.audience, scope_type=body.scope_type, version=body.version,
+            reason=body.reason, dialect=body.dialect, edition=body.edition)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Built-in knowledge publication denied") from exc
+    except builtin_knowledge.KnowledgeLifecycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Built-in knowledge publication unavailable") from exc
+
+@app.post("/api/platform/builtin-knowledge/reindex")
+def builtin_knowledge_reindex(session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import builtin_knowledge
+    try:
+        return builtin_knowledge.reindex_packages(str(session["principal_id"]))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Built-in knowledge reindex denied") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Built-in knowledge reindex unavailable") from exc
+
+
+@app.post("/api/platform/builtin-knowledge/{knowledge_id}/withdraw")
+def builtin_knowledge_withdraw(knowledge_id: str, body: BuiltinKnowledgeWithdrawBody, session: Dict[str, Any] = Depends(require_action("platform.manage"))) -> Dict[str, Any]:
+    from lib import builtin_knowledge
+    try:
+        return builtin_knowledge.withdraw(str(session["principal_id"]), knowledge_id, body.reason)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Built-in knowledge withdrawal denied") from exc
+    except builtin_knowledge.KnowledgeLifecycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Built-in knowledge withdrawal unavailable") from exc
 
 
 @app.put("/api/platform/portal-knowledge-policy")

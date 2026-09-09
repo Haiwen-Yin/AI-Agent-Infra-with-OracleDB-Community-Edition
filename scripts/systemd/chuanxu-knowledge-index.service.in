@@ -1,0 +1,21 @@
+[Unit]
+Description=Chuanxu Built-in Knowledge Index Worker
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+UMask=0077
+WorkingDirectory=@APP_ROOT@
+Environment=PYTHONPATH=@APP_ROOT@/scripts
+Environment=CX_CONFIG_PATH=@CONFIG_PATH@
+ExecStart=@PYTHON_BIN@ @APP_ROOT@/scripts/builtin_knowledge_index_worker.py --actor @INDEX_ACTOR@ --limit 50
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=@EVIDENCE_DIR@
+
+[Install]
+WantedBy=multi-user.target

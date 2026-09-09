@@ -1,4 +1,8 @@
 import React, { FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
+import RecordDetails from "./RecordDetails";
+import FindingReview from "./FindingReview";
+import CatalogPicker from "./CatalogPicker";
+import ToolsCatalog from "./ToolsCatalog";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -13,6 +17,7 @@ import {
   GitCompareArrows,
   FileKey2,
   Download,
+  Eye,
   GitBranch,
   History,
   Layers3,
@@ -26,6 +31,7 @@ import {
   Pin,
   PlayCircle,
   Plus,
+  Pencil,
   Redo2,
   RefreshCw,
   Save,
@@ -46,6 +52,7 @@ import {
 import "./app.css";
 import ChannelComposer from "./ChannelComposer";
 import ComplianceProfileDetail from "./ComplianceProfileDetail";
+import PortalKnowledgePolicy from "./PortalKnowledgePolicy";
 
 const GraphRoutePage = lazy(() => import("./pages/GraphPage"));
 
@@ -88,7 +95,7 @@ const nav = [
   ["workspaces", "工作区", "Workspaces", Layers3],
   ["knowledge", "知识", "Knowledge", Database],
   ["memory", "记忆", "Memory", Network],
-  ["skills", "技能", "Skills", FileKey2],
+  ["skills", "技能与工具", "Skills & tools", FileKey2],
   ["specs", "规格", "Specs", FileKey2],
   ["branches", "分支", "Branches", GitBranch],
   ["loops", "循环", "Loops", RefreshCw],
@@ -1254,7 +1261,8 @@ function PageView({
         onNotice={onNotice}
       />
     );
-  if (["skills", "branches", "loops"].includes(page))
+  if (page === "skills") return <SkillsAndTools lang={lang} capabilities={capabilities} text={text} onNotice={onNotice} />;
+  if (["branches", "loops"].includes(page))
     return (
       <>
         <LegacyOperations
@@ -1268,6 +1276,13 @@ function PageView({
       </>
     );
   return <DataPage page={page} lang={lang} text={text} onNotice={onNotice} />;
+}
+
+function SkillsAndTools({ lang, capabilities, text, onNotice }: { lang: Lang; capabilities: Row | null; text: (zh: string, en: string) => string; onNotice: (value: string) => void }) {
+  const [view, setView] = useUrlState("view", ["skills", "tools"] as const, "skills");
+  return <section><ViewToggle value={view} options={[["skills", text("技能", "Skills"), FileKey2], ["tools", text("工具", "Tools"), Layers3]]} onChange={setView} />
+    {view === "tools" ? <ToolsCatalog text={text} /> : <LegacyOperations page="skills" lang={lang} capabilities={capabilities} text={text} onNotice={onNotice} />}
+  </section>;
 }
 
 function PlatformConfigurationPage({
@@ -1636,6 +1651,7 @@ function PlatformPoolGovernancePanel({
   return <div className="agent-pool-page">{policySaved && <div className="cx-form-notice" role="status">{text("Portal Agent Pool LLM 策略已保存并立即生效。", "Portal Agent Pool LLM policy saved and applied immediately.")}</div>}<InfoPanel title={text("Agent Pool 配置", "Agent Pool configuration")} text={text}>
     <p className="cx-form-hint">{text("按照主机方式接入时，必须完成登记、连通性验证、一次性引导回执、Agent Pool 运行时共享目录绑定、Agent 信息根目录绑定和管理员激活。每个 Agent 的本地文件必须位于其独立子目录，不能把目录内容当作授权。MaaS、SaaS、虚拟化等场景通过部署适配器接入；当前页面只提供适配器边界，不虚构通用自动部署。", "For host onboarding, complete registration, reachability validation, one-time bootstrap receipt, bindings for both the Agent Pool shared runtime directory and the Agent information root, and administrator activation. Each Agent's local files must stay in its own subdirectory; directory contents never grant authority. MaaS, SaaS, and virtualization connect through deployment adapters; this page exposes the adapter boundary and does not claim generic automatic deployment.")}</p>
     <form className="pool-config-block pool-llm-policy-form" onSubmit={savePolicy}><strong>{text("Portal Agent Pool LLM 允许列表", "Portal Agent Pool LLM allowlist")}</strong><p className="cx-form-hint">{text("Portal 只能切换到下方允许的 LLM。默认配置必须在允许列表中。", "Portal can switch only to LLMs allowed below. The default must be allowlisted.")}</p><div className="pool-llm-allowlist">{(data.profiles || []).length ? (data.profiles || []).map((item: Row) => <label className="checkbox-field" key={String(item.profile_id)}><input type="checkbox" name={`profile_${item.profile_id}`} defaultChecked={allowed.has(String(item.profile_id))} />{String(item.profile_key)} · {String(item.model_id)} · {String(item.health_state || "UNKNOWN")}</label>) : <p className="cx-form-hint">{text("请先在部署与模型中配置并测试 LLM。", "Configure and test an LLM in Deployment & models first.")}</p>}</div><div className="pool-policy-fields"><ConfigField label={text("默认 LLM", "Default LLM")} hint={text("只能选择已允许的配置。", "Choose an allowlisted profile.")}><select name="default_profile_id" defaultValue={String(data.policy?.policy?.default_profile_id || "")} required><option value="">{text("请选择", "Select")}</option>{(data.profiles || []).map((item: Row) => <option key={String(item.profile_id)} value={String(item.profile_id)}>{String(item.profile_key)}</option>)}</select></ConfigField><ConfigField label={text("变更原因", "Change reason")} hint={text("至少三个字符并写入审计。", "At least three characters and audited.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("保存后立即应用。", "Applied after saving.")} action><button className="small-button" disabled={busy}><Check size={14} />{text("保存策略", "Save policy")}</button></ConfigField></div></form>
+    <PortalKnowledgePolicy request={api<Row>} text={text} />
     <InfoPanel title={text("主机节点登记", "Host node registration")} text={text}><form className="configuration-form compact-configuration-form" onSubmit={(event) => { event.preventDefault(); void post("/api/platform/managed-nodes", event.currentTarget, text("Agent Pool 主机节点已登记，请继续验证可达性。", "Agent Pool host node registered. Validate reachability next.")); }}>
       <ConfigField label={text("节点名称", "Node name")} hint={text("用于节点清单、回执和审计。", "Used for inventory, receipts, and audit.")}><input name="node_key" required /></ConfigField>
       <ConfigField label={text("主机或 IP", "Host or IP")} hint={text("平台用于进行有界 TCP 连通性验证。", "Used by the platform for bounded TCP reachability validation.")}><input name="host_reference" required /></ConfigField>
@@ -2054,8 +2070,10 @@ function PlatformOperationsPage({
     event.preventDefault(); const formElement = event.currentTarget; const data = new FormData(formElement);
     if (String(data.get("confirmation") || "") !== "CONTAIN") { onNotice(text("请输入 CONTAIN 确认此受保护操作。", "Enter CONTAIN to confirm this protected operation.")); return; }
     setBusy(true); try {
-      await api("/api/platform/containment", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id") || ""), instance_id: String(data.get("instance_id") || ""), requested_state: String(data.get("requested_state") || "DRAIN"), reason: String(data.get("reason") || "") }) });
-      formElement.reset(); onNotice(text("平台侧权限已优先隔离；远程终止仍需受认证运行时或基础设施适配器确认。", "Platform authority was isolated first; remote termination still requires a trusted runtime or infrastructure adapter."));
+      const result = await api<Row>("/api/platform/containment", { method: "POST", body: JSON.stringify({ agent_id: String(data.get("agent_id") || ""), instance_id: String(data.get("instance_id") || ""), requested_state: String(data.get("requested_state") || "DRAIN"), reason: String(data.get("reason") || "") }) });
+      formElement.reset(); onNotice(String(result.status || "").toUpperCase() === "PENDING_APPROVAL"
+        ? text("高风险阻断操作卡已创建，尚未执行；需要另一位授权人员确认。", "A high-impact containment Action Card was created but not executed; a separate authorized Human must confirm it.")
+        : text("平台侧控制已应用；进程级终止仍需受认证运行时或基础设施适配器确认。", "Platform control was applied; process-level termination still requires a trusted runtime or infrastructure adapter."));
     } catch (error) { onNotice((error as Error).message); } finally { setBusy(false); }
   };
   const uploadUpgrade = async (event: FormEvent<HTMLFormElement>) => {
@@ -2514,6 +2532,7 @@ function MemoryLifecyclePage({
   };
   const openChain = async (item: Row) => {
     setSelected(item);
+    setChainData({});
     setView("chain");
     if (!item.family_id) return;
     setLoading(true);
@@ -2572,7 +2591,8 @@ function MemoryLifecyclePage({
     </>}
     {!loading && view === "chain" && <>
       <InfoPanel title={text("记忆链", "Memory chain")} text={text}><p className="cx-form-hint">{text("链路使用有界关系遍历。推断关系是证据，不构成授权或事实权威。", "Chains use bounded traversal. Inferred relations are evidence, not authority or authorization.")}</p></InfoPanel>
-      <NetworkGraph nodes={chainData.nodes || []} edges={(chainData.relations || []).map((item: Row) => ({ from: item.source_version_id, to: item.target_version_id, label: item.relation_type, value: item.confidence || 1 }))} lang={lang} title={selected?.title || text("选择一条记忆", "Select a memory")} loading={false} text={text} onSelect={() => undefined} compact showFilters />
+      <label>{text("记忆条目", "Memory")}<select aria-label={text("记忆条目", "Memory")} value={selected?.family_id || ""} onChange={(event) => { const item = nodes.find((node: Row) => node.family_id === event.target.value); if (item) void openChain(item); }}><option value="">{text("请选择记忆", "Select a memory")}</option>{nodes.map((node: Row) => <option key={node.id} value={node.family_id}>{node.title || node.label}</option>)}</select></label>
+      <NetworkGraph nodes={(chainData.nodes || []).map((node: Row) => ({ ...node, id: node.version_id, label: node.title, entity_type: "MEMORY" }))} edges={(chainData.relations || []).map((item: Row) => ({ id: item.relation_id, from: item.source_version_id, to: item.target_version_id, label: item.relation_type, value: item.confidence || 1 }))} lang={lang} title={selected?.title || text("选择一条记忆", "Select a memory")} loading={false} text={text} onSelect={() => undefined} compact showFilters />
     </>}
     {!loading && view === "workbench" && <div className="cx-memory-workbench">
       <InfoPanel title={text("受控候选", "Governed candidate")} text={text}>
@@ -3438,7 +3458,7 @@ function DataPage({
             {knowledgePolicy && <p className="cx-form-hint">{text("当前策略：", "Current policy: ")}<b>{String(knowledgePolicy.scope_type)}</b>{knowledgePolicy.organization_id ? ` · ${knowledgePolicy.organization_id}` : ""}</p>}
           </InfoPanel>
         )}
-        <pre>{JSON.stringify(detail, null, 2)}</pre>
+        <RecordDetails value={detail} text={text} />
       </DetailDrawer>
     </section>
   );
@@ -3831,7 +3851,7 @@ function GraphVisualization({
         onClose={() => setDetail(null)}
         text={text}
       >
-        <pre>{JSON.stringify(detail, null, 2)}</pre>
+        <RecordDetails value={detail} text={text} />
       </DetailDrawer>
     </section>
   );
@@ -4068,7 +4088,7 @@ function GraphPage({
             "This view shows only database-authorized graph data permitted by the Production baseline.",
           )}
         </p>
-        <pre>{JSON.stringify(detail, null, 2)}</pre>
+        <RecordDetails value={detail} text={text} />
       </DetailDrawer>
     </section>
   );
@@ -5357,7 +5377,7 @@ function ApprovalsPage({
             "Decisions still require a reason and server-side separation of duties.",
           )}
         </p>
-        <pre>{JSON.stringify(detail, null, 2)}</pre>
+        <RecordDetails value={detail} text={text} />
       </DetailDrawer>
     </section>
   );
@@ -5521,7 +5541,7 @@ function AuditPage({
             "Details are limited to the current authorization scope.",
           )}
         </p>
-        <pre>{JSON.stringify(detail, null, 2)}</pre>
+        <RecordDetails value={detail} text={text} />
       </DetailDrawer>
     </section>
   );
@@ -5826,7 +5846,10 @@ function CompliancePage({
     } finally { setBusy(false); }
   };
   const openProfile = async (id: string) => {
-    try { setSelected({ ...await api<Row>(`/api/compliance/profiles/${encodeURIComponent(id)}`), kind: "profile" }); }
+    try {
+      const [profile, agents] = await Promise.all([api<Row>(`/api/compliance/profiles/${encodeURIComponent(id)}`), api<Row>("/api/agents?limit=100")]);
+      setSelected({ ...profile, kind: "profile", visible_agents: agents.items || agents.agents || [] });
+    }
     catch (error) { onNotice(error instanceof Error ? error.message : text("模板详情加载失败", "Template detail failed to load")); }
   };
   const saveProfile = async (content: Row, reason: string) => {
@@ -5838,8 +5861,8 @@ function CompliancePage({
   };
   const copyProfile = async (key: string, name: string, content: Row, reason: string) => {
     if (!selected || selected.kind !== "profile") return;
-    const created = await api<Row>("/api/compliance/profiles", { method: "POST", body: JSON.stringify({
-      profile_key: key, display_name: name, content, reason, parent_version_id: selected.parent_version_id || "",
+    const created = await api<Row>(`/api/compliance/profiles/${encodeURIComponent(selected.profile_version_id)}/clone`, { method: "POST", body: JSON.stringify({
+      profile_key: key, display_name: name, content, reason, expected_digest: selected.content_digest,
     }) });
     await openProfile(created.profile_version_id); await load();
   };
@@ -5968,7 +5991,7 @@ function CompliancePage({
         <p className="cx-form-hint">{text("配置限定已有权限，不会授予身份、数据、工具或数据库访问权。发布后的版本不可修改。", "Profiles constrain existing authority; they never grant identity, data, Tool, or database access. Published versions are immutable.")}</p>
         <DataTable headers={[text("键", "Key"), text("名称", "Name"), text("版本", "Version"), text("状态", "Status"), text("摘要", "Digest"), text("操作", "Actions")]} rows={profiles.map((item) => [String(item.profile_key || "-"), String(item.display_name || "-"), String(item.version_label || "-"), displayRowValue(lang, item.version_status || item.status), String(item.content_digest || "-").slice(0, 16), <button className="small-button" onClick={() => void openProfile(String(item.profile_version_id))}>{text("详情", "Details")}</button>])} text={text} empty={text("暂无合规控制模板", "No compliance control templates")} />
       </InfoPanel>
-      {canAction(capabilities, "agents.manage") && <details className="profile-create"><summary>{text("新增模板", "New template")}</summary><InfoPanel title={text("创建合规控制模板草稿", "Create Compliance control-template draft")} text={text}><p className="cx-form-hint">{text("控制模板限制既有权限，不能单独授予数据库、网络、技能或工具访问权。逗号分隔的技能、工具与锁定字段将作为结构化策略保存。", "A control template constrains existing authority and cannot independently grant database, network, Skill, or Tool access. Comma-separated Skills, Tools, and locked fields are stored as structured policy.")}</p><form className="configuration-form compliance-template-form" onSubmit={createProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一且可读的模板标识。", "A unique, readable template identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("显示名称", "Display name")} hint={text("用于审批、分配与审计显示。", "Shown in approval, assignment, and audit.")}><input name="display_name" required /></ConfigField><ConfigField label={text("父版本 ID", "Parent version ID")} hint={text("可选；父版本必须已发布。", "Optional; the parent version must be published.")}><select name="parent_version_id"><option value="">{text("无父模板", "No parent")}</option>{profiles.filter((item) => item.version_status === "PUBLISHED").map((item) => <option key={item.profile_version_id} value={item.profile_version_id}>{item.display_name} · {item.version_label}</option>)}</select></ConfigField><ConfigField label={text("允许的技能", "Allowed Skills")} hint={text("用逗号分隔；留空表示不在此模板中额外限定。", "Comma separated; blank means this template adds no Skill restriction.")}><input name="allowed_skills" /></ConfigField><ConfigField label={text("允许的工具", "Allowed Tools")} hint={text("用逗号分隔；实际授权仍由身份策略决定。", "Comma separated; effective grants are still decided by identity policy.")}><input name="allowed_tools" /></ConfigField><ConfigField label={text("数据分类上限", "Data classification ceiling")} hint={text("限制此模板可处理的最高数据分类。", "Caps the highest data classification this template can handle.")}><select name="classification_ceiling" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("数据库访问方式", "Database access mode")} hint={text("数据库授权仍由账号、Schema 与网关执行。", "Database grants are still enforced by accounts, schemas, and the gateway.")}><select name="database_access" defaultValue="GATEWAY_ONLY"><option value="GATEWAY_ONLY">{text("仅网关", "Gateway only")}</option><option value="READ_SCOPED">{text("范围内只读", "Scoped read")}</option><option value="LEAST_PRIVILEGE">{text("最小权限", "Least privilege")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("网络出口策略", "Network egress policy")} hint={text("网络访问还需满足运行时与基础设施控制。", "Network access also remains subject to runtime and infrastructure controls.")}><select name="network_egress" defaultValue="ALLOWLIST"><option value="ALLOWLIST">{text("白名单", "Allowlist")}</option><option value="ISOLATED">{text("隔离", "Isolated")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("审批策略", "Approval policy")} hint={text("定义高风险操作的审批要求。", "Defines approval requirements for high-risk actions.")}><select name="approval_policy" defaultValue="REQUIRED"><option value="REQUIRED">{text("必须审批", "Required")}</option><option value="RISK_BASED">{text("按风险审批", "Risk based")}</option><option value="NONE">{text("无需审批", "None")}</option></select></ConfigField><ConfigField label={text("审计与留存策略", "Audit and retention policy")} hint={text("定义审计证据的最低留存要求。", "Defines the minimum retention requirement for audit evidence.")}><select name="audit_retention" defaultValue="EVIDENCE_REQUIRED"><option value="EVIDENCE_REQUIRED">{text("必须保留证据", "Evidence required")}</option><option value="STANDARD">{text("标准留存", "Standard")}</option><option value="EXTENDED">{text("延长留存", "Extended")}</option></select></ConfigField><ConfigField label={text("锁定字段", "Locked fields")} hint={text("用逗号分隔；子模板不可改写父模板同名锁定内容。", "Comma separated; child templates cannot override same-named locked parent content.")}><input name="locked_fields" /></ConfigField><ConfigField label={text("创建原因", "Creation reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("创建后为草稿，发布前仍可复核。", "Created as a draft and remains reviewable before publication.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></ConfigField></form></InfoPanel></details>}
+      {canAction(capabilities, "agents.manage") && <details className="profile-create"><summary>{text("新增模板", "New template")}</summary><InfoPanel title={text("创建合规控制模板草稿", "Create Compliance control-template draft")} text={text}><p className="cx-form-hint">{text("控制模板限制既有权限，不能单独授予数据库、网络、技能或工具访问权。技能、工具与锁定字段作为结构化策略保存。", "A control template constrains existing authority and cannot independently grant database, network, Skill, or Tool access. Skills, Tools, and locked fields are stored as structured policy.")}</p><form className="configuration-form compliance-template-form" onSubmit={createProfile}><ConfigField label={text("配置键", "Profile key")} hint={text("平台内唯一且可读的模板标识。", "A unique, readable template identifier.")}><input name="profile_key" required /></ConfigField><ConfigField label={text("显示名称", "Display name")} hint={text("用于审批、分配与审计显示。", "Shown in approval, assignment, and audit.")}><input name="display_name" required /></ConfigField><ConfigField label={text("父版本 ID", "Parent version ID")} hint={text("可选；父版本必须已发布。", "Optional; the parent version must be published.")}><select name="parent_version_id"><option value="">{text("无父模板", "No parent")}</option>{profiles.filter((item) => item.version_status === "PUBLISHED").map((item) => <option key={item.profile_version_id} value={item.profile_version_id}>{item.display_name} · {item.version_label}</option>)}</select></ConfigField><ConfigField label={text("允许的技能", "Allowed Skills")} hint={text("选择当前可见技能；实际权限仍由身份策略决定。", "Select visible skills; identity policy still controls access.")}><CatalogPicker kind="skills" name="allowed_skills" text={text} /></ConfigField><ConfigField label={text("允许的工具", "Allowed Tools")} hint={text("选择当前可见工具；实际授权仍由身份策略决定。", "Select visible tools; effective grants are still decided by identity policy.")}><CatalogPicker kind="tools" name="allowed_tools" text={text} /></ConfigField><ConfigField label={text("数据分类上限", "Data classification ceiling")} hint={text("限制此模板可处理的最高数据分类。", "Caps the highest data classification this template can handle.")}><select name="classification_ceiling" defaultValue="INTERNAL"><option value="INTERNAL">{text("内部", "Internal")}</option><option value="CONFIDENTIAL">{text("机密", "Confidential")}</option><option value="RESTRICTED">{text("受限", "Restricted")}</option></select></ConfigField><ConfigField label={text("数据库访问方式", "Database access mode")} hint={text("数据库授权仍由账号、Schema 与网关执行。", "Database grants are still enforced by accounts, schemas, and the gateway.")}><select name="database_access" defaultValue="GATEWAY_ONLY"><option value="GATEWAY_ONLY">{text("仅网关", "Gateway only")}</option><option value="READ_SCOPED">{text("范围内只读", "Scoped read")}</option><option value="LEAST_PRIVILEGE">{text("最小权限", "Least privilege")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("网络出口策略", "Network egress policy")} hint={text("网络访问还需满足运行时与基础设施控制。", "Network access also remains subject to runtime and infrastructure controls.")}><select name="network_egress" defaultValue="ALLOWLIST"><option value="ALLOWLIST">{text("白名单", "Allowlist")}</option><option value="ISOLATED">{text("隔离", "Isolated")}</option><option value="DENY">{text("禁止", "Deny")}</option></select></ConfigField><ConfigField label={text("审批策略", "Approval policy")} hint={text("定义高风险操作的审批要求。", "Defines approval requirements for high-risk actions.")}><select name="approval_policy" defaultValue="REQUIRED"><option value="REQUIRED">{text("必须审批", "Required")}</option><option value="RISK_BASED">{text("按风险审批", "Risk based")}</option><option value="NONE">{text("无需审批", "None")}</option></select></ConfigField><ConfigField label={text("审计与留存策略", "Audit and retention policy")} hint={text("定义审计证据的最低留存要求。", "Defines the minimum retention requirement for audit evidence.")}><select name="audit_retention" defaultValue="EVIDENCE_REQUIRED"><option value="EVIDENCE_REQUIRED">{text("必须保留证据", "Evidence required")}</option><option value="STANDARD">{text("标准留存", "Standard")}</option><option value="EXTENDED">{text("延长留存", "Extended")}</option></select></ConfigField><ConfigField label={text("锁定字段", "Locked fields")} hint={text("用逗号分隔；子模板不可改写父模板同名锁定内容。", "Comma separated; child templates cannot override same-named locked parent content.")}><input name="locked_fields" /></ConfigField><ConfigField label={text("创建原因", "Creation reason")} hint={text("至少三个字符，写入审计。", "At least three characters; written to audit.")}><input name="reason" required /></ConfigField><ConfigField label={text("操作", "Action")} hint={text("创建后为草稿，发布前仍可复核。", "Created as a draft and remains reviewable before publication.")} action><button className="primary-button" disabled={busy}><Plus size={15} />{text("创建草稿", "Create draft")}</button></ConfigField></form></InfoPanel></details>}
     </>}
     {tab === "remediation" && <InfoPanel title={text("整改", "Remediation")} text={text}>
       <p className="cx-form-hint">{text("整改必须通过受认证网关提交结构化证据；普通频道聊天不会关闭整改。", "Remediation requires structured evidence through the authenticated Gateway; ordinary Channel chat never closes a case.")}</p>
@@ -5986,8 +6009,14 @@ function CompliancePage({
       <div className="empty-state">{text("最近租约节点：", "Last lease owner: ")}{summary.lease_owner || text("暂无", "None")}</div>
     </InfoPanel>}
     <DetailDrawer open={Boolean(selected)} title={text("合规详情", "Compliance details")} onClose={() => setSelected(null)} text={text} wide>
-      {selected?.kind === "profile" && <ComplianceProfileDetail key={`${selected.profile_version_id}:${selected.content_digest}`} profile={selected} editable={canAction(capabilities, "agents.manage")} text={text} onSave={saveProfile} onCopy={copyProfile} />}
-      {selected && selected.kind !== "profile" && <><pre className="decision-box">{JSON.stringify(selected, null, 2)}</pre>{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
+      {selected?.kind === "finding" && canAction(capabilities, "agents.manage") && <FindingReview key={`${selected.finding_id}:${selected.status}`} finding={selected} text={text}
+        onReview={async (body) => { const result = await api<Row>(`/api/compliance/findings/${encodeURIComponent(selected.finding_id)}/review`, { method: "POST", body: JSON.stringify(body) }); setSelected({ ...selected, status: result.status }); await load(); }}
+        onRemediate={async (body) => { await api(`/api/compliance/findings/${encodeURIComponent(selected.finding_id)}/remediations`, { method: "POST", body: JSON.stringify(body) }); setSelected(null); selectTab("remediation"); }} />}
+      {selected?.kind === "profile" && <ComplianceProfileDetail key={`${selected.profile_version_id}:${selected.content_digest}`} profile={selected} editable={canAction(capabilities, "agents.manage")} text={text} onSave={saveProfile} onCopy={copyProfile} agents={selected.visible_agents} onWorkflow={(reason, agentId, environment) => selected.status === "DRAFT"
+        ? api<Row>(`/api/compliance/profiles/${encodeURIComponent(selected.profile_version_id)}/publication-requests`, { method: "POST", body: JSON.stringify({ expected_digest: selected.content_digest, reason }) })
+        : api<Row>(`/api/agents/${encodeURIComponent(agentId || "")}/compliance-profile-requests`, { method: "POST", body: JSON.stringify({ profile_version_id: selected.profile_version_id, environment, reason }) })}
+        onValidate={(content) => api<Row>(`/api/compliance/profiles/${encodeURIComponent(selected.profile_version_id)}/validate`, { method: "POST", body: JSON.stringify({ content, expected_digest: selected.content_digest }) })} />}
+      {selected && selected.kind !== "profile" && <><RecordDetails value={selected} text={text} />{selected.kind === "exception" && canAction(capabilities, "agents.manage") && <form className="cx-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") || ""); void decideException("approve", reason); }}><label>{text("决定原因", "Decision reason")}<input name="reason" required /></label><div className="actions-row"><button className="primary-button" disabled={busy}>{text("批准", "Approve")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("拒绝原因", "Rejection reason")) || ""; void decideException("reject", reason); }}>{text("拒绝", "Reject")}</button><button type="button" className="small-button" disabled={busy} onClick={() => { const reason = promptInput(text("撤销原因", "Revocation reason")) || ""; void decideException("revoke", reason); }}>{text("撤销", "Revoke")}</button></div></form>}</>}
     </DetailDrawer>
   </section>;
 }
@@ -6677,8 +6706,7 @@ function Channels({
     if (followLatestRef.current) {
       window.requestAnimationFrame(() => { stream.scrollTop = stream.scrollHeight; });
     }
-    if (!messages.some((item) => String(item.message_type || "").toUpperCase() === "AGENT_RESPONSE_STREAMING")) followLatestRef.current = false;
-  }, [messages]);
+  }, [messages, view]);
   const handleMessageScroll = () => {
     const stream = messageStreamRef.current;
     if (!stream) return;
@@ -9101,6 +9129,8 @@ function LegacyOperations({
 }) {
   const [items, setItems] = useState<Row[]>([]);
   const [selected, setSelected] = useState("");
+  const [skillEditingId, setSkillEditingId] = useState("");
+  const [skillDetail, setSkillDetail] = useState<Row | null>(null);
   const [runs, setRuns] = useState<Row[]>([]);
   const endpoint =
     page === "skills"
@@ -9167,7 +9197,7 @@ function LegacyOperations({
     }
   };
   if (page === "skills") {
-    const target = items.find((item) => String(item[idField]) === selected);
+    const target = items.find((item) => String(item[idField]) === skillEditingId);
     const upload = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const formElement = event.currentTarget;
@@ -9192,6 +9222,7 @@ function LegacyOperations({
         new FormData(event.currentTarget).entries(),
       );
       await run(`/api/skill/${encodeURIComponent(selected)}/update`, data);
+      setSkillEditingId("");
     };
     const uploadResource = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -9215,16 +9246,16 @@ function LegacyOperations({
       }
     };
     return (
-      <InfoPanel title={text("技能管理", "Skill management")} text={text}>
+      <div className="skill-management-stack">
+      <InfoPanel title={text("创建技能", "Create Skill")} text={text}>
         <p className="cx-form-hint">
           {text(
-            "上传包含 SKILL.md 的 ZIP 创建技能；选择已有技能后可更新元数据、替换资源、下载资源或删除。",
-            "Upload a ZIP containing SKILL.md to create a Skill; select an existing Skill to update metadata, replace or download its resource, or delete it.",
+            "上传包含 SKILL.md 的 ZIP 创建技能；在下方唯一目录中直接查看、编辑、下载或删除。",
+            "Upload a ZIP containing SKILL.md to create a Skill; use the single catalog below to view, edit, download, or delete it.",
           )}
         </p>
-        <form className="inline-form" onSubmit={upload}>
+        <form className="skill-create-form" onSubmit={upload}>
           <FilePicker name="file" accept=".zip" text={text} />
-          <span></span>
           <button
             className="primary-button"
             disabled={!canAction(capabilities, "skills.write")}
@@ -9233,57 +9264,37 @@ function LegacyOperations({
             {text("创建技能", "Create Skill")}
           </button>
         </form>
-        <div className="page-toolbar evidence-actions">
-          <select
-            value={selected}
-            onChange={(event) => setSelected(event.target.value)}
-          >
-            {items.map((item) => (
-              <option key={item[idField]} value={item[idField]}>
-                {item.skill_name || item.title || item[idField]}
-              </option>
-            ))}
-          </select>
-          <span className="row-actions">
-            <a
-              className={`small-button ${!selected ? "disabled" : ""}`}
-              href={
-                selected
-                  ? `/api/skill/${encodeURIComponent(selected)}/resource`
-                  : undefined
-              }
-            >
-              <Download size={14} />
-              {text("下载资源", "Download resource")}
-            </a>
-            <button
-              className="small-button danger"
-              disabled={!selected || !canAction(capabilities, "skills.write")}
-              onClick={() => {
-                const reason = askReason(
-                  text,
-                  text("删除不再使用的技能", "Remove an unused Skill"),
-                );
-                if (reason)
-                  void run(
-                    `/api/skill/${encodeURIComponent(selected)}/delete`,
-                    { reason },
-                  );
-              }}
-            >
-              <X size={14} />
-              {text("删除所选技能", "Delete selected Skill")}
-            </button>
-          </span>
+      </InfoPanel>
+      <InfoPanel title={text("已注册技能", "Registered Skills")} text={text}>
+        <div className="table-wrap skill-list-panel">
+          <table>
+            <thead><tr><th>{text("技能", "Skill")}</th><th>{text("版本", "Version")}</th><th>{text("运行时", "Runtime")}</th><th>{text("状态", "Status")}</th><th>{text("操作", "Actions")}</th></tr></thead>
+            <tbody>{items.map((item) => {
+              const id = String(item[idField]);
+              const name = item.skill_name || item.title || id;
+              return <tr key={id}>
+                <td data-label={text("技能", "Skill")}><button type="button" className="text-button" onClick={() => setSkillDetail(item)}>{name}</button></td>
+                <td data-label={text("版本", "Version")}>{item.skill_version || "-"}</td>
+                <td data-label={text("运行时", "Runtime")}>{item.runtime || "-"}</td>
+                <td data-label={text("状态", "Status")}>{displayRowValue(lang, item.skill_status || item.status || "-")}</td>
+                <td data-label={text("操作", "Actions")}><span className="tool-row-actions">
+                  <button type="button" className="icon-button" title={text("查看技能", "View Skill")} aria-label={text("查看技能", "View Skill")} onClick={() => setSkillDetail(item)}><Eye size={15} /></button>
+                  <button type="button" className="icon-button" title={text("编辑技能", "Edit Skill")} aria-label={text("编辑技能", "Edit Skill")} onClick={() => { setSelected(id); setSkillEditingId(id); }}><Pencil size={15} /></button>
+                  <a className="icon-button" title={text("下载资源", "Download resource")} aria-label={text("下载资源", "Download resource")} href={`/api/skill/${encodeURIComponent(id)}/resource`}><Download size={15} /></a>
+                  <button type="button" className="icon-button danger" title={text("删除技能", "Delete Skill")} aria-label={text("删除技能", "Delete Skill")} disabled={!canAction(capabilities, "skills.write")} onClick={() => { const reason = askReason(text, text("删除不再使用的技能", "Remove an unused Skill")); if (reason) void run(`/api/skill/${encodeURIComponent(id)}/delete`, { reason }); }}><Trash2 size={15} /></button>
+                </span></td>
+              </tr>;
+            })}</tbody>
+          </table>
         </div>
-        {target && (
-          <div className="split-grid operation-form">
+        <DetailDrawer open={Boolean(target)} title={text("编辑技能", "Edit Skill")} onClose={() => setSkillEditingId("")} text={text} wide>
+          {target && <div className="split-grid operation-form">
             <form className="compact-form" onSubmit={update}>
               <label>
                 {text("技能名称", "Skill name")}
                 <input
                   name="skill_name"
-                  defaultValue=""
+                  defaultValue={target.skill_name || target.title || ""}
                   required
                 />
               </label>
@@ -9291,7 +9302,7 @@ function LegacyOperations({
                 {text("版本", "Version")}
                 <input
                   name="skill_version"
-                  defaultValue=""
+                  defaultValue={target.skill_version || "1.0.0"}
                   required
                 />
               </label>
@@ -9319,14 +9330,10 @@ function LegacyOperations({
               </button>
             </form>
             <form className="compact-form" onSubmit={uploadResource}>
-              <label>
-                {text("替换技能资源", "Replace Skill resource")}
+              <div className="skill-resource-field">
+                <span>{text("替换技能资源", "Replace Skill resource")}</span>
                 <FilePicker name="file" text={text} />
-              </label>
-              <p className="cx-form-hint">
-                {target.resource_filename ||
-                  text("当前没有单独资源文件", "No separate resource file")}
-              </p>
+              </div>
               <button
                 className="primary-button"
                 disabled={!canAction(capabilities, "skills.write")}
@@ -9335,9 +9342,13 @@ function LegacyOperations({
                 {text("上传资源", "Upload resource")}
               </button>
             </form>
-          </div>
-        )}
+          </div>}
+        </DetailDrawer>
       </InfoPanel>
+      <DetailDrawer open={Boolean(skillDetail)} title={text("技能详情", "Skill details")} onClose={() => setSkillDetail(null)} text={text}>
+        {skillDetail && <RecordDetails value={skillDetail} text={text} />}
+      </DetailDrawer>
+      </div>
     );
   }
   if (page === "branches") {

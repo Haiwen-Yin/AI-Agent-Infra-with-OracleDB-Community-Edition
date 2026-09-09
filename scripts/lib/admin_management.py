@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import admin_ha, compliance_api, containment, connection, identity_api, native_agent_api, platform_agent_pool
+from . import admin_ha, compliance_api, containment, connection, governed_approval, identity_api, native_agent_api, platform_agent_pool
 
 ADMIN_CHANNEL_NAME = "PLATFORM_ADMINISTRATION"
 ADMIN_CHANNEL_ID = "CH_PLATFORM_ADMINISTRATION"
@@ -524,11 +524,34 @@ def acquire_leader(actor: str, member_id: str, lease_seconds: int = 60) -> Dict[
     return connection.execute_transaction_callback(work)
 
 
-def issue_containment(actor: str, agent_id: str, instance_id: str, requested_state: str, reason: str, expires_seconds: int = 300) -> Dict[str, Any]:
+def _containment_binding(agent_id: str, instance_id: str, requested_state: str,
+                         reason: str, expires_seconds: int) -> Dict[str, Any]:
+    return {"agent_id": str(agent_id), "instance_id": str(instance_id),
+            "requested_state": str(requested_state).upper(), "reason": str(reason),
+            "expires_seconds": int(expires_seconds)}
+
+
+def request_containment(actor: str, agent_id: str, instance_id: str, requested_state: str,
+                        reason: str, expires_seconds: int = 300) -> Dict[str, Any]:
+    """Create immutable approval evidence for a high-impact containment action."""
+    _require_manage(actor)
+    state = str(requested_state or "").upper()
+    if state not in {"QUARANTINE", "TERMINATE", "INFRA_TERMINATE"} or len(str(reason or "").strip()) < 3:
+        raise ManagementError("high-impact containment state and reason are required")
+    binding = _containment_binding(agent_id, instance_id, state, reason, expires_seconds)
+    return governed_approval.request(actor, "PLATFORM_AGENT_CONTAINMENT", binding, reason)
+
+
+def issue_containment(actor: str, agent_id: str, instance_id: str, requested_state: str, reason: str,
+                      expires_seconds: int = 300, *, approval_action_id: str = "") -> Dict[str, Any]:
     _require_manage(actor)
     state = str(requested_state or "").upper()
     if state not in containment.STATES or len(str(reason or "").strip()) < 3:
         raise ManagementError("containment state and reason are required")
+    if state in {"QUARANTINE", "TERMINATE", "INFRA_TERMINATE"}:
+        binding = _containment_binding(agent_id, instance_id, state, reason, expires_seconds)
+        connection.execute_transaction_callback(lambda tx: governed_approval.require_tx(
+            tx, approval_action_id, "PLATFORM_AGENT_CONTAINMENT", binding, "platform.manage"))
     current = _row(connection.execute_query_one(
         "SELECT CONTROL_GENERATION AS GENERATION,REQUESTED_STATE AS STATE FROM CX_AGENT_CONTAINMENT_COMMANDS "
         "WHERE INSTANCE_ID=:instance ORDER BY CONTROL_GENERATION DESC " +

@@ -106,11 +106,15 @@ def test_invalid_old_draft_remains_inspectable_without_claiming_effective_policy
 
 
 def test_valid_root_profile_still_publishes(authorized, monkeypatch):
+    from lib import governed_approval
+    approval = Mock()
+    monkeypatch.setattr(governed_approval, "require_tx", approval)
     item = version("v1", {"controls": {"network": "isolated"}}, status="DRAFT")
     tx = tx_for(item)
     monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
     assert api.publish_profile("admin", "v1", "reviewed")["status"] == "PUBLISHED"
     assert tx.execute.call_count == 2
+    approval.assert_called_once()
 
 
 def test_all_controls_lock_rejects_new_control():
@@ -118,3 +122,70 @@ def test_all_controls_lock_rejects_new_control():
     child = version("child", {"controls": {"database": "open"}}, "parent", "DRAFT")
     with pytest.raises(api.ComplianceError, match="locked"):
         api._resolve_profile_tx(tx_for(parent), child)
+
+
+def test_validation_resolves_candidate_without_writing(authorized, monkeypatch):
+    item = version("v1", {}, status="DRAFT")
+    tx = tx_for(item)
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    result = api.validate_profile_draft("admin", "v1", {"controls": {"network": "isolated"}}, item["content_digest"])
+    assert result["effective_content"]["controls"]["network"] == "isolated"
+    assert result["expected_digest"] == item["content_digest"]
+    tx.execute.assert_not_called()
+
+
+def test_validation_rejects_stale_source(authorized, monkeypatch):
+    tx = tx_for(version("v1", {}))
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(api.ProfileConflict):
+        api.validate_profile_draft("admin", "v1", {}, "0" * 64)
+    tx.execute.assert_not_called()
+
+
+def test_create_rejects_locked_parent_before_insert(authorized, monkeypatch):
+    parent = version("parent", {"locked_fields": ["network"], "controls": {"network": "isolated"}})
+    tx = tx_for(parent)
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(api.ComplianceError, match="locked"):
+        api.create_profile_draft("admin", "child", "Child", {"controls": {"network": "open"}}, "reviewed", "parent")
+    tx.execute.assert_not_called()
+
+
+def test_clone_rejects_stale_source_before_insert(authorized, monkeypatch):
+    tx = tx_for(version("source", {}))
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(api.ProfileConflict):
+        api.create_profile_draft("admin", "copy", "Copy", {}, "reviewed",
+                                 source_version_id="source", expected_source_digest="0" * 64)
+    tx.execute.assert_not_called()
+
+
+def test_clone_preserves_parent_constraints(authorized, monkeypatch):
+    parent = version("parent", {"locked_fields": ["network"], "controls": {"network": "isolated"}})
+    source = version("source", {}, "parent")
+    tx = tx_for(parent, source)
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(api.ComplianceError, match="locked"):
+        api.create_profile_draft("admin", "copy", "Copy", {"controls": {"network": "open"}}, "reviewed",
+                                 source_version_id="source", expected_source_digest=source["content_digest"])
+    tx.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("content", [
+    {"unknown": True}, {"controls": {"network": None}}, {"controls": {"network": "unrestricted"}},
+    {"controls": {"netwrok": "isolated"}}, {"controls": {"allowed_tools": "tool"}},
+    {"controls": {"allowed_tools": ["tool", "tool"]}}, {"locked_fields": ["unknown"]},
+    {"controls": {"network": "isolated", "network_egress": "allowlist"}},
+])
+def test_invalid_schema_cannot_be_saved(authorized, monkeypatch, content):
+    item = version("v1", {}, status="DRAFT")
+    tx = tx_for(item)
+    monkeypatch.setattr(api.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(api.ComplianceError, match="schema"):
+        api.update_profile_draft("admin", "v1", content, item["content_digest"], "reviewed")
+    tx.execute.assert_not_called()
+
+
+def test_seed_profiles_satisfy_mutation_schema():
+    for _, _, content in api.SEED_PROFILES:
+        api._validate_profile_schema(content)

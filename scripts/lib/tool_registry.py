@@ -6,8 +6,10 @@ Tables: TOOL_REGISTRY, TOOL_CHAINS, TOOL_CHAIN_STEPS
 
 import json
 import logging
+import re
 import urllib.request
 import urllib.error
+from urllib.parse import urlencode, urljoin, urlsplit
 from typing import Any, Dict, List, Optional
 
 from .connection import (
@@ -21,6 +23,11 @@ from .connection import (
 
 logger = logging.getLogger(__name__)
 
+_HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH"}
+_MAX_OPENAPI_BYTES = 2 * 1024 * 1024
+_NAMESPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_EDITABLE_TOOL_STATUSES = {"ACTIVE", "DEPRECATED"}
+
 
 def _row_to_dict(row: Any) -> Dict[str, Any]:
     if row is None:
@@ -28,19 +35,61 @@ def _row_to_dict(row: Any) -> Dict[str, Any]:
     return sanitize_row(row)
 
 
+def _validated_namespace(namespace: str) -> str:
+    raw = str(namespace or "")
+    value = raw.strip()
+    if value != raw:
+        raise ValueError("Tool namespace may not contain leading or trailing whitespace")
+    if not _NAMESPACE_RE.fullmatch(value):
+        raise ValueError("Tool namespace must be 1-64 letters, digits, dots, underscores, or hyphens")
+    return value
+
+
+def _openapi_base_url(spec: Dict[str, Any]) -> str:
+    servers = spec.get("servers") or []
+    if not servers:
+        return ""
+    if not isinstance(servers, list) or not isinstance(servers[0], dict):
+        raise ValueError("OpenAPI servers must be a list of objects")
+    value = str(servers[0].get("url") or "").strip().rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("The first OpenAPI server must be an absolute credential-free HTTP(S) URL")
+    return value
+
+
 def import_openapi(spec: Dict[str, Any], namespace: str) -> List[str]:
+    if not isinstance(spec, dict):
+        raise ValueError("OpenAPI document must be an object")
     paths = spec.get("paths", {})
-    version = spec.get("info", {}).get("version", "1.0.0")
+    if not isinstance(paths, dict) or not paths:
+        raise ValueError("OpenAPI document must contain a non-empty paths object")
+    namespace = _validated_namespace(namespace)
+    version = str((spec.get("info") or {}).get("version") or "1.0.0")[:32]
+    base_url = _openapi_base_url(spec)
     created: List[str] = []
 
     for path, methods in paths.items():
+        if not isinstance(path, str) or not path.startswith("/") or not isinstance(methods, dict):
+            raise ValueError("OpenAPI paths must map absolute paths to operation objects")
         for method, endpoint in methods.items():
-            if method.upper() not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+            if str(method).upper() not in _HTTP_METHODS:
                 continue
+            if not isinstance(endpoint, dict):
+                raise ValueError("OpenAPI operations must be objects")
             operation_id = endpoint.get("operationId") or f"{method}_{path}".replace("/", "_")
-            tool_name = f"{namespace}_{operation_id}"
+            operation_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(operation_id)).strip("_")
+            if not operation_id:
+                raise ValueError("OpenAPI operationId produced an empty tool name")
+            tool_name = f"{namespace}_{operation_id}"[:256]
 
-            input_schema = {"path": path, "method": method.upper(), "parameters": endpoint.get("parameters", [])}
+            input_schema = {
+                "path": path,
+                "method": str(method).upper(),
+                "parameters": endpoint.get("parameters", []),
+            }
+            if base_url:
+                input_schema["base_url"] = base_url
             if "requestBody" in endpoint:
                 input_schema["requestBody"] = endpoint["requestBody"]
             output_schema = {}
@@ -49,19 +98,36 @@ def import_openapi(spec: Dict[str, Any], namespace: str) -> List[str]:
                     output_schema = resp.get("content", {}).get("application/json", {}).get("schema", {})
                     break
 
-            tool_id = execute_insert_returning_id(
+            existing = execute_query_one(
+                "SELECT TOOL_ID FROM TOOL_REGISTRY WHERE TOOL_NAME = :name AND TOOL_VERSION = :ver",
+                {"name": tool_name, "ver": version},
+            )
+            values = {
+                "name": tool_name, "ns": namespace, "ver": version,
+                "descr": str(endpoint.get("summary") or f"{str(method).upper()} {path}")[:2000],
+                "in_schema": json.dumps(input_schema), "out_schema": json.dumps(output_schema),
+            }
+            if existing:
+                existing_row = _row_to_dict(existing)
+                tool_id = str(existing_row.get("tool_id") or existing_row.get("TOOL_ID"))
+                execute(
+                    """UPDATE TOOL_REGISTRY
+                       SET TOOL_NAMESPACE = :ns, DESCRIPTION = :descr,
+                           INPUT_SCHEMA = :in_schema, OUTPUT_SCHEMA = :out_schema,
+                           TOOL_TYPE = 'API', STATUS = 'ACTIVE', UPDATED_AT = CURRENT_TIMESTAMP
+                       WHERE TOOL_ID = :tool_id""",
+                    {key: values[key] for key in ("ns", "descr", "in_schema", "out_schema")} | {"tool_id": tool_id},
+                )
+            else:
+                tool_id = execute_insert_returning_id(
                 """INSERT INTO TOOL_REGISTRY
                    (TOOL_ID, TOOL_NAME, TOOL_NAMESPACE, TOOL_VERSION, DESCRIPTION,
                     INPUT_SCHEMA, OUTPUT_SCHEMA, TOOL_TYPE, STATUS)
                    VALUES (AI_NEW_ID(), :name, :ns, :ver, :descr,
                            :in_schema, :out_schema, 'API', 'ACTIVE')
                    RETURNING TOOL_ID INTO :ret_id""",
-                {
-                    "name": tool_name, "ns": namespace, "ver": version,
-                    "descr": endpoint.get("summary", f"{method.upper()} {path}"),
-                    "in_schema": json.dumps(input_schema), "out_schema": json.dumps(output_schema),
-                },
-            )
+                    values,
+                )
             created.append(tool_id)
 
     logger.info("Imported %d tools from OpenAPI namespace %s", len(created), namespace)
@@ -69,12 +135,26 @@ def import_openapi(spec: Dict[str, Any], namespace: str) -> List[str]:
 
 
 def import_from_url(url: str, namespace: str, auth_header: Optional[str] = None) -> List[str]:
-    import urllib.request
+    from .execution_control import validate_outbound_url
+
+    validate_outbound_url(url)
+
+    class _ImportRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            validate_outbound_url(newurl)
+            if auth_header:
+                raise ValueError("Authenticated OpenAPI imports may not follow redirects")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     if auth_header:
         req.add_header("Authorization", auth_header)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        spec = json.loads(resp.read().decode("utf-8"))
+    opener = urllib.request.build_opener(_ImportRedirectHandler())
+    with opener.open(req, timeout=30) as resp:
+        content = resp.read(_MAX_OPENAPI_BYTES + 1)
+        if len(content) > _MAX_OPENAPI_BYTES:
+            raise ValueError("OpenAPI document exceeds the 2 MiB limit")
+        spec = json.loads(content.decode("utf-8"))
     return import_openapi(spec, namespace)
 
 
@@ -124,9 +204,27 @@ def refresh_tool(tool_id: str, spec: Dict[str, Any]) -> bool:
     return affected > 0
 
 
+def update_tool(tool_id: str, *, description: str, status: str) -> bool:
+    """Update operator-managed metadata without changing a tool's contract identity."""
+    description = str(description or "").strip()
+    if len(description) > 2000:
+        raise ValueError("Tool description may not exceed 2000 characters")
+    status = str(status or "").strip().upper()
+    if status not in _EDITABLE_TOOL_STATUSES:
+        raise ValueError("Tool status must be ACTIVE or DEPRECATED")
+    affected = execute(
+        """UPDATE TOOL_REGISTRY
+           SET DESCRIPTION = :description, STATUS = :status, UPDATED_AT = CURRENT_TIMESTAMP
+           WHERE TOOL_ID = :tool_id AND STATUS != 'RETIRED'""",
+        {"description": description, "status": status, "tool_id": tool_id},
+    )
+    return affected > 0
+
+
 def delete_tool(tool_id: str) -> bool:
     affected = execute(
-        "UPDATE TOOL_REGISTRY SET STATUS = 'RETIRED', UPDATED_AT = CURRENT_TIMESTAMP WHERE TOOL_ID = :tid",
+        """UPDATE TOOL_REGISTRY SET STATUS = 'RETIRED', UPDATED_AT = CURRENT_TIMESTAMP
+           WHERE TOOL_ID = :tid AND STATUS != 'RETIRED'""",
         {"tid": tool_id},
     )
     return affected > 0
@@ -245,14 +343,15 @@ def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
             input_schema = {}
 
     path = input_schema.get("path", "/")
+    base_url = str(input_schema.get("base_url") or "").rstrip("/")
     method = input_schema.get("method", "GET").upper()
     parameters = input_schema.get("parameters", [])
     request_body = input_schema.get("requestBody", {})
 
     input_params = input_params or {}
 
-    url = path
-    query_parts = []
+    url = urljoin(base_url + "/", str(path).lstrip("/")) if base_url else str(path)
+    query_params = []
     body_data = None
     headers = {"Content-Type": "application/json"}
 
@@ -261,14 +360,12 @@ def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
         pin = param.get("in", "query")
         if pname in input_params:
             if pin == "path":
-                url = url.replace(f"{{{pname}}}", str(input_params[pname]))
+                from urllib.parse import quote
+                url = url.replace(f"{{{pname}}}", quote(str(input_params[pname]), safe=""))
             elif pin == "query":
-                query_parts.append(f"{pname}={input_params[pname]}")
+                query_params.append((pname, input_params[pname]))
             elif pin == "header":
                 headers[pname] = str(input_params[pname])
-
-    if query_parts:
-        url += "?" + "&".join(query_parts)
 
     if method in ("POST", "PUT", "PATCH") and request_body:
         body_data = json.dumps(input_params).encode()
@@ -276,9 +373,9 @@ def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
     if method == "GET" and input_params:
         for k, v in input_params.items():
             if k not in [p.get("name") for p in parameters]:
-                query_parts.append(f"{k}={v}")
-        if query_parts:
-            url += ("?" if "?" not in url else "&") + "&".join(query_parts)
+                query_params.append((k, v))
+    if query_params:
+        url += ("?" if "?" not in url else "&") + urlencode(query_params, doseq=True)
 
     from .connection import get_current_agent_id
     from .execution_control import enqueue_job

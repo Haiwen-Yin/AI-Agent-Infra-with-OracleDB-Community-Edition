@@ -69,10 +69,15 @@ def test_registry_contains_help_and_accurate_execution_boundaries():
 
 
 def test_registry_is_idempotent(service):
+    from lib import compliance_api
     service.commands.clear()
     service.executed.clear()
     result = platform_agent_pool.ensure_platform_command_registry()
-    assert result["seeded"] == len(platform_agent_pool.COMMAND_SEEDS)
+    expected = {item[0] for item in platform_agent_pool.COMMAND_SEEDS}
+    if not compliance_api._enterprise_enabled():
+        expected -= platform_agent_pool.COMPLIANCE_COMMANDS
+    assert result["seeded"] == len(expected)
+    assert set(service.commands) == expected
     result = platform_agent_pool.ensure_platform_command_registry()
     assert result["seeded"] == 0
     service.executed.clear()

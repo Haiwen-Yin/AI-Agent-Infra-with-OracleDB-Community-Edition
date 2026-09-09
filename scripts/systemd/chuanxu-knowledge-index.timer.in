@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Chuanxu Built-in Knowledge Index Worker
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+RandomizedDelaySec=30
+Unit=chuanxu-knowledge-index.service
+
+[Install]
+WantedBy=timers.target

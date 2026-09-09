@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from . import connection, content_security, identity_api, knowledge_api
+from . import connection, content_security, identity_api, knowledge_api, agent_registration
 
 
 class GroundingError(ValueError):
@@ -21,7 +21,16 @@ def require_reader(actor: str, agent: str) -> None:
         if identity_api.effective_access(principal, "knowledge.read").get("decision") != "ALLOW":
             raise PermissionError("Knowledge access is unavailable")
         row = connection.execute_query_one("SELECT STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id", {"id": principal})
-        if not row or str(next((v for k, v in row.items() if k.lower() == "status"), "")).upper() != "ACTIVE":
+        if row:
+            if str(next((v for k, v in row.items() if k.lower() == "status"), "")).upper() != "ACTIVE":
+                raise PermissionError("Knowledge principal is inactive")
+        elif principal == agent:
+            # Pool Agents may expose a registry alias instead of a principal id.
+            # Their admission is authoritative in the registration inventory.
+            registration = agent_registration.get_registration(principal)
+            if not registration or str(registration.get("status") or "").upper() != "ACTIVE":
+                raise PermissionError("Knowledge Agent is inactive")
+        else:
             raise PermissionError("Knowledge principal is inactive")
 
 
@@ -74,13 +83,19 @@ def search(actor: str, agent: str, query: str, *, limit: int = 8, entity_ids: li
     if terms:
         predicates.append("(" + " OR ".join(f"(LOWER(e.TITLE) LIKE :q{i} OR LOWER(e.SUMMARY) LIKE :q{i} OR LOWER(e.CONTENT) LIKE :q{i})" for i in range(len(terms))) + ")")
         params.update({f"q{i}": "%" + term.replace("%", "").replace("_", "") + "%" for i, term in enumerate(terms)})
+        relevance = " + ".join(
+            f"CASE WHEN LOWER(e.TITLE) LIKE :q{i} THEN 8 WHEN LOWER(e.SUMMARY) LIKE :q{i} THEN 3 WHEN LOWER(e.CONTENT) LIKE :q{i} THEN 1 ELSE 0 END"
+            for i in range(len(terms))
+        )
+    else:
+        relevance = "0"
     if entity_ids is not None:
         if not entity_ids:
             return {"status": "NO_MATCH", "items": [], "retrieval_mode": "KEYWORD"}
         predicates.append("e.ENTITY_ID IN (" + ",".join(f":id{i}" for i in range(len(entity_ids))) + ")")
         params.update({f"id{i}": key for i, key in enumerate(entity_ids)})
     suffix = " LIMIT :lim" if str(connection.DATABASE_DIALECT).lower() in {"pg", "postgresql"} else " FETCH FIRST :lim ROWS ONLY"
-    rows = connection.execute_query("SELECT e.ENTITY_ID FROM ENTITIES e WHERE " + " AND ".join(predicates) + " ORDER BY e.UPDATED_AT DESC" + suffix, params)
+    rows = connection.execute_query("SELECT e.ENTITY_ID FROM ENTITIES e WHERE " + " AND ".join(predicates) + " ORDER BY (" + relevance + ") DESC, e.UPDATED_AT DESC" + suffix, params)
     items = []
     for row in rows:
         entity_id = str(next(v for k, v in row.items() if k.lower() == "entity_id"))

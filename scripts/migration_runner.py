@@ -1236,6 +1236,34 @@ def _graph_v421_closure_present(cursor: Any, database: str) -> bool:
 
 def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
     """Verify live objects rather than trusting migration ledger status."""
+    if script.name == "80_v4_4_13_portal_builtin_knowledge.sql":
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM ENTITIES e JOIN KNOWLEDGE_META km "
+                "ON km.ENTITY_ID=e.ENTITY_ID AND km.ENTITY_TYPE=e.ENTITY_TYPE "
+                "WHERE e.ENTITY_TYPE='KNOWLEDGE' AND e.STATUS='ACTIVE' "
+                "AND e.VISIBILITY='PUBLIC' AND e.TITLE LIKE '川序 v4.4.13%'"
+            )
+            row = cursor.fetchone()
+            return bool(row and int(row[0]) >= 6)
+        except Exception:
+            return False
+    if script.name == "81_v4_4_13_portal_bilingual_knowledge.sql":
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM ENTITIES WHERE ENTITY_TYPE='KNOWLEDGE' "
+                "AND STATUS='ACTIVE' AND TITLE LIKE '川序 v4.4.13%' AND ("
+                "CONTENT LIKE '%database-authoritative enterprise platform%' OR "
+                "CONTENT LIKE '%Portal checks both principals%' OR "
+                "CONTENT LIKE '%Humans and Agents are governed principals%' OR "
+                "CONTENT LIKE '%Chuanxu governs Agent Pool assignment%' OR "
+                "CONTENT LIKE '%Unified entities and edges preserve%' OR "
+                "CONTENT LIKE '%This database adapter provides%')"
+            )
+            row = cursor.fetchone()
+            return bool(row and int(row[0]) >= 6)
+        except Exception:
+            return False
     if script.name == "79_v4_4_13_portal_knowledge_policy.sql":
         if "CX_PORTAL_KNOWLEDGE_POLICY" not in _schema_tables(cursor, database):
             return False
@@ -1749,6 +1777,8 @@ def release_script_names(version: str, database: str, config_path: Path, edition
         names.append("78_v4_4_12_gateway_credential_write_boundary.sql")
     if version == "4.4.13":
         names.append("79_v4_4_13_portal_knowledge_policy.sql")
+        names.append("80_v4_4_13_portal_builtin_knowledge.sql")
+        names.append("81_v4_4_13_portal_bilingual_knowledge.sql")
     return names
 
 
@@ -2278,7 +2308,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12", "4.4.13"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)

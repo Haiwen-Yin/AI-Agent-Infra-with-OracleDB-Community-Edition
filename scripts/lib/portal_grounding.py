@@ -24,8 +24,15 @@ def policy() -> dict[str, Any]:
 def set_policy(actor: str, mode: str, allow_model_supplement: bool, disclosure_profiles: list[str], expected_version: int, reason: str) -> dict[str, Any]:
     if identity_api.effective_access(actor, "platform.manage").get("decision") != "ALLOW":
         raise PermissionError("Platform management permission is required")
-    if mode not in {"KNOWLEDGE_FIRST", "KNOWLEDGE_ONLY"} or not reason.strip() or len(disclosure_profiles) > 50:
+    if (mode not in {"KNOWLEDGE_FIRST", "KNOWLEDGE_ONLY"}
+            or type(allow_model_supplement) is not bool
+            or type(expected_version) is not int or expected_version < 1
+            or not isinstance(reason, str) or not 3 <= len(reason.strip()) <= 2000
+            or not isinstance(disclosure_profiles, list) or len(disclosure_profiles) > 50
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 128 for item in disclosure_profiles)):
         raise ValueError("Knowledge policy is invalid")
+    if mode == "KNOWLEDGE_ONLY" and allow_model_supplement:
+        raise ValueError("Knowledge-only policy cannot allow model supplementation")
     def work(tx):
         current = tx.query_one("SELECT VERSION FROM CX_PORTAL_KNOWLEDGE_POLICY WHERE POLICY_ID='DEFAULT' FOR UPDATE", {})
         if not current or int(next(iter(current.values()))) != expected_version:

@@ -184,6 +184,8 @@ a {
   border-color: var(--brand);
   color: var(--brand-deep);
 }
+.icon-button.danger { color: var(--danger); }
+.icon-button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .language-button {
   font-size: 11px;
   font-weight: 700;
@@ -1525,7 +1527,11 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .operation-form {
   margin-top: 15px;
+  align-items: start;
 }
+.operation-form > form { align-content: start; }
+.skill-resource-field { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.skill-resource-field > .file-picker { width: fit-content; max-width: 100%; }
 .operation-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -1700,12 +1706,12 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   overflow-wrap: anywhere;
 }
 .channel-markdown p { margin: 4px 0 0; white-space: pre-wrap; }
-.channel-markdown h1,.channel-markdown h2,.channel-markdown h3 { margin: 9px 0 4px; color: var(--ink); font-size: 13px; line-height: 1.35; }
+.channel-markdown h1,.channel-markdown h2,.channel-markdown h3 { margin: 9px 0 4px; color: var(--ink); font-size: 16px; line-height: 1.5; }
 .channel-markdown h1 { font-size: 15px; }
 .channel-markdown ul { margin: 4px 0 4px 18px; padding: 0; }
 .channel-markdown blockquote { margin: 5px 0; padding: 3px 9px; border-left: 3px solid var(--brand); color: var(--muted); }
 .channel-markdown pre { max-width: 100%; overflow: auto; margin: 6px 0; padding: 8px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 82%, var(--ink)); }
-.channel-markdown code { padding: 1px 3px; background: color-mix(in srgb, var(--panel) 75%, var(--ink)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.channel-markdown code { padding: 1px 3px; background: color-mix(in srgb, var(--panel) 75%, var(--ink)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
 .channel-markdown pre code { padding: 0; background: transparent; }
 .channel-markdown a { color: var(--brand); text-decoration: underline; }
 .streaming-placeholder { color: var(--muted); font-style: italic; }
@@ -1758,6 +1764,81 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .channel-completions button small { white-space: normal; overflow-wrap: anywhere; }
 .channel-completions button[aria-selected="true"] { background: var(--surface-hover, var(--line)); }
 .channel-completions button span small { display: block; }
+.channel-markdown { font-size: 15px; line-height: 1.65; }
+.channel-completions { overscroll-behavior: contain; }
+.record-details { font-size: 14px; line-height: 1.6; min-width: 0; overflow-wrap: anywhere; }
+.record-details dl { margin: 0; }
+.record-details dl > div { display: grid; grid-template-columns: minmax(110px, 28%) minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.record-details dt { color: var(--muted); }
+.record-details dd { margin: 0; white-space: pre-wrap; min-width: 0; }
+.record-details ul { padding-left: 20px; margin: 0; }
+.record-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-raw { margin-top: 16px; }
+.catalog-dialog { width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.tool-import-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.tool-import-layout > .info-panel { min-width: 0; margin: 0 0 14px; }
+.tool-import-layout > .info-panel:last-child { margin-bottom: 0; }
+.tool-import-panel .panel-title, .tool-list-panel .panel-title { margin-bottom: 12px; }
+.tool-import-panel .view-toggle { margin: 0 0 12px; }
+.tool-import-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.tool-import-form > label { display: grid; gap: 6px; min-width: 0; }
+.tool-import-form input, .tool-import-form textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.tool-import-form .tool-namespace { width: min(100%, 360px); }
+.tool-import-form textarea { min-height: 160px; resize: vertical; font-family: ui-monospace, monospace; }
+.tool-import-actions { display: flex; align-items: flex-start; justify-content: flex-start; }
+.tool-list-panel .table-wrap { max-height: 560px; overflow: auto; }
+.tool-row-actions { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tool-row-actions .icon-button { width: 30px; min-width: 30px; height: 30px; padding: 5px; }
+.skill-list-panel { margin-top: 14px; }
+.skill-management-stack { display: grid; gap: 14px; }
+.skill-management-stack > .info-panel { margin: 0; }
+.skill-create-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: end; margin-top: 14px; }
+.skill-create-form .primary-button { min-height: 34px; white-space: nowrap; }
+.skill-list-panel .tool-row-actions { gap: 5px; }
+.skill-list-panel .tool-row-actions .icon-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.tool-confirm-drawer { max-width: 440px; }
+@media (max-width: 820px) { .tool-import-layout { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .skill-create-form { grid-template-columns: 1fr; align-items: stretch; }
+  .skill-create-form .primary-button { width: 100%; }
+  .tool-list-panel .table-wrap { max-height: none; overflow: visible; }
+  .tool-list-panel table, .tool-list-panel tbody { display: block; width: 100%; }
+  .tool-list-panel thead { display: none; }
+  .tool-list-panel tbody { display: grid; gap: 10px; }
+  .tool-list-panel tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .tool-list-panel tbody td { display: grid; gap: 3px; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; }
+  .tool-list-panel tbody td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 600; }
+  .tool-list-panel tbody td:nth-child(1),
+  .tool-list-panel tbody td:nth-child(2),
+  .tool-list-panel tbody td:nth-child(5) { grid-column: 1 / -1; }
+  .tool-list-panel .text-button { width: fit-content; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+  .skill-list-panel { max-height: none; overflow: visible; }
+  .skill-list-panel table, .skill-list-panel tbody { display: block; width: 100%; }
+  .skill-list-panel thead { display: none; }
+  .skill-list-panel tbody { display: grid; gap: 10px; }
+  .skill-list-panel tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
+  .skill-list-panel tbody td { display: grid; gap: 3px; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; }
+  .skill-list-panel tbody td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 600; }
+  .skill-list-panel tbody td:first-child, .skill-list-panel tbody td:last-child { grid-column: 1 / -1; }
+}
+.tool-import-panel .tool-import-actions .primary-button { flex: none; width: auto; height: 32px; min-height: 32px; padding: 6px 12px; font-size: 13px; line-height: 18px; }
+.tool-import-panel form .primary-button svg { width: 14px; height: 14px; }
+.tool-import-panel .view-toggle button { min-height: 32px; padding: 6px 12px; font-size: 13px; }
+.catalog-dialog::backdrop { background: #0008; }
+.catalog-dialog > input { width: 100%; }
+.catalog-options { max-height: 45vh; overflow: auto; margin: 12px 0; }
+.catalog-options label { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.catalog-options input[type=checkbox] { width: 18px; min-height: 18px; flex: 0 0 18px; }
+.catalog-options span { overflow-wrap: anywhere; }
+.catalog-options small { display: block; }
+@media (max-width: 600px) { .record-details dl > div { grid-template-columns: minmax(0, 1fr); gap: 3px; } }
 .mention-menu {
   display: grid;
   gap: 2px;

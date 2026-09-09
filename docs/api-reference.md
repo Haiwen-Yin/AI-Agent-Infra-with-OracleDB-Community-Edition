@@ -290,6 +290,9 @@ routes authenticate the calling Agent's current token and instance instead.
 | `/api/compliance/summary` | GET | Read scope-filtered posture/finding counts and, for global administrators, Controller health. |
 | `/api/compliance/findings` | GET | List authorized deterministic findings. |
 | `/api/compliance/profiles` | GET/POST | Inspect Profiles or create a constrained draft. |
+| `/api/compliance/profiles/{profile_version_id}` | GET/PATCH | Read original/effective controls, parent sources and mutation schema; edit a draft with `content`, `expected_digest` and `reason`. |
+| `/api/compliance/profiles/{profile_version_id}/validate` | POST | Validate candidate `content` against the current `expected_digest`, schema and inherited locks without saving. |
+| `/api/compliance/profiles/{profile_version_id}/clone` | POST | Create a new draft with `profile_key`, `display_name`, `content`, `expected_digest` and `reason`; preserve source inheritance and reject existing target keys. |
 | `/api/compliance/profiles/{profile_version_id}/publish` | POST | Publish an immutable validated Profile version with a reason. |
 | `/api/agents/{agent_id}/compliance-profile` | POST | Assign a published Profile and reset posture for reactivation. |
 | `/api/agents/{agent_id}/compliance-control` | POST | Apply an authorized, reasoned control state with optimistic version checking. |
@@ -1138,3 +1141,41 @@ returns only the authorized current publication. Every v4.4.10 error contains
 
 A context reference never grants access. The receiver's Principal, Agent
 Instance, organization, Security Domain, and database policies remain active.
+
+## v4.4.13 Candidate Knowledge and Management APIs
+
+`GET /api/platform/portal-knowledge-policy` requires `platform.manage` and reads
+the database policy and version. `PUT` requires `mode` (`KNOWLEDGE_FIRST` or
+`KNOWLEDGE_ONLY`), boolean `allow_model_supplement`, a list of active model
+`disclosure_profiles`, integer `expected_version`, and a 3-2000 character
+`reason`. Unknown fields and contradictory knowledge-only supplementation are
+rejected. Concurrent changes return 409; mandatory service failures return 503.
+Model disclosure permission never grants access to additional knowledge.
+
+Portal answer behavior is knowledge-first. If the Human and assigned Agent can
+both read matching active Knowledge and the selected profile is approved for
+disclosure, the LLM receives only those authorized sources and returns fresh
+citations (`KNOWLEDGE_GROUNDED`). With no match, `KNOWLEDGE_FIRST` may call the
+model only when supplementation is enabled and labels the answer as general
+model knowledge (`MODEL_SUPPLEMENT`). Without a configured model, matching
+Knowledge remains available as cited extracts (`KNOWLEDGE_EXTRACTS`).
+
+Portal pool selection requires an ACTIVE Agent Principal and effective
+`knowledge.read`; a legacy `AGENT_REGISTRY` alias is not enough. Conversation
+removal changes the owned Workspace to `ABANDONED` so retained context and
+audit references remain valid. The client removes a successful deletion from
+the visible list immediately.
+
+Compliance draft mutations reject unknown fields, invalid enum values, null
+controls, duplicate list entries and duplicate aliases. Read the `content_schema`
+in version details for accepted values. Omission means no local override;
+inherited locks remain effective. Validation is a preview, and saving revalidates.
+
+The management command catalog includes `AGENT_DIAGNOSIS_READ`,
+`COMPLIANCE_FINDINGS_READ`, `APPROVAL_STATUS_READ` and `CAPABILITY_CATALOG_READ`.
+The first two require Enterprise compliance capability. Object and Channel
+authorization still applies; finding evidence and Action Card payloads are not
+included in these summaries. Management mutations bind inspection rules and
+content digests to their Action Card and recheck before execution. Cards created
+without this binding must be proposed again. These additions do not constitute
+completion of the full v4.4.13 release acceptance matrix.

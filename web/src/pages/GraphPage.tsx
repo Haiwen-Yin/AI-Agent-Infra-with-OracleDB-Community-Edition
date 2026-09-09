@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Activity, GitBranch, Layers3, Network, PlayCircle, RefreshCw, X } from "lucide-react";
+import RecordDetails from "../RecordDetails";
 
 type Lang = "zh" | "en";
 type Row = Record<string, any>;
@@ -180,6 +181,6 @@ export default function GraphPage({ lang, text, onNotice }: Props) {
       {view === "runs" && <section className="info-panel"><div className="panel-title"><h2>{text("运行记录", "Graph runs")}</h2></div>{table(["ID", text("图版本", "Graph version"), text("状态", "Status"), text("更新时间", "Updated")], runs.map((row) => [detailButton(row, field(row, ["run_id", "id"])), String(field(row, ["graph_version_id", "version_id"])), display(field(row, ["status"])), String(field(row, ["updated_at", "created_at"]))]), text("暂无运行记录", "No runs"))}</section>}
       {view === "relationships" && <section className="info-panel"><div className="panel-title"><h2>{text("实体关系图", "Entity relationship graph")}</h2><span>{(relations.nodes || []).length} {text("节点", "nodes")} · {(relations.edges || []).length} {text("关系", "relationships")}</span></div><RelationshipGraph nodes={relations.nodes || []} edges={relations.edges || []} text={text} onSelect={setDetail} /></section>}
     </>}
-    {detail && <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}><aside className="detail-drawer" role="dialog" aria-modal="true"><div className="subhead"><h2>{text("图数据详情", "Graph data detail")}</h2><button className="icon-button" onClick={() => setDetail(null)} aria-label={text("关闭", "Close")}><X size={16} /></button></div><pre>{JSON.stringify(detail, null, 2)}</pre></aside></div>}
+    {detail && <div className="detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}><aside className="detail-drawer" role="dialog" aria-modal="true"><div className="subhead"><h2>{text("图数据详情", "Graph data detail")}</h2><button className="icon-button" onClick={() => setDetail(null)} aria-label={text("关闭", "Close")}><X size={16} /></button></div><RecordDetails value={detail} text={text} /></aside></div>}
   </section>;
 }

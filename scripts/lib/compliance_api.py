@@ -159,6 +159,14 @@ def _canonical_profile_content(content: Dict[str, Any]) -> Dict[str, Any]:
     return json.loads(serialized)
 
 
+def _validate_profile_schema(content: Dict[str, Any]) -> None:
+    from . import compliance_profile_schema
+    try:
+        compliance_profile_schema.validate(content)
+    except ValueError as exc:
+        raise ComplianceError(str(exc)) from exc
+
+
 def _profile_content(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -233,6 +241,7 @@ def _resolve_profile_tx(tx: Any, version: Dict[str, Any]) -> Dict[str, Any]:
 def get_profile_version(actor: str, profile_version_id: str) -> Dict[str, Any]:
     enterprise_required()
     _require(actor, "agents.read")
+    from .compliance_profile_schema import PROFILE_SCHEMA
     def work(tx: Any) -> Dict[str, Any]:
         version = _row(tx.query_one(
             "SELECT v.PROFILE_VERSION_ID,v.PROFILE_ID,v.VERSION_LABEL,v.PARENT_VERSION_ID,v.CONTENT_JSON,"
@@ -253,7 +262,7 @@ def get_profile_version(actor: str, profile_version_id: str) -> Dict[str, Any]:
             resolved = {"effective_content": None, "field_sources": {}, "parent_chain": [],
                         "validation": {"status": "INVALID", "reason": str(exc)}}
         content = _profile_content(version.pop("content_json"))
-        return {**version, "content": content, **resolved}
+        return {**version, "content": content, "content_schema": PROFILE_SCHEMA, **resolved}
     return connection.execute_transaction_callback(work)
 
 
@@ -272,6 +281,7 @@ def update_profile_draft(actor: str, profile_version_id: str, content: Dict[str,
         if not version or version["status"] != "DRAFT" or version["content_digest"] != expected_digest:
             raise ProfileConflict("Profile draft changed or is immutable; reload before editing")
         _validate_profile_publication_tx(tx, {**version, "content_json": canonical, "content_digest": digest})
+        _validate_profile_schema(content)
         changed = tx.execute(
             "UPDATE CX_AGENT_PROFILE_VERSIONS SET CONTENT_JSON=:content,CONTENT_DIGEST=:digest "
             "WHERE PROFILE_VERSION_ID=:id AND STATUS='DRAFT' AND CONTENT_DIGEST=:expected",
@@ -280,6 +290,25 @@ def update_profile_draft(actor: str, profile_version_id: str, content: Dict[str,
             raise ProfileConflict("Profile draft changed concurrently")
         _audit_tx(tx, actor, "COMPLIANCE_PROFILE_EDIT", "AGENT_PROFILE", profile_version_id, "ALLOW", reason)
         return {"profile_version_id": profile_version_id, "content_digest": digest, "status": "DRAFT"}
+    return connection.execute_transaction_callback(work)
+
+
+def validate_profile_draft(actor: str, profile_version_id: str, content: Dict[str, Any],
+                           expected_digest: str) -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.manage")
+    canonical = _json(_canonical_profile_content(content))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    def work(tx: Any) -> Dict[str, Any]:
+        version = _row(tx.query_one(
+            "SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST "
+            "FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
+        if not version or version["content_digest"] != expected_digest:
+            raise ProfileConflict("Profile changed; reload before validation")
+        resolved = _resolve_profile_tx(tx, {**version, "content_json": canonical, "content_digest": digest})
+        _validate_profile_schema(content)
+        return {**resolved, "validation": {"status": "VALID"}, "content_digest": digest,
+                "expected_digest": expected_digest}
     return connection.execute_transaction_callback(work)
 
 
@@ -507,7 +536,8 @@ def ensure_compliance_admin_agent() -> bool:
 
 
 def create_profile_draft(actor: str, profile_key: str, display_name: str, content: Dict[str, Any], reason: str,
-                         parent_version_id: str = "") -> Dict[str, Any]:
+                         parent_version_id: str = "", *, source_version_id: str = "",
+                         expected_source_digest: str = "") -> Dict[str, Any]:
     enterprise_required()
     _require(actor, "agents.manage")
     if not profile_key.strip() or not display_name.strip() or not reason.strip():
@@ -516,7 +546,21 @@ def create_profile_draft(actor: str, profile_key: str, display_name: str, conten
     profile_id, version_id = _id("AP"), _id("APV")
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     def work(tx: Any) -> Dict[str, Any]:
+        parent_id = parent_version_id
+        if source_version_id:
+            source = _row(tx.query_one(
+                "SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST "
+                "FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": source_version_id}))
+            if not source or not expected_source_digest or source["content_digest"] != expected_source_digest:
+                raise ProfileConflict("Source profile changed; reload before cloning")
+            _resolve_profile_tx(tx, source)
+            parent_id = str(source.get("parent_version_id") or "")
+        _resolve_profile_tx(tx, {"profile_version_id": version_id, "parent_version_id": parent_id,
+                                "content_json": canonical, "content_digest": digest, "status": "DRAFT"})
+        _validate_profile_schema(content)
         existing = _row(tx.query_one("SELECT PROFILE_ID FROM CX_AGENT_PROFILES WHERE PROFILE_KEY=:profile_key FOR UPDATE", {"profile_key": profile_key[:128]}))
+        if source_version_id and existing:
+            raise ProfileConflict("Cloned profile key already exists")
         active_profile_id = str((existing or {}).get("profile_id") or profile_id)
         if not existing:
             tx.execute("INSERT INTO CX_AGENT_PROFILES(PROFILE_ID,PROFILE_KEY,DISPLAY_NAME,STATUS,CREATED_BY) VALUES (:profile_id,:profile_key,:display_name,'DRAFT',:actor)",
@@ -525,25 +569,48 @@ def create_profile_draft(actor: str, profile_key: str, display_name: str, conten
             "INSERT INTO CX_AGENT_PROFILE_VERSIONS(PROFILE_VERSION_ID,PROFILE_ID,VERSION_LABEL,PARENT_VERSION_ID,CONTENT_JSON,CONTENT_DIGEST,STATUS,CREATED_BY) "
             "VALUES (:version_id,:profile_id,:version_label,:parent_version_id,:content_json,:content_digest,'DRAFT',:actor)",
             {"version_id": version_id, "profile_id": active_profile_id, "version_label": "draft-" + version_id[-12:],
-             "parent_version_id": parent_version_id or None, "content_json": canonical, "content_digest": digest, "actor": actor})
+             "parent_version_id": parent_id or None, "content_json": canonical, "content_digest": digest, "actor": actor})
         _audit_tx(tx, actor, "COMPLIANCE_PROFILE_DRAFT", "AGENT_PROFILE", version_id, "ALLOW", reason)
         return {"profile_id": active_profile_id, "profile_version_id": version_id, "content_digest": digest, "status": "DRAFT"}
     return connection.execute_transaction_callback(work)
 
 
-def publish_profile(actor: str, profile_version_id: str, reason: str) -> Dict[str, Any]:
+def request_profile_publication(actor: str, profile_version_id: str, expected_digest: str, reason: str) -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.manage")
+    from . import governed_approval
+    version = get_profile_version(actor, profile_version_id)
+    if version["status"] != "DRAFT" or version["content_digest"] != expected_digest:
+        raise ProfileConflict("Profile draft changed or is immutable")
+    if version["validation"]["status"] != "VALID":
+        raise ComplianceError("Profile inheritance is invalid")
+    _validate_profile_schema(version["content"])
+    binding = {"profile_version_id": profile_version_id, "content_digest": expected_digest,
+               "effective_digest": governed_approval.digest(version["effective_content"])}
+    return governed_approval.request(actor, "PLATFORM_COMPLIANCE_PROFILE_PUBLISH", binding, reason)
+
+
+def publish_profile(actor: str, profile_version_id: str, reason: str, *, approval_action_id: str = "") -> Dict[str, Any]:
     enterprise_required()
     _require(actor, "agents.manage")
     if not reason.strip():
         raise ComplianceError("Publication reason is required")
+    from . import governed_approval
     def work(tx: Any) -> Dict[str, Any]:
         version = _row(tx.query_one("SELECT PROFILE_VERSION_ID,PROFILE_ID,PARENT_VERSION_ID,STATUS,CONTENT_JSON,CONTENT_DIGEST FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
-        if not version or str(version.get("status") or "").upper() != "DRAFT":
+        if not version or str(version.get("status") or "").upper() not in {"DRAFT", "PUBLISHED"}:
             raise ComplianceError("Profile draft is unavailable")
-        _validate_profile_publication_tx(tx, version)
+        effective = _validate_profile_publication_tx(tx, version)
+        _validate_profile_schema(_profile_content(version["content_json"]))
         actual = hashlib.sha256(str(version.get("content_json") or "").encode("utf-8")).hexdigest()
         if actual != str(version.get("content_digest") or ""):
             raise ComplianceError("Profile digest mismatch")
+        governed_approval.require_tx(tx, approval_action_id, "PLATFORM_COMPLIANCE_PROFILE_PUBLISH",
+            {"profile_version_id": profile_version_id, "content_digest": actual,
+             "effective_digest": governed_approval.digest(effective)}, "agents.manage")
+        if version["status"] == "PUBLISHED":
+            return {"profile_version_id": profile_version_id, "profile_id": version["profile_id"],
+                    "status": "PUBLISHED", "content_digest": actual, "idempotent": True}
         changed = tx.execute("UPDATE CX_AGENT_PROFILE_VERSIONS SET STATUS='PUBLISHED',PUBLISHED_AT=CURRENT_TIMESTAMP WHERE PROFILE_VERSION_ID=:id AND STATUS='DRAFT'", {"id": profile_version_id})
         if changed != 1:
             raise ComplianceError("Profile changed concurrently")
@@ -553,18 +620,54 @@ def publish_profile(actor: str, profile_version_id: str, reason: str) -> Dict[st
     return connection.execute_transaction_callback(work)
 
 
-def assign_profile(actor: str, agent_id: str, profile_version_id: str, environment: str, reason: str) -> Dict[str, Any]:
+def request_profile_assignment(actor: str, agent_id: str, profile_version_id: str, environment: str, reason: str) -> Dict[str, Any]:
     enterprise_required()
     _require(actor, "agents.manage")
     _visible(actor, agent_id)
-    if not environment.strip() or not reason.strip():
+    from . import governed_approval
+    if not environment.strip() or len(environment) > 64:
+        raise ComplianceError("Assignment environment is invalid")
+    version = get_profile_version(actor, profile_version_id)
+    if version["status"] != "PUBLISHED" or version["validation"]["status"] != "VALID":
+        raise ComplianceError("A valid published Profile is required")
+    prior = _row(connection.execute_query_one("SELECT ASSIGNMENT_ID FROM CX_AGENT_PROFILE_ASSIGNMENTS "
+        "WHERE AGENT_ID=:agent AND ENVIRONMENT=:environment AND STATUS='ACTIVE'", {"agent": agent_id, "environment": environment}))
+    binding = {"agent_id": agent_id, "profile_version_id": profile_version_id, "environment": environment,
+               "content_digest": version["content_digest"], "previous_assignment_id": (prior or {}).get("assignment_id")}
+    return governed_approval.request(actor, "PLATFORM_COMPLIANCE_PROFILE_ASSIGN", binding, reason)
+
+
+def assign_profile(actor: str, agent_id: str, profile_version_id: str, environment: str, reason: str,
+                   *, approval_action_id: str = "") -> Dict[str, Any]:
+    enterprise_required()
+    _require(actor, "agents.manage")
+    _visible(actor, agent_id)
+    if not environment.strip() or len(environment) > 64 or not reason.strip():
         raise ComplianceError("Environment and reason are required")
-    assignment_id = _id("APA")
+    from . import governed_approval
+    if not approval_action_id:
+        raise governed_approval.ApprovalRequired("An independently approved assignment is required")
+    assignment_id = "APA_" + governed_approval.digest(approval_action_id)[:40]
     def work(tx: Any) -> Dict[str, Any]:
         _agent_row(agent_id, tx)
-        version = _row(tx.query_one("SELECT PROFILE_VERSION_ID,STATUS FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
+        tx.query_one("SELECT PRINCIPAL_ID FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE", {"id": agent_id})
+        existing = _row(tx.query_one("SELECT ASSIGNMENT_ID,AGENT_ID,PROFILE_VERSION_ID,ENVIRONMENT,STATUS "
+            "FROM CX_AGENT_PROFILE_ASSIGNMENTS WHERE ASSIGNMENT_ID=:id", {"id": assignment_id}))
+        if existing:
+            if any(existing[key] != value for key, value in (("agent_id", agent_id), ("profile_version_id", profile_version_id), ("environment", environment))):
+                raise ProfileConflict("Assignment replay target does not match")
+            return {**existing, "idempotent": True}
+        version = _row(tx.query_one("SELECT PROFILE_VERSION_ID,PARENT_VERSION_ID,CONTENT_JSON,CONTENT_DIGEST,STATUS "
+            "FROM CX_AGENT_PROFILE_VERSIONS WHERE PROFILE_VERSION_ID=:id FOR UPDATE", {"id": profile_version_id}))
         if not version or str(version.get("status") or "").upper() != "PUBLISHED":
             raise ComplianceError("Published Profile is required")
+        _validate_profile_publication_tx(tx, version)
+        prior = _row(tx.query_one("SELECT ASSIGNMENT_ID FROM CX_AGENT_PROFILE_ASSIGNMENTS "
+            "WHERE AGENT_ID=:agent AND ENVIRONMENT=:environment AND STATUS='ACTIVE' FOR UPDATE", {"agent": agent_id, "environment": environment}))
+        approval = governed_approval.require_tx(tx, approval_action_id, "PLATFORM_COMPLIANCE_PROFILE_ASSIGN",
+            {"agent_id": agent_id, "profile_version_id": profile_version_id, "environment": environment,
+             "content_digest": version["content_digest"], "previous_assignment_id": (prior or {}).get("assignment_id")}, "agents.manage")
+        _visible(approval["proposed_by"], agent_id)
         tx.execute("UPDATE CX_AGENT_PROFILE_ASSIGNMENTS SET STATUS='SUPERSEDED',ENDED_AT=CURRENT_TIMESTAMP WHERE AGENT_ID=:agent_id AND ENVIRONMENT=:environment AND STATUS='ACTIVE'", {"agent_id": agent_id, "environment": environment[:64]})
         tx.execute("INSERT INTO CX_AGENT_PROFILE_ASSIGNMENTS(ASSIGNMENT_ID,AGENT_ID,PROFILE_VERSION_ID,ENVIRONMENT,STATUS,ASSIGNED_BY,REASON) VALUES (:assignment_id,:agent_id,:profile_version_id,:environment,'ACTIVE',:actor,:reason)",
                    {"assignment_id": assignment_id, "agent_id": agent_id, "profile_version_id": profile_version_id, "environment": environment[:64], "actor": actor, "reason": reason[:2000]})
@@ -843,6 +946,48 @@ def list_findings_cursor(actor: str, *, page_size: int = 20, cursor: str = "", a
     except Exception:
         pass
     return result
+
+
+def review_finding(actor: str, finding_id: str, decision: str, reason: str,
+                   evidence_ref: str, expected_status: str, expected_observed_at: str) -> Dict[str, Any]:
+    """Record a Human review without changing Agent posture or runtime access."""
+    enterprise_required()
+    _require(actor, "agents.manage")
+    decision = str(decision).upper()
+    if decision not in {"ACKNOWLEDGE", "RESOLVE", "REOPEN"} or len(reason.strip()) < 3:
+        raise ComplianceError("Review decision and reason are required")
+    if decision == "RESOLVE" and not evidence_ref.strip():
+        raise ComplianceError("Resolution requires a review evidence reference")
+    if len(reason) > 2000 or len(evidence_ref) > 2000:
+        raise ComplianceError("Review evidence or reason is too long")
+    review_record = _json({"decision": decision, "reason": reason.strip(), "evidence_ref": evidence_ref.strip(), "review_type": "HUMAN_REVIEW"})
+    if len(review_record) > 2000:
+        raise ComplianceError("Combined review reason and evidence exceed the audit limit")
+    def work(tx: Any) -> Dict[str, Any]:
+        _active_human_tx(tx, actor)
+        finding = _row(tx.query_one(
+            "SELECT FINDING_ID,AGENT_ID,STATUS,LAST_OBSERVED_AT FROM CX_COMPLIANCE_FINDINGS "
+            "WHERE FINDING_ID=:finding_id FOR UPDATE", {"finding_id": finding_id}))
+        if not finding:
+            raise ComplianceError("Finding is unavailable")
+        _visible(actor, str(finding["agent_id"]))
+        observed = finding.get("last_observed_at")
+        observed = observed.isoformat() if hasattr(observed, "isoformat") else str(observed or "")
+        if finding["status"] != expected_status or observed != expected_observed_at:
+            raise ComplianceError("Finding changed; reload before reviewing")
+        allowed = {"ACKNOWLEDGE": {"OPEN"}, "RESOLVE": {"OPEN", "ACKNOWLEDGED", "REMEDIATING"}, "REOPEN": {"RESOLVED", "CLOSED"}}
+        if finding["status"] not in allowed[decision]:
+            raise ComplianceError("Review transition is not allowed")
+        status = {"ACKNOWLEDGE": "ACKNOWLEDGED", "RESOLVE": "RESOLVED", "REOPEN": "OPEN"}[decision]
+        tx.execute("UPDATE CX_COMPLIANCE_FINDINGS SET STATUS=:status,UPDATED_AT=CURRENT_TIMESTAMP WHERE FINDING_ID=:finding_id",
+                   {"status": status, "finding_id": finding_id})
+        if decision == "RESOLVE":
+            tx.execute("UPDATE CX_COMPLIANCE_REMEDIATION_CASES SET STATUS='RESOLVED',UPDATED_AT=CURRENT_TIMESTAMP "
+                       "WHERE FINDING_ID=:finding_id AND STATUS IN ('OPEN','ACKNOWLEDGED','REMEDIATING')", {"finding_id": finding_id})
+        _audit_tx(tx, actor, "COMPLIANCE_FINDING_REVIEW", "COMPLIANCE_FINDING", finding_id, "ALLOW",
+                  review_record)
+        return {"finding_id": finding_id, "status": status, "agent_control_changed": False}
+    return connection.execute_transaction_callback(work)
 
 
 def create_remediation(actor: str, finding_id: str, required_action: str, reason: str,

@@ -92,3 +92,42 @@ def test_query_has_both_acl_predicates(monkeypatch):
     assert "kap.PRINCIPAL_ID=:actor" in sql and "kap.PRINCIPAL_ID=:agent" in sql
     assert "e.STATUS='ACTIVE'" in sql and "e.EXPIRES_AT>CURRENT_TIMESTAMP" in sql
     assert result["status"] == "NO_MATCH"
+
+
+@pytest.mark.parametrize("changes", [
+    {"mode": "MODEL_ONLY"}, {"mode": "KNOWLEDGE_ONLY", "allow_model_supplement": True},
+    {"allow_model_supplement": "false"}, {"expected_version": True},
+    {"expected_version": 0}, {"disclosure_profiles": "model"},
+    {"disclosure_profiles": [None]}, {"disclosure_profiles": [""]}, {"reason": "  "},
+])
+def test_policy_rejects_invalid_settings_before_database(monkeypatch, changes):
+    monkeypatch.setattr(portal.identity_api, "effective_access", lambda *_: {"decision": "ALLOW"})
+    database = Mock()
+    monkeypatch.setattr(portal.connection, "execute_transaction_callback", database)
+    settings = dict(mode="KNOWLEDGE_FIRST", allow_model_supplement=False,
+                    disclosure_profiles=[], expected_version=1, reason="reviewed")
+    settings.update(changes)
+    with pytest.raises(ValueError): portal.set_policy("admin", **settings)
+    database.assert_not_called()
+
+
+def test_policy_rejects_stale_version_without_write(monkeypatch):
+    monkeypatch.setattr(portal.identity_api, "effective_access", lambda *_: {"decision": "ALLOW"})
+    tx = Mock(query_one=Mock(return_value={"VERSION": 2}))
+    monkeypatch.setattr(portal.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    with pytest.raises(knowledge.GroundingError):
+        portal.set_policy("admin", "KNOWLEDGE_FIRST", False, [], 1, "reviewed")
+    tx.execute.assert_not_called()
+
+
+def test_policy_updates_version_and_audit_in_same_transaction(monkeypatch):
+    monkeypatch.setattr(portal.identity_api, "effective_access", lambda *_: {"decision": "ALLOW"})
+    tx = Mock(query_one=Mock(side_effect=[{"VERSION": 2}, {"PROFILE_ID": "model"}]), execute=Mock(return_value=1))
+    audit = Mock()
+    monkeypatch.setattr(portal.identity_api, "_audit_tx", audit)
+    monkeypatch.setattr(portal.connection, "execute_transaction_callback", lambda fn: fn(tx))
+    result = portal.set_policy("admin", "KNOWLEDGE_ONLY", False, ["model"], 2, "reviewed")
+    assert result["version"] == 3
+    assert tx.execute.call_args.args[1]["expected"] == 2
+    audit.assert_called_once()
+    assert audit.call_args.args[0] is tx

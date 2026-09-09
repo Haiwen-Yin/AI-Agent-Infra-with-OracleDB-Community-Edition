@@ -353,10 +353,12 @@ def _get_or_assign_portal_agent(user_id):
     node_id = _portal_node_id()
     attempted = set()
     assigned = connection.execute_query_one(
-        "SELECT AGENT_ID FROM AGENT_REGISTRY "
-        "WHERE STATUS = 'ACTIVE' AND CURRENT_USER_ID = :v_uid "
-        "AND PORTAL_NODE_ID = :v_node_id "
-        "ORDER BY UPDATED_AT DESC",
+        "SELECT a.AGENT_ID FROM AGENT_REGISTRY a "
+        "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = a.AGENT_ID "
+        "WHERE a.STATUS = 'ACTIVE' AND p.PRINCIPAL_TYPE = 'AGENT' "
+        "AND p.STATUS = 'ACTIVE' AND a.CURRENT_USER_ID = :v_uid "
+        "AND a.PORTAL_NODE_ID = :v_node_id "
+        "ORDER BY a.UPDATED_AT DESC",
         {"v_uid": str(user_id), "v_node_id": node_id},
     )
     if assigned:
@@ -399,6 +401,10 @@ def _get_or_assign_portal_agent(user_id):
                     agent_id, created_by='portal-confirmation'
                 )
             if not registration or str(registration.get('status') or '').upper() != 'ACTIVE':
+                agent_api.hibernate_agent(agent_id, node_id)
+                candidate = None
+                continue
+            if identity_api.effective_access(agent_id, 'knowledge.read').get('decision') != 'ALLOW':
                 agent_api.hibernate_agent(agent_id, node_id)
                 candidate = None
                 continue
@@ -4284,8 +4290,11 @@ class VisHandler(BaseHTTPRequestHandler):
             previous_agent = connection.get_current_agent_id()
             try:
                 connection.set_agent_context(None)
+                # The server-side Portal policy is authoritative.  When the
+                # policy permits model supplementation, clients need not opt
+                # in with a fragile transport flag; knowledge remains first.
                 answer = portal_grounding.answer(sess, message, selected_profile,
-                    supplement=data.get('model_supplement') is True, entity_ids=data.get('knowledge_ids'))
+                    supplement=True, entity_ids=data.get('knowledge_ids'))
                 if workspace_id:
                     workspace_api.save_context(
                         workspace_id=workspace_id, agent_id=agent_id or user_id,
@@ -4472,8 +4481,9 @@ class VisHandler(BaseHTTPRequestHandler):
                     connection.set_agent_context(sess['agent_id'])
                 self._send_json({'success': False, 'error': 'Workspace not found'}, 404)
                 return
-            connection.execute("DELETE FROM WORKSPACE_CONTEXT WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
-            connection.execute("DELETE FROM WORKSPACES WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
+            # Keep workspace/context rows for audit and avoid FK failures on
+            # adapters that retain related conversation evidence.
+            connection.execute("UPDATE WORKSPACES SET STATUS = 'ABANDONED', UPDATED_AT = CURRENT_TIMESTAMP WHERE WORKSPACE_ID = :v_wid", {"v_wid": ws_id})
             if sess.get('agent_id'):
                 connection.set_agent_context(sess['agent_id'])
             if sess.get('workspace_id') == ws_id:
@@ -4912,7 +4922,7 @@ class VisHandler(BaseHTTPRequestHandler):
                 html = f.read()
             timeout = _session_timeout()
             html = html.replace('4.4.13', VERSION)
-            html = html.replace('2026-09-05', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('2026-09-08', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

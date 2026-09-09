@@ -212,12 +212,17 @@ def test_v442_dashboard_automates_embedding_activation_and_uses_named_external_a
     assert 'text("测试并自动配置", "Test and configure")' in ui
     assert 'text("智能体名称", "Agent name")' in ui
     assert 'item.agent_name || "-"' in ui
-    assert 'text("运行时", "Runtime")' not in ui
     assert ".cursor-pager" in css and "flex-wrap: nowrap" in css
     deployment = ui.split("function DeploymentModelsPage", 1)[1].split("function NativeAgentsPage", 1)[0]
+    assert 'text("运行时", "Runtime")' not in deployment
     assert '<input name="dimension"' not in deployment
     assert "待测试" in deployment
     assert "admin-admission-form" in ui and "placeholder={text(\"目标节点 ID\"" not in ui
+    assert (
+        '<th>{text("技能", "Skill")}</th><th>{text("版本", "Version")}</th>'
+        '<th>{text("运行时", "Runtime")}</th><th>{text("状态", "Status")}</th>'
+        '<th>{text("操作", "Actions")}</th>'
+    ) in ui
 
 
 def test_v442_embedding_manual_write_routes_are_not_mounted_and_knowledge_graph_is_principal_scoped():

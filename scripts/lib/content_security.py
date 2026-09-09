@@ -15,7 +15,7 @@ RULES = (
     ("PRIVATE_KEY", "DENY", r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
     ("PROVIDER_CREDENTIAL", "DENY", r"\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16})\b"),
     ("CREDENTIAL_ASSIGNMENT", "DENY", r'''(?i)\b(?:api[_ -]?key|access[_ -]?token|client[_ -]?secret|password)\s*[=:]\s*["']?[A-Za-z0-9_+/=-]{16,}'''),
-    ("INSTRUCTION_OVERRIDE", "WARN", r"(?i)(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|system|developer|prior)\s+(?:instructions?|prompts?|rules?)|忽略.{0,8}(?:系统|先前|之前|开发者).{0,8}(?:指令|提示|规则)"),
+    ("INSTRUCTION_OVERRIDE", "WARN", r"(?i)(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|system|developer|prior)(?:\s+(?:system|developer))?\s+(?:instructions?|prompts?|rules?)|忽略.{0,8}(?:系统|先前|之前|开发者).{0,8}(?:指令|提示|规则)"),
     ("SECRET_EXFILTRATION", "WARN", r"(?i)(?:send|upload|export|reveal|print).{0,60}(?:api.?key|password|access.?token|private.?key)|(?:发送|上传|导出|泄露|显示).{0,30}(?:密钥|口令|密码|访问令牌)"),
     ("AUTHORITY_IMPERSONATION", "WARN", r"(?i)(?:i am|act as|you are now).{0,20}(?:root|system administrator)|(?:我是|扮演|现在是).{0,12}(?:超级管理员|系统管理员)"),
     ("AUDIT_BYPASS", "WARN", r"(?i)(?:disable|bypass|delete).{0,20}(?:audit|security checks)|(?:关闭|绕过|删除).{0,12}(?:审计|安全检查)"),

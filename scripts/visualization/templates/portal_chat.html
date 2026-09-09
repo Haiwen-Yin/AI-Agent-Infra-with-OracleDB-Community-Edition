@@ -19,7 +19,7 @@
     <button class="action-btn" onclick="openKnowledge()"><span data-zh>我的知识</span><span data-en>My knowledge</span></button>
     <label class="portal-llm-switch"><span data-zh>LLM</span><span data-en>LLM</span><select id="portalLlmSelect" onchange="switchPortalLlm(this.value)" aria-label="LLM"><option value="">--</option></select></label>
     <button class="action-btn" onclick="window.open('/portal/login','_self')"><span data-zh>切换用户</span><span data-en>Switch User</span></button>
-    <button class="action-btn danger" onclick="releaseAgent()"><span data-zh>退出</span><span data-en>Exit</span></button>
+    <button class="action-btn danger" onclick="openExitConfirm()"><span data-zh>退出</span><span data-en>Exit</span></button>
   </div>
 </div>
 
@@ -60,6 +60,21 @@
   <div id="knowledgeResults" role="status"></div>
   <pre id="knowledgeContent"></pre>
 </dialog>
+<div class="portal-detail-backdrop" id="exitConfirm" role="presentation" hidden onclick="if(event.target===this)closeExitConfirm()">
+  <aside class="portal-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="exitConfirmTitle">
+    <div class="portal-detail-head">
+      <h2 id="exitConfirmTitle"><span data-zh>退出登录</span><span data-en>Sign out</span></h2>
+      <button type="button" class="portal-icon-button" onclick="closeExitConfirm()" aria-label="Close" title="Close">&times;</button>
+    </div>
+    <div class="portal-confirm-content">
+      <p><span data-zh>确定要退出当前 Portal 会话吗？</span><span data-en>Sign out of the current Portal session?</span></p>
+      <div class="portal-confirm-actions">
+        <button type="button" class="portal-confirm-button" onclick="closeExitConfirm()"><span data-zh>取消</span><span data-en>Cancel</span></button>
+        <button type="button" class="portal-confirm-button danger" id="confirmExitButton" onclick="releaseAgent()"><span data-zh>确认退出</span><span data-en>Sign out</span></button>
+      </div>
+    </div>
+  </aside>
+</div>
 
 <script src="/static/marked.min.js"></script>
 <script src="/static/purify.min.js"></script>
@@ -127,6 +142,7 @@ function loadSessions(){
       d.sessions.forEach(function(s){
         var div=document.createElement('div');
         div.className='session-item'+(s.is_current?' active':'');
+        div.dataset.wsId=s.workspace_id;
         div.dataset.wsId=s.workspace_id;
         div.innerHTML='<span class="session-name">'+escapeHtml(s.name||s.workspace_id)+'</span>'
           +'<span class="session-meta">'+s.msg_count+' msg</span>'
@@ -334,14 +350,25 @@ function deleteSession(wsId,name){
   .then(function(r){return r.json()})
   .then(function(d){
     if(d.success){
+      var row=document.querySelector('[data-ws-id="'+wsId+'"]');
+      if(row)row.remove();
       loadSessions();
       loadHistory();
-    }
+    } else { alert(d.error||'Delete failed'); }
   }).catch(function(){});
 }
 
+function openExitConfirm(){
+  var dialog=document.getElementById('exitConfirm');
+  dialog.hidden=false;
+  document.getElementById('confirmExitButton').focus();
+}
+function closeExitConfirm(){document.getElementById('exitConfirm').hidden=true}
+document.addEventListener('keydown',function(event){if(event.key==='Escape')closeExitConfirm()});
+
 async function releaseAgent(){
-  if(!confirm(document.documentElement.getAttribute('data-lang')==='zh'?'确定退出吗？你将返回登录页面。':'Exit? You will return to the login page.'))return;
+  var button=document.getElementById('confirmExitButton');
+  button.disabled=true;
   try{
     var response=await portalFetch('/portal/api/agent/release',{method:'POST'});
     var result=await response.json();
