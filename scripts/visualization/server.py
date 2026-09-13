@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.13 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.14 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -58,7 +58,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.13"
+VERSION = "4.4.14"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -1325,6 +1325,10 @@ class VisHandler(BaseHTTPRequestHandler):
 
         if path == '/portal/api/chat/delete':
             self._handle_portal_chat_delete()
+            return
+
+        if path == '/portal/api/chat/delete-batch':
+            self._handle_portal_chat_delete_batch()
             return
 
         if path == '/portal/api/chat/switch':
@@ -4492,6 +4496,45 @@ class VisHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({'success': False, 'error': str(e)}, 500)
 
+    def _handle_portal_chat_delete_batch(self):
+        session_data = _get_session(self)
+        if not session_data:
+            self._send_json({'success': False, 'error': 'Not authenticated'}, 401)
+            return
+        sess = session_data[1]
+        user_id = sess.get('user_id', '')
+        try:
+            data = json.loads(self._read_body() or '{}')
+            workspace_ids = data.get('workspace_ids') or []
+            if not isinstance(workspace_ids, list) or len(workspace_ids) > 100:
+                self._send_json({'success': False, 'error': 'workspace_ids must be a list of at most 100 items'}, 400)
+                return
+            workspace_ids = list(dict.fromkeys(str(value).strip() for value in workspace_ids if str(value).strip()))
+            current = str(sess.get('workspace_id') or '')
+            if current and current in workspace_ids:
+                self._send_json({'success': False, 'error': 'The active session cannot be deleted in bulk'}, 409)
+                return
+            if not workspace_ids:
+                self._send_json({'success': True, 'deleted': 0, 'workspace_ids': []})
+                return
+            connection.set_agent_context(None)
+            placeholders = ','.join(f':wid{i}' for i in range(len(workspace_ids)))
+            params = {'owner_user_id': user_id, **{f'wid{i}': value for i, value in enumerate(workspace_ids)}}
+            rows = connection.execute_query(
+                f"SELECT WORKSPACE_ID FROM WORKSPACES WHERE OWNER_USER_ID=:owner_user_id AND WORKSPACE_TYPE='CONVERSATION' AND STATUS='ACTIVE' AND WORKSPACE_ID IN ({placeholders})",
+                params,
+            )
+            found = [str(next(v for k, v in row.items() if k.lower() == 'workspace_id')) for row in rows]
+            if found:
+                found_params = {'owner_user_id': user_id, **{f'found{i}': value for i, value in enumerate(found)}}
+                connection.execute(
+                    f"UPDATE WORKSPACES SET STATUS='ABANDONED', UPDATED_AT=CURRENT_TIMESTAMP WHERE OWNER_USER_ID=:owner_user_id AND WORKSPACE_ID IN ({','.join(f':found{i}' for i in range(len(found)))})",
+                    found_params,
+                )
+            self._send_json({'success': True, 'deleted': len(found), 'workspace_ids': found})
+        except Exception as e:
+            self._send_json({'success': False, 'error': str(e)}, 500)
+
     def _handle_portal_chat_switch(self):
         session_data = _get_session(self)
         if not session_data:
@@ -4921,8 +4964,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.13', VERSION)
-            html = html.replace('2026-09-08', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.14', VERSION)
+            html = html.replace('2026-09-13', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

@@ -16,7 +16,10 @@ body{background:var(--cx-canvas);color:var(--cx-text);font-family:var(--cx-font-
 .sidebar-item.user-name{font-size:1rem;color:var(--cx-text);font-weight:600}
 .sidebar-item.user-type{font-size:.72rem;color:var(--cx-text-secondary)}
 .new-chat-btn{width:100%;padding:10px;background:var(--cx-brand-blue);color:var(--cx-canvas);border:none;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;margin-bottom:12px}
+.session-toolbar .new-chat-btn,.session-toolbar .session-manage-btn{box-sizing:border-box;height:38px;min-height:38px;padding-top:0;padding-bottom:0}
 .new-chat-btn:hover{background:var(--cx-brand-cyan)}
+.session-toolbar{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:start}.session-toolbar .new-chat-btn{margin-bottom:12px}.session-manage-btn,.session-bulk-delete{border:1px solid var(--cx-border);background:var(--cx-surface-strong);color:var(--cx-text-secondary);border-radius:6px;padding:9px 8px;font-size:.72rem;cursor:pointer;white-space:nowrap}.session-manage-btn:hover,.session-bulk-delete:hover{border-color:var(--cx-brand-blue);color:var(--cx-brand-blue)}.session-manage-bar{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:-2px 0 12px;padding:7px 8px;background:var(--cx-surface-strong);border:1px solid var(--cx-border);border-radius:6px;font-size:.7rem;color:var(--cx-text-secondary)}.session-manage-bar label{display:flex;align-items:center;gap:5px}.session-bulk-delete{padding:5px 7px;color:var(--cx-danger)}
+.session-check{flex:0 0 auto;width:15px;height:15px;accent-color:var(--cx-brand-blue)}
 .session-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background .15s;margin-bottom:4px;position:relative}
 .session-item:hover{background:var(--cx-surface-strong)}
 .session-item.active{background:var(--cx-surface-strong);border-left:2px solid var(--cx-brand-blue)}
@@ -58,6 +61,11 @@ body{background:var(--cx-canvas);color:var(--cx-text);font-family:var(--cx-font-
 [data-lang="en"] [data-zh]{display:none!important}
 
 @media(max-width:560px){
+  .top-bar{padding:8px 14px;flex-wrap:wrap;gap:8px}
+  .top-bar .actions{flex:1 1 100%;flex-wrap:wrap;gap:6px;min-width:0}
+  .top-bar .action-btn{padding:6px 10px}
+  .portal-llm-switch{flex:1 1 auto;min-width:0}
+  .portal-llm-switch select{max-width:100%;min-width:0}
   .cx-chat-brand .cx-lockup{width:108px;max-height:36px}
   .cx-chat-platform{display:none}
 }

@@ -163,15 +163,16 @@ def initialize() -> Dict[str, Any]:
                         "WHERE MEMBERSHIP_ID=:id",
                         {"id": historical["membership_id"]},
                     )
-        native = _row(tx.query_one("SELECT AGENT_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id FOR UPDATE", {"id": native_agent_api.PLATFORM_ADMIN_AGENT_ID}))
-        if native:
-            member = _row(tx.query_one("SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent FOR UPDATE", {"group_id": ADMIN_GROUP_ID, "agent": native_agent_api.PLATFORM_ADMIN_AGENT_ID}))
-            if not member:
-                tx.execute(
-                    "INSERT INTO CX_ADMIN_AGENT_MEMBERS(MEMBER_ID,GROUP_ID,AGENT_ID,ADMISSION_PATH,STATUS,VOTING_ENABLED,WEIGHT,NODE_ID,PUBLIC_KEY_DIGEST,APPROVED_AT) "
-                    "VALUES (:id,:group_id,:agent,'PLATFORM_DEPLOYED','ACTIVE','Y',5,'LOCAL_BOOTSTRAP','BUILTIN',CURRENT_TIMESTAMP)",
-                    {"id": _id("AAM"), "group_id": ADMIN_GROUP_ID, "agent": native_agent_api.PLATFORM_ADMIN_AGENT_ID},
-                )
+        for agent_id in management_agents:
+            native = _row(tx.query_one("SELECT AGENT_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id FOR UPDATE", {"id": agent_id}))
+            if native:
+                member = _row(tx.query_one("SELECT MEMBER_ID FROM CX_ADMIN_AGENT_MEMBERS WHERE GROUP_ID=:group_id AND AGENT_ID=:agent FOR UPDATE", {"group_id": ADMIN_GROUP_ID, "agent": agent_id}))
+                if not member:
+                    tx.execute(
+                        "INSERT INTO CX_ADMIN_AGENT_MEMBERS(MEMBER_ID,GROUP_ID,AGENT_ID,ADMISSION_PATH,STATUS,VOTING_ENABLED,WEIGHT,NODE_ID,PUBLIC_KEY_DIGEST,APPROVED_AT) "
+                        "VALUES (:id,:group_id,:agent,'PLATFORM_DEPLOYED','ACTIVE','Y',5,'LOCAL_BOOTSTRAP','BUILTIN',CURRENT_TIMESTAMP)",
+                        {"id": _id("AAM"), "group_id": ADMIN_GROUP_ID, "agent": agent_id},
+                    )
         for policy_key in ("DASHBOARD", "PORTAL"):
             policy = _row(tx.query_one("SELECT POLICY_KEY FROM CX_WEB_SESSION_POLICIES WHERE POLICY_KEY=:key FOR UPDATE", {"key": policy_key}))
             if not policy:

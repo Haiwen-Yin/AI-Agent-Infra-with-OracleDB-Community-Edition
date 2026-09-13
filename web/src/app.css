@@ -2908,9 +2908,37 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .cx-auth-title h1 { margin: 0 0 5px; font-size: 18px; line-height: 1.25; }
 .cx-auth-title p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.cx-auth-entry-actions,
 .cx-auth-return-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
-.cx-auth-return-actions a { justify-content: center; text-decoration: none; }
+.cx-auth-entry-actions a,
+.cx-auth-return-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  text-decoration: none;
+}
+.cx-auth-entry-actions a:hover,
+.cx-auth-return-actions a:hover {
+  border-color: var(--brand);
+  background: var(--surface-strong);
+  color: var(--brand);
+}
+.cx-auth-entry-actions .cx-auth-register-link { margin-top: 0; }
 .cx-auth-register-link { display: block; margin-top: 14px; color: var(--brand-deep); font-size: 12px; text-align: center; }
+@media (max-width: 560px) {
+  .cx-auth-entry-actions,
+  .cx-auth-return-actions { grid-template-columns: 1fr; }
+}
 .cx-auth-foot { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 0; padding-top: 14px; border-top: 1px solid var(--line); }
 .cx-form-notice {
   padding: 8px 10px;

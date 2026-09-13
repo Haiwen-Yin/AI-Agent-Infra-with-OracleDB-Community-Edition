@@ -1122,7 +1122,16 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         elif not _bootstrap_admin_configured(database, config):
             raise DeploymentError("initial administrator setup is incomplete; resume with --admin-password-file")
     migrations = _migration_apply(target_version, database, edition, config_path, config, root)
-    if not migrations or str(migrations[-1].get("script") or "") != terminal_migration:
+    # A resumed/idempotent migration run may return already-applied entries in
+    # ledger order rather than the manifest order.  The terminal contract is
+    # satisfied when the packaged terminal script is present and passed; it
+    # must not depend on it being the final list element.
+    terminal_result = next(
+        (item for item in migrations
+         if str(item.get("script") or "") == terminal_migration),
+        None,
+    )
+    if terminal_result is None or not terminal_result.get("passed"):
         raise DeploymentError("migration chain did not reach the packaged terminal migration")
     readiness = {"database": "PENDING", "control_plane": "PENDING", "llm": "UNCONFIGURED", "embedding": "UNCONFIGURED", "runtime": "PENDING", "enrollment": "BLOCKED"}
     _database_record(journal.run_id, mode, database, edition, target_version, plan_digest, journal_digest, "NATIVE_HANDOFF", readiness, "native-handoff")

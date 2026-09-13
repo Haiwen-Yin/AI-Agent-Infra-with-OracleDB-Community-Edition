@@ -136,7 +136,9 @@ def test_baseline_declares_packaged_version_and_terminal():
         if version == "4.4.12":
             terminal = "78_v4_4_12_gateway_credential_write_boundary.sql"
         if version == "4.4.13":
-            terminal = "79_v4_4_13_portal_knowledge_policy.sql"
+            terminal = "81_v4_4_13_portal_bilingual_knowledge.sql"
+        if version == "4.4.14":
+            terminal = "82_v4_4_14_governed_model_capabilities.sql"
         baseline = deployment_orchestrator.release_baseline(database, root)
         assert baseline["version"] == version
         assert baseline["deployment"] == "bootstrap-deployment-agent"

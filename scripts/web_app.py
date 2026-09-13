@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.13 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.14 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -35,16 +35,16 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
-    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
+    from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
-    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
+    from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.13"
+VERSION = "4.4.14"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -1569,6 +1569,13 @@ class GraphCapabilityBody(BaseModel):
     reason: str = Field(min_length=3, max_length=2000)
 
 
+class ModelCapabilityBody(BaseModel):
+    state: str = Field(min_length=1, max_length=32)
+    expected_version: int = Field(ge=1)
+    evidence_ref: str = Field(default="", max_length=256)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class LLMProviderProfileBody(BaseModel):
     profile_key: str = Field(min_length=1, max_length=128)
     provider_url: str = Field(min_length=1, max_length=512)
@@ -2658,6 +2665,33 @@ def graph_capability_update(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except graph_production_profile.ProfileUnavailable as exc:
         raise HTTPException(status_code=503, detail="Graph capability matrix is unavailable") from exc
+
+
+@app.get("/api/platform/model-capabilities")
+def model_capability_list(
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return model_capability_api.list_capabilities()
+    except model_capability_api.CapabilityUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Model capability registry is unavailable") from exc
+
+
+@app.put("/api/platform/model-capabilities/{capability_key}")
+def model_capability_update(
+    capability_key: str,
+    body: ModelCapabilityBody,
+    session: Dict[str, Any] = Depends(require_action("platform.manage")),
+) -> Dict[str, Any]:
+    try:
+        return model_capability_api.set_state(
+            str(session["principal_id"]), capability_key, body.state,
+            body.reason, body.expected_version, body.evidence_ref,
+        )
+    except model_capability_api.CapabilityConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except model_capability_api.CapabilityUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Model capability registry is unavailable") from exc
 
 
 @app.get("/api/platform/administration")

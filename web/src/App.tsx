@@ -969,7 +969,10 @@ function AuthScreen({
             <a className="secondary-button" href="/app">{text("返回 Dashboard 登录", "Back to Dashboard login")}</a>
           </div>
         ) : (
-          <a className="cx-auth-register-link" href="/register?entry=dashboard">{text("注册新账户", "Register a new account")}</a>
+          <div className="cx-auth-entry-actions">
+            <a className="cx-auth-register-link" href="/register?entry=dashboard">{text("注册新账户", "Register a new account")}</a>
+            <a className="secondary-button" href="/portal/login">{text("进入 Portal", "Open Portal")}</a>
+          </div>
         )}
         <p className="cx-auth-foot">
           {text(

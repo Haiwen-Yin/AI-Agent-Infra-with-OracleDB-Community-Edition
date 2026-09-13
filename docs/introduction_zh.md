@@ -1,7 +1,7 @@
-# 川序：Oracle AI Database 26ai 社区版 v4.4.13 中文介绍
+# 川序：Oracle AI Database 26ai 社区版 v4.4.14 中文介绍
 
-**版本**: v4.4.13
-**日期**: 2026-09-08
+**版本**: v4.4.14
+**日期**: 2026-09-13
 **许可**: Apache License 2.0
 
 [返回 README](../README.md) · [官方网站](https://db4agent.cn)
@@ -11,6 +11,12 @@
 川序（Chuanxu）是基于数据库的 AI Agent 管理平台，为企业内部及外部智能体保存身份、组织、知识、记忆、工作上下文、任务状态及治理记录。数据库负责持久状态和数据授权，模型负责推理与生成，Agent 运行进程负责执行。三者凭据和权限分别管理。
 
 技术项目名为 AI Agent Infra with DB。本包只适配 Oracle AI Database 26ai。社区版与企业版从同一仓库生成，实际可用能力取决于发行版、平台开关和主体权限。
+
+## v4.4.14 当前能力说明
+
+本版本以数据库中的能力矩阵为唯一准入依据，统一管理模型推理、结构化输出、模型工具调用、MCP、A2A 和受控执行。能力状态为 `OFF`（关闭）、`READ_ONLY`（只读）、`PROPOSAL_ONLY`（仅提案）或 `GOVERNED_EXECUTOR`（经治理的执行器），每次变更都需要并发版本和不可变审计记录。MCP 与 A2A 默认关闭；模型生成的写入、策略变更、Agent 控制、外部联系和发布默认只能形成提案，除非当前策略、信任信息和人工审批共同允许。
+
+模型供应商证据采用脱敏、规范化格式，记录模型身份、可见内容、结构化校验、工具调用、用量、延迟、超时、取消、重试和完成状态，不保存隐藏推理内容或完整提示词。直连调用与平台网关可以并存，未被网关观测的直连流量不能被报告为零消耗。完整接口、迁移 82 和验收边界见包内英文技术文档；本节是面向中文读者的能力和限制摘要。
 
 ## 功能与边界
 
@@ -49,7 +55,7 @@ DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 
 
 ## 从空目标部署
 
-先阅读 [部署说明](deployment.md)，由 DBA 完成包内 `scripts/deploy/0_oracle_database_prerequisites.sql` 对应的前置操作，准备独立空目标。数据库安装、PDB 创建、恢复与基础设施权限由数据库运维负责。
+先阅读 [中文运维与部署说明](operations_zh.md)，由 DBA 完成包内 `scripts/deploy/0_oracle_database_prerequisites.sql` 对应的前置操作，准备独立空目标。数据库安装、PDB 创建、恢复与基础设施权限由数据库运维负责。
 
 在解压后的发行包根目录执行：
 
@@ -57,7 +63,7 @@ DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.4.13 --database oracle \
+  --version 4.4.14 --database oracle \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status
@@ -65,7 +71,7 @@ bash start_web_server.sh status
 
 上例适用于社区版；企业版安装包将 `--edition community` 改为 `--edition enterprise`。使用可访问的 Python 3.14 和匹配依赖。初始化按清单执行 SQL、核对迁移记录和部署后检查；不要只运行少数历史 SQL。
 
-配置向导设置数据库连接、Web 监听地址/端口、LLM 地址、模型 ID 和凭据，并执行服务探测。向量嵌入使用统一契约。初始管理员密码由初始化流程输入，不存在通用默认密码；首次初始化不要求客户端备份文件。已有数据按 [迁移](migration.md) 与数据库恢复策略处理。
+配置向导设置数据库连接、Web 监听地址/端口、LLM 地址、模型 ID 和凭据，并执行服务探测。向量嵌入使用统一契约。初始管理员密码由初始化流程输入，不存在通用默认密码；首次初始化不要求客户端备份文件。已有数据按 [中文运维与部署说明](operations_zh.md) 与数据库恢复策略处理。
 
 ## Web 与外部接入
 
@@ -77,7 +83,7 @@ bash start_web_server.sh status
 
 初始化失败应保留脱敏错误、迁移位置和 postflight 结果，按数据库文档修复；不反复清空目标掩盖原因。运行问题先查服务状态、数据库连接、会话、权限和能力开关，再核对模型健康与 Embedding 契约。
 
-数据库、页面、运行隔离分别验收，任何一种通过不能替代其他测试。参见 [恢复](recovery.md)、[模型用量](model-usage-and-wallboard.md)、[组织治理](organization-governance.md)、[API](api-reference.md)。
+数据库、页面、运行隔离分别验收，任何一种通过不能替代其他测试。参见 [中文运维与技术说明](operations_zh.md)。
 
 ## 许可与作者
 

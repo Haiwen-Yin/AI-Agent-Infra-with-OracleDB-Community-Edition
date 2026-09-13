@@ -12,6 +12,13 @@ type Props = {
   onSend: (mentions: string[]) => Promise<void>;
 };
 
+const managementMentionLabel = (item: Row) => {
+  const id = String(item.principal_id || "");
+  if (id === "SYSTEM_COMPLIANCE_ADMIN_AGENT") return "Compliance Admin Agent";
+  if (id === "SYSTEM_PLATFORM_ADMIN_AGENT") return "Platform Admin Agent";
+  return String(item.display_name || item.principal_id || "").trim();
+};
+
 export default function ChannelComposer(props: Props) {
   const { body, setBody, members, commands, text } = props;
   const input = useRef<HTMLTextAreaElement>(null);
@@ -26,7 +33,7 @@ export default function ChannelComposer(props: Props) {
   const mention = possibleMention && !mentions.some((item) => item.start === possibleMention.start && caret > item.end) ? possibleMention : null;
   const query = commandQuery(body);
   const mentionItems = mention ? members.filter((item) =>
-    `${item.display_name || ""} ${item.principal_id}`.toLowerCase().includes(mention.query)).slice(0, 8) : [];
+    `${managementMentionLabel(item)} ${item.display_name || ""} ${item.principal_id}`.toLowerCase().includes(mention.query)).slice(0, 8) : [];
   const commandItems = query !== null ? commands.filter((item) =>
     `${item.command_key} ${item.metadata?.name_zh || ""} ${item.metadata?.name_en || ""} ${item.metadata?.summary_zh || ""}`.toLowerCase().includes(query)).slice(0, 10) : [];
   const items = dismissed ? [] : mention ? mentionItems : commandItems;
@@ -43,7 +50,7 @@ export default function ChannelComposer(props: Props) {
   });
   const pick = (item: Row) => {
     if (mention) {
-      const label = `@${String(item.display_name || item.principal_id).trim()}`;
+      const label = `@${managementMentionLabel(item)}`;
       const next = body.slice(0, mention.start) + label + " " + body.slice(mention.end);
       const position = mention.start + label.length + 1;
       update(next, position, [...rebaseMentions(body, next, mentions), { start: mention.start, end: position - 1, label, principalId: String(item.principal_id) }]);
@@ -58,7 +65,16 @@ export default function ChannelComposer(props: Props) {
   const submit = async () => {
     if (props.sending || composing.current || !body.trim()) return;
     if (hasCommandPlaceholders(body)) { setError(text("请填写命令中的参数和原因。", "Complete the command parameters and reason.")); return; }
-    await props.onSend(selectedMentionIds(body, mentions, new Set(members.map((item) => String(item.principal_id)))));
+    const memberIds = new Set(members.map((item) => String(item.principal_id)));
+    const selectedIds = selectedMentionIds(body, mentions, memberIds);
+    // Accept the localized labels for the two built-in management Agents when
+    // a user types them directly instead of selecting autocomplete.
+    const directIds = members.filter((item) => {
+      const id = String(item.principal_id || "");
+      if (id !== "SYSTEM_COMPLIANCE_ADMIN_AGENT" && id !== "SYSTEM_PLATFORM_ADMIN_AGENT") return false;
+      return body.includes(`@${managementMentionLabel(item)}`);
+    }).map((item) => String(item.principal_id));
+    await props.onSend([...new Set([...selectedIds, ...directIds])]);
   };
   const insertTrigger = (trigger: string) => {
     const position = input.current?.selectionStart ?? body.length;

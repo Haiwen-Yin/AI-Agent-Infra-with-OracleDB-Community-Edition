@@ -88,7 +88,8 @@ def search(actor: str, agent: str, query: str, *, limit: int = 8, entity_ids: li
             for i in range(len(terms))
         )
     else:
-        relevance = "0"
+        # Empty-query inventory must use valid sortable SQL on every adapter.
+        relevance = "e.UPDATED_AT"
     if entity_ids is not None:
         if not entity_ids:
             return {"status": "NO_MATCH", "items": [], "retrieval_mode": "KEYWORD"}

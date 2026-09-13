@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.13 - Community Edition - Task Plan API
+"""AI Agent Infra v4.4.14 - Community Edition - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.

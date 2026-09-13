@@ -33,6 +33,16 @@ def test_protected_management_agents_receive_explicit_default_domain_admission()
     assert "management_agents = [native_agent_api.PLATFORM_ADMIN_AGENT_ID]" in management
     assert "CX_DOMAIN_MEMBERS" in management
     assert "their audited reply is rejected" in management
+    assert "for agent_id in management_agents:" in management
+    assert "CX_ADMIN_AGENT_MEMBERS" in management
+
+
+def test_mention_prefixed_platform_commands_keep_the_governed_command_path():
+    root = Path(__file__).resolve().parents[1]
+    native = (root / "lib" / "native_agent_api.py").read_text(encoding="utf-8")
+    assert 're.search(r"(?:^|\\s)(/platform\\s+.+)$"' in native
+    assert "command_match.group(1).strip()" in native
+    assert "platform_agent_pool.create_command(" in native
 
 
 def test_channel_streaming_and_markdown_are_owned_by_the_control_plane():

@@ -359,6 +359,18 @@ input::placeholder, textarea::placeholder { color: var(--cx-text-muted) !importa
 .alert-danger, .error-msg { color: var(--cx-danger) !important; }
 .version-badge { color: var(--cx-text-muted) !important; border-color: var(--cx-border) !important; }
 
+/* Keep the standalone Dashboard/Portal auth actions identical to the App auth panel. */
+.login-card .btn-login,
+.portal-card .submit-btn {
+  min-height: 34px !important;
+  padding: 7px 12px !important;
+  border-radius: 3px !important;
+  border: 1px solid var(--cx-brand-blue) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 18px !important;
+}
+
 /* Portal chat */
 .main-layout { background: var(--cx-canvas) !important; }
 .main-layout > .sidebar { position: relative; height: calc(100vh - 64px); }

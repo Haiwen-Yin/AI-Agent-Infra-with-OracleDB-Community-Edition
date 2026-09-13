@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.13">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.14">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.13 - Login</title>
+<title>Chuanxu Oracle Community v4.4.14 - Login</title>
 <link rel="stylesheet" href="/static/pages/login.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -11,13 +11,10 @@
 <style id="cx-prepaint">html[data-theme="light"] body{background:#dce2e8;color:#102033}html[data-theme="light"] body{visibility:visible}</style>
 </head>
 <body class="cx-ui">
-<button class="lang-toggle" onclick="toggleLang()">
-  <span data-zh>EN</span><span data-en>中文</span>
-</button>
-
 <div class="login-card">
-  <h2><span data-zh>川序 AI Agent 管理平台</span><span data-en>Chuanxu AI Agent Management Platform</span></h2>
-  <p class="subtitle"><span data-zh>请输入用户名和密码登录</span><span data-en>Please enter username and password to login</span></p>
+  <div class="login-controls"><button type="button" class="cx-theme-toggle login-icon-button" aria-label="Toggle theme"></button><button type="button" class="lang-toggle" onclick="toggleLang()"><span data-zh>EN</span><span data-en>中</span></button></div>
+  <div class="login-brand"><img src="/static/brand/chuanxu-mark.svg" alt=""><div><strong><span data-zh>川序</span><span data-en>Chuanxu</span></strong><small><span data-zh>AI Agent 管理平台</span><span data-en>AI Agent Management Platform</span></small></div></div>
+  <div class="login-title"><h2><span data-zh>登录管理平台</span><span data-en>Sign in to Dashboard</span></h2><p class="subtitle"><span data-zh>请输入用户名和密码登录</span><span data-en>Please enter username and password to login</span></p></div>
 
   <div id="errorMsg" class="alert alert-danger d-none"></div>
 
@@ -41,7 +38,9 @@
     </button>
   </form>
 
-  <div class="version-badge">Oracle Community Edition v4.4.13</div>
+  <div class="login-entry-actions"><a href="/portal/login"><span data-zh>进入 Portal</span><span data-en>Open Portal</span></a></div>
+
+  <div class="version-badge">Oracle Community Edition v4.4.14</div>
 </div>
 
 <script>
@@ -109,7 +108,7 @@ async function handleLogin(e) {
 
 applyLang(document.documentElement.getAttribute('data-lang') || 'en');
 
-(function(){var q=new URLSearchParams(location.search).get('cx_lang'),sl=q||localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl}})();
+(function(){var q=new URLSearchParams(location.search).get('cx_lang'),sl=q||localStorage.getItem('lang');if(sl){document.documentElement.setAttribute('data-lang',sl);document.documentElement.lang=sl;localStorage.setItem('lang',sl);applyLang(sl)}})();
 </script>
 </body>
 </html>

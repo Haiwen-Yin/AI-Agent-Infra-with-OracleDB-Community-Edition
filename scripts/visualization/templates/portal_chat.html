@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.13">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.14">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.13 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.4.14 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -30,7 +30,8 @@
       <div id="userInfo">-</div>
     </div>
     <div class="sidebar-section" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
-      <button class="new-chat-btn" onclick="newChat()"><span data-zh>+ 新建会话</span><span data-en>+ New Chat</span></button>
+      <div class="session-toolbar"><button class="new-chat-btn" onclick="newChat()"><span data-zh>+ 新建会话</span><span data-en>+ New Chat</span></button><button class="session-manage-btn" id="sessionManageBtn" onclick="toggleSessionManager()"><span data-zh>管理</span><span data-en>Manage</span></button></div>
+      <div class="session-manage-bar" id="sessionManageBar" hidden><label><input type="checkbox" id="selectAllSessions" onchange="toggleAllSessions(this.checked)"><span data-zh>全选历史会话</span><span data-en>Select all history</span></label><button type="button" class="session-bulk-delete" onclick="deleteSelectedSessions()"><span data-zh>删除所选</span><span data-en>Delete selected</span></button></div>
       <h6><span data-zh>会话列表</span><span data-en>Sessions</span></h6>
       <div id="sessionList" style="flex:1;overflow-y:auto"></div>
     </div>
@@ -144,7 +145,8 @@ function loadSessions(){
         div.className='session-item'+(s.is_current?' active':'');
         div.dataset.wsId=s.workspace_id;
         div.dataset.wsId=s.workspace_id;
-        div.innerHTML='<span class="session-name">'+escapeHtml(s.name||s.workspace_id)+'</span>'
+        var selectable=!document.getElementById('sessionManageBar').hidden&&!s.is_current;
+        div.innerHTML=(selectable?'<input class="session-check" type="checkbox" value="'+escapeHtml(s.workspace_id)+'" aria-label="Select session">':'')+'<span class="session-name">'+escapeHtml(s.name||s.workspace_id)+'</span>'
           +'<span class="session-meta">'+s.msg_count+' msg</span>'
           +'<span class="session-actions">'
           +'<button class="sa-btn" aria-label="Rename" onclick="event.stopPropagation();renameSession(\''+s.workspace_id+'\',\''+escapeHtml(s.name||'').replace(/'/g,"\\'")+'\')" title="Rename"><svg class="cx-nav-icon"><use href="/static/chuanxu-icons.svg#edit"></use></svg></button>'
@@ -157,6 +159,16 @@ function loadSessions(){
       el.innerHTML='<div class="sidebar-item" style="color:var(--cx-text-secondary)"><span data-zh>暂无会话</span><span data-en>No sessions</span></div>';
     }
   }).catch(function(){});
+}
+
+function toggleSessionManager(){var bar=document.getElementById('sessionManageBar');bar.hidden=!bar.hidden;document.getElementById('selectAllSessions').checked=false;loadSessions()}
+function toggleAllSessions(checked){document.querySelectorAll('.session-check').forEach(function(box){box.checked=checked})}
+function deleteSelectedSessions(){
+  var ids=Array.from(document.querySelectorAll('.session-check:checked')).map(function(box){return box.value});
+  var zh=document.documentElement.getAttribute('data-lang')==='zh';
+  if(!ids.length){alert(zh?'请选择要删除的历史会话':'Select at least one historical session');return}
+  if(!confirm(zh?'确定批量删除选中的 '+ids.length+' 个历史会话？':'Delete '+ids.length+' selected historical sessions?'))return;
+  portalFetch('/portal/api/chat/delete-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace_ids:ids})}).then(function(r){return r.json()}).then(function(d){if(!d.success)throw new Error(d.error||'Delete failed');document.getElementById('sessionManageBar').hidden=true;document.getElementById('selectAllSessions').checked=false;loadSessions()}).catch(function(error){alert(error.message)})
 }
 
 function loadHistory(){

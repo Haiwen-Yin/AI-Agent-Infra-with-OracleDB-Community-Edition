@@ -1,5 +1,11 @@
 # Changelog
 
+## v4.4.14 - 2026-09-13
+
+- Added migration 82 and equivalent database-authoritative model capability controls across Oracle, PostgreSQL, and YashanDB.
+- Added secret-free provider evidence normalization and fail-closed structured-output/tool-call decisions.
+- Verified all six generated editions against isolated real databases and retained MCP/A2A execution as disabled by default.
+
 ## v4.4.11 - 2026-08-31
 
 - Added evidence-bound Runtime isolation admission and drift detection.

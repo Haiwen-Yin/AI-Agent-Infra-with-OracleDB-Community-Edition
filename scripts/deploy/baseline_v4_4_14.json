@@ -1,9 +1,9 @@
 {
-  "version": "4.4.13",
+  "version": "4.4.14",
   "database": "oracle",
   "fresh_install": true,
   "deployment": "bootstrap-deployment-agent",
-  "required_terminal_migration": "79_v4_4_13_portal_knowledge_policy.sql",
+  "required_terminal_migration": "82_v4_4_14_governed_model_capabilities.sql",
   "historical_chain": "retained-for-audit",
   "withdrawn_upgrade_sources": [
     "4.4.8"

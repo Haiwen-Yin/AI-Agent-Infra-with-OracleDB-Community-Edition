@@ -31,8 +31,8 @@ body{background:linear-gradient(145deg,var(--cx-canvas),var(--cx-surface-strong)
 .select-arrow svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .auth-mode-select:focus-within .select-arrow{color:var(--cx-brand-blue)}
 .form-select option{background:var(--cx-surface);color:var(--cx-text)}
-.submit-btn{width:100%;padding:12px;background:var(--cx-brand-blue);color:var(--cx-canvas);border:none;border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer;transition:all .2s;margin-top:8px}
-.submit-btn:hover{background:var(--cx-brand-cyan)}
+.submit-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:34px;padding:7px 12px;background:var(--cx-brand-blue);color:#fff;border:1px solid var(--cx-brand-blue);border-radius:3px;font-size:12px;font-weight:700;line-height:18px;cursor:pointer;transition:all .15s;margin-top:8px}
+.submit-btn:hover{background:var(--cx-brand-cyan);border-color:var(--cx-brand-cyan);color:#fff}
 .submit-btn:disabled{opacity:.5;cursor:not-allowed}
 .error-msg{color:var(--cx-danger);font-size:.82rem;text-align:center;margin-top:12px;min-height:20px}
 .hint-text{text-align:center;color:var(--cx-text-secondary);font-size:.82rem;margin-bottom:16px}
@@ -46,6 +46,6 @@ body{background:linear-gradient(145deg,var(--cx-canvas),var(--cx-surface-strong)
 .lang-toggle{background:var(--cx-surface-strong);border:1px solid var(--cx-border);color:var(--cx-text-secondary);border-radius:6px;padding:4px 12px;font-size:.78rem;cursor:pointer;transition:all .2s}
 .lang-toggle:hover{border-color:var(--cx-brand-blue);color:var(--cx-text)}
 .portal-entry-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
-.portal-entry-actions a{display:flex;align-items:center;justify-content:center;min-height:34px;padding:7px 8px;border:1px solid var(--cx-border);border-radius:6px;color:var(--cx-text-secondary);font-size:.72rem;text-decoration:none;text-align:center}
-.portal-entry-actions a:hover{border-color:var(--cx-brand-blue);color:var(--cx-brand-blue)}
+.portal-entry-actions a{display:flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border:1px solid var(--cx-border);border-radius:3px;background:transparent;color:var(--cx-text-secondary);font-size:12px;font-weight:700;line-height:18px;text-decoration:none;text-align:center}
+.portal-entry-actions a:hover{border-color:var(--cx-brand-blue);color:var(--cx-brand-blue);background:var(--cx-surface-strong)}
 @media(max-width:560px){body{padding:16px 12px}.portal-card{width:100%;padding:26px 22px}.portal-entry-actions{grid-template-columns:1fr}.portal-brand{margin-right:72px}}

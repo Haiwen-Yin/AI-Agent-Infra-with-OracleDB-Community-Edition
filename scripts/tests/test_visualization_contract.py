@@ -262,6 +262,30 @@ def test_portal_exposes_separate_dashboard_and_registration_entries():
     assert '<a href="/register?entry=portal">' in portal_login
 
 
+def test_dashboard_login_exposes_portal_entry_with_shared_auth_surface():
+    dashboard = (TEMPLATES_DIR / "login.html").read_text(encoding="utf-8")
+    dashboard_css = (TEMPLATES_DIR.parent / "static" / "pages" / "login.css").read_text(encoding="utf-8")
+    portal_css = (TEMPLATES_DIR.parent / "static" / "pages" / "portal_login.css").read_text(encoding="utf-8")
+    assert '<a href="/portal/login">' in dashboard
+    assert 'class="login-brand"' in dashboard
+    assert 'class="cx-theme-toggle login-icon-button"' in dashboard
+    assert 'var(--cx-surface)' in dashboard_css and 'var(--cx-surface)' in portal_css
+
+
+def test_portal_knowledge_inventory_and_bulk_session_management_contract():
+    grounding = (TEMPLATES_DIR.parent.parent / "lib" / "knowledge_grounding.py").read_text(encoding="utf-8")
+    server = SERVER_PATH.read_text(encoding="utf-8")
+    chat = (TEMPLATES_DIR / "portal_chat.html").read_text(encoding="utf-8")
+    assert 'relevance = "e.UPDATED_AT"' in grounding
+    assert "'/portal/api/chat/delete-batch'" in server
+    assert "def _handle_portal_chat_delete_batch" in server
+    assert "sessionManageBar" in chat and "deleteSelectedSessions" in chat
+    # UID is an Oracle-reserved identifier in bind contexts (ORA-01745).
+    batch_sql = server.split("def _handle_portal_chat_delete_batch", 1)[1].split("def _handle_portal_chat_switch", 1)[0]
+    assert ":uid" not in batch_sql
+    assert ":owner_user_id" in batch_sql
+
+
 def test_dashboard_mfa_is_explicitly_configured_after_login():
     app = (TEMPLATES_DIR.parent.parent / "web_app.py").read_text(encoding="utf-8")
     ui, _ = _react_ui_source()

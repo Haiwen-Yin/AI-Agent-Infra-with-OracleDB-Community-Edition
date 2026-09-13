@@ -1235,7 +1235,8 @@ def is_management_status_request(body: str) -> bool:
     """Recognize read-only platform-health requests without intent expansion."""
     value = str(body or "").lower()
     markers = (
-        "运行状态", "平台状态", "当前状态", "系统状态", "健康状态", "检查状态",
+        "运行状态", "运行情况", "平台运行", "平台状态", "当前状态", "系统状态", "健康状态", "检查状态",
+        "合规安全", "合规情况", "compliance status", "security status",
         "runtime status", "platform status", "system status", "health status",
     )
     return any(marker in value for marker in markers)
@@ -1256,7 +1257,9 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
 
     if channel_id != admin_management.ADMIN_CHANNEL_ID:
         raise NativeAgentError("native Channel execution is limited to the Platform Administration Channel")
-    is_platform_command = str(body or "").strip().lower().startswith("/platform ")
+    stripped_body = str(body or "").strip()
+    command_match = re.search(r"(?:^|\s)(/platform\s+.+)$", stripped_body, re.IGNORECASE)
+    is_platform_command = bool(command_match)
     if is_platform_command and mentioned_agent_id != PLATFORM_ADMIN_AGENT_ID:
         raise NativeAgentError("typed platform commands are handled by the Platform Admin Agent")
     if mentioned_agent_id not in {PLATFORM_ADMIN_AGENT_ID, COMPLIANCE_ADMIN_AGENT_ID}:
@@ -1274,7 +1277,7 @@ def create_channel_execution(actor: str, channel_id: str, message_id: str, body:
     # Action Card used by Dashboard. Ordinary prose remains conversational and
     # can only request a read-only status snapshot.
     command_notice: Dict[str, Any] = {}
-    stripped = str(body or "").strip()
+    stripped = command_match.group(1).strip() if command_match else stripped_body
     if stripped.lower().startswith("/platform "):
         from . import platform_agent_pool
         parsed = platform_agent_pool.parse_channel_command(actor, stripped)
