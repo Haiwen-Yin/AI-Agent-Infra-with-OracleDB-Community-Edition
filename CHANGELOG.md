@@ -6,6 +6,18 @@
 - Added secret-free provider evidence normalization and fail-closed structured-output/tool-call decisions.
 - Verified all six generated editions against isolated real databases and retained MCP/A2A execution as disabled by default.
 
+## v4.4.13 - 2026-09-08
+
+- Added governed bilingual Portal Knowledge retrieval, Human/Agent authorization intersection, citations, and explicit no-model/no-match behavior.
+- Added protected Channel mention dispatch, Admin/Compliance Agent management commands, Skill/Tool administration, and content-security checks.
+- Added migrations 80-81 for six bilingual product-Knowledge topics.
+
+## v4.4.12 - 2026-09-06
+
+- Repaired YashanDB external-role credential boundaries and native-client loading checks.
+- Bound legacy session cookies to the request port, hardened DB4A2A context and branch authorization, and separated cached Agent sessions across concurrent callers.
+- Rewrote the six Chinese adapter introductions and added generated-edition README links.
+
 ## v4.4.11 - 2026-08-31
 
 - Added evidence-bound Runtime isolation admission and drift detection.
