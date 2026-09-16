@@ -259,7 +259,9 @@ def test_portal_exposes_separate_dashboard_and_registration_entries():
     assert '@app.get("/login", include_in_schema=False)' in web_app
     assert 'RedirectResponse(url="/app", status_code=302)' in web_app
     assert '<a href="/app">' in portal_login
-    assert '<a href="/register?entry=portal">' in portal_login
+    # Registration remains an explicit entry surface but may be hidden by the
+    # deployment policy that screens registration from the login page.
+    assert re.search(r'<a href="/register\?entry=portal"(?:\s[^>]*)?>', portal_login)
 
 
 def test_dashboard_login_exposes_portal_entry_with_shared_auth_surface():

@@ -347,10 +347,15 @@ def reclaim_local_instances(node_id: str, reason: str = "web node restart") -> i
 def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: str = "", required_scope: str = "", *, operation: str = "work") -> Optional[Dict[str, Any]]:
     if not raw_token:
         return None
-    row = identity_api._row(connection.execute_query_one(
+    return _authenticate_access_token_digest(_digest(raw_token,"agent-access-token"),agent_id,instance_id,required_scope,operation=operation)
+
+
+def _authenticate_access_token_digest(token_digest: str, agent_id: str = "", instance_id: str = "", required_scope: str = "", *, operation: str = "work", query_one=None) -> Optional[Dict[str, Any]]:
+    """Internal receipt revalidation; never accept token digests as public bearers."""
+    row = identity_api._row((query_one or connection.execute_query_one)(
         "SELECT t.TOKEN_DIGEST, t.AGENT_ID, t.INSTANCE_ID, t.SCOPE_JSON, t.LEASE_DIGEST, "
         "t.FENCING_TOKEN, t.EXPIRES_AT, i.STATUS AS INSTANCE_STATUS, i.LEASE_EXPIRES_AT, "
-        "i.FENCING_TOKEN AS CURRENT_FENCING_TOKEN, p.STATUS AS AGENT_STATUS "
+        "i.FENCING_TOKEN AS CURRENT_FENCING_TOKEN, p.STATUS AS AGENT_STATUS,i.SECURITY_DOMAIN_ID "
         "FROM CX_AGENT_ACCESS_TOKENS t JOIN CX_AGENT_INSTANCES i ON i.INSTANCE_ID = t.INSTANCE_ID "
         "JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID = t.AGENT_ID "
         "WHERE t.TOKEN_DIGEST = :digest AND t.REVOKED_AT IS NULL "
@@ -362,7 +367,7 @@ def authenticate_access_token(raw_token: str, agent_id: str = "", instance_id: s
         "WHERE ric.AGENT_ID=t.AGENT_ID AND ric.INSTANCE_ID=t.INSTANCE_ID) OR EXISTS "
         "(SELECT 1 FROM CX_RUNTIME_ISOLATION_CONTRACTS ric WHERE ric.AGENT_ID=t.AGENT_ID "
         "AND ric.INSTANCE_ID=t.INSTANCE_ID AND ric.STATUS='ACTIVE'))",
-        {"digest": _digest(raw_token, "agent-access-token")},
+        {"digest": token_digest},
     ))
     if not row or (agent_id and str(row.get("agent_id")) != agent_id) or (instance_id and str(row.get("instance_id")) != instance_id):
         return None

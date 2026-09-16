@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.4.14
+# Deployment Guide - AI Agent Infra with DB v4.4.15
 
 ## Startup Mode And Database Governance
 
@@ -29,11 +29,12 @@ Oracle Linux 9.8 x86_64 is the only strong-isolation host currently verified by
 this project; other distributions require the packaged gate on their exact
 image and patch level.
 
-v4.4.10 adds optional model forwarding, usage/cost accounting, per-profile
-routing, and an authenticated read-only executive wallboard. It is the clean
-deployment baseline for new installations. Apply the
-migration-runner selected chain through migration 65;
-the adapter `deploy/baseline_v4_4_10.json` is the authoritative package manifest.
+Use the selected package's sole `scripts/deploy/baseline_v*.json` as the
+current new-install contract. v4.4.15 ends at migration 97 across all three
+databases; v4.4.14 ended at 82. The runner verifies the exact ordered chain.
+Historically, v4.4.10 added optional model forwarding, usage/cost accounting,
+per-profile routing and the read-only wallboard through migration 65. Its
+source template filename is not the current generated deployment contract.
 v4.4.8 is withdrawn and must not be used as an upgrade source. Existing historical
 SQL remains retained for audit/reference, while fresh deployment uses the ordered
 manifest and does not require customer upgrade compatibility.
@@ -210,7 +211,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.4.14 --database <oracle|pg|yashandb> \
+  --version 4.4.15 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -241,7 +242,7 @@ an Argon2id hash is stored.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.14 --database <oracle|pg|yashandb> \
+  --version 4.4.15 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json
 ```
 
@@ -259,7 +260,7 @@ another verified Python 3.14 environment.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.4.14 --database <oracle|pg|yashandb> \
+  --version 4.4.15 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json \
   --admin-password-file /run/secrets/chuanxu-initial-admin
 ```
@@ -410,7 +411,7 @@ The verifier checks wheel metadata, Python/platform compatibility, glibc 2.34+
 host baseline, and RECORD integrity before install.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.4.14`. The current `production`
+through `migration_runner.py --version 4.4.15`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
@@ -1020,7 +1021,7 @@ Agent instead of an external Skill runtime:
 
 ```bash
 bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --version 4.4.14 --config config.json
+  --edition <community|enterprise> --version 4.4.15 --config config.json
 ```
 
 The command verifies a strictly empty target, records a database-managed

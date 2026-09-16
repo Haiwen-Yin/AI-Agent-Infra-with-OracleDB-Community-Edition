@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Web Visualization Server
+"""AI Agent Infra v4.4.15 - Community Edition - Web Visualization Server
 
 Lightweight HTTP server providing session-based auth, page routing,
 and JSON API endpoints for knowledge, memory, agents, tasks, workspaces,
@@ -58,7 +58,7 @@ if edition_features.has_feature('governance'):
 else:
     governance_api = None
 
-VERSION = "4.4.14"
+VERSION = "4.4.15"
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), 'templates')
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
@@ -699,13 +699,13 @@ def _get_tags_for_entities(entity_ids):
     if not entity_ids:
         return {}
     tags_map = {}
+    params = {f'entity{i}': value for i, value in enumerate(dict.fromkeys(entity_ids))}
     rows = connection.execute_query(
         "SELECT et.entity_id, t.tag_name FROM entity_tags et JOIN tags t ON et.tag_id = t.tag_id "
-        "WHERE et.entity_id IN (%s)"
-        % ','.join(["'%s'" % eid for eid in entity_ids])
+        "WHERE et.entity_id IN ({})".format(','.join(':' + name for name in params)), params,
     )
     for r in rows:
-        eid = r['entity_id']
+        eid = str(r['entity_id'])
         if eid not in tags_map:
             tags_map[eid] = []
         tags_map[eid].append(r['tag_name'])
@@ -735,7 +735,7 @@ def _knowledge_to_vis(principal_id=None):
             'topic': item.get('topic') or '',
             'difficulty': item.get('difficulty') or '',
             'review_count': item.get('review_count', 0),
-            'tags': tags_map.get(item['entity_id'], []),
+            'tags': tags_map.get(str(item['entity_id']), []),
         })
     vis_edges = []
     for e in edges:
@@ -751,7 +751,11 @@ def _knowledge_to_vis(principal_id=None):
 def _memory_to_vis():
     items = memory_api.search_memories(limit=500)
     version_ids = [str(i.get('version_id')) for i in items if i.get('version_id')]
-    eids = [i['entity_id'] for i in items if i.get('entity_id')]
+    # Versioned families need not have a legacy ENTITIES row. Their family ID
+    # is a display compatibility ID, never an entity_tags foreign key.
+    def legacy_id(item):
+        return item.get('legacy_entity_id') if item.get('family_id') else item.get('entity_id')
+    eids = [legacy_id(item) for item in items if legacy_id(item) is not None]
     tags_map = _get_tags_for_entities(eids)
     try:
         # Do not let the library's newest-500 window hide valid relationships
@@ -806,7 +810,7 @@ def _memory_to_vis():
             'lifecycle_state': item.get('lifecycle_state') or item.get('status') or '',
             'visibility': item.get('visibility') or '',
             'owned_by_agent': item.get('owned_by_agent') or '',
-            'tags': tags_map.get(item['entity_id'], []),
+            'tags': tags_map.get(str(legacy_id(item)), []),
         })
     # A current-memory view needs the linked historical endpoints; otherwise
     # valid lineage edges are silently dropped by the client graph renderer.
@@ -3837,16 +3841,30 @@ class VisHandler(BaseHTTPRequestHandler):
             page_lease = identity_api.acquire_portal_page_lease(session_id, page_instance)
             sess['portal_page_lease_id'] = page_lease['lease_id']
         except identity_api.IdentityError as exc:
+            identity_api.release_portal_connection(session_id, 'portal connection admission denied')
             identity_api.revoke_session(session_id, 'portal connection admission denied')
             sessions.pop(session_id, None)
             self._send_json({'success': False, 'error': str(exc)}, 409)
             return
         except Exception:
+            identity_api.release_portal_connection(session_id, 'portal connection admission unavailable')
             identity_api.revoke_session(session_id, 'portal connection admission unavailable')
             sessions.pop(session_id, None)
             self._send_json({'success': False, 'error': 'Portal connection service unavailable'}, 503)
             return
-        portal_agent = _get_or_assign_portal_agent(str(user['user_id']))
+        try:
+            portal_agent = _get_or_assign_portal_agent(str(user['user_id']))
+        except Exception:
+            logger.exception('Portal Agent assignment unavailable')
+            portal_agent = None
+        if not portal_agent:
+            # Admission is incomplete. Do not strand a connection slot behind a
+            # login screen that has no usable Agent and cannot send heartbeats.
+            identity_api.release_portal_connection(session_id, 'portal agent unavailable')
+            identity_api.revoke_session(session_id, 'portal agent unavailable')
+            sessions.pop(session_id, None)
+            self._send_json({'success': False, 'error': 'No agent available, please try again later'}, 503)
+            return
         if portal_agent:
             sess['agent_id'] = portal_agent['agent_id']
         # Auto-load most recent conversation workspace, or create one if none exists
@@ -4964,8 +4982,8 @@ class VisHandler(BaseHTTPRequestHandler):
             with open(filepath, 'r', encoding='utf-8') as f:
                 html = f.read()
             timeout = _session_timeout()
-            html = html.replace('4.4.14', VERSION)
-            html = html.replace('2026-09-13', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
+            html = html.replace('4.4.15', VERSION)
+            html = html.replace('2026-09-16', os.environ.get('AI_AGENT_RELEASE_DATE', ''))
             html = html.replace('{{DB_DISPLAY}}', _product_database_display())
             html = html.replace('{{EDITION_TIER}}', _product_tier())
             html = html.replace(

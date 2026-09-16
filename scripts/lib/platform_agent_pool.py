@@ -1012,7 +1012,7 @@ def register_node(actor: str, body: Dict[str, Any]) -> Dict[str, Any]:
         local_path = resolve_agent_info_path(local_path)
     node_id = _id("NODE")
     connection.execute_transaction_callback(lambda tx: (
-        tx.execute("INSERT INTO CX_MANAGED_NODES(NODE_ID,NODE_KEY,HOST_REFERENCE,SSH_PORT,OS_USER,ROLE_JSON,FAILURE_DOMAIN,TRUST_MODE,AGENT_INFO_PATH,STATUS,VALIDATION_STATE,CREATED_BY,REASON) VALUES (:id,:key,:host,:port,:user,:roles,:domain,:trust,:agent_info_path,'REGISTERED','PENDING',:actor,:reason)", {"id": node_id, "key": str(body["node_key"])[:128], "host": str(body["host_reference"])[:256], "port": int(body.get("ssh_port") or 22), "user": str(body.get("os_user") or "")[:128], "roles": _json(body.get("roles") or []), "domain": str(body.get("failure_domain") or "")[:128], "trust": trust, "agent_info_path": local_path[:512], "actor": actor, "reason": str(body["reason"])[:2000]}),
+        tx.execute("INSERT INTO CX_MANAGED_NODES(NODE_ID,NODE_KEY,HOST_REFERENCE,SSH_PORT,OS_USER,ROLE_JSON,FAILURE_DOMAIN,TRUST_MODE,AGENT_INFO_PATH,STATUS,VALIDATION_STATE,CREATED_BY,REASON) VALUES (:id,:key,:host,:port,:os_user,:roles,:domain,:trust,:agent_info_path,'REGISTERED','PENDING',:actor,:reason)", {"id": node_id, "key": str(body["node_key"])[:128], "host": str(body["host_reference"])[:256], "port": int(body.get("ssh_port") or 22), "os_user": str(body.get("os_user") or "")[:128], "roles": _json(body.get("roles") or []), "domain": str(body.get("failure_domain") or "")[:128], "trust": trust, "agent_info_path": local_path[:512], "actor": actor, "reason": str(body["reason"])[:2000]}),
         identity_api._audit_tx(tx, actor, "MANAGED_NODE_REGISTER", "MANAGED_NODE", node_id, "ALLOW", str(body["reason"]))
     )[0])
     return {"node_id": node_id, "status": "REGISTERED", "validation_state": "PENDING"}
@@ -1436,7 +1436,7 @@ def register_endpoint(actor: str, body: Dict[str, Any]) -> Dict[str, Any]:
             snapshot = dict(snapshot or {})
             snapshot["database_endpoint_id"] = endpoint_id
             snapshot["database_endpoint_security_domain"] = str(grant.get("security_domain_id") or "DEFAULT")
-            tx.execute("UPDATE CX_ENROLLMENT_GRANTS SET POLICY_SNAPSHOT=:snapshot WHERE GRANT_ID=:grant", {"snapshot": _json(snapshot), "grant": grant_id})
+            tx.execute("UPDATE CX_ENROLLMENT_GRANTS SET POLICY_SNAPSHOT=:snapshot WHERE GRANT_ID=:grant_id", {"snapshot": _json(snapshot), "grant_id": grant_id})
         identity_api._audit_tx(tx, actor, "EXTERNAL_DB_ENDPOINT_REGISTER", "DB_ENDPOINT", endpoint_id, "ALLOW", str(body["reason"]))
         return {"endpoint_id": endpoint_id, "status": "ACTIVE", "registration_grant_id": grant_id or None}
     return connection.execute_transaction_callback(work)

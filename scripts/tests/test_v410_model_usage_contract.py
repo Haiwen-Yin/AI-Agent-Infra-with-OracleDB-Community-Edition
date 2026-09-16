@@ -96,6 +96,7 @@ def test_gateway_token_can_request_every_scope_used_by_external_agent_routes():
         "events.read", "compliance.evidence", "compliance.remediation",
         "embedding.probe", "embedding.generate", "database.endpoint", "skills.read",
         "memory.propose", "knowledge.read", "knowledge.write",
+        "workspaces.read", "workspaces.write",
     ):
         assert f'"{scope}"' in token_route
 
@@ -404,7 +405,7 @@ def test_client_backup_tool_is_not_part_of_the_release_contract():
     assert not (ROOT / "tools" / "v410_pre57_backup.py").exists()
     assert '"v410_pre57_backup.py"' not in build
     allowlist = validator.split("dialect_boundary_dual_files = {", 1)[1].split("}", 1)[0]
-    assert set(re.findall(r'\"([^\"]+\.py)\"', allowlist)) == {"migration_runner.py"}
+    assert set(re.findall(r'\"([^\"]+\.py)\"', allowlist)) == {"migration_runner.py", "oracle_task_migration.py"}
 
 
 @pytest.mark.skipif(GENERATED, reason="cross-adapter validator closure is a unified-source gate")

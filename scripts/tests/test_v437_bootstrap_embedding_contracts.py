@@ -410,16 +410,20 @@ def test_agent_gateway_exposes_scoped_openai_embedding_route():
 
 
 def test_shared_runtime_sql_does_not_use_known_oracle_reserved_binds():
+    import ast
     root = Path(__file__).resolve().parents[1]
     for name, reserved in (
         ("embedding_api.py", ("mode", "desc")),
         ("embedding_governance.py", ("mode",)),
         ("identity_api.py", ("mode",)),
         ("deployment_orchestrator.py", ("mode", "order")),
+        ("continuity_assembly.py", ("number", "uid", "mode", "order", "level")),
     ):
         source = (root / "lib" / name).read_text(encoding="utf-8")
+        # Inspect string literals, not Python dict syntax such as key: number.
+        strings=[node.value for node in ast.walk(ast.parse(source)) if isinstance(node,ast.Constant) and isinstance(node.value,str)]
         for bind in reserved:
-            assert not re.search(rf":{bind}\b", source)
+            assert not any(re.search(rf":{bind}\b", value) for value in strings)
 
 
 def test_dashboard_uses_draft_probe_before_enabling_embedding_profile_creation():

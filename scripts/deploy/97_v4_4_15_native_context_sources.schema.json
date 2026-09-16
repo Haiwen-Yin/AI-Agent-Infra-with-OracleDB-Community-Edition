@@ -1,0 +1,635 @@
+{
+  "CX_AUDIT_CONTEXT_REVISIONS": {
+    "check_expressions": [
+      "FAMILY='AUDIT'"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACTION_NAME": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "ACTOR_TYPE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(16)"
+      },
+      "FAMILY": {
+        "default": "'AUDIT'",
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "OUTCOME": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(2000)"
+      },
+      "RESOURCE_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "RESOURCE_TYPE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "FAMILY",
+      "ACTOR_TYPE",
+      "ACTION_NAME",
+      "RESOURCE_TYPE",
+      "RESOURCE_ID",
+      "OUTCOME",
+      "REASON"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ],
+        "CX_NATIVE_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ]
+      ]
+    ],
+    "trigger": "CX86_1043B6C8F7E85317"
+  },
+  "CX_DB4A2A_CONTEXT_REVISIONS": {
+    "check_expressions": [
+      "FAMILY='DB4A2A'"
+    ],
+    "checks": 1,
+    "columns": {
+      "BRANCH_POLICY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      },
+      "CHILD_BRANCH_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "CONTEXT_REF": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "EXPECTED_VERSION": {
+        "default": null,
+        "not_null": false,
+        "type": "NUMBER(19)"
+      },
+      "FAMILY": {
+        "default": "'DB4A2A'",
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "RECEIVER_AGENT_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SCOPE_REF": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "SNAPSHOT_DIGEST": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "SOURCE_BRANCH": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      },
+      "TASK_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "TRANSPORT": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "FAMILY",
+      "TASK_ID",
+      "RECEIVER_AGENT_ID",
+      "CONTEXT_REF",
+      "SNAPSHOT_DIGEST",
+      "EXPECTED_VERSION",
+      "SCOPE_REF",
+      "SOURCE_BRANCH",
+      "BRANCH_POLICY",
+      "TRANSPORT",
+      "STATUS",
+      "CHILD_BRANCH_ID"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ],
+        "CX_NATIVE_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ]
+      ]
+    ],
+    "trigger": "CX86_C4B2D7B9AFBFA8AD"
+  },
+  "CX_GRAPH_CONTEXT_ITEMS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "BRANCH_KEY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "INPUT_CHECKPOINT_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITERATION_NO": {
+        "default": null,
+        "not_null": false,
+        "type": "INTEGER"
+      },
+      "JOIN_KEY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "NODE_KEY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(256)"
+      },
+      "OUTPUT_CHECKPOINT_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "ITEM_ID",
+      "NODE_KEY",
+      "STATUS",
+      "BRANCH_KEY",
+      "JOIN_KEY",
+      "ITERATION_NO",
+      "INPUT_CHECKPOINT_ID",
+      "OUTPUT_CHECKPOINT_ID"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "REVISION_ID"
+        ],
+        "CX_GRAPH_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "REVISION_ID",
+          "ITEM_ID"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_0B06049E984A8E61"
+  },
+  "CX_GRAPH_CONTEXT_REVISIONS": {
+    "check_expressions": [
+      "FAMILY='GRAPH'"
+    ],
+    "checks": 1,
+    "columns": {
+      "CURRENT_CHECKPOINT_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "ERROR_CODE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "ERROR_MESSAGE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(2000)"
+      },
+      "FAMILY": {
+        "default": "'GRAPH'",
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "GRAPH_VERSION_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "PLAN_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "FAMILY",
+      "GRAPH_VERSION_ID",
+      "PLAN_ID",
+      "STATUS",
+      "CURRENT_CHECKPOINT_ID",
+      "ERROR_CODE",
+      "ERROR_MESSAGE"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ],
+        "CX_NATIVE_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ]
+      ]
+    ],
+    "trigger": "CX86_C8930EC07698333A"
+  },
+  "CX_NATIVE_CONTEXT_REVISIONS": {
+    "check_expressions": [
+      "FAMILY IN ('TASK','GRAPH','DB4A2A','AUDIT')"
+    ],
+    "checks": 1,
+    "columns": {
+      "CAPTURED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SOURCE_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "FAMILY",
+      "ENTITY_ID",
+      "SECURITY_DOMAIN_ID",
+      "SOURCE_PRINCIPAL_ID",
+      "CAPTURED_BY",
+      "CONTENT_DIGEST",
+      "REASON",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SOURCE_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CAPTURED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "CAPTURED_BY",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_6B2CB61D9C07FED3"
+  },
+  "CX_TASK_CONTEXT_ITEMS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "DESCRIPTION": {
+        "default": null,
+        "not_null": false,
+        "type": "CLOB"
+      },
+      "ITEM_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      },
+      "STEP_ORDER": {
+        "default": null,
+        "not_null": false,
+        "type": "INTEGER"
+      },
+      "TOOL_NAME": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "ITEM_ID",
+      "STEP_ORDER",
+      "DESCRIPTION",
+      "TOOL_NAME",
+      "STATUS"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "REVISION_ID"
+        ],
+        "CX_TASK_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "REVISION_ID",
+          "ITEM_ID"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_187277234B302F28"
+  },
+  "CX_TASK_CONTEXT_REVISIONS": {
+    "check_expressions": [
+      "FAMILY='TASK'"
+    ],
+    "checks": 1,
+    "columns": {
+      "FAMILY": {
+        "default": "'TASK'",
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "GOAL": {
+        "default": null,
+        "not_null": false,
+        "type": "CLOB"
+      },
+      "PRIORITY": {
+        "default": null,
+        "not_null": false,
+        "type": "INTEGER"
+      },
+      "RESULT_SUMMARY": {
+        "default": null,
+        "not_null": false,
+        "type": "CLOB"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(32)"
+      },
+      "STRATEGY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "REVISION_ID",
+      "FAMILY",
+      "GOAL",
+      "STATUS",
+      "PRIORITY",
+      "STRATEGY",
+      "RESULT_SUMMARY"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ],
+        "CX_NATIVE_CONTEXT_REVISIONS",
+        [
+          "REVISION_ID",
+          "FAMILY"
+        ]
+      ]
+    ],
+    "trigger": "CX86_1A857158C0B8C91C"
+  }
+}

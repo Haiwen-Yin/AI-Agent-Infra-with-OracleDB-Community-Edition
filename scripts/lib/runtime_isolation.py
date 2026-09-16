@@ -199,15 +199,15 @@ def persist_contract(actor: str, agent_id: str, instance_id: str,
             "WHERE AGENT_ID=:agent AND INSTANCE_ID=:instance FOR UPDATE",
             {"agent": agent, "instance": instance},
         )
-        values = {"agent": agent, "instance": instance, "level": contract.isolation_level,
-                  "mode": contract.enforcement_mode, "adapter": contract.runtime_adapter,
+        values = {"agent": agent, "instance": instance, "isolation_level": contract.isolation_level,
+                  "enforcement_mode": contract.enforcement_mode, "adapter": contract.runtime_adapter,
                   "identity": contract.runtime_identity or None,
                   "boundaries": json.dumps(sorted(contract.boundaries), separators=(",", ":")),
                   "policy": contract.policy_digest or None, "rootfs": contract.rootfs_digest or None,
                   "evidence": contract.evidence_ref or None, "actor": actor}
         if existing:
             tx.execute(
-                "UPDATE CX_RUNTIME_ISOLATION_CONTRACTS SET ISOLATION_LEVEL=:level,ENFORCEMENT_MODE=:mode,"
+                "UPDATE CX_RUNTIME_ISOLATION_CONTRACTS SET ISOLATION_LEVEL=:isolation_level,ENFORCEMENT_MODE=:enforcement_mode,"
                 "RUNTIME_ADAPTER=:adapter,RUNTIME_IDENTITY=:identity,BOUNDARIES_JSON=:boundaries,"
                 "POLICY_DIGEST=:policy,ROOTFS_DIGEST=:rootfs,EVIDENCE_REF=:evidence,STATUS='ACTIVE',"
                 "VERSION=VERSION+1,UPDATED_BY=:actor,UPDATED_AT=CURRENT_TIMESTAMP "
@@ -219,7 +219,7 @@ def persist_contract(actor: str, agent_id: str, instance_id: str,
                 "INSERT INTO CX_RUNTIME_ISOLATION_CONTRACTS(CONTRACT_ID,AGENT_ID,INSTANCE_ID,ISOLATION_LEVEL,"
                 "ENFORCEMENT_MODE,RUNTIME_ADAPTER,RUNTIME_IDENTITY,BOUNDARIES_JSON,POLICY_DIGEST,ROOTFS_DIGEST,"
                 "EVIDENCE_REF,STATUS,CREATED_BY,UPDATED_BY) VALUES "
-                "(:id,:agent,:instance,:level,:mode,:adapter,:identity,:boundaries,:policy,:rootfs,:evidence,'ACTIVE',:actor,:actor)",
+                "(:id,:agent,:instance,:isolation_level,:enforcement_mode,:adapter,:identity,:boundaries,:policy,:rootfs,:evidence,'ACTIVE',:actor,:actor)",
                 {"id": contract_id, **values},
             )
         identity_api._audit_tx(tx, actor, "RUNTIME_ISOLATION_CONTRACT", "AGENT_INSTANCE", instance,

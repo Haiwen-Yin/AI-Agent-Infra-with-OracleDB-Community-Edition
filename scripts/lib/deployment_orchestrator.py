@@ -241,16 +241,31 @@ def preflight(database: str, config: Dict[str, Any], *, require_empty: bool = Fa
     checks: List[Dict[str, Any]] = []
     try:
         conn = _connect(database, config)
+        # Preflight deliberately treats individual capability probes as
+        # independent checks.  PostgreSQL aborts the current transaction on
+        # any failed probe; autocommit prevents one optional probe from
+        # poisoning all subsequent checks (and avoids false connection
+        # failures such as InFailedSqlTransaction).
+        if database == "pg":
+            conn.autocommit = True
     except Exception as exc:
         message = str(exc)
         nne = database == "oracle" and ("DPY-3001" in message or "Native Network Encryption" in message)
+        missing_yashan_client = database == "yashandb" and (
+            "libyascli.so" in message or "load yacli library error" in message
+            or (isinstance(exc, ImportError) and "yaspy" in message)
+        )
         checks.append(_check(
             "DATABASE_CONNECTION", "BLOCKED", "Database connection could not be established",
             ("The database requires Oracle Native Network Encryption. Use a DBA-approved compatible "
              "server policy or a separately validated Oracle Client Thick Mode deployment; do not "
              "silently weaken encryption." if nne else
+             "Run bash scripts/install_yaspy.sh in this release package, then use its prepared "
+             "Python runtime and native client library path. Reinstall the client after rebuilding "
+             "the package." if missing_yashan_client else
              "Verify the configured host, port, service, listener, credentials, and network path."),
-            {"error_code": "ORACLE_NATIVE_ENCRYPTION_REQUIRES_THICK_MODE" if nne else "DATABASE_CONNECTION_FAILED"},
+            {"error_code": "ORACLE_NATIVE_ENCRYPTION_REQUIRES_THICK_MODE" if nne else
+             "YASHANDB_CLIENT_UNAVAILABLE" if missing_yashan_client else "DATABASE_CONNECTION_FAILED"},
         ))
         return {"database": database, "checked_at": _now(), "checks": checks,
                 "passed": False, "blocked": checks}
@@ -638,8 +653,10 @@ def _migration_apply(target_version: str, database: str, edition: str, config_pa
     deploy = _package_deploy_dir(database, root)
     apply = {"oracle": runner._apply_oracle, "pg": runner._apply_pg, "yashandb": runner._apply_yashandb}[database]
     results = []
-    for name in names:
-        result = apply(config, deploy / name)
+    scripts = runner._order_successor_recovery(database, config, [deploy / name for name in names])
+    for script in scripts:
+        name = script.name
+        result = apply(config, script)
         results.append({"script": name, "passed": bool(result.passed), "ledger_status": result.ledger_status,
                         "checksum": result.checksum, "error": result.error_type})
         if not result.passed:
@@ -782,7 +799,7 @@ def _deployment_database_status(database: str, config: Dict[str, Any], run_id: s
         conn.close()
 
 
-def postflight(database: str, edition: str, config: Dict[str, Any], terminal_migration: str) -> Dict[str, Any]:
+def postflight(database: str, edition: str, config: Dict[str, Any], terminal_migration: str, root: Path = PACKAGE_ROOT) -> Dict[str, Any]:
     """Verify release and database-security closure before reporting READY."""
     checks: List[Dict[str, Any]] = []
     conn = _connect(database, config)
@@ -814,6 +831,79 @@ def postflight(database: str, edition: str, config: Dict[str, Any], terminal_mig
                 "Migration ledger has no failed steps",
                 "Resolve failed migration steps before handoff.", {"count": failed},
             ))
+
+            if terminal_migration in {"85_v4_4_15_task_stable_identity.sql", "86_v4_4_15_continuity_entities.sql", "87_v4_4_15_continuity_bindings.sql", "88_v4_4_15_execution_links.sql", "89_v4_4_15_dynamic_mcp_exposure.sql", "90_v4_4_15_mcp_native_boundary.sql", "91_v4_4_15_mcp_owner_binding.sql","92_v4_4_15_mcp_native_exception.sql","93_v4_4_15_mcp_tool_requests.sql","94_v4_4_15_handoff_policy.sql","95_v4_4_15_runtime_context.sql","96_v4_4_15_runtime_credentials.sql","97_v4_4_15_native_context_sources.sql"}:
+                import migration_runner
+                queue_complete = migration_runner._execution_queue_complete(cursor, database)
+                checks.append(_check(
+                    'EXECUTION_QUEUE_STRUCTURE', 'PASS' if queue_complete else 'BLOCKED',
+                    'Execution queue dependencies include all required tables and columns',
+                    'Restore the historical execution schema before upgrading or enabling workers.',
+                ))
+                if database == "oracle":
+                    cursor.execute("SELECT COUNT(*) FROM USER_PART_TABLES WHERE TABLE_NAME='TASK_STEPS' AND PARTITIONING_TYPE='HASH'")
+                    stable = int(cursor.fetchone()[0]) == 1
+                    cursor.execute("SELECT COUNT(*) FROM CX415_TASK_SWITCH WHERE MIGRATION_KEY='TASK_STEPS' AND STATE='VERIFIED'")
+                    stable = stable and int(cursor.fetchone()[0]) == 1
+                    cursor.execute("SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME='CX415_TASK_STEPS_OLD'")
+                    stable = stable and int(cursor.fetchone()[0]) == 0
+                    cursor.execute("SELECT COUNT(*) FROM USER_CONSTRAINTS WHERE TABLE_NAME='TASK_STEPS' AND CONSTRAINT_NAME='CX415_TS_PLAN' AND STATUS='ENABLED' AND VALIDATED='VALIDATED'")
+                    stable = stable and int(cursor.fetchone()[0]) == 1
+                elif database == "pg":
+                    cursor.execute("SELECT COUNT(*) FROM pg_constraint WHERE conrelid='task_steps'::regclass AND conname='fk_step_plan' AND condeferrable AND convalidated")
+                    stable = int(cursor.fetchone()[0]) == 1
+                else:
+                    cursor.execute("SELECT COUNT(*) FROM USER_CONSTRAINTS WHERE TABLE_NAME='TASK_STEPS' AND CONSTRAINT_NAME='FK_STEP_PLAN' AND STATUS='ENABLED' AND VALIDATED='VALIDATED'")
+                    stable = int(cursor.fetchone()[0]) == 1
+                checks.append(_check("TASK_STORAGE", "PASS" if stable else "BLOCKED",
+                    "Task storage transition contract verified",
+                    "Complete or recover migration 85 before enabling task operations."))
+
+            if terminal_migration in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                from .continuity_schema_validation import errors as continuity_schema_errors
+                facts_path = _package_deploy_dir(database, root) / '86_v4_4_15_continuity_entities.schema.json'
+                facts = json.loads(facts_path.read_text())
+                if terminal_migration in {'87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'87_v4_4_15_continuity_bindings.schema.json').read_text()))
+                if terminal_migration in {'88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'88_v4_4_15_execution_links.schema.json').read_text()))
+                if terminal_migration in {'94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'94_v4_4_15_handoff_policy.schema.json').read_text()))
+                if terminal_migration in {'95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'95_v4_4_15_runtime_context.schema.json').read_text()))
+                if terminal_migration in {'96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'96_v4_4_15_runtime_credentials.schema.json').read_text()))
+                if terminal_migration=='97_v4_4_15_native_context_sources.sql':
+                    facts.update(json.loads((_package_deploy_dir(database,root)/'97_v4_4_15_native_context_sources.schema.json').read_text()))
+                failures = continuity_schema_errors(cursor, database, facts)
+                if terminal_migration in {'94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    if not migration_runner._step_objects_complete(cursor,database,_package_deploy_dir(database,root)/'94_v4_4_15_handoff_policy.sql'):
+                        failures.append('HANDOFF_POLICY_STRUCTURE_OR_COVERAGE')
+                    if not migration_runner._step_objects_complete(cursor,database,_package_deploy_dir(database,root)/'86_v4_4_15_continuity_entities.sql',version=release_version(database,root)):
+                        failures.append('HISTORICAL_SUCCESSOR_VERIFICATION')
+                if terminal_migration in {'93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    tool_facts=json.loads((_package_deploy_dir(database,root)/'93_v4_4_15_mcp_tool_requests.schema.json').read_text())
+                    failures+=continuity_schema_errors(cursor,database,tool_facts)
+                checks.append(_check('CONTINUITY_STORAGE', 'BLOCKED' if failures else 'PASS',
+                    'Continuity relational keys, history protection and native grants verified',
+                    'Complete or repair migrations 86 through 88 before enabling continuity operations.', {'failures': failures}))
+
+            if terminal_migration in {'89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                import migration_runner as runner
+                valid=runner._tool_mcp_exposure_complete(cursor,database)
+                if terminal_migration != '89_v4_4_15_dynamic_mcp_exposure.sql':
+                    valid=valid and runner._mcp_native_boundary_complete(cursor,database)
+                if terminal_migration == '91_v4_4_15_mcp_owner_binding.sql':
+                    valid=valid and runner._mcp_owner_binding_complete(cursor,database)
+                if terminal_migration == '92_v4_4_15_mcp_native_exception.sql':
+                    valid=valid and runner._step_objects_complete(cursor,database,Path(terminal_migration))
+                if terminal_migration in {'93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'}:
+                    valid=valid and runner._mcp_owner_binding_complete(cursor,database)
+                    if database == 'yashandb':
+                        valid=valid and runner._step_objects_complete(cursor,database,Path('92_v4_4_15_mcp_native_exception.sql'))
+                checks.append(_check('MCP_TOOL_EXPOSURE','PASS' if valid else 'BLOCKED',
+                    'Dynamic MCP exposure flag and native constraint verified',
+                    'Complete or repair the packaged MCP exposure migrations before using dynamic discovery.'))
 
             if database == "oracle":
                 dual = "DU" + "AL"
@@ -1056,7 +1146,7 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     journal = DeploymentJournal(root, run_id)
     if mode in {"STATUS", "VERIFY"}:
         durable = _deployment_database_status(database, config, run_id)
-        verified = postflight(database, edition, config, terminal_migration) if mode == "VERIFY" else None
+        verified = postflight(database, edition, config, terminal_migration, root) if mode == "VERIFY" else None
         prerequisites = preflight(database, config, require_empty=False, edition=edition)
         status = "STATUS"
         if mode == "VERIFY":
@@ -1156,7 +1246,7 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         raise DeploymentError("scoped platform management knowledge did not pass postflight")
     _record_evidence(journal.run_id, "PLATFORM_KNOWLEDGE_POSTFLIGHT", knowledge_state)
     models = _configure_models(raw, journal.run_id)
-    verified = postflight(database, edition, config, terminal_migration)
+    verified = postflight(database, edition, config, terminal_migration, root)
     if not verified["passed"]:
         raise DeploymentError("database postflight verification failed")
     readiness["database"] = "READY"

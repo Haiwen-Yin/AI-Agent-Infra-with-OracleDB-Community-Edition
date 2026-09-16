@@ -1,0 +1,188 @@
+{
+  "CX_HANDOFFS": {
+    "check_expressions": [
+      "HANDOFF_KIND IN ('HUMAN_TO_AGENT','AGENT_TO_AGENT','AGENT_TO_HUMAN','WORKER_REPLACEMENT')",
+      "STATUS IN ('DRAFT','OFFERED','ACKNOWLEDGED','IN_PROGRESS','COMPLETED','REJECTED','EXPIRED')",
+      "VERSION>0",
+      "CURRENT_REVISION_NO>0",
+      "(STATUS IN ('DRAFT','OFFERED','ACKNOWLEDGED','IN_PROGRESS') AND ACTIVE_WORK_ID IS NOT NULL AND ACTIVE_WORK_ID=WORK_CONTRACT_ID) OR (STATUS IN ('COMPLETED','REJECTED','EXPIRED') AND ACTIVE_WORK_ID IS NULL)"
+    ],
+    "checks": 5,
+    "columns": {
+      "ACTIVE_WORK_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CURRENT_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FROM_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_KIND": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(32)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "TO_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "WORK_CONTRACT_ID",
+      "FROM_PRINCIPAL_ID",
+      "TO_PRINCIPAL_ID",
+      "HANDOFF_KIND",
+      "EXPIRES_AT",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "HANDOFF_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID"
+        ],
+        "CX_WORK_CONTRACTS",
+        [
+          "WORK_CONTRACT_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "FROM_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TO_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "WORK_REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_6F8B9B427B362D51"
+  },
+  "CX_WORK_HANDOFF_POLICIES": {
+    "check_expressions": [
+      "MAX_ACTIVE_RECIPIENTS>=1 AND MAX_ACTIVE_RECIPIENTS<=16"
+    ],
+    "checks": 1,
+    "columns": {
+      "MAX_ACTIVE_RECIPIENTS": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "MAX_ACTIVE_RECIPIENTS"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_2178E4536904F343"
+  }
+}

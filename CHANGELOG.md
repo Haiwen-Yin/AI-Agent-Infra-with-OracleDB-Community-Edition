@@ -1,5 +1,12 @@
 # Changelog
 
+## v4.4.15 - 2026-09-14
+
+- Added the database-entity proposal specification for context continuity, Work Contracts, Handoffs, Context Assemblies, candidate review, immutable Revisions, explicit publications, and diagnostics. These new entities are not yet implemented.
+- Restored journaled v4.4.15 migration execution and strict terminal-step/failed-step deployment verification, retaining the reviewed v4.4.14 migration baseline.
+- Combined consecutive leading system messages for model-provider compatibility without promoting user content or bypassing content-security checks.
+- Extended isolated six-edition acceptance to committed dispatch, rollback, native authorization, standalone Graph Runtime, real-model Channel replies and Portal knowledge responses. Full release acceptance remains incomplete.
+
 ## v4.4.14 - 2026-09-13
 
 - Added migration 82 and equivalent database-authoritative model capability controls across Oracle, PostgreSQL, and YashanDB.

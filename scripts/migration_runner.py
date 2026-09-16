@@ -124,7 +124,7 @@ IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
 PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
 RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS = frozenset({"4.4.9"})
 MODEL_USAGE_WALLBOARD_MIGRATION_VERSIONS = frozenset({"4.4.10"})
-RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12", "4.4.13", "4.4.14"})
+RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15"})
 SUPPORTED_V449_BASELINE_VERSION = "4.4.7"
 WITHDRAWN_SCHEMA_VERSION = "4.4.8"
 JOURNALED_MIGRATION_VERSIONS = (
@@ -420,13 +420,14 @@ def _ensure_step_ledger(cursor: Any, database: str) -> None:
             raise
 
 
-def _step_row(cursor: Any, database: str, script: Path) -> dict[str, Any] | None:
-    params = {"version": MIGRATION_VERSION, "step_name": _script_key(script)}
+def _step_row(cursor: Any, database: str, script: Path, *, version: str | None = None) -> dict[str, Any] | None:
+    selected_version = MIGRATION_VERSION if version is None else version
+    params = {"version": selected_version, "step_name": _script_key(script)}
     if database == "pg":
         cursor.execute(
             "SELECT checksum, status, statements_executed, failed_statement FROM ai_schema_migration_steps "
             "WHERE version = %s AND step_name = %s",
-            (MIGRATION_VERSION, _script_key(script)),
+            (selected_version, _script_key(script)),
         )
     else:
         cursor.execute(
@@ -1234,8 +1235,202 @@ def _graph_v421_closure_present(cursor: Any, database: str) -> bool:
     return True
 
 
-def _step_objects_complete(cursor: Any, database: str, script: Path) -> bool:
+def _tool_mcp_exposure_complete(cursor: Any, database: str) -> bool:
+    """Verify the additive exposure flag, its default and enabled constraint."""
+    try:
+        try:
+            from lib.continuity_schema_validation import check_expression
+        except ModuleNotFoundError:
+            from shared.lib.continuity_schema_validation import check_expression
+        if database in {'pg', 'postgresql'}:
+            cursor.execute("SELECT data_type,character_maximum_length,is_nullable,column_default FROM information_schema.columns "
+                           "WHERE table_schema=current_schema() AND table_name='tool_registry' AND column_name='mcp_exposed'")
+            row=cursor.fetchone()
+            if not row or row[0]!='character' or int(row[1])!=1 or row[2]!='NO':
+                return False
+            if re.sub(r'::(?:bpchar|character)', '', str(row[3])).strip()!="'N'":
+                return False
+            cursor.execute("SELECT convalidated,pg_get_expr(conbin,conrelid) FROM pg_constraint "
+                           "WHERE conrelid='tool_registry'::regclass AND conname='cx415_tool_mcp_flag' AND contype='c'")
+            constraint=cursor.fetchone()
+            if not constraint or not constraint[0]:
+                return False
+            expression=constraint[1]
+            cursor.execute("SELECT COUNT(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid "
+                           "JOIN pg_namespace n ON n.oid=p.pronamespace WHERE t.tgrelid='tool_registry'::regclass "
+                           "AND t.tgname='cx415_tool_mcp_guard' AND t.tgenabled='O' AND NOT t.tgisinternal "
+                           "AND p.proname='cx89_guard_mcp_tool' AND n.nspname='public' AND p.prosecdef")
+            if int(cursor.fetchone()[0])!=1:
+                return False
+        else:
+            cursor.execute("SELECT DATA_TYPE,CHAR_LENGTH,NULLABLE,DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME='TOOL_REGISTRY' AND COLUMN_NAME='MCP_EXPOSED'")
+            row=cursor.fetchone()
+            if not row or row[0]!='CHAR' or int(row[1])!=1 or row[2]!='N':
+                return False
+            default=row[3].read() if hasattr(row[3],'read') else row[3]
+            if str(default).strip()!="'N'":
+                return False
+            cursor.execute("SELECT STATUS,VALIDATED,SEARCH_CONDITION FROM USER_CONSTRAINTS WHERE TABLE_NAME='TOOL_REGISTRY' AND CONSTRAINT_NAME='CX415_TOOL_MCP_FLAG' AND CONSTRAINT_TYPE='C'")
+            constraint=cursor.fetchone()
+            if not constraint or constraint[0]!='ENABLED' or constraint[1]!='VALIDATED':
+                return False
+            expression=constraint[2].read() if hasattr(constraint[2],'read') else constraint[2]
+        return check_expression(expression)==check_expression("MCP_EXPOSED IN ('Y','N')")
+    except Exception:
+        return False
+
+
+def _mcp_native_boundary_complete(cursor: Any, database: str) -> bool:
+    """Verify filtered discovery and enabled native mutation guards."""
+    try:
+        if not _tool_mcp_exposure_complete(cursor, database):
+            return False
+        if database in {'pg', 'postgresql'}:
+            cursor.execute("SELECT to_regclass('public.cx_mcp_exposed_tools')")
+            if not cursor.fetchone()[0]:
+                return False
+            cursor.execute("SELECT pg_get_viewdef('public.cx_mcp_exposed_tools'::regclass,true)")
+            definition = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid "
+                           "WHERE t.tgrelid='public.tool_registry'::regclass AND t.tgname='cx415_tool_mcp_delete' "
+                           "AND t.tgenabled='O' AND NOT t.tgisinternal AND p.proname='cx90_guard_mcp_delete' AND p.prosecdef")
+            if int(cursor.fetchone()[0]) != 1:
+                return False
+            cursor.execute("SELECT has_table_privilege('ai_agent_runtime','public.cx_mcp_exposed_tools','SELECT'),"
+                           "has_table_privilege('ai_agent_runtime','public.cx_mcp_exposed_tools','INSERT,UPDATE,DELETE')")
+            grants = cursor.fetchone()
+            if not grants[0] or grants[1]:
+                return False
+        else:
+            cursor.execute("SELECT TEXT FROM USER_VIEWS WHERE VIEW_NAME='CX_MCP_EXPOSED_TOOLS'")
+            row = cursor.fetchone()
+            if not row:
+                return False
+            definition = row[0].read() if hasattr(row[0], 'read') else row[0]
+            cursor.execute("SELECT STATUS,TRIGGERING_EVENT,TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME='CX415_TOOL_MCP_GUARD' AND TABLE_NAME='TOOL_REGISTRY'")
+            row = cursor.fetchone()
+            if not row or row[0] != 'ENABLED' or not all(event in row[1] for event in ('INSERT','UPDATE','DELETE')):
+                return False
+            body = row[2].read() if hasattr(row[2], 'read') else row[2]
+            if not all(token in str(body).upper() for token in ('SESSION_USER', ':NEW.MCP_EXPOSED', ':OLD.MCP_EXPOSED')):
+                return False
+            if not any(token in str(body).upper() for token in ('RAISE_APPLICATION_ERROR','RAISE MCP_CONTROL_PLANE_REQUIRED')):
+                return False
+            cursor.execute(
+                "SELECT COUNT(*) FROM ROLE_TAB_PRIVS WHERE OWNER=USER AND TABLE_NAME='CX_MCP_EXPOSED_TOOLS' AND ROLE='DEEP_SEC_SESSION_ROLE' AND PRIVILEGE='SELECT'"
+                if database == 'yashandb' else
+                "SELECT COUNT(*) FROM USER_TAB_PRIVS_MADE WHERE TABLE_NAME='CX_MCP_EXPOSED_TOOLS' AND GRANTEE='DEEP_SEC_SESSION_ROLE' AND PRIVILEGE='SELECT'")
+            if int(cursor.fetchone()[0]) != 1:
+                return False
+        definition = re.sub(r'::(?:character varying|character|bpchar|text)', '', str(definition))
+        normalized = re.sub(r'[\s"()]', '', definition).upper()
+        return "MCP_EXPOSED='Y'" in normalized and "STATUS='ACTIVE'" in normalized
+    except Exception:
+        return False
+
+
+def _mcp_owner_binding_complete(cursor: Any, database: str) -> bool:
+    if not _mcp_native_boundary_complete(cursor, database):
+        return False
+    try:
+        if database in {'pg', 'postgresql'}:
+            cursor.execute("SELECT COUNT(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid "
+                           "WHERE t.tgrelid='public.cx_mcp_exposed_tools'::regclass AND t.tgname='cx415_mcp_view_readonly' "
+                           "AND t.tgenabled='O' AND NOT t.tgisinternal AND p.proname='cx91_readonly_mcp_view'")
+            return int(cursor.fetchone()[0]) == 1
+        cursor.execute("SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME='CX415_TOOL_MCP_GUARD'")
+        body = cursor.fetchone()[0]
+        body = body.read() if hasattr(body, 'read') else str(body)
+        cursor.execute("SELECT USERNAME FROM USER_USERS")
+        owner = str(cursor.fetchone()[0]).replace("'", "''")
+        normalized = re.sub(r'\s+', '', body).upper()
+        return ("SYS_CONTEXT('USERENV','SESSION_USER')<>'" + owner.upper() + "'") in normalized
+    except Exception:
+        return False
+
+
+def _execution_queue_complete(cursor: Any, database: str) -> bool:
+    """Verify historical queue dependencies even on a newer migration chain."""
+    required = {
+        'EXECUTION_JOBS': {'JOB_ID','JOB_TYPE','STATUS','AGENT_ID','PAYLOAD_JSON','RESULT_JSON',
+            'ERROR_MESSAGE','IDEMPOTENCY_KEY','ATTEMPT_COUNT','MAX_ATTEMPTS','LEASE_TOKEN',
+            'LEASE_OWNER','LEASE_UNTIL','REQUIRES_APPROVAL','APPROVED_BY','APPROVED_AT',
+            'CANCEL_REQUESTED','CREATED_AT','UPDATED_AT','COMPLETED_AT'},
+        'EXECUTION_ATTEMPTS': {'ATTEMPT_ID','JOB_ID','ATTEMPT_NUMBER','LEASE_TOKEN','WORKER_ID',
+            'STATUS','RESULT_JSON','ERROR_MESSAGE','STARTED_AT','COMPLETED_AT'},
+        'EXECUTION_POLICIES': {'POLICY_ID','POLICY_NAME','JOB_TYPE','POLICY_JSON','ENABLED',
+            'CREATED_AT','UPDATED_AT'},
+        'EXECUTION_ARTIFACTS': {'ARTIFACT_ID','JOB_ID','ARTIFACT_TYPE','ARTIFACT_URI',
+            'CONTENT_HASH','SIZE_BYTES','CREATED_AT'},
+        'EXECUTION_AUDIT': {'AUDIT_ID','JOB_ID','ACTION_TYPE','ACTOR_ID','DETAIL_JSON','CREATED_AT'},
+    }
+    return set(required) <= _schema_tables(cursor, database) and all(
+        columns <= _schema_columns(cursor, database, table) for table, columns in required.items())
+
+
+def _step_objects_complete(cursor: Any, database: str, script: Path, *, version: str | None = None) -> bool:
     """Verify live objects rather than trusting migration ledger status."""
+    if script.name == '7_v4_0_1_migration.sql':
+        return _execution_queue_complete(cursor, database)
+    if script.name == '92_v4_4_15_mcp_native_exception.sql':
+        if not _mcp_owner_binding_complete(cursor, database):
+            return False
+        cursor.execute("SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME='CX415_TOOL_MCP_GUARD'")
+        body=cursor.fetchone()[0]
+        body=body.read() if hasattr(body,'read') else str(body)
+        return 'RAISE MCP_CONTROL_PLANE_REQUIRED;' in body.upper()
+    if script.name == '91_v4_4_15_mcp_owner_binding.sql':
+        return _mcp_owner_binding_complete(cursor, database)
+    if script.name == '90_v4_4_15_mcp_native_boundary.sql':
+        return _mcp_native_boundary_complete(cursor, database)
+    if script.name == '89_v4_4_15_dynamic_mcp_exposure.sql':
+        return _tool_mcp_exposure_complete(cursor, database)
+    if script.name in {"86_v4_4_15_continuity_entities.sql", "87_v4_4_15_continuity_bindings.sql", "88_v4_4_15_execution_links.sql", "93_v4_4_15_mcp_tool_requests.sql", "94_v4_4_15_handoff_policy.sql","95_v4_4_15_runtime_context.sql","96_v4_4_15_runtime_credentials.sql","97_v4_4_15_native_context_sources.sql"}:
+        try:
+            try:
+                from lib.continuity_schema_validation import errors
+            except ModuleNotFoundError:
+                from shared.lib.continuity_schema_validation import errors
+            facts = json.loads(script.with_suffix('.schema.json').read_text())
+            if script.name=='86_v4_4_15_continuity_entities.sql':
+                successor=script.with_name('94_v4_4_15_handoff_policy.sql')
+                if successor.is_file():
+                    applied=_step_row(cursor,database,successor,version=version)
+                    if applied and applied['status']=='APPLIED' and applied['checksum']==_checksum(successor):
+                        overlay=json.loads(successor.with_suffix('.schema.json').read_text())['CX_HANDOFFS']
+                        expected=dict(facts['CX_HANDOFFS'])
+                        expected['keys']=[key for key in expected['keys'] if key!=['U',['ACTIVE_WORK_ID'],'',[]]]
+                        if overlay!=expected:
+                            return False
+                        facts['CX_HANDOFFS']=overlay
+            if script.name=='94_v4_4_15_handoff_policy.sql':
+                cursor.execute('SELECT COUNT(*) FROM CX_WORK_REVISIONS r WHERE NOT EXISTS '
+                               '(SELECT 1 FROM CX_WORK_HANDOFF_POLICIES p WHERE p.WORK_CONTRACT_ID=r.WORK_CONTRACT_ID AND p.REVISION_NO=r.REVISION_NO)')
+                if int(cursor.fetchone()[0]):
+                    return False
+            return not errors(cursor, database, facts)
+        except Exception:
+            return False
+    if script.name == "85_v4_4_15_task_stable_identity.sql":
+        try:
+            if database == "oracle":
+                cursor.execute("SELECT COUNT(*) FROM USER_PART_TABLES WHERE TABLE_NAME='TASK_STEPS' AND PARTITIONING_TYPE='HASH'")
+                if int(cursor.fetchone()[0]) != 1:
+                    return False
+                cursor.execute("SELECT COUNT(*) FROM CX415_TASK_SWITCH WHERE MIGRATION_KEY='TASK_STEPS' AND STATE='VERIFIED'")
+                if int(cursor.fetchone()[0]) != 1:
+                    return False
+                cursor.execute("SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME='CX415_TASK_STEPS_OLD'")
+                if int(cursor.fetchone()[0]):
+                    return False
+                cursor.execute("SELECT COUNT(*) FROM USER_CONSTRAINTS WHERE TABLE_NAME='TASK_STEPS' AND CONSTRAINT_NAME='CX415_TS_PLAN' AND STATUS='ENABLED' AND VALIDATED='VALIDATED'")
+            elif database == "pg":
+                cursor.execute("SELECT COUNT(*) FROM pg_constraint WHERE conrelid='task_steps'::regclass AND conname='fk_step_plan' AND condeferrable AND convalidated")
+            else:
+                cursor.execute("SELECT COUNT(*) FROM USER_CONSTRAINTS WHERE TABLE_NAME='TASK_STEPS' AND CONSTRAINT_NAME='FK_STEP_PLAN' AND STATUS='ENABLED' AND VALIDATED='VALIDATED'")
+            return int(cursor.fetchone()[0]) == 1
+        except Exception:
+            return False
     if script.name == "82_v4_4_14_governed_model_capabilities.sql":
         required = {"CX_MODEL_CAPABILITIES", "CX_MODEL_CAPABILITY_HISTORY", "CX_MODEL_EXECUTION_EVIDENCE"}
         if not required <= _schema_tables(cursor, database):
@@ -1769,14 +1964,15 @@ def release_script_names(version: str, database: str, config_path: Path, edition
         "4.4.12": _v411_script_names,
         "4.4.13": _v411_script_names,
         "4.4.14": _v411_script_names,
+        "4.4.15": _v411_script_names,
     }
     selector = selectors.get(str(version or "").strip())
     if selector is None:
         raise ValueError(f"unsupported package bootstrap version: {version}")
     names = selector(database, config_path, edition)
-    if version in {"4.4.12", "4.4.13", "4.4.14"} and database in {"oracle", "yashandb"}:
+    if version in {"4.4.12", "4.4.13", "4.4.14", "4.4.15"} and database in {"oracle", "yashandb"}:
         names.append("69_v4_4_12_context_read_isolation.sql")
-    if version in {"4.4.12", "4.4.13", "4.4.14"}:
+    if version in {"4.4.12", "4.4.13", "4.4.14", "4.4.15"}:
         names.append("70_v4_4_12_entity_read_isolation.sql")
         names.append("71_v4_4_12_knowledge_policy_constraints.sql")
         names.append("72_v4_4_12_agent_control_write_boundary.sql")
@@ -1786,12 +1982,29 @@ def release_script_names(version: str, database: str, config_path: Path, edition
         names.append("76_v4_4_12_native_organization_owner.sql")
         names.append("77_v4_4_12_organization_fact_grants.sql")
         names.append("78_v4_4_12_gateway_credential_write_boundary.sql")
-    if version in {"4.4.13", "4.4.14"}:
+    if version in {"4.4.13", "4.4.14", "4.4.15"}:
         names.append("79_v4_4_13_portal_knowledge_policy.sql")
         names.append("80_v4_4_13_portal_builtin_knowledge.sql")
         names.append("81_v4_4_13_portal_bilingual_knowledge.sql")
-    if version == "4.4.14":
+    if version in {"4.4.14", "4.4.15"}:
         names.append("82_v4_4_14_governed_model_capabilities.sql")
+    if version == "4.4.15":
+        names.append("83_v4_4_15_task_status_fk_repair.sql")
+        names.append("84_v4_4_15_task_online_migration.sql")
+        names.append("85_v4_4_15_task_stable_identity.sql")
+        names.append("86_v4_4_15_continuity_entities.sql")
+        names.append("87_v4_4_15_continuity_bindings.sql")
+        names.append("88_v4_4_15_execution_links.sql")
+        names.append("89_v4_4_15_dynamic_mcp_exposure.sql")
+        names.append("90_v4_4_15_mcp_native_boundary.sql")
+        names.append("91_v4_4_15_mcp_owner_binding.sql")
+        if database == "yashandb":
+            names.append("92_v4_4_15_mcp_native_exception.sql")
+        names.append("93_v4_4_15_mcp_tool_requests.sql")
+        names.append("94_v4_4_15_handoff_policy.sql")
+        names.append("95_v4_4_15_runtime_context.sql")
+        names.append("96_v4_4_15_runtime_credentials.sql")
+        names.append("97_v4_4_15_native_context_sources.sql")
     return names
 
 
@@ -2006,10 +2219,15 @@ def _apply_statement_migration(
                             "61_v4_4_10_", "62_v4_4_10_", "63_v4_4_10_",
                             "64_v4_4_10_", "65_v4_4_10_",
                         ))
+                        continuity86_repair = (
+                            database == 'yashandb' and MIGRATION_VERSION == '4.4.15'
+                            and script.name == '86_v4_4_15_continuity_entities.sql'
+                            and existing['checksum'] == '2fb6c92d99c75a826251b1486ab22f2f084cf5d238d894642e8f309a3a8c3ba5'
+                        )
                         if (
                             additive_upgrade or native_sdd_repair or admin_ha_repair
                             or graph_operations_repair or v448_isolation_repair
-                            or v448_pg_domain_repair or v410_repair
+                            or v448_pg_domain_repair or v410_repair or continuity86_repair
                         ):
                             # Continue below and replay the idempotent script. The
                             # early v4.3 draft is not accepted as complete until
@@ -2110,6 +2328,15 @@ def _apply_statement_migration(
         with conn.cursor() as cursor:
             for number, statement in enumerate(_statements(script), start=1):
                 try:
+                    if database == "oracle" and script.name == "85_v4_4_15_task_stable_identity.sql" and number == 1:
+                        try:
+                            from lib.oracle_task_migration import TaskMigration
+                        except ModuleNotFoundError as exc:
+                            if exc.name not in {"lib", "lib.oracle_task_migration"}:
+                                raise
+                            from shared.lib.oracle_task_migration import TaskMigration
+                        with connect(config) as mutex_conn:
+                            TaskMigration(conn, mutex_conn).run()
                     cursor.execute(statement)
                     result.statements_executed += 1
                 except Exception as exc:
@@ -2131,6 +2358,13 @@ def _apply_statement_migration(
                             )
                         conn.commit()
                     return result
+            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'} and not _step_objects_complete(cursor, database, script):
+                result.error_type = 'ContinuitySchemaMismatch'
+                result.ledger_status = 'blocked_structure_drift'
+                _upsert_step_row(cursor, database, script, result.checksum, 'FAILED', result.statements_executed,
+                                 error_message='Continuity native structure verification failed')
+                conn.commit()
+                return result
             if MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS:
                 _upsert_step_row(
                     cursor, database, script, result.checksum, "APPLIED", result.statements_executed,
@@ -2272,6 +2506,8 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
             # AGE/DDL blocks and their IF NOT EXISTS guards remain atomic.
             cursor.execute(script.read_text(encoding="utf-8"))
             result.statements_executed = len(statements) or 1
+            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql'} and not _step_objects_complete(cursor, 'pg', script):
+                raise RuntimeError('Continuity native structure verification failed')
             if MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS:
                 _upsert_step_row(cursor, "pg", script, result.checksum, "APPLIED", result.statements_executed)
             else:
@@ -2301,6 +2537,39 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
     return result
 
 
+def _order_successor_recovery(database: str, config: dict[str, Any], scripts: list[Path]) -> list[Path]:
+    """Resume an interrupted policy successor before verifying its retired key.
+
+    Never use incomplete successor facts as verification evidence. Only an
+    exact journaled attempt with all immediate predecessors APPLIED may run
+    first; the normal chain still runs afterwards, including successor checks.
+    """
+    successor = next((path for path in scripts if path.name == '94_v4_4_15_handoff_policy.sql'), None)
+    if successor is None:
+        return scripts
+    probe = _connect_for_preflight(database, config)
+    try:
+        with probe.cursor() as cursor:
+            if 'AI_SCHEMA_MIGRATION_STEPS' not in _schema_tables(cursor, database):
+                return scripts
+            row = _step_row(cursor, database, successor)
+            if not row or row['status'] not in {'FAILED', 'RUNNING'}:
+                return scripts
+            if row['checksum'] != _checksum(successor):
+                raise ValueError('Interrupted policy migration checksum mismatch')
+            predecessors = [path for path in scripts if path.name.startswith(tuple(str(number)+'_' for number in range(85,94)))]
+            expected = set(range(85,94)) - ({92} if database != 'yashandb' else set())
+            if {int(path.name.split('_',1)[0]) for path in predecessors} != expected:
+                raise ValueError('Policy recovery requires the complete predecessor chain')
+            for path in predecessors:
+                prior = _step_row(cursor, database, path)
+                if not prior or prior['status'] != 'APPLIED' or prior['checksum'] != _checksum(path):
+                    raise ValueError('Policy recovery requires verified predecessor checksums')
+            return [successor, *scripts]
+    finally:
+        probe.close()
+
+
 def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
     if database == "oracle":
         import oracledb
@@ -2321,7 +2590,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12", "4.4.13", "4.4.14"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)
@@ -2469,6 +2738,7 @@ def main() -> int:
                 ))
                 continue
             per_script = []
+            scripts = _order_successor_recovery(database, config, scripts)
             for script in scripts:
                 result = runners[database](config, script)
                 per_script.append(result)

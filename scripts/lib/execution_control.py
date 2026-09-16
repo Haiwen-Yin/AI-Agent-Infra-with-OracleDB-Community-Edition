@@ -100,10 +100,10 @@ def decide_job(job_id: str, approved: bool, decided_by: str, reason: str = "") -
     status = "PENDING" if approved else "REJECTED"
     affected = execute(
         """UPDATE EXECUTION_JOBS
-              SET STATUS = :status, APPROVED_BY = :by, APPROVED_AT = CURRENT_TIMESTAMP,
+              SET STATUS = :status, APPROVED_BY = :decision_actor, APPROVED_AT = CURRENT_TIMESTAMP,
                   ERROR_MESSAGE = :reason, UPDATED_AT = CURRENT_TIMESTAMP
             WHERE JOB_ID = :id AND STATUS = 'WAITING_APPROVAL'""",
-        {"status": status, "by": decided_by, "reason": reason or None, "id": job_id},
+        {"status": status, "decision_actor": decided_by, "reason": reason or None, "id": job_id},
     )
     if affected:
         _audit(job_id, "APPROVED" if approved else "REJECTED", decided_by, {"reason": reason})
@@ -222,6 +222,9 @@ def run_worker_once(worker_id: str = "worker") -> Optional[Dict[str, Any]]:
         if job["job_type"] in ("COMMAND", "LOOP_TEST", "LOOP_DIFF", "HOOK_SCRIPT"):
             result = _run_command(payload)
         elif job["job_type"] in ("HTTP", "TOOL_HTTP", "HOOK_WEBHOOK", "HOOK_MCP"):
+            if job["job_type"] == "TOOL_HTTP":
+                from .continuity_tools import validate_execution
+                validate_execution(job)
             result = _run_http(payload)
         else:
             raise ValueError(f"Unsupported job type: {job['job_type']}")

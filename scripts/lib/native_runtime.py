@@ -48,9 +48,49 @@ def _llm_profile(profile_id: str) -> Optional[Dict[str, Any]]:
     ))
 
 
+def _provider_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Combine leading system instructions for providers accepting one system turn.
+
+    Preserve order and roles; never promote conversation text into system data.
+    """
+    leading = []
+    index = 0
+    while index < len(messages) and messages[index].get("role") == "system":
+        leading.append(str(messages[index].get("content") or ""))
+        index += 1
+    if len(leading) < 2:
+        return [dict(message) for message in messages]
+    return [{"role": "system", "content": "\n\n".join(leading)}, *[dict(message) for message in messages[index:]]]
+
+
+def _failure_code(exc: Exception) -> str:
+    """Persist only bounded local error categories, never remote bodies."""
+    if isinstance(exc,PermissionError): return 'AUTHORITY_DENIED'
+    known={
+        'LLM provider URL is invalid':'LLM_URL_INVALID',
+        'LLM provider profile is incomplete':'LLM_PROFILE_INCOMPLETE',
+        'LLM provider response is too large':'LLM_RESPONSE_TOO_LARGE',
+        'LLM provider returned no content':'LLM_EMPTY_RESPONSE',
+        'LLM provider request failed':'LLM_REQUEST_FAILED',
+        'LLM provider streaming request failed':'LLM_STREAM_FAILED',
+        'LLM provider stream ended before completion':'LLM_STREAM_INCOMPLETE',
+        'Agent is not active':'AGENT_INACTIVE',
+        'Agent has no active LLM Provider Profile':'LLM_PROFILE_UNAVAILABLE',
+        'Deployment target is unavailable':'DEPLOYMENT_TARGET_UNAVAILABLE',
+        'Deployment target has no verified runtime adapter':'RUNTIME_ADAPTER_UNVERIFIED',
+    }
+    code=known.get(str(exc),'RUNTIME_EXECUTION_FAILED')
+    if code in {'LLM_REQUEST_FAILED','LLM_STREAM_FAILED'}:
+        cause=exc.__cause__
+        if isinstance(cause,TimeoutError) or isinstance(getattr(cause,'reason',None),TimeoutError): return 'LLM_REQUEST_TIMEOUT'
+        if isinstance(cause,urllib.error.HTTPError): return 'LLM_HTTP_'+str(int(cause.code))
+    return code
+
+
 def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Call an OpenAI-compatible endpoint without logging prompt or secrets."""
     content_security.inspect_messages(messages)
+    messages = _provider_messages(messages)
     provider_url = str(profile.get("provider_url") or "").strip().rstrip("/")
     parsed = urlsplit(provider_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
@@ -90,6 +130,7 @@ def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[s
 def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delta: Any) -> Dict[str, Any]:
     """Stream OpenAI-compatible deltas without retaining or logging prompts."""
     content_security.inspect_messages(messages)
+    messages = _provider_messages(messages)
     provider_url = str(profile.get("provider_url") or "").strip().rstrip("/")
     parsed = urlsplit(provider_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
@@ -503,6 +544,13 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
     fencing_token = int(execution.get("fencing_token") or 0)
     input_payload: Dict[str, Any] = {}
     agent: Optional[Dict[str, Any]] = None
+    provider_failed = False
+    def provider_call(function, *args):
+        nonlocal provider_failed
+        provider_failed = True
+        result = function(*args)
+        provider_failed = False
+        return result
     try:
         _admit_execution(execution)
         agent = _row(connection.execute_query_one(
@@ -523,7 +571,15 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         if not profile and not isinstance(status_snapshot, dict) and not isinstance(template_knowledge, dict) and not isinstance(product_overview, dict) and not isinstance(command_help, dict) and not isinstance(command_result, dict):
             raise RuntimeError("Agent has no active LLM Provider Profile")
         dispatch = _channel_dispatch(input_payload)
-        if dispatch:
+        from . import continuity_runtime
+        context_binding=continuity_runtime.binding(execution_id)
+        if context_binding:
+            if dispatch or any(isinstance(value,dict) for value in (status_snapshot,template_knowledge,product_overview,command_help,command_result)):
+                raise PermissionError('Context-bound execution cannot change its dispatch contract')
+            if not profile:
+                raise RuntimeError('Agent has no active LLM Provider Profile')
+            output=continuity_runtime.execute(execution,context_binding,lambda inputs:provider_call(_call_llm,profile,inputs))
+        elif dispatch:
             channel_id = str(dispatch["channel_id"])
             identity_api.begin_channel_agent_response(
                 str(agent.get("agent_id") or ""), channel_id, execution_id=execution_id,
@@ -541,8 +597,8 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                 output = {"content": _management_status_markdown(status_snapshot, response_language), "model": "database-control-plane"}
             else:
                 try:
-                    output = _stream_llm(
-                        profile, messages if isinstance(messages, list) else [],
+                    output = provider_call(
+                        _stream_llm, profile, messages if isinstance(messages, list) else [],
                         lambda content: identity_api.update_channel_agent_response(
                             str(agent.get("agent_id") or ""), channel_id, content, execution_id=execution_id,
                         ),
@@ -555,7 +611,7 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                     # remain failures and are never retried here.
                     if str(exc) != "LLM provider returned no content":
                         raise
-                    output = _call_llm(profile, messages if isinstance(messages, list) else [])
+                    output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
             identity_api.update_channel_agent_response(
                 str(agent.get("agent_id") or ""), channel_id, str(output.get("content") or ""),
                 execution_id=execution_id, completed=True,
@@ -563,7 +619,7 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         else:
             if not profile:
                 raise RuntimeError("Agent has no active LLM Provider Profile")
-            output = _call_llm(profile, messages if isinstance(messages, list) else [])
+            output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
         _set_profile_health(str(agent.get("llm_profile_id") or ""), "HEALTHY")
         if not dispatch:
             _write_channel_response(str(agent.get("agent_id") or ""), execution_id, input_payload, output=output)
@@ -571,19 +627,25 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         return {"status": "COMPLETED", "execution_id": execution_id}
     except Exception as exc:
         logger.info("Native execution failed: %s", type(exc).__name__)
+        failure_code=_failure_code(exc)
+        logger.info("Native execution failure code: %s",failure_code)
         try:
-            _set_profile_health(str((agent or {}).get("llm_profile_id") or ""), "DEGRADED")
+            if provider_failed:
+                _set_profile_health(str((agent or {}).get("llm_profile_id") or ""), "DEGRADED")
         except Exception:
             logger.debug("Unable to update LLM health", exc_info=True)
         try:
             _write_channel_response(str((agent or {}).get("agent_id") or ""), execution_id, input_payload, failure="runtime execution failed")
         except Exception:
             logger.debug("Unable to write Channel response", exc_info=True)
-        _finish(execution_id, worker_id, node_id, fencing_token, "FAILED", failure="runtime execution failed")
-        return {"status": "FAILED", "execution_id": execution_id}
+        _finish(execution_id, worker_id, node_id, fencing_token, "FAILED", failure=failure_code)
+        return {"status": "FAILED", "execution_id": execution_id,"failure_code":failure_code}
 
 
 def get_execution(actor: str, execution_id: str) -> Dict[str, Any]:
+    from . import continuity_runtime
+    if continuity_runtime.binding(execution_id):
+        return continuity_runtime.read_execution(actor,execution_id)
     row = _row(connection.execute_query_one(
         "SELECT EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,WORKER_ID,NODE_ID,OUTPUT_JSON,"
         "FAILURE_REASON,STARTED_AT,COMPLETED_AT,CREATED_AT,UPDATED_AT FROM CX_RUNTIME_EXECUTIONS "

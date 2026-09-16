@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Task Plan API
+"""AI Agent Infra v4.4.15 - Community Edition - Task Plan API
 
 Task plan creation, step management, breakpoint recovery,
 tool call auditing, and dependency tracking.
@@ -6,6 +6,7 @@ tool call auditing, and dependency tracking.
 
 import json
 import logging
+import secrets
 from typing import Any, Dict, List, Optional
 
 from .connection import (
@@ -95,20 +96,12 @@ def _plan_select_cols(pg_mode: bool = False) -> str:
 
 def get_plan(plan_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a plan by PLAN_ID."""
-    try:
-        sql = f"""
-            SELECT {_plan_select_cols(pg_mode=True)}
-            FROM TASK_PLANS
-            WHERE PLAN_ID = :plan_id
-        """
-        row = execute_query_one(sql, {"plan_id": plan_id})
-    except Exception:
-        sql = f"""
-            SELECT {_plan_select_cols(pg_mode=False)}
-            FROM TASK_PLANS
-            WHERE PLAN_ID = :plan_id
-        """
-        row = execute_query_one(sql, {"plan_id": plan_id})
+    sql = f"""
+        SELECT {_plan_select_cols(pg_mode=DATABASE_DIALECT in {'postgresql', 'pg'})}
+        FROM TASK_PLANS
+        WHERE PLAN_ID = :plan_id
+    """
+    row = execute_query_one(sql, {"plan_id": plan_id})
     if row is None:
         return None
     return _row_to_dict(row)
@@ -138,21 +131,36 @@ def update_plan(plan_id: str, **kwargs: Any) -> bool:
         return False
 
     set_parts.append("UPDATED_AT = CURRENT_TIMESTAMP")
-    if has_terminal:
+    if has_terminal and DATABASE_DIALECT not in {"postgresql", "pg"}:
         set_parts.append("COMPLETED_AT = CURRENT_TIMESTAMP")
 
     set_clause = ", ".join(set_parts)
-    sql = f"UPDATE TASK_PLANS SET {set_clause} WHERE PLAN_ID = :plan_id"
-    try:
+    # Keep the denormalized step status in the parent transaction. PostgreSQL
+    # requires the deferrable FK migration; Oracle reference partitioning still
+    # requires its structural migration before these transitions can succeed.
+    target_status = valid.get("status")
+    if target_status:
+        from . import connection as _connection
+        def transition(tx):
+            # PostgreSQL v4.4.15 migration marks this FK deferrable.
+            if str(DATABASE_DIALECT).lower() in {"postgresql", "pg"}:
+                tx.execute("SET CONSTRAINTS fk_step_plan DEFERRED")
+            current = tx.query_one("SELECT STATUS FROM TASK_PLANS WHERE PLAN_ID=:plan_id FOR UPDATE", {"plan_id": plan_id})
+            if not current:
+                return 0
+            old_status = str(next(iter(current.values())))
+            if old_status != target_status:
+                tx.execute("UPDATE TASK_STEPS SET PLAN_STATUS=:new_status WHERE PLAN_ID=:plan_id AND PLAN_STATUS=:old_status",
+                           {"new_status": target_status, "old_status": old_status, "plan_id": plan_id})
+            affected = tx.execute(f"UPDATE TASK_PLANS SET {set_clause} WHERE PLAN_ID=:plan_id", params)
+            if affected and "status" in valid:
+                tx.execute("UPDATE TASK_STEPS SET PLAN_STATUS=:new_status WHERE PLAN_ID=:plan_id AND PLAN_STATUS<>:new_status",
+                           {"new_status": target_status, "plan_id": plan_id})
+            return affected
+        affected = _connection.execute_transaction_callback(transition)
+    else:
+        sql = f"UPDATE TASK_PLANS SET {set_clause} WHERE PLAN_ID = :plan_id"
         affected = execute(sql, params)
-    except Exception:
-        if has_terminal:
-            set_parts = [p for p in set_parts if not p.startswith("COMPLETED_AT")]
-            set_clause = ", ".join(set_parts)
-            sql = f"UPDATE TASK_PLANS SET {set_clause} WHERE PLAN_ID = :plan_id"
-            affected = execute(sql, params)
-        else:
-            raise
     if affected > 0 and "status" in valid:
         try:
             from . import graph_compat
@@ -160,10 +168,12 @@ def update_plan(plan_id: str, **kwargs: Any) -> bool:
             if plan and valid["status"] == "RUNNING":
                 graph_compat.start_task_plan(plan, get_plan_steps(plan_id), str(plan.get("agent_id") or "system"))
             elif plan and valid["status"] == "SUCCESS":
-                graph_compat.finish_legacy_run(
+                finished = graph_compat.finish_legacy_run(
                     "TASK_PLAN", plan_id, str(plan.get("agent_id") or "system"),
                     str(plan.get("result_summary") or "Task Plan completed"), success=True,
                 )
+                if finished is False:
+                    raise RuntimeError("Task state saved but Graph completion is pending; retry synchronization")
             elif plan and valid["status"] in {"FAILED", "CANCELLED"}:
                 graph_compat.finish_legacy_run(
                     "TASK_PLAN", plan_id, str(plan.get("agent_id") or "system"),
@@ -178,24 +188,25 @@ def update_plan(plan_id: str, **kwargs: Any) -> bool:
 def add_step(plan_id: str, plan_status: str, description: str, step_order: int,
              tool_name: Optional[str] = None, tool_input: Optional[Any] = None,
              assigned_agent_id: Optional[str] = None) -> str:
-    """Add a step to a plan and return its STEP_ID."""
+    """Add a step under the parent lock; reject a stale caller status."""
     if DATABASE_DIALECT == "postgresql":
         sql = """
-        INSERT INTO TASK_STEPS (STEP_ID, PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
+        INSERT INTO TASK_STEPS (PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
                                 TOOL_NAME, TOOL_INPUT, STATUS)
-        VALUES ('STEP_' || AI_NEW_ID(), :plan_id, :plan_status, :step_order,
+        VALUES (:plan_id, :plan_status, :step_order,
                 :description, :tool_name, :tool_input, 'PENDING')
-        RETURNING STEP_ID INTO :ret_id
+        RETURNING STEP_ID
         """
     else:
         sql = """
         INSERT INTO TASK_STEPS (STEP_ID, PLAN_ID, PLAN_STATUS, STEP_ORDER, DESCRIPTION,
                                 TOOL_NAME, TOOL_INPUT, ASSIGNED_AGENT_ID, STATUS)
-        VALUES ('STEP_' || AI_NEW_ID(), :plan_id, :plan_status, :step_order,
+        VALUES (:step_id, :plan_id, :plan_status, :step_order,
                 :description, :tool_name, :tool_input, :vaaid, 'PENDING')
-        RETURNING STEP_ID INTO :ret_id
         """
-    step_id = execute_insert_returning_id(sql, {
+    step_id = "STEP_" + secrets.token_hex(16)
+    params = {
+        "step_id": step_id,
         "plan_id": plan_id,
         "plan_status": plan_status,
         "step_order": step_order,
@@ -203,7 +214,21 @@ def add_step(plan_id: str, plan_status: str, description: str, step_order: int,
         "tool_name": tool_name,
         "tool_input": json.dumps(tool_input) if tool_input is not None else None,
         "vaaid": assigned_agent_id,
-    })
+    }
+    from . import connection as _connection
+    def insert(tx):
+        parent = tx.query_one("SELECT STATUS FROM TASK_PLANS WHERE PLAN_ID=:plan_id FOR UPDATE", {"plan_id": plan_id})
+        if not parent:
+            raise ValueError("Task plan does not exist")
+        current = str(next(iter(parent.values())))
+        if current != plan_status:
+            raise ValueError("Task plan status changed; reload the plan before adding a step")
+        if DATABASE_DIALECT == "postgresql":
+            row = tx.query_one(sql, params)
+            return str(row["step_id"])
+        tx.execute(sql, params)
+        return step_id
+    step_id = _connection.execute_transaction_callback(insert)
     try:
         from . import graph_compat
         plan = get_plan(plan_id)
@@ -251,11 +276,12 @@ def update_step(step_id: str, **kwargs: Any) -> bool:
     if affected > 0 and "status" in valid and valid["status"] in _STEP_TERMINAL_STATUSES:
         try:
             from . import graph_compat
-            step = execute_query_one(
-                "SELECT STEP_ID, PLAN_ID, STATUS, TOOL_OUTPUT FROM TASK_STEPS WHERE STEP_ID = :step_id",
+            step = _row_to_dict(execute_query_one(
+                "SELECT s.STEP_ID,s.PLAN_ID,s.STATUS,s.TOOL_OUTPUT,p.AGENT_ID AS GRAPH_ACTOR_ID "
+                "FROM TASK_STEPS s JOIN TASK_PLANS p ON p.PLAN_ID=s.PLAN_ID WHERE s.STEP_ID=:step_id",
                 {"step_id": step_id},
-            ) or {"step_id": step_id}
-            graph_compat.sync_task_step(step, valid["status"], str(step.get("assigned_agent_id") or "system"),
+            ) or {"step_id": step_id})
+            graph_compat.sync_task_step(step, valid["status"], str(step.get("graph_actor_id") or "system"),
                                         step.get("tool_output") if isinstance(step.get("tool_output"), dict) else None)
         except Exception:
             logger.exception("Failed to synchronize Task Step with Graph Runtime")

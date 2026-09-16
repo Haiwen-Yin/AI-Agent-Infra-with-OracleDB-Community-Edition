@@ -9,6 +9,18 @@ from lib import native_agent_api
 from lib import deployment_adapters
 
 
+def test_runtime_failure_categories_do_not_expose_provider_details():
+    from lib.native_runtime import _failure_code
+    import urllib.error
+    assert _failure_code(RuntimeError('LLM provider returned no content'))=='LLM_EMPTY_RESPONSE'
+    assert _failure_code(RuntimeError('secret provider payload'))=='RUNTIME_EXECUTION_FAILED'
+    failure=RuntimeError('LLM provider request failed')
+    failure.__cause__=TimeoutError('private endpoint')
+    assert _failure_code(failure)=='LLM_REQUEST_TIMEOUT'
+    failure.__cause__=urllib.error.HTTPError('http://private',503,'secret body',{},None)
+    assert _failure_code(failure)=='LLM_HTTP_503'
+
+
 class _Tx:
     def __init__(self, state: str = "ENABLED", version: int = 1) -> None:
         self.state = state

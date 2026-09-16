@@ -1,0 +1,233 @@
+{
+  "CX_RUNTIME_CONTEXT_ATTEMPTS": {
+    "check_expressions": [
+      "FENCING_TOKEN>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EXECUTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "NODE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "USE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORKER_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "EXECUTION_ID",
+      "USE_ID",
+      "WORKER_ID",
+      "NODE_ID",
+      "FENCING_TOKEN",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "EXECUTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "EXECUTION_ID"
+        ],
+        "CX_RUNTIME_CONTEXT_BINDINGS",
+        [
+          "EXECUTION_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "USE_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "USE_ID"
+        ],
+        "CX_CONTEXT_INPUT_USES",
+        [
+          "USE_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_2E127CB6B635A6AA"
+  },
+  "CX_RUNTIME_CONTEXT_BINDINGS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "AGENT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EXECUTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INPUT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUESTED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "EXECUTION_ID",
+      "ASSEMBLY_ID",
+      "REQUESTED_BY",
+      "AGENT_ID",
+      "SECURITY_DOMAIN_ID",
+      "INPUT_DIGEST",
+      "REQUEST_DIGEST",
+      "IDEMPOTENCY_KEY",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "EXECUTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "EXECUTION_ID"
+        ],
+        "CX_RUNTIME_EXECUTIONS",
+        [
+          "EXECUTION_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "CX_CONTEXT_ASSEMBLIES",
+        [
+          "ASSEMBLY_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "REQUESTED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "AGENT_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "REQUESTED_BY",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_DD43255546748EED"
+  }
+}

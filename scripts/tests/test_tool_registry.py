@@ -34,6 +34,28 @@ def _spec(server="https://api.example.com/v1"):
     return spec
 
 
+def test_tool_stats_sum_all_groups_and_accept_empty_registry(monkeypatch):
+    rows=[{'tool_type':'API','status':'ACTIVE','cnt':3,'total_calls':5},
+          {'tool_type':'API','status':'DEPRECATED','cnt':2,'total_calls':7},
+          {'tool_type':'MCP','status':'ACTIVE','cnt':4,'total_calls':9}]
+    monkeypatch.setattr(tool_registry,'execute_query',lambda *args:rows)
+    assert tool_registry.get_tool_stats()=={'by_type':{'API':5,'MCP':4},
+        'by_status':{'ACTIVE':7,'DEPRECATED':2},'total_tools':9,'total_calls':21}
+    rows.clear()
+    assert tool_registry.get_tool_stats()=={'by_type':{},'by_status':{},'total_tools':0,'total_calls':0}
+
+
+@pytest.mark.parametrize('tool',[None,{'status':'ACTIVE'}, {'status':'ACTIVE','mcp_exposed':'N'}])
+def test_dynamic_mcp_call_rechecks_exposure_before_queueing(monkeypatch,tool):
+    from lib import execution_control
+    monkeypatch.setattr(tool_registry,'execute_query_one',lambda *_:tool)
+    def forbidden(*args,**kwargs):
+        raise AssertionError('A hidden dynamic tool must not enqueue work')
+    monkeypatch.setattr(execution_control,'enqueue_job',forbidden)
+    assert tool_registry.invoke_tool('synthetic',{},require_mcp_exposure=True)=={
+        'success':False,'error':'MCP tool is unavailable'}
+
+
 def test_openapi_import_binds_server_and_is_idempotent(monkeypatch):
     inserts = []
     updates = []

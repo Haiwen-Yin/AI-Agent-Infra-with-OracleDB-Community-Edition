@@ -59,10 +59,12 @@ def test_human_registration_token_consumption_is_purpose_bound_and_atomic(monkey
 def test_portal_page_lease_conflict_is_read_only(monkeypatch):
     class Tx:
         def query_one(self, sql, params):
+            from datetime import timedelta
             if "CX_PORTAL_CONNECTIONS" in sql:
-                return {"connection_id": "PC-1"}
+                return {"connection_id": "PC-1", "lease_expires_at": identity_api._now()+timedelta(seconds=300)}
             if "CX_PORTAL_PAGE_LEASES" in sql:
-                return {"lease_id": "PPL-1", "page_instance_digest": "other", "fencing_token": 1}
+                return {"lease_id": "PPL-1", "page_instance_digest": "other", "fencing_token": 1,
+                        "status": "ACTIVE", "lease_expires_at": identity_api._now()+timedelta(seconds=60)}
             return None
 
         def execute(self, *_args, **_kwargs):

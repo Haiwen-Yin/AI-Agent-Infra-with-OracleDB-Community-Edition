@@ -1,3 +1,4 @@
+import { statusLabel } from "./statusLabels";
 import React, { useState } from "react";
 import { Save, Copy, Check, Send } from "lucide-react";
 import CatalogPicker from "./CatalogPicker";
@@ -48,7 +49,7 @@ export default function ComplianceProfileDetail({ profile, editable, text, onSav
   const changedControls = [...new Set([...Object.keys(originalControls), ...Object.keys(controls)])]
     .filter((key) => JSON.stringify(originalControls[key]) !== JSON.stringify(controls[key]));
   return <div className="page-stack">
-    <dl className="profile-version-meta"><dt>{text("版本", "Version")}</dt><dd>{profile.version_label}</dd><dt>{text("状态", "Status")}</dt><dd>{profile.status}</dd><dt>{text("内容摘要", "Content digest")}</dt><dd>{profile.content_digest}</dd></dl>
+    <dl className="profile-version-meta"><dt>{text("版本", "Version")}</dt><dd>{profile.version_label}</dd><dt>{text("状态", "Status")}</dt><dd>{statusLabel(profile.status, text)}</dd><dt>{text("内容摘要", "Content digest")}</dt><dd>{profile.content_digest}</dd></dl>
     <h3>{text("有效控制配置", "Effective controls")}</h3>
     {profile.validation?.status === "INVALID" && <p role="alert">{text("继承校验未通过：", "Inheritance validation failed: ")}{profile.validation.reason}</p>}
     <div className="table-scroll"><table><thead><tr><th>{text("配置项", "Control")}</th><th>{text("值", "Value")}</th><th>{text("来源版本", "Source version")}</th></tr></thead><tbody>{Object.entries(profile.effective_content?.controls || {}).map(([field, value]) => <tr key={field}><td>{field}{profile.effective_content?.locked_fields?.includes(field) ? text("（锁定）", " (locked)") : ""}</td><td>{typeof value === "string" ? value : JSON.stringify(value)}</td><td>{profile.field_sources?.[`controls.${field}`]}</td></tr>)}</tbody></table></div>

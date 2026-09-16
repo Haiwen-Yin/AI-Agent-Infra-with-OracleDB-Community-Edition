@@ -1,0 +1,3612 @@
+{
+  "CX_ARTIFACT_CANDIDATES": {
+    "check_expressions": [
+      "FAMILY IN ('MEMORY','KNOWLEDGE','EXPERIENCE','SKILL')",
+      "STATUS IN ('PENDING','REVIEWING','APPROVED','REJECTED','EXPIRED','SUPERSEDED')",
+      "VERSION>0",
+      "CURRENT_REVISION_NO>0"
+    ],
+    "checks": 4,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CURRENT_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "PROPOSED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "RESULT_ENTITY_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "RESULT_REVISION_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVIEWED_BY": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "UPDATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "FAMILY",
+      "SECURITY_DOMAIN_ID",
+      "PROPOSED_BY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PROPOSED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "REVIEWED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_D80FDDB0E3544BBC"
+  },
+  "CX_ARTIFACT_RETIREMENTS": {
+    "check_expressions": [
+      "FAMILY IN ('MEMORY','KNOWLEDGE','EXPERIENCE','SKILL')",
+      "VERSION>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "RETIREMENT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "RETIREMENT_ID",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST",
+      "VERSION",
+      "ACTOR_ID",
+      "SECURITY_DOMAIN_ID",
+      "REASON",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "RETIREMENT_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "FAMILY",
+          "ENTITY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "ACTOR_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_E2858D0EEEE60E86"
+  },
+  "CX_CANDIDATE_EXPERIENCE": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "APPLICABILITY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PROBLEM": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SOLUTION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "TITLE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "VALIDATION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "TITLE",
+      "PROBLEM",
+      "SOLUTION",
+      "VALIDATION",
+      "APPLICABILITY"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_08DB4D263BBA2C00"
+  },
+  "CX_CANDIDATE_KNOWLEDGE": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "BODY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "TITLE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "TITLE",
+      "BODY"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_2CDCAB84463CB27D"
+  },
+  "CX_CANDIDATE_MEMORY": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "BODY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "MEMORY_TYPE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "TITLE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "TITLE",
+      "BODY",
+      "MEMORY_TYPE"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_51E0F798DE60B242"
+  },
+  "CX_CANDIDATE_REQUESTS": {
+    "check_expressions": [
+      "RESOURCE_VERSION>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OPERATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "RESOURCE_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ACTOR_ID",
+      "OPERATION",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CANDIDATE_ID",
+      "RESOURCE_VERSION"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID"
+        ],
+        "CX_ARTIFACT_CANDIDATES",
+        [
+          "CANDIDATE_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ACTOR_ID",
+          "OPERATION",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_945B48B2D5CD199A"
+  },
+  "CX_CANDIDATE_REVIEWS": {
+    "check_expressions": [
+      "DECISION IN ('APPROVED','REJECTED')"
+    ],
+    "checks": 1,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "DECISION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REVIEWER_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVIEW_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "REVIEW_ID",
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "REVIEWER_ID",
+      "DECISION",
+      "CONTENT_DIGEST",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REVIEW_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "REVIEWER_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_3B881D04B968C2CA"
+  },
+  "CX_CANDIDATE_REVISIONS": {
+    "check_expressions": [
+      "REVISION_NO>0",
+      "(REPLACES_ENTITY_ID IS NULL AND REPLACES_REVISION_ID IS NULL AND REPLACES_DIGEST IS NULL) OR (REPLACES_ENTITY_ID IS NOT NULL AND REPLACES_REVISION_ID IS NOT NULL AND REPLACES_DIGEST IS NOT NULL)"
+    ],
+    "checks": 2,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CREATED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REPLACES_DIGEST": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "REPLACES_ENTITY_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REPLACES_REVISION_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "CONTENT_DIGEST",
+      "REPLACES_ENTITY_ID",
+      "REPLACES_REVISION_ID",
+      "REPLACES_DIGEST",
+      "CREATED_BY",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "CANDIDATE_ID"
+        ],
+        "CX_ARTIFACT_CANDIDATES",
+        [
+          "CANDIDATE_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CREATED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_8D06C5BA5207A530"
+  },
+  "CX_CANDIDATE_SKILL": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INPUT_CONTRACT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "INSTRUCTIONS": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "OUTPUT_CONTRACT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "TITLE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "TITLE",
+      "INSTRUCTIONS",
+      "INPUT_CONTRACT",
+      "OUTPUT_CONTRACT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_7FCB13539A48D90E"
+  },
+  "CX_CANDIDATE_SKILL_ACTIONS": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "RESOURCE_ACTION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "ITEM_NO",
+      "RESOURCE_ACTION"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_SKILL",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_9841DD634DB3133D"
+  },
+  "CX_CANDIDATE_SOURCES": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "CANDIDATE_ID",
+      "REVISION_NO",
+      "ITEM_NO",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_A798321FA027A0B1"
+  },
+  "CX_CONTEXT_ASSEMBLIES": {
+    "check_expressions": [
+      "TOKEN_BUDGET>0",
+      "ENTRY_LIMIT>=0",
+      "STATUS IN ('PREPARED','SENDING','SENT','UNOBSERVED')"
+    ],
+    "checks": 3,
+    "columns": {
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENTRY_LIMIT": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "POLICY_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PURPOSE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "RETRIEVAL_POLICY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "TOKEN_BUDGET": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ASSEMBLY_ID",
+      "REQUEST_ID",
+      "PRINCIPAL_ID",
+      "SECURITY_DOMAIN_ID",
+      "POLICY_VERSION",
+      "RETRIEVAL_POLICY",
+      "TOKEN_BUDGET",
+      "ENTRY_LIMIT",
+      "CONTENT_DIGEST",
+      "PURPOSE",
+      "EXPIRES_AT",
+      "CREATED_AT",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "PRINCIPAL_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_3CD1230E47EBC63D"
+  },
+  "CX_CONTEXT_ASSEMBLY_ITEMS": {
+    "check_expressions": [
+      "ITEM_NO>0",
+      "RENDERED_TOKENS>=0"
+    ],
+    "checks": 2,
+    "columns": {
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "AUTHORIZED_SCOPE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "RANK_SCORE": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REDACTION_STATE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "RENDERED_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "RENDERED_TOKENS": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SELECTION_REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      }
+    },
+    "immutable_columns": [
+      "ASSEMBLY_ID",
+      "ITEM_NO",
+      "FAMILY",
+      "ENTITY_ID",
+      "REVISION_ID",
+      "CONTENT_DIGEST",
+      "RENDERED_DIGEST",
+      "RENDERED_TOKENS",
+      "AUTHORIZED_SCOPE",
+      "SELECTION_REASON",
+      "RANK_SCORE",
+      "REDACTION_STATE"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "CX_CONTEXT_ASSEMBLIES",
+        [
+          "ASSEMBLY_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ASSEMBLY_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_AD5853D8101445C1"
+  },
+  "CX_CONTEXT_INPUT_USES": {
+    "check_expressions": [
+      "ITEM_COUNT>=0",
+      "STATUS IN ('SENDING','SENT','UNOBSERVED')"
+    ],
+    "checks": 2,
+    "columns": {
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "COMPLETED_AT": {
+        "default": null,
+        "not_null": false,
+        "type": "TIMESTAMP"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ITEM_COUNT": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "USE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "USE_ID",
+      "ASSEMBLY_ID",
+      "PRINCIPAL_ID",
+      "CONTENT_DIGEST",
+      "ITEM_COUNT",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "USE_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "CX_CONTEXT_ASSEMBLIES",
+        [
+          "ASSEMBLY_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_5870FD16464F98AB"
+  },
+  "CX_CONTEXT_ITEM_GRANTS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "PUBLICATION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "ASSEMBLY_ID",
+      "ITEM_NO",
+      "PUBLICATION_ID"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ASSEMBLY_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "ASSEMBLY_ID",
+          "ITEM_NO"
+        ],
+        "CX_CONTEXT_ASSEMBLY_ITEMS",
+        [
+          "ASSEMBLY_ID",
+          "ITEM_NO"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PUBLICATION_ID"
+        ],
+        "CX_CONTEXT_PUBLICATIONS",
+        [
+          "PUBLICATION_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_04308F2FBFA45058"
+  },
+  "CX_CONTEXT_PUBLICATIONS": {
+    "check_expressions": [
+      "FAMILY IN ('MEMORY','KNOWLEDGE','EXPERIENCE','SKILL','HANDOFF')",
+      "CLASSIFICATION IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED')",
+      "STATUS IN ('PUBLISHED','REVOKED')",
+      "VERSION>0"
+    ],
+    "checks": 4,
+    "columns": {
+      "CLASSIFICATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PUBLICATION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PUBLISHED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PURPOSE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SOURCE_SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "TARGET_SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "PUBLICATION_ID",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST",
+      "SOURCE_SECURITY_DOMAIN_ID",
+      "TARGET_SECURITY_DOMAIN_ID",
+      "PUBLISHED_BY",
+      "PURPOSE",
+      "CLASSIFICATION",
+      "EXPIRES_AT",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "PUBLICATION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "SOURCE_SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TARGET_SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PUBLISHED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "PUBLISHED_BY",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_215229A1855921F3"
+  },
+  "CX_CONTINUITY_ARTIFACTS": {
+    "check_expressions": [
+      "FAMILY IN ('KNOWLEDGE','EXPERIENCE','SKILL')",
+      "VERSION>0",
+      "STATUS IN ('ACTIVE','RETIRED')"
+    ],
+    "checks": 3,
+    "columns": {
+      "ARTIFACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CURRENT_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "OWNER_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ARTIFACT_ID",
+      "FAMILY",
+      "OWNER_PRINCIPAL_ID",
+      "SECURITY_DOMAIN_ID",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ARTIFACT_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "OWNER_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_21A58D3895D1E152"
+  },
+  "CX_CONTINUITY_ARTIFACT_REVS": {
+    "check_expressions": [
+      "REVISION_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ARTIFACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CANDIDATE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CANDIDATE_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CREATED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "NATIVE_ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ARTIFACT_ID",
+      "REVISION_ID",
+      "REVISION_NO",
+      "NATIVE_ENTITY_ID",
+      "CONTENT_DIGEST",
+      "CANDIDATE_ID",
+      "CANDIDATE_REVISION_NO",
+      "CREATED_BY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ARTIFACT_ID"
+        ],
+        "CX_CONTINUITY_ARTIFACTS",
+        [
+          "ARTIFACT_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "NATIVE_ENTITY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CREATED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ARTIFACT_ID",
+          "REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "ARTIFACT_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "CANDIDATE_ID",
+          "CANDIDATE_REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANDIDATE_ID",
+          "CANDIDATE_REVISION_NO"
+        ],
+        "CX_CANDIDATE_REVISIONS",
+        [
+          "CANDIDATE_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_B579FDFA5F0112E6"
+  },
+  "CX_DIAGNOSTIC_CHECKS": {
+    "check_expressions": [
+      "ITEM_NO>0",
+      "STATUS IN ('PASS','FAIL','UNAVAILABLE','UNOBSERVED')",
+      "OBSERVED IN ('Y','N')",
+      "(STATUS IN ('PASS','FAIL') AND OBSERVED='Y') OR (STATUS='UNOBSERVED' AND OBSERVED='N') OR STATUS='UNAVAILABLE'"
+    ],
+    "checks": 4,
+    "columns": {
+      "CHECK_CODE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "DETAIL_CODE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "OBSERVED": {
+        "default": null,
+        "not_null": true,
+        "type": "CHAR(1)"
+      },
+      "RUN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      }
+    },
+    "immutable_columns": [
+      "RUN_ID",
+      "ITEM_NO",
+      "CHECK_CODE",
+      "STATUS",
+      "OBSERVED",
+      "DETAIL_CODE"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "RUN_ID"
+        ],
+        "CX_DIAGNOSTIC_RUNS",
+        [
+          "RUN_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "RUN_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "RUN_ID",
+          "CHECK_CODE"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_C47DEA6FE6AA786E"
+  },
+  "CX_DIAGNOSTIC_RUNS": {
+    "check_expressions": [
+      "STATUS IN ('PASS','FAIL','UNAVAILABLE','UNOBSERVED')",
+      "CHECK_COUNT>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "CHECK_COUNT": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PURPOSE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "RUN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      }
+    },
+    "immutable_columns": [
+      "RUN_ID",
+      "REQUEST_ID",
+      "PRINCIPAL_ID",
+      "SECURITY_DOMAIN_ID",
+      "STATUS",
+      "CHECK_COUNT",
+      "PURPOSE",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "RUN_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "PRINCIPAL_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_26BAA2E8653130EA"
+  },
+  "CX_EXPERIENCE_META": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "APPLICABILITY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PROBLEM": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "SOLUTION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "VALIDATION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "ENTITY_ID",
+      "PROBLEM",
+      "SOLUTION",
+      "VALIDATION",
+      "APPLICABILITY"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ENTITY_ID"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_E7B1995A25F263DC"
+  },
+  "CX_HANDOFFS": {
+    "check_expressions": [
+      "HANDOFF_KIND IN ('HUMAN_TO_AGENT','AGENT_TO_AGENT','AGENT_TO_HUMAN','WORKER_REPLACEMENT')",
+      "STATUS IN ('DRAFT','OFFERED','ACKNOWLEDGED','IN_PROGRESS','COMPLETED','REJECTED','EXPIRED')",
+      "VERSION>0",
+      "CURRENT_REVISION_NO>0",
+      "(STATUS IN ('DRAFT','OFFERED','ACKNOWLEDGED','IN_PROGRESS') AND ACTIVE_WORK_ID IS NOT NULL AND ACTIVE_WORK_ID=WORK_CONTRACT_ID) OR (STATUS IN ('COMPLETED','REJECTED','EXPIRED') AND ACTIVE_WORK_ID IS NULL)"
+    ],
+    "checks": 5,
+    "columns": {
+      "ACTIVE_WORK_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CURRENT_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FROM_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_KIND": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(32)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "TO_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "WORK_CONTRACT_ID",
+      "FROM_PRINCIPAL_ID",
+      "TO_PRINCIPAL_ID",
+      "HANDOFF_KIND",
+      "EXPIRES_AT",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "HANDOFF_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID"
+        ],
+        "CX_WORK_CONTRACTS",
+        [
+          "WORK_CONTRACT_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "FROM_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TO_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "ACTIVE_WORK_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "WORK_REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_6F8B9B427B362D51"
+  },
+  "CX_HANDOFF_ACTIONS": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACCEPTANCE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "ACTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "DESCRIPTION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "RESPONSIBLE_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "ACTION_ID",
+      "ITEM_NO",
+      "RESPONSIBLE_PRINCIPAL_ID",
+      "DESCRIPTION",
+      "ACCEPTANCE"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "RESPONSIBLE_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ACTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_0CE05A5030414E7F"
+  },
+  "CX_HANDOFF_ASSIGNMENTS": {
+    "check_expressions": [
+      "STATUS IN ('OFFERED','ACKNOWLEDGED','IN_PROGRESS','COMPLETED','REJECTED','EXPIRED')"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACK_AT": {
+        "default": null,
+        "not_null": false,
+        "type": "TIMESTAMP"
+      },
+      "ACK_REVISION_NO": {
+        "default": null,
+        "not_null": false,
+        "type": "INTEGER"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OFFERED_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "RECIPIENT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "RECIPIENT_ID"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "HANDOFF_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID"
+        ],
+        "CX_HANDOFFS",
+        [
+          "HANDOFF_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "RECIPIENT_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "OFFERED_REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "ACK_REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_19D03E8607064C54"
+  },
+  "CX_HANDOFF_OUTCOMES": {
+    "check_expressions": [
+      "RESULT IN ('COMPLETED','BLOCKED','FAILED')"
+    ],
+    "checks": 1,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OUTCOME_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "RESULT": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SUBMITTED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SUMMARY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "OUTCOME_ID",
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "SUBMITTED_BY",
+      "RESULT",
+      "SUMMARY",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "OUTCOME_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "HANDOFF_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "SUBMITTED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_C387354714D0A599"
+  },
+  "CX_HANDOFF_OUTCOME_CRITERIA": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "CRITERION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OUTCOME_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "OUTCOME_ID",
+      "WORK_CONTRACT_ID",
+      "WORK_REVISION_NO",
+      "CRITERION_ID"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "OUTCOME_ID"
+        ],
+        "CX_HANDOFF_OUTCOMES",
+        [
+          "OUTCOME_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "OUTCOME_ID",
+          "CRITERION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "WORK_REVISION_NO",
+          "CRITERION_ID"
+        ],
+        "CX_WORK_CRITERIA",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO",
+          "CRITERION_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_DAD5FDD0257E4C37"
+  },
+  "CX_HANDOFF_OUTCOME_EVIDENCE": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "OUTCOME_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PUBLICATION_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "OUTCOME_ID",
+      "ITEM_NO",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST",
+      "PUBLICATION_ID"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "OUTCOME_ID"
+        ],
+        "CX_HANDOFF_OUTCOMES",
+        [
+          "OUTCOME_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "OUTCOME_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "OUTCOME_ID",
+          "FAMILY",
+          "ENTITY_ID",
+          "SOURCE_REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "PUBLICATION_ID"
+        ],
+        "CX_CONTEXT_PUBLICATIONS",
+        [
+          "PUBLICATION_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_4DC9B86A8F0DE70E"
+  },
+  "CX_HANDOFF_PREREQUISITES": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTENT_TEXT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "ACTION_ID",
+      "ITEM_NO",
+      "CONTENT_TEXT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ACTION_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ACTION_ID"
+        ],
+        "CX_HANDOFF_ACTIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ACTION_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_6B915611BEE8522E"
+  },
+  "CX_HANDOFF_REQUESTS": {
+    "check_expressions": [
+      "RESOURCE_VERSION>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OPERATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "RESOURCE_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ACTOR_ID",
+      "OPERATION",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "HANDOFF_ID",
+      "RESOURCE_VERSION"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID"
+        ],
+        "CX_HANDOFFS",
+        [
+          "HANDOFF_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ACTOR_ID",
+          "OPERATION",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_00BE3C17B2EE32CA"
+  },
+  "CX_HANDOFF_REVISIONS": {
+    "check_expressions": [
+      "REVISION_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CREATED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SUMMARY": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "SUMMARY",
+      "CONTENT_DIGEST",
+      "WORK_CONTRACT_ID",
+      "WORK_REVISION_NO",
+      "CREATED_BY",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "HANDOFF_ID"
+        ],
+        "CX_HANDOFFS",
+        [
+          "HANDOFF_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CREATED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "WORK_REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_0910CBC6A942EC10"
+  },
+  "CX_HANDOFF_SECTIONS": {
+    "check_expressions": [
+      "SECTION_KIND IN ('DECISION','CONSTRAINT','QUESTION','RISK')",
+      "ITEM_NO>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "CONTENT_TEXT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SECTION_KIND": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "SECTION_KIND",
+      "ITEM_NO",
+      "CONTENT_TEXT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "SECTION_KIND",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_50CB5FBAC53E8DF1"
+  },
+  "CX_PUBLICATION_EVENTS": {
+    "check_expressions": [
+      "VERSION>0",
+      "OPERATION IN ('PUBLISH','REVOKE')"
+    ],
+    "checks": 2,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EVENT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OPERATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "PUBLICATION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(1000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "EVENT_ID",
+      "PUBLICATION_ID",
+      "VERSION",
+      "ACTOR_ID",
+      "OPERATION",
+      "REASON",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "EVENT_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "PUBLICATION_ID"
+        ],
+        "CX_CONTEXT_PUBLICATIONS",
+        [
+          "PUBLICATION_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "PUBLICATION_ID",
+          "VERSION"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "ACTOR_ID",
+          "OPERATION",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_EE53299E13EB32D3"
+  },
+  "CX_SKILL_CONTRACTS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INPUT_CONTRACT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "OUTPUT_CONTRACT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      }
+    },
+    "immutable_columns": [
+      "ENTITY_ID",
+      "INPUT_CONTRACT",
+      "OUTPUT_CONTRACT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ENTITY_ID"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_2BD0BE08C0A5FC18"
+  },
+  "CX_SKILL_REQUIRED_ACTIONS": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "RESOURCE_ACTION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "ENTITY_ID",
+      "ITEM_NO",
+      "RESOURCE_ACTION"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ENTITY_ID"
+        ],
+        "CX_SKILL_CONTRACTS",
+        [
+          "ENTITY_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ENTITY_ID",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_FB13C41A195E2558"
+  },
+  "CX_WORK_CONSTRAINTS": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONSTRAINT_TEXT": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "ITEM_NO",
+      "CONSTRAINT_TEXT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_5B1CFB59598B79F3"
+  },
+  "CX_WORK_CONTRACTS": {
+    "check_expressions": [
+      "VERSION>0",
+      "STATUS IN ('OPEN','IN_PROGRESS','BLOCKED','COMPLETED','CANCELLED','EXPIRED')"
+    ],
+    "checks": 2,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CREATED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OWNER_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "UPDATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "SECURITY_DOMAIN_ID",
+      "CREATED_BY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "OWNER_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CREATED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_F185E1FAB290E7D1"
+  },
+  "CX_WORK_CRITERIA": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CRITERION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "DESCRIPTION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "VERIFICATION": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "CRITERION_ID",
+      "ITEM_NO",
+      "DESCRIPTION",
+      "VERIFICATION"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO",
+          "CRITERION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_BC389FB1575F408C"
+  },
+  "CX_WORK_REQUESTS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OPERATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "RESOURCE_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "ACTOR_ID",
+      "OPERATION",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "WORK_CONTRACT_ID",
+      "RESOURCE_VERSION"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ACTOR_ID",
+          "OPERATION",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "RESOURCE_VERSION"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_47B05320EF962C35"
+  },
+  "CX_WORK_REVISIONS": {
+    "check_expressions": [
+      "REVISION_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "CREATED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OBJECTIVE": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "CLOB"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "OBJECTIVE",
+      "CONTENT_DIGEST",
+      "CREATED_BY",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID"
+        ],
+        "CX_WORK_CONTRACTS",
+        [
+          "WORK_CONTRACT_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CREATED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_9DF894AA333C8F6F"
+  },
+  "CX_WORK_REVISION_STATES": {
+    "check_expressions": [
+      "STATUS IN ('OPEN','IN_PROGRESS','BLOCKED','COMPLETED','CANCELLED','EXPIRED')"
+    ],
+    "checks": 1,
+    "columns": {
+      "OWNER_PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "OWNER_PRINCIPAL_ID",
+      "STATUS"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "OWNER_PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_7CDD4751320F7C07"
+  },
+  "CX_WORK_SOURCES": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "WORK_CONTRACT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "WORK_CONTRACT_ID",
+      "REVISION_NO",
+      "ITEM_NO",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ],
+        "CX_WORK_REVISIONS",
+        [
+          "WORK_CONTRACT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_F340EE62E4FF0255"
+  }
+}

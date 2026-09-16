@@ -1,7 +1,14 @@
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+pytestmark = pytest.mark.skipif(
+    not (ROOT / "live_mode_validator.py").is_file(),
+    reason="unified-source validator inspection is not part of generated packages",
+)
 
 
 def test_yashandb_business_probe_uses_security_filtered_entity_view():

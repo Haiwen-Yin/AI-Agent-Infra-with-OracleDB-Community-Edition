@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - MCP Server
+"""AI Agent Infra v4.4.15 - MCP Server
 
 Exposes the system's tools, memory, knowledge, and search capabilities
 as an MCP (Model Context Protocol) server. Supports both stdio and SSE transport.
@@ -58,6 +58,10 @@ def _authenticated_mcp_agent() -> str:
     from lib import agent_registration
     from lib.connection import set_agent_context
 
+    # SDK schema discovery can run inside a call task and leave its Agent
+    # context attached. Verify credentials at the service authentication
+    # boundary before selecting this call's independent database login.
+    set_agent_context(None)
     agent_id = (os.environ.get("AI_AGENT_ID") or os.environ.get("MCP_AGENT_ID") or "").strip()
     token = os.environ.get("AI_AGENT_TOKEN") or os.environ.get("MCP_AGENT_TOKEN") or ""
     if not agent_id or not token or not agent_registration.authenticate_agent(agent_id, token):
@@ -72,17 +76,18 @@ def _get_exposed_tools() -> List[str]:
 
 
 def _load_dynamic_tools() -> List[Tool]:
+    from .continuity_contracts import ToolInvocation
     tools: List[Tool] = []
     try:
         rows = execute_query(
             """SELECT TOOL_ID, TOOL_NAME, DESCRIPTION, INPUT_SCHEMA
-               FROM TOOL_REGISTRY
+               FROM CX_MCP_EXPOSED_TOOLS
                WHERE MCP_EXPOSED = 'Y' AND STATUS = 'ACTIVE'""",
             {},
         )
     except Exception as e:
         logger.warning(
-            "Dynamic tool loading skipped (TOOL_REGISTRY.MCP_EXPOSED unavailable): %s", e
+            "Dynamic tool registry unavailable (%s)", type(e).__name__
         )
         return tools
 
@@ -110,13 +115,16 @@ def _load_dynamic_tools() -> List[Tool]:
             if not description:
                 description = f"Dynamic tool {tool_name} (registry id: {tool_id})"
 
+            call_schema=ToolInvocation.model_json_schema()
+            call_schema['properties']['arguments']['description']=(
+                'Arguments for the exposed HTTP contract: '+json.dumps(input_schema,ensure_ascii=False))
             tools.append(Tool(
                 name=f"{DYNAMIC_TOOL_PREFIX}{tool_id}",
                 description=description,
-                inputSchema=input_schema,
+                inputSchema=call_schema,
             ))
         except Exception as e:
-            logger.warning("Skipping dynamic tool row %s: %s", row, e)
+            logger.warning("Skipping invalid dynamic tool metadata (%s)", type(e).__name__)
             continue
 
     logger.info("Loaded %d dynamic tools from TOOL_REGISTRY (MCP_EXPOSED='Y')", len(tools))
@@ -128,6 +136,11 @@ async def list_tools() -> List[Tool]:
     _authenticated_mcp_agent()
     exposed = _get_exposed_tools()
     tools = []
+
+    if 'continuity' in exposed:
+        from . import continuity_client
+        tools.append(Tool(name='continuity',description='Create and follow authorized work, handoffs, context, reviewed artifacts and diagnostics through the instance-bound Gateway.',
+                          inputSchema=continuity_client.input_schema()))
 
     if "search" in exposed:
         tools.append(Tool(
@@ -451,13 +464,23 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         authenticated_agent = _authenticated_mcp_agent()
+        if name == 'continuity':
+            from . import continuity_client
+            if name not in _get_exposed_tools():
+                return [TextContent(type='text',text=json.dumps({'error':'TOOL_NOT_EXPOSED'}))]
+            try:
+                result=continuity_client.call(authenticated_agent,arguments)
+                return [TextContent(type='text',text=json.dumps(result,default=str,ensure_ascii=False))]
+            except continuity_client.ContinuityClientError as exc:
+                return [TextContent(type='text',text=json.dumps({'error':exc.code}))]
         if name.startswith(DYNAMIC_TOOL_PREFIX):
             tool_id = name[len(DYNAMIC_TOOL_PREFIX):]
-            result = tool_registry.invoke_tool(
-                tool_id=tool_id,
-                input_params=arguments,
-                timeout=arguments.get("timeout", 30) if isinstance(arguments, dict) else 30,
-            )
+            from . import continuity_client
+            try:
+                result = continuity_client.call(authenticated_agent, {
+                    'operation':'tool_invoke','request':{**arguments,'tool_id':tool_id}})
+            except continuity_client.ContinuityClientError as exc:
+                result={'success':False,'error':exc.code}
             return [TextContent(type="text", text=json.dumps(result, default=str, ensure_ascii=False))]
 
         if name == "search":

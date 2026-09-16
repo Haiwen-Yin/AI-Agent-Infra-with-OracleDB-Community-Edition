@@ -184,9 +184,9 @@ def allocate_identity(actor: str, node_id: str, agent_id: str,
         if uid is None:
             raise HostProvisioningError("runtime UID/GID pool is exhausted")
         tx.execute("INSERT INTO CX_RUNTIME_UID_LEASES(LEASE_ID,NODE_ID,AGENT_ID,INSTANCE_ID,RUNTIME_UID,"
-                   "RUNTIME_GID,STATUS,CREATED_BY,REASON) VALUES (:lease,:node,:agent,:instance,:uid,:gid,'ACTIVE',:actor,:reason)",
+                   "RUNTIME_GID,STATUS,CREATED_BY,REASON) VALUES (:lease,:node,:agent,:instance,:runtime_uid,:gid,'ACTIVE',:actor,:reason)",
                    {"lease": lease_id, "node": node_id, "agent": str(agent_id)[:128],
-                    "instance": str(instance_id)[:128], "uid": uid, "gid": uid,
+                    "instance": str(instance_id)[:128], "runtime_uid": uid, "gid": uid,
                     "actor": actor, "reason": str(reason)[:2000]})
         _audit(tx, actor, "RUNTIME_IDENTITY_ALLOCATE", "RUNTIME_UID_LEASE", lease_id, "ALLOW", str(reason))
         return {"lease_id": lease_id, "runtime_uid": uid, "runtime_gid": uid, "status": "ACTIVE"}

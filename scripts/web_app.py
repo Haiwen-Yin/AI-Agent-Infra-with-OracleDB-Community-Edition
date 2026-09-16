@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.14 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.15 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -31,7 +31,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
@@ -44,11 +44,14 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.14"
+VERSION = "4.4.15"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
     WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+# Pin the physical asset directory. A compatibility symlink used by packaged
+# tests can disappear while this process continues serving requests.
+WEB_ROOT = WEB_ROOT.resolve()
 DIST_ROOT = WEB_ROOT / "dist"
 DEFAULT_NODE_ID = agent_gateway_api.local_node_id()
 _COMPLIANCE_CONTROLLER_STOP = threading.Event()
@@ -190,7 +193,7 @@ def _path_capability(path: str) -> Optional[str]:
         (("/api/model-evidence",), "external_model_evidence"),
         (("/api/agents/",), "agents"),
         (("/api/tasks", "/api/execution", "/ap/v1/agent/tasks"), "tasks"),
-        (("/api/workspaces",), "workspaces"),
+        (("/api/workspaces", "/api/work-contracts", "/api/handoffs", "/api/context/", "/api/context-publications", "/api/artifact-candidates", "/api/diagnostics/", "/api/agent-gateway/continuity/"), "workspaces"),
         (("/api/knowledge",), "knowledge"),
         (("/api/memory",), "memory"),
         (("/api/skills", "/api/skill", "/api/agent/skills"), "skills"),
@@ -1396,6 +1399,13 @@ class ToolUpdateBody(BaseModel):
     status: str = Field(default="ACTIVE", min_length=1, max_length=16)
 
 
+class ToolMCPExposureBody(BaseModel):
+    model_config = {'extra': 'forbid'}
+    expected_exposed: StrictBool
+    exposed: StrictBool
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class RegistrationApprovalBody(DecisionBody):
     organization_id: str = Field(min_length=1, max_length=128)
 
@@ -1961,8 +1971,9 @@ class SkillDistributionBody(BaseModel):
 class SkillDistributionAcknowledgementBody(BaseModel):
     upgrade_id: str = Field(min_length=1, max_length=128)
     skill_version: str = Field(min_length=1, max_length=64)
-    safe_point: bool = False
-    verified: bool = True
+    safe_point: StrictBool = False
+    verified: StrictBool = False
+    received_digest: str = Field(default="", pattern=r'^(?:[0-9a-f]{64})?$')
     detail: str = Field(default="", max_length=1000)
 
 
@@ -3366,6 +3377,18 @@ def tool_retire(tool_id: str, session: Dict[str, Any] = Depends(require_action("
         raise
     except Exception as exc:
         raise _identity_http_error(exc, "Tool retirement was denied") from exc
+
+
+@app.post('/api/tools/{tool_id}/mcp-exposure')
+def tool_mcp_exposure(tool_id: str, body: ToolMCPExposureBody, session: dict = Depends(require_action('tools.write'))):
+    try:
+        with _schema_owner_context():
+            return tool_registry.set_mcp_exposure(str(session['principal_id']),tool_id,
+                expected_exposed=body.expected_exposed,exposed=body.exposed,reason=body.reason)
+    except tool_registry.ToolExposureConflict as exc:
+        raise HTTPException(409,detail=str(exc)) from exc
+    except Exception as exc:
+        raise _identity_http_error(exc,'MCP tool exposure update was denied') from exc
 
 
 @app.get("/api/skills")
@@ -6247,6 +6270,10 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
             credential = None
     if not credential:
         raise HTTPException(status_code=401, detail="Agent credential is invalid")
+    requested = body.scopes or ["channels.read", "channels.write"]
+    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe", "embedding.generate", "database.endpoint", "skills.read", "memory.propose", "knowledge.read", "knowledge.write", "workspaces.read", "workspaces.write", "agents.operate"}
+    if not set(requested) <= allowed:
+        raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
     if not instance_id:
         try:
             instance = agent_gateway_api.create_instance(
@@ -6256,10 +6283,6 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
             instance_id = instance["instance_id"]
         except (agent_gateway_api.GatewayError, PermissionError) as exc:
             raise HTTPException(status_code=403, detail="Agent instance could not be created") from exc
-    requested = body.scopes or ["channels.read", "channels.write"]
-    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe", "embedding.generate", "database.endpoint", "skills.read", "memory.propose", "knowledge.read", "knowledge.write"}
-    if not set(requested) <= allowed:
-        raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
     if "embedding.generate" in requested:
         try:
             embedding_governance.require_embedding_gateway_access(body.agent_id)
@@ -6519,11 +6542,28 @@ def gateway_upgrade_skill_ack(body: SkillDistributionAcknowledgementBody, reques
         return admin_management.acknowledge_upgrade_skill(
             str(context["agent_id"]), body.upgrade_id, body.skill_version,
             body.safe_point, body.verified, body.detail,
+            received_digest=body.received_digest,
         )
     except admin_management.ManagementError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Skill distribution acknowledgement service unavailable") from exc
+
+
+@app.get('/api/gateway/upgrades/{upgrade_id}/skill-archive')
+@app.get('/api/agent-gateway/upgrades/{upgrade_id}/skill-archive')
+@_gateway_request_context
+def gateway_upgrade_skill_archive(upgrade_id: str, skill_version: str, request: Request) -> Response:
+    context=_gateway_context(request,'skills.read',operation='skills.read',attach_agent_database_context=False)
+    try:
+        content=admin_management.download_upgrade_skill(str(context['agent_id']),upgrade_id,skill_version)
+        return Response(content,media_type='application/zip',headers={
+            'Content-Disposition':'attachment; filename="verified-skill-release.zip"',
+            'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+    except admin_management.ManagementError as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail='Skill archive service unavailable') from exc
 
 
 @app.post("/api/gateway/management-artifacts/receipt")
@@ -6798,6 +6838,71 @@ def portal_knowledge_policy_update(body: PortalKnowledgePolicyBody, session: Dic
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Knowledge policy update unavailable") from exc
+
+
+from lib.continuity_http import install_routes as _install_continuity_routes
+
+_install_continuity_routes(app, require_action, _schema_owner_context)
+
+
+def _continuity_gateway_action(action: str):
+    def authorize(request: Request):
+        context = _gateway_context(request, action, operation=action, attach_agent_database_context=False)
+        # Bearer authentication verifies current token scope, principal,
+        # instance lease and fencing. Services independently authorize resources.
+        # Dedicated Agent logins retain no direct writes to these control tables.
+        return {'principal_id': str(context['agent_id']), 'continuity_transport': {
+            key: context[key] for key in ('instance_id', 'token_digest', 'fencing_token')}}
+    return authorize
+
+
+_install_continuity_routes(app, _continuity_gateway_action, _schema_owner_context,
+                           prefix='/api/agent-gateway/continuity')
+
+
+def _portal_continuity_action(action: str):
+    def authorize(request: Request, session: dict = Depends(require_action(action))):
+        # require_action resolves the PORTAL cookie and its entry policy from
+        # the path. A Dashboard cookie never substitutes for this session.
+        raw = getattr(request.state, 'cx_session_id', '')
+        with _schema_owner_context():
+            try:
+                if not identity_api.heartbeat_portal_connection(raw, int(_session_policy('PORTAL')['idle_timeout_seconds'])):
+                    raise HTTPException(401, detail='Portal connection expired')
+                if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+                    identity_api.acquire_portal_page_lease(raw, request.headers.get('X-CX-Page-Instance', '').strip())
+            except identity_api.IdentityError as exc:
+                raise HTTPException(409, detail='Portal page lease is unavailable') from exc
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(503, detail='Portal lease service unavailable') from exc
+        return session
+    return authorize
+
+
+@app.get('/portal/continuity', include_in_schema=False)
+def portal_continuity_shell():
+    return _shell()
+
+
+@app.get('/portal/api/continuity/session')
+def portal_continuity_session(request: Request, session: dict = Depends(_portal_continuity_action('workspaces.read'))):
+    with _schema_owner_context():
+        read_only = identity_api.is_global_read_only_principal(str(session['principal_id']))
+        try:
+            identity_api.acquire_portal_page_lease(getattr(request.state, 'cx_session_id', ''), request.headers.get('X-CX-Page-Instance', '').strip())
+        except identity_api.IdentityError:
+            read_only = True
+        except Exception as exc:
+            raise HTTPException(503, detail='Portal lease service unavailable') from exc
+        can_write = identity_api.effective_access(str(session['principal_id']), 'workspaces.write').get('decision') == 'ALLOW'
+    return {'principal_id': session['principal_id'], 'release_version': VERSION,
+            'read_only': read_only, 'can_write': can_write}
+
+
+_install_continuity_routes(app, _portal_continuity_action, _schema_owner_context,
+                           prefix='/portal/api/continuity')
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

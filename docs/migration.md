@@ -1,4 +1,21 @@
-# Migration Guide - AI Agent Infra with DB v4.4.14
+# Migration Guide - AI Agent Infra with DB v4.4.15
+
+## Current v4.4.15 Contract
+
+Select the sole `scripts/deploy/baseline_v*.json` shipped in the current
+package. The terminal migration is 97 on Oracle, PostgreSQL and YashanDB;
+v4.4.14 remains an already released version ending at 82. Historical sections
+below describe earlier implementations, not instructions to stop at an older
+terminal. Unknown/partial schemas require journal recovery, never an assumed
+clean install. Preserve applied SQL and manifest checksums.
+
+Migration 85 repairs Task step relationships; 86–88 introduce continuity
+entities and typed execution links; 89–93 protect dynamic MCP discovery and
+execution provenance; 94 adds immutable parallel-handoff policy; 95–96 bind
+Worker context and original Gateway credentials; 97 stores native-source
+snapshots. Drain affected old writers before migration cutover and run strict
+verification before restarting them. See [continuity operations](continuity-operations.md)
+and [中文部署与运维](operations_zh.md) for current operation and recovery boundaries.
 
 ## v4.4.10 Fresh Deployment Baseline
 

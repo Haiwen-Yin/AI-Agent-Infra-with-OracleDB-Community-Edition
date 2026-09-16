@@ -41,6 +41,11 @@ def _configure(package_root: Path, config_file: Path):
 
 def run_live_checks(package_root: Path, config_file: Path, database: str) -> Dict[str, Any]:
     connection = _configure(package_root, config_file)
+    from lib.config import get_config
+    config = get_config().database
+    target = str(getattr(config, "dbname", "") or getattr(config, "dsn", "")).rsplit("/", 1)[-1].lower()
+    if target not in {"cxv412com", "cxv412ent", "cxv413com", "cxv413ent", "cxv415com", "cxv415ent"}:
+        raise RuntimeError("Graph live checks require an explicitly isolated release test database")
     from lib import graph_compiler as compiler
     from lib import graph_definition_api as definitions
     from lib import graph_event_api as events

@@ -11,6 +11,7 @@ import hashlib
 import json
 import base64
 import hmac
+import re
 import os
 import secrets
 import zipfile
@@ -76,8 +77,17 @@ def _update_or_insert(tx: Any, update_sql: str, insert_sql: str, params: Dict[st
     followed by an insert preserves the same uniqueness contract without
     embedding a vendor SQL branch in the shared service layer.
     """
-    if tx.execute(update_sql, params) != 1:
-        tx.execute(insert_sql, params)
+    def bindings(sql):
+        # Oracle/YashanDB reject dictionary keys absent from the statement;
+        # update and insert deliberately have different placeholder sets.
+        code=re.sub(r"'(?:''|[^'])*'|--[^\n]*|/\*.*?\*/",'',sql,flags=re.S)
+        names=set(re.findall(r'(?<!:):([A-Za-z_][A-Za-z0-9_]*)',code))
+        return {name:params[name] for name in names}
+    changed=tx.execute(update_sql,bindings(update_sql))
+    if changed==0:
+        tx.execute(insert_sql,bindings(insert_sql))
+    elif changed!=1:
+        raise ManagementError('Upsert scope matched an unexpected number of records')
 
 
 def _admin_principals(tx: Any) -> List[str]:
@@ -327,9 +337,9 @@ def create_admin_enrollment(
         if target_id:
             tx.execute(
                 "INSERT INTO CX_ADMIN_NODE_TARGETS(TARGET_ID,NODE_ID,HOST_REFERENCE,SSH_PORT,OS_USER,DEPLOYMENT_TARGET,SSH_TRUST_MODE,PUBLIC_KEY_DIGEST,FAILURE_DOMAIN,STATUS,REASON,CREATED_BY) "
-                "VALUES (:id,:node,:host,:port,:user,:target,:trust,:key,:domain,'PENDING_ADAPTER_VERIFICATION',:reason,:actor)",
+                "VALUES (:id,:node,:host,:port,:os_user,:target,:trust,:key,:domain,'PENDING_ADAPTER_VERIFICATION',:reason,:actor)",
                 {"id": target_id, "node": node_id[:256], "host": host_reference[:256], "port": int(ssh_port),
-                 "user": os_user[:128], "target": deployment_target[:128], "trust": trust_mode,
+                 "os_user": os_user[:128], "target": deployment_target[:128], "trust": trust_mode,
                  "key": digest, "domain": failure_domain[:128], "reason": reason[:2000], "actor": actor},
             )
             # Password verification is deliberately one-use: retain a digest of
@@ -631,12 +641,8 @@ def acknowledge_containment(agent_id: str, instance_id: str, command_id: str, ge
 
 def stage_upgrade(actor: str, package_version: str, edition: str, package_digest: str, signature_state: str, reason: str) -> Dict[str, Any]:
     _require_manage(actor)
-    if not package_version or len(package_digest) < 32 or str(signature_state).upper() != "VERIFIED":
-        raise ManagementError("only a verified package digest may be staged")
-    upgrade_id = _id("UPG")
-    connection.execute("INSERT INTO CX_UPGRADE_PLANS(UPGRADE_ID,PACKAGE_VERSION,EDITION,PACKAGE_DIGEST,SIGNATURE_STATE,PREFLIGHT_STATE,STATUS,REASON,CREATED_BY) VALUES (:id,:version,:edition,:digest,'VERIFIED','PENDING','STAGED',:reason,:actor)", {"id": upgrade_id, "version": package_version[:64], "edition": edition[:32], "digest": package_digest[:128], "reason": reason[:2000], "actor": actor})
-    identity_api._audit(actor, "UPGRADE_STAGE", "UPGRADE", upgrade_id, "ALLOW", reason)
-    return {"upgrade_id": upgrade_id, "status": "STAGED", "signature_state": "VERIFIED"}
+    # A caller-provided VERIFIED label is not cryptographic evidence.
+    raise ManagementError("Upload the signed archive for server-side verification; metadata cannot establish package trust")
 
 
 def _staging_directory() -> Path:
@@ -651,7 +657,7 @@ def _staging_directory() -> Path:
 
 def _verify_package_manifest(archive: zipfile.ZipFile) -> tuple[Dict[str, Any], str]:
     names = [item.filename for item in archive.infolist() if not item.is_dir()]
-    if not names or any(name.startswith("/") or ".." in Path(name).parts for name in names):
+    if not names or len(names)!=len(set(names)) or any(name.startswith("/") or ".." in Path(name).parts or '\\' in name for name in names):
         raise ManagementError("upgrade archive contains an unsafe path")
     manifest_names = [name for name in names if name.endswith("/build-manifest.json")]
     guard_names = [name for name in names if name.endswith("/package-files.sha256")]
@@ -660,6 +666,8 @@ def _verify_package_manifest(archive: zipfile.ZipFile) -> tuple[Dict[str, Any], 
     root = manifest_names[0].rsplit("/", 1)[0] + "/"
     if guard_names[0] != root + "package-files.sha256":
         raise ManagementError("upgrade archive manifests are not in the same package root")
+    if any(not name.startswith(root) for name in names):
+        raise ManagementError("upgrade archive contains files outside its package root")
     try:
         manifest = json.loads(archive.read(manifest_names[0]).decode("ascii"))
         lines = archive.read(guard_names[0]).decode("ascii").splitlines()
@@ -675,8 +683,10 @@ def _verify_package_manifest(archive: zipfile.ZipFile) -> tuple[Dict[str, Any], 
             raise ManagementError("upgrade archive file manifest is invalid") from exc
         if len(digest) != 64 or not all(char in "0123456789abcdef" for char in digest.lower()):
             raise ManagementError("upgrade archive file digest is invalid")
-        expected[relative.strip()] = digest.lower()
-    actual = {name[len(root):] for name in names if name.startswith(root) and not name.endswith("/package-files.sha256")}
+        if relative!=relative.strip() or relative in expected or relative in {'package-files.sha256','release-signature.json'}:
+            raise ManagementError("upgrade archive file manifest contains duplicate or reserved paths")
+        expected[relative] = digest.lower()
+    actual = {name[len(root):] for name in names if name not in {root+'package-files.sha256',root+'release-signature.json'}}
     if set(expected) != actual:
         raise ManagementError("upgrade archive file manifest does not match its contents")
     for relative, digest in expected.items():
@@ -689,8 +699,10 @@ def _verify_release_signature(archive: zipfile.ZipFile, root: str, package_diges
     """Verify an optional Ed25519 release signature against an operator key.
 
     Packaging does not carry private keys. An operator supplies the trusted
-    public key through ``CX_RELEASE_SIGNING_PUBLIC_KEY`` and signs the archive
-    digest externally. Without both pieces, the package stays untrusted.
+    public key through ``CX_RELEASE_SIGNING_PUBLIC_KEY``. The signature binds
+    the exact file manifest, which binds every payload file. The envelope and
+    manifest are excluded from their own file list to avoid self-reference.
+    The outer archive digest remains the stored transport identity.
     """
     signature_name = root + "release-signature.json"
     public_key = os.environ.get("CX_RELEASE_SIGNING_PUBLIC_KEY", "").strip()
@@ -698,12 +710,16 @@ def _verify_release_signature(archive: zipfile.ZipFile, root: str, package_diges
         return "UNTRUSTED", "release signing key or signature is unavailable"
     try:
         envelope = json.loads(archive.read(signature_name).decode("ascii"))
-        if str(envelope.get("algorithm") or "").upper() != "ED25519" or str(envelope.get("digest") or "") != package_digest:
-            return "UNTRUSTED", "release signature envelope does not bind the archive digest"
+        manifest_digest=hashlib.sha256(archive.read(root+'package-files.sha256')).hexdigest()
+        if (envelope.get('schema')!='chuanxu-release-signature/v1'
+            or envelope.get('signed_object')!='package-files.sha256'
+            or str(envelope.get("algorithm") or "").upper() != "ED25519"
+            or envelope.get('digest')!=manifest_digest):
+            return "UNTRUSTED", "release signature envelope does not bind the file manifest"
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
         key = base64.urlsafe_b64decode(public_key + "=" * (-len(public_key) % 4))
         signature = base64.urlsafe_b64decode(str(envelope.get("signature") or "") + "=" * (-len(str(envelope.get("signature") or "")) % 4))
-        Ed25519PublicKey.from_public_bytes(key).verify(signature, package_digest.encode("ascii"))
+        Ed25519PublicKey.from_public_bytes(key).verify(signature, b'chuanxu-release-manifest/v1\n'+manifest_digest.encode('ascii'))
     except Exception:
         return "UNTRUSTED", "release signature verification failed"
     return "VERIFIED", str(envelope.get("key_id") or "operator-key")[:256]
@@ -744,14 +760,14 @@ def stage_upgrade_archive(actor: str, filename: str, content: bytes, reason: str
         existing = _row(tx.query_one("SELECT UPGRADE_ID,PACKAGE_VERSION,EDITION,STATUS,SIGNATURE_STATE FROM CX_UPGRADE_PLANS WHERE PACKAGE_DIGEST=:digest FOR UPDATE", {"digest": package_digest}))
         if existing:
             return {"upgrade_id": existing["upgrade_id"], "status": existing["status"], "idempotent": True,
-                    "signature_state": existing.get("signature_state") or signature_state,
+                    "signature_state": signature_state,
                     "signature_detail": signature_detail, "package_version": existing.get("package_version") or version,
                     "edition": existing.get("edition") or edition}
         tx.execute(
             "INSERT INTO CX_MANAGEMENT_ARTIFACTS(ARTIFACT_ID,ARTIFACT_KEY,ARTIFACT_VERSION,ARTIFACT_KIND,CONTENT_DIGEST,"
             "SIGNATURE,CLASSIFICATION,SECRET_FREE,STATUS,STORAGE_ADAPTER,CREATED_BY) VALUES "
             "(:id,:key,:version,'RELEASE_PACKAGE',:digest,:signature,'RESTRICTED','Y','STAGED','PEER',:actor)",
-            {"id": artifact_id, "key": "release-package", "version": version[:64], "digest": package_digest,
+            {"id": artifact_id, "key": "release-package:"+package_digest, "version": version[:64], "digest": package_digest,
              "signature": signature_detail, "actor": actor},
         )
         tx.execute(
@@ -780,12 +796,21 @@ def _package_manifest_for_upgrade(upgrade_id: str) -> tuple[Dict[str, Any], str,
     ))
     if not row:
         raise ManagementError("upgrade package is unavailable")
-    archive_path = _staging_directory() / (str(row.get("package_digest") or "") + ".zip")
+    digest=str(row.get('package_digest') or '')
+    if len(digest)!=64 or any(char not in '0123456789abcdef' for char in digest):
+        raise ManagementError('staged upgrade digest is invalid')
+    archive_path = _staging_directory() / (digest + ".zip")
     if not archive_path.is_file():
         raise ManagementError("staged upgrade archive is unavailable on this node")
     try:
-        with zipfile.ZipFile(archive_path) as archive:
-            manifest, root = _verify_package_manifest(archive)
+        with archive_path.open('rb') as stream:
+            if hashlib.file_digest(stream,'sha256').hexdigest()!=digest:
+                raise ManagementError('staged upgrade archive digest changed')
+            stream.seek(0)
+            with zipfile.ZipFile(stream) as archive:
+                manifest, root = _verify_package_manifest(archive)
+                if _verify_release_signature(archive,root,digest)[0]!='VERIFIED':
+                    raise ManagementError('staged upgrade signature is not currently trusted')
     except (OSError, zipfile.BadZipFile) as exc:
         raise ManagementError("staged upgrade archive cannot be read") from exc
     return manifest, root, str(row.get("package_digest") or "")
@@ -879,6 +904,7 @@ def auto_schedule_upgrade(actor: str, upgrade_id: str, expected_edition: str,
 
 def preflight_upgrade(actor: str, upgrade_id: str, expected_edition: str) -> Dict[str, Any]:
     _require_manage(actor)
+    _package_manifest_for_upgrade(upgrade_id)
     def work(tx: Any) -> Dict[str, Any]:
         row = _row(tx.query_one("SELECT UPGRADE_ID,EDITION,SIGNATURE_STATE,STATUS FROM CX_UPGRADE_PLANS WHERE UPGRADE_ID=:id FOR UPDATE", {"id": upgrade_id}))
         if not row or str(row.get("status") or "") != "STAGED":
@@ -966,6 +992,7 @@ def vote_upgrade(agent_id: str, instance_id: str, upgrade_id: str, decision: str
 def start_upgrade_rollout(actor: str, upgrade_id: str, node_ids: List[str], reason: str) -> Dict[str, Any]:
     """Create the serialized node plan after approvals; adapters perform the work."""
     _require_manage(actor)
+    _package_manifest_for_upgrade(upgrade_id)
     requested_nodes = sorted({str(node).strip()[:256] for node in node_ids if str(node).strip()})
     if not requested_nodes or len(str(reason or "").strip()) < 3:
         raise ManagementError("at least one rollout node and a reason are required")
@@ -1056,6 +1083,9 @@ def distribute_upgrade_skill(actor: str, upgrade_id: str, agent_ids: List[str], 
                              reason: str) -> Dict[str, Any]:
     """Queue signed Skill-update notices; activation remains pinned to safe points."""
     _require_manage(actor)
+    manifest,_,_=_package_manifest_for_upgrade(upgrade_id)
+    if str(manifest.get('version') or '')!=skill_version:
+        raise ManagementError('Skill version must match the verified package')
     agents = sorted({str(agent).strip()[:128] for agent in agent_ids if str(agent).strip()})
     if not agents or not skill_version or len(str(reason or "").strip()) < 3:
         raise ManagementError("Agent recipients, Skill version, and reason are required")
@@ -1084,36 +1114,85 @@ def distribute_upgrade_skill(actor: str, upgrade_id: str, agent_ids: List[str], 
 
 
 def acknowledge_upgrade_skill(agent_id: str, upgrade_id: str, skill_version: str, safe_point: bool,
-                              verified: bool, detail: str = "") -> Dict[str, Any]:
-    """Acknowledge verification and switch only at an Agent-declared safe point."""
+                              verified: bool, detail: str = "", received_digest: str = "") -> Dict[str, Any]:
+    """Bind client observation to current server trust and atomic audit.
+
+    safe_point is an authenticated Agent's attestation, not independent proof
+    that an external process is idle. A client flag never establishes trust.
+    """
+    if type(verified) is not bool or type(safe_point) is not bool:
+        raise ManagementError('Skill acknowledgement flags must be booleans')
     ack = "ACKNOWLEDGED" if verified else "FAILED"
     activation = "ACTIVE" if verified and safe_point else "OLD_VERSION"
     drift = "IN_SYNC" if activation == "ACTIVE" else "DRIFT"
-    changed = connection.execute(
-        "UPDATE CX_SKILL_DISTRIBUTION SET ACKNOWLEDGEMENT_STATE=:ack,ACTIVATION_STATE=:activation,DRIFT_STATE=:drift,"
-        "EVIDENCE_JSON=:evidence,UPDATED_AT=CURRENT_TIMESTAMP WHERE UPGRADE_ID=:upgrade AND AGENT_ID=:agent "
-        "AND SKILL_VERSION=:version AND MESSAGE_STATE='SENT'",
-        {"ack": ack, "activation": activation, "drift": drift, "evidence": _json({"safe_point": bool(safe_point), "verified": bool(verified), "detail": str(detail or "")[:1000]}), "upgrade": upgrade_id, "agent": agent_id, "version": skill_version},
-    )
-    if changed != 1:
-        raise ManagementError("Skill distribution acknowledgement is unavailable")
-    identity_api._audit(agent_id, "UPGRADE_SKILL_ACK", "UPGRADE", upgrade_id, "ALLOW" if verified else "ERROR", detail or skill_version)
-    return {"upgrade_id": upgrade_id, "agent_id": agent_id, "acknowledgement_state": ack, "activation_state": activation, "drift_state": drift}
+    def work(tx):
+        row=_skill_recipient(tx,agent_id,upgrade_id,skill_version,lock=True)
+        if verified:
+            manifest,_,digest=_package_manifest_for_upgrade(upgrade_id)
+            if str(manifest.get('version') or '')!=skill_version or not hmac.compare_digest(str(received_digest),digest):
+                raise ManagementError('Skill acknowledgement must match the currently verified archive')
+        if row['activation_state']=='ACTIVE':
+            if not verified or not safe_point:
+                raise ManagementError('An active Skill cannot be reverted by a stale acknowledgement')
+            return {'upgrade_id':upgrade_id,'agent_id':agent_id,'acknowledgement_state':'ACKNOWLEDGED',
+                    'activation_state':'ACTIVE','drift_state':'IN_SYNC','replayed':True}
+        changed=tx.execute(
+            "UPDATE CX_SKILL_DISTRIBUTION SET ACKNOWLEDGEMENT_STATE=:ack,ACTIVATION_STATE=:activation,DRIFT_STATE=:drift,"
+            "EVIDENCE_JSON=:evidence,UPDATED_AT=CURRENT_TIMESTAMP WHERE UPGRADE_ID=:upgrade AND AGENT_ID=:agent "
+            "AND SKILL_VERSION=:version AND MESSAGE_STATE='SENT'",
+            {"ack":ack,"activation":activation,"drift":drift,"evidence":_json({"safe_point":safe_point,
+             "safe_point_authority":"AGENT_ATTESTATION","verified":verified,"received_digest":received_digest,
+             "detail":str(detail or '')[:1000]}),"upgrade":upgrade_id,"agent":agent_id,"version":skill_version})
+        if changed!=1:
+            raise ManagementError('Skill distribution acknowledgement is unavailable')
+        identity_api._audit_tx(tx,agent_id,'UPGRADE_SKILL_ACK','UPGRADE',upgrade_id,'ALLOW' if verified else 'ERROR',detail or skill_version)
+        return {'upgrade_id':upgrade_id,'agent_id':agent_id,'acknowledgement_state':ack,
+                'activation_state':activation,'drift_state':drift,'replayed':False}
+    return connection.execute_transaction_callback(work)
+
+
+def _skill_recipient(tx,agent_id,upgrade_id,skill_version,*,lock=False):
+    suffix=' FOR UPDATE' if lock else ''
+    plan=_row(tx.query_one('SELECT PACKAGE_VERSION,SIGNATURE_STATE,STATUS FROM CX_UPGRADE_PLANS WHERE UPGRADE_ID=:upgrade'+suffix,{'upgrade':upgrade_id}))
+    if not plan or plan['status'] not in {'SKILL_DISTRIBUTION','COMPLETED'} or plan['signature_state']!='VERIFIED' or plan['package_version']!=skill_version:
+        raise ManagementError('Verified Skill distribution is unavailable')
+    principal=tx.query_one("SELECT PRINCIPAL_ID FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:agent AND PRINCIPAL_TYPE='AGENT' AND STATUS='ACTIVE'",{'agent':agent_id})
+    row=_row(tx.query_one("SELECT ACTIVATION_STATE FROM CX_SKILL_DISTRIBUTION WHERE UPGRADE_ID=:upgrade AND AGENT_ID=:agent "
+                         "AND SKILL_VERSION=:version AND MESSAGE_STATE='SENT'"+suffix,
+                         {'upgrade':upgrade_id,'agent':agent_id,'version':skill_version}))
+    if not principal or not row:
+        raise ManagementError('Skill recipient is unavailable')
+    return row
+
+
+def download_upgrade_skill(agent_id: str,upgrade_id: str,skill_version: str) -> bytes:
+    """Return exact signed release bytes only to an assigned active recipient."""
+    def work(tx):
+        _skill_recipient(tx,agent_id,upgrade_id,skill_version)
+        manifest,_,digest=_package_manifest_for_upgrade(upgrade_id)
+        if str(manifest.get('version') or '')!=skill_version:
+            raise ManagementError('Skill version does not match the verified package')
+        content=(_staging_directory()/(digest+'.zip')).read_bytes()
+        if not hmac.compare_digest(hashlib.sha256(content).hexdigest(),digest):
+            raise ManagementError('Skill archive changed during download preparation')
+        identity_api._audit_tx(tx,agent_id,'UPGRADE_SKILL_DOWNLOAD_PREPARED','UPGRADE',upgrade_id,'ALLOW',skill_version)
+        return content
+    return connection.execute_transaction_callback(work)
 
 
 def pending_upgrade_skills(agent_id: str) -> List[Dict[str, Any]]:
     """Return signed-update metadata to one authenticated Agent only.
 
-    The archive itself is deliberately not sent through the Gateway. An Agent
-    obtains the approved Skill through its managed distribution path, verifies
-    it, and calls the acknowledgement route at a task-safe point.
+    Download remains a separate recipient-authorized route. An acknowledgement
+    before a safe point remains visible until activation.
     """
     suffix = " LIMIT 20" if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"} else " FETCH FIRST 20 ROWS ONLY"
     rows = _rows(connection.execute_query(
         "SELECT d.UPGRADE_ID,d.SKILL_VERSION,d.MESSAGE_STATE,d.ACKNOWLEDGEMENT_STATE,d.ACTIVATION_STATE,d.DRIFT_STATE,"
         "p.PACKAGE_DIGEST,p.PACKAGE_VERSION,p.SIGNATURE_STATE FROM CX_SKILL_DISTRIBUTION d "
         "JOIN CX_UPGRADE_PLANS p ON p.UPGRADE_ID=d.UPGRADE_ID "
-        "WHERE d.AGENT_ID=:agent AND d.MESSAGE_STATE='SENT' AND d.ACKNOWLEDGEMENT_STATE='PENDING' "
+        "WHERE d.AGENT_ID=:agent AND d.MESSAGE_STATE='SENT' AND (d.ACKNOWLEDGEMENT_STATE='PENDING' "
+        "OR (d.ACKNOWLEDGEMENT_STATE='ACKNOWLEDGED' AND d.ACTIVATION_STATE<>'ACTIVE')) "
         "AND p.SIGNATURE_STATE='VERIFIED' ORDER BY d.UPDATED_AT ASC" + suffix,
         {"agent": agent_id},
     ))

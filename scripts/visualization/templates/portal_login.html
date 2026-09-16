@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.14">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.15">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.14 - Portal Login</title>
+<title>Chuanxu Oracle Community v4.4.15 - Portal Login</title>
 <link rel="stylesheet" href="/static/pages/portal_login.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -53,7 +53,7 @@
     </form>
     <div class="error-msg" id="loginError"></div>
     <div class="portal-entry-actions" id="authActions">
-      <a href="/register?entry=portal"><span data-zh>注册新账户</span><span data-en>Register a new account</span></a>
+      <a href="/register?entry=portal" style="display:none"><span data-zh>注册新账户</span><span data-en>Register a new account</span></a>
       <a href="/app"><span data-zh>进入 Dashboard 登录</span><span data-en>Open Dashboard login</span></a>
     </div>
   </div>
@@ -80,7 +80,7 @@
     <div class="error-msg" id="mfaError"></div>
   </div>
 
-  <div class="version-badge">Oracle Community v4.4.14</div>
+  <div class="version-badge">Oracle Community v4.4.15</div>
 </div>
 
 <script>
@@ -91,8 +91,10 @@ var _langTexts={
 
 function updateLangTexts(){
   var lang=document.documentElement.getAttribute('data-lang')||'en';
-  document.getElementById('optLocal').textContent=_langTexts.optLocal[lang];
-  document.getElementById('optLdap').textContent=_langTexts.optLdap[lang];
+  Object.keys(_langTexts).forEach(function(id){
+    var option=document.getElementById(id);
+    if(option)option.textContent=_langTexts[id][lang]||_langTexts[id].en;
+  });
 }
 
 function switchAuthMode(){}
@@ -135,6 +137,9 @@ function portalLoginError(error){
   }
   if(error==='Portal connection service unavailable'){
     return zh?'Portal 连接服务不可用，请稍后重试':'Portal connection service is unavailable; try again later';
+  }
+  if(error==='No agent available, please try again later'){
+    return zh?'暂无可用 Agent，请稍后再试':'No agent available, please try again later';
   }
   return error||(zh?'登录失败':'Login failed');
 }

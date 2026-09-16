@@ -1682,8 +1682,8 @@ def portal_connection_policy(actor_principal_id: str, principal_id: str) -> Dict
     )) or {}
     active = _row(connection.execute_query_one(
         "SELECT COUNT(*) AS CNT FROM CX_PORTAL_CONNECTIONS WHERE PRINCIPAL_ID = :principal_id "
-        "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
-        {"principal_id": principal_id},
+        "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > :now",
+        {"principal_id": principal_id, "now": _now()},
     )) or {}
     return {
         "principal_id": principal_id,
@@ -1768,15 +1768,22 @@ def acquire_portal_connection(principal_id: str, raw_session_id: str, client_ins
     session_digest = hashlib.sha256(raw_session_id.encode("utf-8")).hexdigest()
     client_digest = _secret_digest(str(client_instance)[:256], "portal-client")
     connection_id = _id("PC")
-    now = _now()
-    expires = now + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
-
     def reserve(tx: Any) -> Dict[str, Any]:
+        # Serialize admission for this principal, including the first connection.
+        # Locking existing connections alone cannot protect an empty inventory.
+        principal = _row(tx.query_one(
+            "SELECT STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID = :principal_id FOR UPDATE",
+            {"principal_id": principal_id},
+        ))
+        if not principal or principal.get("status") != "ACTIVE":
+            raise IdentityError("Portal connection identity is unavailable")
+        now = _now()
+        expires = now + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
         limit = _portal_connection_limit(principal_id, tx)
         active = tx.query_one(
             "SELECT COUNT(*) AS CNT FROM CX_PORTAL_CONNECTIONS WHERE PRINCIPAL_ID = :principal_id "
-            "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
-            {"principal_id": principal_id},
+            "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > :now",
+            {"principal_id": principal_id, "now": now},
         ) or {}
         if int(active.get("cnt") or 0) >= limit:
             raise IdentityError("Portal connection limit reached")
@@ -1804,11 +1811,12 @@ def release_portal_connection(raw_session_id: str, reason: str = "logout") -> bo
 
 def heartbeat_portal_connection(raw_session_id: str, ttl_seconds: int = 300) -> bool:
     digest = hashlib.sha256(str(raw_session_id or "").encode("utf-8")).hexdigest()
-    expires = _now() + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
+    now = _now()
+    expires = now + timedelta(seconds=max(60, min(SESSION_MAX_SECONDS, int(ttl_seconds))))
     return connection.execute(
         "UPDATE CX_PORTAL_CONNECTIONS SET LAST_HEARTBEAT_AT = :now, LEASE_EXPIRES_AT = :expires_at "
-        "WHERE SESSION_DIGEST = :session_digest AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
-        {"session_digest": digest, "now": _now(), "expires_at": expires},
+        "WHERE SESSION_DIGEST = :session_digest AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > :now",
+        {"session_digest": digest, "now": now, "expires_at": expires},
     ) == 1
 
 
@@ -1818,29 +1826,35 @@ def acquire_portal_page_lease(raw_session_id: str, page_instance: str, ttl_secon
     page_digest = _secret_digest(str(page_instance or "")[:256], "portal-page")
     if not raw_session_id or not page_instance:
         raise IdentityError("Portal page identity is invalid")
-    now = _now()
-    expires = now + timedelta(seconds=max(30, min(3600, int(ttl_seconds))))
-
     def lease(tx: Any) -> Dict[str, Any]:
         connection_row = _row(tx.query_one(
-            "SELECT CONNECTION_ID FROM CX_PORTAL_CONNECTIONS WHERE SESSION_DIGEST = :session_digest "
-            "AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP", {"session_digest": session_digest},
+            "SELECT CONNECTION_ID, LEASE_EXPIRES_AT FROM CX_PORTAL_CONNECTIONS WHERE SESSION_DIGEST = :session_digest "
+            "AND STATUS = 'ACTIVE' FOR UPDATE", {"session_digest": session_digest},
         ))
-        if not connection_row:
+        now = _now()
+        expires = now + timedelta(seconds=max(30, min(3600, int(ttl_seconds))))
+        if (not connection_row or not _timestamp(connection_row.get("lease_expires_at"))
+                or _timestamp(connection_row["lease_expires_at"]) <= now):
             raise IdentityError("Portal connection is unavailable")
         existing = _row(tx.query_one(
-            "SELECT LEASE_ID, PAGE_INSTANCE_DIGEST, FENCING_TOKEN, LEASE_EXPIRES_AT FROM CX_PORTAL_PAGE_LEASES "
-            "WHERE CONNECTION_ID = :connection_id AND STATUS = 'ACTIVE' AND LEASE_EXPIRES_AT > CURRENT_TIMESTAMP",
+            "SELECT LEASE_ID, PAGE_INSTANCE_DIGEST, FENCING_TOKEN, LEASE_EXPIRES_AT, STATUS FROM CX_PORTAL_PAGE_LEASES "
+            "WHERE CONNECTION_ID = :connection_id",
             {"connection_id": connection_row["connection_id"]},
         ))
-        if existing and str(existing.get("page_instance_digest")) != page_digest:
+        live = bool(existing and existing.get("status") == "ACTIVE"
+                    and _timestamp(existing.get("lease_expires_at"))
+                    and _timestamp(existing["lease_expires_at"]) > now)
+        if live and str(existing.get("page_instance_digest")) != page_digest:
             raise IdentityError("Portal page is in use")
         if existing:
+            token = int(existing.get("fencing_token") or 1) + (0 if live else 1)
             tx.execute(
-                "UPDATE CX_PORTAL_PAGE_LEASES SET LAST_HEARTBEAT_AT = :now, LEASE_EXPIRES_AT = :expires_at "
-                "WHERE LEASE_ID = :lease_id", {"now": now, "expires_at": expires, "lease_id": existing["lease_id"]},
+                "UPDATE CX_PORTAL_PAGE_LEASES SET LAST_HEARTBEAT_AT = :now, LEASE_EXPIRES_AT = :expires_at, "
+                "PAGE_INSTANCE_DIGEST=:page_digest,FENCING_TOKEN=:token,STATUS='ACTIVE' "
+                "WHERE LEASE_ID = :lease_id", {"now": now, "expires_at": expires, "lease_id": existing["lease_id"],
+                    "page_digest": page_digest, "token": token},
             )
-            return {"lease_id": existing["lease_id"], "fencing_token": int(existing.get("fencing_token") or 1), "read_only": False}
+            return {"lease_id": existing["lease_id"], "fencing_token": token, "read_only": False}
         lease_id = _id("PPL")
         tx.execute(
             "INSERT INTO CX_PORTAL_PAGE_LEASES(LEASE_ID, CONNECTION_ID, SESSION_DIGEST, PAGE_INSTANCE_DIGEST, "

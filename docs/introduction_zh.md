@@ -1,18 +1,20 @@
-# 川序：Oracle AI Database 26ai 社区版 v4.4.14 中文介绍
+# 川序：Oracle AI Database 26ai 社区版 v4.4.15 中文介绍
 
-**版本**: v4.4.14
-**日期**: 2026-09-13
+**版本**: v4.4.15
+**日期**: 2026-09-16
 **许可**: Apache License 2.0
 
 [返回 README](../README.md) · [官方网站](https://db4agent.cn)
 
 ## 平台用途
 
+工作交接、上下文组装和诊断入口请阅读[完整中文操作说明](continuity-operations_zh.md)，其中包含安装校验、Agent 认证、MCP 配置、命令行操作和当前验收边界。
+
 川序（Chuanxu）是基于数据库的 AI Agent 管理平台，为企业内部及外部智能体保存身份、组织、知识、记忆、工作上下文、任务状态及治理记录。数据库负责持久状态和数据授权，模型负责推理与生成，Agent 运行进程负责执行。三者凭据和权限分别管理。
 
 技术项目名为 AI Agent Infra with DB。本包只适配 Oracle AI Database 26ai。社区版与企业版从同一仓库生成，实际可用能力取决于发行版、平台开关和主体权限。
 
-## v4.4.14 当前能力说明
+## v4.4.15 当前能力说明
 
 本版本以数据库中的能力矩阵为唯一准入依据，统一管理模型推理、结构化输出、模型工具调用、MCP、A2A 和受控执行。能力状态为 `OFF`（关闭）、`READ_ONLY`（只读）、`PROPOSAL_ONLY`（仅提案）或 `GOVERNED_EXECUTOR`（经治理的执行器），每次变更都需要并发版本和不可变审计记录。MCP 与 A2A 默认关闭；模型生成的写入、策略变更、Agent 控制、外部联系和发布默认只能形成提案，除非当前策略、信任信息和人工审批共同允许。
 
@@ -41,17 +43,17 @@
 
 ## 隔离、图工程与 DB4A2A
 
-本地强隔离运行依赖独立 UID/GID、namespace、cgroup、seccomp 和受保护的 Host Manager。控制面能够启动不等于宿主机通过强隔离准入。阅读 [Linux 兼容性](linux-platform-compatibility.md) 和 [运行隔离](runtime-isolation.md)。其他容器、云或 MaaS/SaaS 目标需要适配器与实际环境验证。
+本地强隔离运行依赖独立 UID/GID、namespace、cgroup、seccomp 和受保护的 Host Manager。控制面能够启动不等于宿主机通过强隔离准入。阅读 [Linux 兼容性](operations_zh.md) 和 [运行隔离](operations_zh.md)。其他容器、云或 MaaS/SaaS 目标需要适配器与实际环境验证。
 
-DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 仍须独立认证授权。它用于共享数据平面的协作，不替代标准 A2A 互操作。具体实现与未完成验证见 [DB4A2A](db4a2a.md) 及发布证据；接口存在不能证明全部不变量均已实测。
+DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 仍须独立认证授权。它用于共享数据平面的协作，不替代标准 A2A 互操作。具体实现与未完成验证见 [DB4A2A](operations_zh.md) 及发布证据；接口存在不能证明全部不变量均已实测。
 
-图运行时核心和图检查按权限提供。清单草稿导入、SLO 只读及检查点分叉为受控能力；回放、动态图迁移、框架适配器执行、A2A 和 OTLP 当前为禁用状态，不属于本版可启用的交付能力。不能由提示词或 Skill 自动开启。详见 [图工程](graph-engineering.md)。
+图运行时核心和图检查按权限提供。清单草稿导入、SLO 只读及检查点分叉为受控能力；回放、动态图迁移、框架适配器执行、A2A 和 OTLP 当前为禁用状态，不属于本版可启用的交付能力。不能由提示词或 Skill 自动开启。详见 [图工程](operations_zh.md)。
 
 ## 数据库适配
 
 向量、全文、Property Graph、关系数据和 PL/SQL；DBA 须准备 PDB、表空间与组件授权。网络加密策略须与 python-oracledb thin/thick 模式匹配。
 
-业务凭据失效时不得回退到部署账户。应用层检查不能替代数据库内部的行级/对象级授权。参见 [最小权限](minimum-privileges.md)、[安全](security.md) 和 [架构](architecture.md)。不以手工统计的表、函数或索引数量承诺当前能力；实际对象由发行清单和 postflight 核验。
+业务凭据失效时不得回退到部署账户。应用层检查不能替代数据库内部的行级/对象级授权。参见 [最小权限](operations_zh.md)、[安全](operations_zh.md) 和 [架构](operations_zh.md)。不以手工统计的表、函数或索引数量承诺当前能力；实际对象由发行清单和 postflight 核验。
 
 ## 从空目标部署
 
@@ -63,7 +65,7 @@ DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.4.14 --database oracle \
+  --version 4.4.15 --database oracle \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status

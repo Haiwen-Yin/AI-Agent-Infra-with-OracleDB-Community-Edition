@@ -1,0 +1,168 @@
+{
+  "CX_MCP_TOOL_REQUESTS": {
+    "check_expressions": [
+      "FENCING_TOKEN>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTRACT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INSTANCE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "JOB_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PAYLOAD_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "TOKEN_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "TOOL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "REQUEST_ID",
+      "JOB_ID",
+      "TOOL_ID",
+      "PRINCIPAL_ID",
+      "SECURITY_DOMAIN_ID",
+      "INSTANCE_ID",
+      "TOKEN_DIGEST",
+      "FENCING_TOKEN",
+      "CONTRACT_DIGEST",
+      "PAYLOAD_DIGEST",
+      "REQUEST_DIGEST",
+      "IDEMPOTENCY_KEY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "REQUEST_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "JOB_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "JOB_ID"
+        ],
+        "EXECUTION_JOBS",
+        [
+          "JOB_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "INSTANCE_ID"
+        ],
+        "CX_AGENT_INSTANCES",
+        [
+          "INSTANCE_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TOKEN_DIGEST"
+        ],
+        "CX_AGENT_ACCESS_TOKENS",
+        [
+          "TOKEN_DIGEST"
+        ]
+      ],
+      [
+        "U",
+        [
+          "PRINCIPAL_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_36C6575FDD050E00"
+  }
+}

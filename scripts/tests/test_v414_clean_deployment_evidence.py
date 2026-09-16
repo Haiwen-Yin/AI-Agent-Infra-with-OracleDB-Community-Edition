@@ -1,7 +1,14 @@
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
+
+pytestmark = pytest.mark.skipif(
+    not (ROOT / "tools/v414_clean_deployment_evidence.py").is_file(),
+    reason="unified-source release evidence inspection is not part of generated packages",
+)
 
 
 def test_v414_clean_evidence_is_bound_to_real_release_artifacts():

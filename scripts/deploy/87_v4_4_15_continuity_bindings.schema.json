@@ -1,0 +1,307 @@
+{
+  "CX_HANDOFF_CREDENTIAL_USES": {
+    "check_expressions": [
+      "RESOURCE_VERSION>0",
+      "FENCING_TOKEN>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INSTANCE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "OPERATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "RESOURCE_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "TOKEN_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "RESOURCE_VERSION",
+      "OPERATION",
+      "PRINCIPAL_ID",
+      "INSTANCE_ID",
+      "TOKEN_DIGEST",
+      "FENCING_TOKEN",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "HANDOFF_ID"
+        ],
+        "CX_HANDOFFS",
+        [
+          "HANDOFF_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "INSTANCE_ID"
+        ],
+        "CX_AGENT_INSTANCES",
+        [
+          "INSTANCE_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TOKEN_DIGEST"
+        ],
+        "CX_AGENT_ACCESS_TOKENS",
+        [
+          "TOKEN_DIGEST"
+        ]
+      ],
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "RESOURCE_VERSION"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_9D56E7F8080BD438"
+  },
+  "CX_HANDOFF_EVIDENCE": {
+    "check_expressions": [
+      "ITEM_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CONTENT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "ENTITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FAMILY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ITEM_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "PUBLICATION_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "REVISION_NO",
+      "ITEM_NO",
+      "FAMILY",
+      "ENTITY_ID",
+      "SOURCE_REVISION_ID",
+      "CONTENT_DIGEST",
+      "PUBLICATION_ID"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "PUBLICATION_ID"
+        ],
+        "CX_CONTEXT_PUBLICATIONS",
+        [
+          "PUBLICATION_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "ITEM_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO",
+          "FAMILY",
+          "ENTITY_ID",
+          "SOURCE_REVISION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ],
+        "CX_HANDOFF_REVISIONS",
+        [
+          "HANDOFF_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_ACA2693B55713861"
+  },
+  "CX_HANDOFF_INSTANCE_BINDINGS": {
+    "check_expressions": [
+      "PARTICIPANT_SIDE IN ('SENDER','RECIPIENT')",
+      "FENCING_TOKEN>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "HANDOFF_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INSTANCE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PARTICIPANT_SIDE": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "PRINCIPAL_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "HANDOFF_ID",
+      "PARTICIPANT_SIDE",
+      "PRINCIPAL_ID",
+      "INSTANCE_ID",
+      "FENCING_TOKEN",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "HANDOFF_ID"
+        ],
+        "CX_HANDOFFS",
+        [
+          "HANDOFF_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PRINCIPAL_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "INSTANCE_ID"
+        ],
+        "CX_AGENT_INSTANCES",
+        [
+          "INSTANCE_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "HANDOFF_ID",
+          "PARTICIPANT_SIDE"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_6C8211D0F7BD68A5"
+  }
+}

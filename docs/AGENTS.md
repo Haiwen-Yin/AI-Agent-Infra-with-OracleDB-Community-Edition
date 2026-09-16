@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.14 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.15 Unified Repository Guide
 
-> **v4.4.14** - The unified single-source repository that generates all 6 release
+> **v4.4.15** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -14,7 +14,7 @@
 Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
 deployment contract, not the historical source template filename. The build
 must align its version, adapter and terminal migration with the package:
-v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82.
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15 currently ends at 97.
 Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
 Historical scripts remain for
 journal/checksum reproducibility, not as a customer upgrade promise.
@@ -26,6 +26,99 @@ v4.4.14 adds database-authoritative model, MCP, A2A, and governed-execution
 capability posture plus normalized provider evidence in migration 82.
 Release acceptance is determined by the current package-bound evidence;
 the migration terminal alone does not establish production readiness.
+
+Migrations 86 through 88 introduce 45 normalized continuity tables and native
+immutable history, including exact handoff evidence, instance bindings and
+credential-use digests and native execution links. Include all three schema verification manifests in generated packages.
+Agent SQL access to these control-plane tables is denied; use authenticated
+Gateway services with current resource authorization. PostgreSQL registration
+must preserve these denials after legacy broad grants. See
+[continuity operations](continuity-operations.md) and the
+[Chinese guide](continuity-operations_zh.md). All four continuity phases remain
+required; isolated service acceptance is not full release acceptance.
+
+Migrations 89–92 protect explicit dynamic MCP exposure. Independent Agent
+discovery uses the filtered, read-only CX_MCP_EXPOSED_TOOLS view. Native SQL
+cannot expose a tool or mutate/delete an exposed contract. Invocation rechecks
+current exposure; reimport closes exposure pending a new authorized decision.
+Bind native authority to SESSION_USER and the actual object owner, never a
+caller-selected CURRENT_SCHEMA. YashanDB role grants must also be checked in
+ROLE_TAB_PRIVS. Use native named exceptions on YashanDB; Oracle application-error
+numbers are not portable. Preserve applied migration checksums.
+
+Migration 93 adds immutable CX_MCP_TOOL_REQUESTS provenance. Dynamic MCP
+invocation uses an authenticated Gateway proposal; Agent database sessions do
+not write the control-plane queue. Queue, receipt and audit commit together.
+Workers recheck the current claim, original credential, instance fencing,
+exposure and exact payload before execution. Native JSON numeric values must
+retain their digest across Oracle Decimal round trips. Nested MCP discovery
+must clear the previous Agent context before authenticating registration again.
+
+Migration 94 adds immutable per-revision handoff policies and retires only the
+serial-only ACTIVE_WORK_ID uniqueness constraint. Historical migration 86 may
+use this successor manifest only after its exact checksum is APPLIED. Default
+capacity remains one; explicit capacities 2–16 retain coordinator ownership.
+Lock the Work root for offers, policy changes and acknowledgements; reject
+duplicate active recipients and policy changes while handoffs are active.
+Preserve all policy revisions and keep Agent SQL access denied. Verify every
+Work revision has a policy before serving a migration-94 runtime.
+An interrupted journaled 94 attempt resumes before historical key verification
+only with exact predecessor and successor checksums. Reverify the entire chain
+after recovery; never accept incomplete successor facts as evidence. Drain old
+continuity writers before backfill/cutover so no revision lacks a policy.
+
+Public Gateway token exchange must allow the continuity workspace scopes and
+the agents.operate scope for explicit context execution. Scope selection never
+grants resource permissions. Migrations 95 and 96 bind native executions to
+exact context assemblies, Worker attempts, and the original Gateway credential
+using immutable relations. Workers recheck current authority, payload digest,
+including both requester and target Agent source reads. Result reads through
+both the continuity and legacy execution routes enforce that same intersection.
+Standalone successor verification must pass the selected package version to
+the journal reader, never depend on the migration runner's process default.
+Workers recheck the
+lease and fencing immediately before model dispatch. Revocation of the original
+credential cannot be repaired by issuing a replacement token. An expired Worker
+with an uncertain prior send records UNOBSERVED and never automatically resends.
+Install both migrations before running a context-aware Worker; retain their
+exact applied SQL and schema manifests. Current baselines have verified
+migrations 95 through 97 after sequential drained local-service cutovers.
+
+Migration 97 stores native Task, Graph, DB4A2A dispatch and own security-event
+projections in seven immutable typed relations. Capture parent/children in one
+native SELECT, preserve capture time and digest, and recheck the current
+original object's existence, owner and permissions on every use. These are
+original-domain snapshots, not current-state claims or cross-domain grants.
+Native locators must not create status-dependent foreign keys. Native Agent SQL
+remains denied after registration. Keep applied SQL and manifests unchanged.
+
+Public Gateway token exchange must allow the continuity workspace scopes and
+reject unsupported scopes before creating an instance. Test fresh HTTP
+enrollment and activation; internal token issuance is not public-entry proof.
+Deployment verification must check the historical execution queue dependencies
+as well as the terminal migration. Recompile invalidated Oracle packages after
+repairing historical structures and verify before replacing a running service.
+
+Release trust requires server-side signature verification of an actual archive.
+Never accept a client-supplied VERIFIED flag. Sign the exact file manifest,
+excluding itself and its signature envelope; keep the outer archive digest as
+the stored transport identity. Recheck staged bytes and current trust before
+rollout or Skill distribution. See [release signing](release-signing.md) and
+[发布签名](release-signing_zh.md).
+Skill download must authenticate the assigned recipient and recheck current
+archive trust. Acknowledgement requires the received digest and atomic audit;
+client VERIFIED flags never establish package trust. Keep acknowledged updates
+pending until activation. Safe-point assertions are Agent attestations, not
+independent evidence of an external runtime switch.
+
+The cooperative Linux Skill client installs signed plain files in a dedicated
+private runtime directory and revalidates each managed turn. Preserve the
+shared flock in the launched child so wrapper failure cannot permit a switch
+while that turn still runs. Recheck current server distribution trust before
+the durable atomic active-pointer replacement; retain old files and reconcile
+uncertain final acknowledgements with the exact local version. This does not
+isolate processes that bypass the wrapper or establish independent server
+observation. Never execute a downloaded program merely to acknowledge receipt.
 
 The model gateway is optional. Direct and gateway routes can coexist per LLM
 Provider Profile. The gateway provides bounded streaming/non-streaming
@@ -210,7 +303,7 @@ Never hardcode version numbers in source — `build.py` rewrites them.
 ```
 
 - Without flags: rebuilds every edition listed in `build.py:EDITIONS`.
-- `--edition oracle-ent`: build only that edition.
+- `--edition oracle-enterprise`: build only that edition.
 - `--skip-zip`: skip the zip step (faster iteration).
 - Output: `build_output/AI-Agent-Infra-with-<DB>-<Tier>-Edition/` and a sibling
   `.zip` per edition.
@@ -354,7 +447,7 @@ must be handled by an operator capacity decision.
 | Task                                        | Command                                                         |
 |---------------------------------------------|-----------------------------------------------------------------|
 | Cut a release (all editions)                | `$PYTHON_BIN build.py`                                           |
-| Iterate on one edition (no zip)             | `$PYTHON_BIN build.py --edition oracle-ent --skip-zip`           |
+| Iterate on one edition (no zip)             | `$PYTHON_BIN build.py --edition oracle-enterprise --skip-zip`    |
 | Validate against specs                      | `$PYTHON_BIN spec_validator.py`                                  |
 | Probe a running server                      | `$PYTHON_BIN spec_validator.py --live --base-url http://host:8000` |
 | Run generated Oracle package tests           | `cd build_output/AI-Agent-Infra-with-OracleDB-Enterprise-Edition && AIAGENT_TEST_DB=oracle "$PYTHON_BIN" -m pytest scripts/tests/` |
@@ -398,6 +491,8 @@ drop cluster-wide roles merely because one database was retired.
 6. **No `NVL()`** -> Use `COALESCE()`
 7. **`RETURNING col INTO :ret_id`** -> Keep in SQL. Oracle/YashanDB use it natively. PG adapter strips it.
 8. **Named binds `:param`** -> Use in SQL. PG `_convert_params` converts to `%s`.
+9. **Portable bind names** -> Never use Oracle-reserved `:audit`, `:by`, `:user`, `:grant`, `:level`, `:mode` or `:uid`. Use descriptive names such as `:audit_id`, `:decision_actor`, `:os_user`, `:grant_id`, `:isolation_level`, `:enforcement_mode` and `:runtime_uid`. The shared static guard and read-only Oracle bind preparation gate prevent recurrence.
+10. **Exact bind dictionaries** -> Oracle and YashanDB reject unused parameter names. For update-then-insert helpers, bind each statement's own placeholders; do not pass insert-only IDs to the update. Verify both branches against the native drivers.
 
 ### JavaScript Type Safety
 - PG returns BIGINT as `int`, Oracle/YashanDB return VARCHAR as `str`
@@ -416,7 +511,7 @@ drop cluster-wide roles merely because one database was retired.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.14`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.15`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

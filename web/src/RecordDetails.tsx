@@ -1,3 +1,4 @@
+import { statusLabels, statusLabel } from "./statusLabels";
 import React from "react";
 
 type Text = (zh: string, en: string) => string;
@@ -23,7 +24,8 @@ export default function RecordDetails({ value, text, raw = true, depth = 0 }: { 
     if (typeof item === "boolean") return item ? text("是", "Yes") : text("否", "No");
     if (typeof item === "object") return depth >= 6 ? <details><summary>{text("展开内容", "Expand content")}</summary><pre>{JSON.stringify(item, null, 2)}</pre></details> : <RecordDetails value={item} text={text} raw={false} depth={depth + 1} />;
     const str = String(item);
-    if (states[str]) return text(states[str], str);
+    if (states[str.toUpperCase()]) return text(states[str.toUpperCase()], str);
+    if (statusLabels[str.trim().toUpperCase()]) return statusLabel(str, text);
     if (/^[\[{]/.test(str)) { try { return render(JSON.parse(str)); } catch { /* Preserve plain text. */ } }
     return str;
   };

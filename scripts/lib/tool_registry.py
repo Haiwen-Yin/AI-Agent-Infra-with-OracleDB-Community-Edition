@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Tool Registry + DAG Chains
+"""AI Agent Infra v4.4.15 - Community Edition - Tool Registry + DAG Chains
 
 OpenAPI import, tool versioning, tool DAG composition, tool invocation.
 Tables: TOOL_REGISTRY, TOOL_CHAINS, TOOL_CHAIN_STEPS
@@ -114,7 +114,7 @@ def import_openapi(spec: Dict[str, Any], namespace: str) -> List[str]:
                     """UPDATE TOOL_REGISTRY
                        SET TOOL_NAMESPACE = :ns, DESCRIPTION = :descr,
                            INPUT_SCHEMA = :in_schema, OUTPUT_SCHEMA = :out_schema,
-                           TOOL_TYPE = 'API', STATUS = 'ACTIVE', UPDATED_AT = CURRENT_TIMESTAMP
+                           TOOL_TYPE = 'API', STATUS = 'ACTIVE', MCP_EXPOSED = 'N', UPDATED_AT = CURRENT_TIMESTAMP
                        WHERE TOOL_ID = :tool_id""",
                     {key: values[key] for key in ("ns", "descr", "in_schema", "out_schema")} | {"tool_id": tool_id},
                 )
@@ -197,7 +197,7 @@ def refresh_tool(tool_id: str, spec: Dict[str, Any]) -> bool:
     if not tool:
         return False
     affected = execute(
-        """UPDATE TOOL_REGISTRY SET OUTPUT_SCHEMA = :schema, UPDATED_AT = CURRENT_TIMESTAMP
+        """UPDATE TOOL_REGISTRY SET OUTPUT_SCHEMA = :schema, MCP_EXPOSED = 'N', UPDATED_AT = CURRENT_TIMESTAMP
            WHERE TOOL_ID = :tid""",
         {"schema": json.dumps(spec), "tid": tool_id},
     )
@@ -219,6 +219,39 @@ def update_tool(tool_id: str, *, description: str, status: str) -> bool:
         {"description": description, "status": status, "tool_id": tool_id},
     )
     return affected > 0
+
+
+class ToolExposureConflict(ValueError):
+    pass
+
+
+def set_mcp_exposure(actor: str, tool_id: str, *, expected_exposed: bool,
+                     exposed: bool, reason: str) -> Dict[str, Any]:
+    """Explicit operator decision, current-state check and audit in one transaction."""
+    from . import connection, identity_api
+    if type(exposed) is not bool or type(expected_exposed) is not bool:
+        raise ValueError('MCP exposure must be a boolean')
+    reason=str(reason or '').strip()
+    if not reason or len(reason)>1000:
+        raise ValueError('MCP exposure requires a bounded reason')
+    def change(tx):
+        principal=tx.query_one("SELECT STATUS FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:actor FOR UPDATE",{'actor':actor})
+        if not principal or principal['status']!='ACTIVE' or identity_api.effective_access(actor,'tools.write').get('decision')!='ALLOW':
+            raise PermissionError('MCP tool administration denied')
+        row=tx.query_one("SELECT STATUS,MCP_EXPOSED FROM TOOL_REGISTRY WHERE TOOL_ID=:tool FOR UPDATE",{'tool':tool_id})
+        if not row or row['status']=='RETIRED':
+            raise PermissionError('MCP tool administration denied')
+        if row['mcp_exposed'] not in {'Y','N'}:
+            raise ValueError('MCP exposure state is invalid')
+        if (row['mcp_exposed']=='Y')!=expected_exposed:
+            raise ToolExposureConflict('Tool exposure changed; reload before updating')
+        if exposed and row['status']!='ACTIVE':
+            raise ToolExposureConflict('Only an active tool can be exposed')
+        tx.execute("UPDATE TOOL_REGISTRY SET MCP_EXPOSED=:flag,UPDATED_AT=CURRENT_TIMESTAMP WHERE TOOL_ID=:tool",
+                   {'flag':'Y' if exposed else 'N','tool':tool_id})
+        identity_api._audit_tx(tx,actor,'TOOL_MCP_EXPOSE' if exposed else 'TOOL_MCP_REVOKE','TOOL',str(tool_id),'ALLOW',reason)
+        return {'tool_id':str(tool_id),'mcp_exposed':exposed}
+    return connection.execute_transaction_callback(change)
 
 
 def delete_tool(tool_id: str) -> bool:
@@ -315,13 +348,13 @@ def get_tool_stats() -> Dict[str, Any]:
         calls = r.get("total_calls", 0) or 0
         stats["by_type"][ttype] = stats["by_type"].get(ttype, 0) + cnt
         stats["by_status"][stat] = stats["by_status"].get(stat, 0) + cnt
-    stats["total_tools"] += cnt
-    stats["total_calls"] += calls
+        stats["total_tools"] += cnt
+        stats["total_calls"] += calls
     return stats
 
 
 def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
-                timeout: int = 30) -> Dict[str, Any]:
+                timeout: int = 30, *, require_mcp_exposure: bool = False) -> Dict[str, Any]:
     """Queue a registered HTTP tool call for approval-gated execution.
 
     Reads the tool's INPUT_SCHEMA (which contains path, method, parameters)
@@ -329,12 +362,31 @@ def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
 
     Returns a dict with: success, status_code, body, error
     """
-    tool = get_tool(tool_id)
+    tool = (execute_query_one(
+        "SELECT TOOL_ID, INPUT_SCHEMA, STATUS, MCP_EXPOSED FROM CX_MCP_EXPOSED_TOOLS WHERE TOOL_ID=:tid",
+        {"tid": tool_id},
+    ) if require_mcp_exposure else get_tool(tool_id))
+    if require_mcp_exposure and (not tool or tool.get("mcp_exposed") != "Y"):
+        # Discovery is not authority: a cached DYN_ name must not retain access
+        # after exposure is withdrawn, or expose a never-published registry ID.
+        return {"success": False, "error": "MCP tool is unavailable"}
     if not tool:
         return {"success": False, "error": f"Tool {tool_id} not found"}
     if tool.get("status", "ACTIVE") != "ACTIVE":
         return {"success": False, "error": f"Tool {tool_id} is not active"}
 
+    payload = prepare_http_request(tool, input_params or {}, timeout)
+    from .connection import get_current_agent_id
+    from .execution_control import enqueue_job
+    job = enqueue_job("TOOL_HTTP", payload, get_current_agent_id() or "system",
+        idempotency_key=input_params.get("idempotency_key") if isinstance(input_params, dict) else None,
+        requires_approval=True)
+    return {"success": True, "status": "QUEUED", "job_id": job.get("job_id"),
+            "url": payload["url"], "method": payload["method"]}
+
+
+def prepare_http_request(tool: Dict[str, Any], input_params: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+    """Build from the selected database contract; this function sends nothing."""
     input_schema = tool.get("input_schema", {})
     if isinstance(input_schema, str):
         try:
@@ -377,15 +429,5 @@ def invoke_tool(tool_id: str, input_params: Optional[Dict[str, Any]] = None,
     if query_params:
         url += ("?" if "?" not in url else "&") + urlencode(query_params, doseq=True)
 
-    from .connection import get_current_agent_id
-    from .execution_control import enqueue_job
-    job = enqueue_job(
-        "TOOL_HTTP",
-        {"url": url, "method": method, "headers": headers,
-         "body": input_params if body_data is not None else None, "timeout": timeout},
-        get_current_agent_id() or "system",
-        idempotency_key=input_params.get("idempotency_key") if isinstance(input_params, dict) else None,
-        requires_approval=True,
-    )
-    return {"success": True, "status": "QUEUED", "job_id": job.get("job_id"),
-            "url": url, "method": method}
+    return {"url": url, "method": method, "headers": headers,
+            "body": input_params if body_data is not None else None, "timeout": timeout}

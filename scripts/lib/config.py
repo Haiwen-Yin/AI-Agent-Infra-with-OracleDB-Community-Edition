@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Unified Configuration Manager
+"""AI Agent Infra v4.4.15 - Community Edition - Unified Configuration Manager
 
 Reads from encrypted config.json with environment variable fallback.
 Supports encrypted database credentials, LDAP configuration, and enterprise features.
@@ -15,7 +15,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-VERSION = "4.4.14"
+VERSION = "4.4.15"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -128,7 +128,7 @@ class MCPConfig:
         "knowledge_create", "knowledge_search",
         "tool_list", "tool_invoke", "graph_neighbors",
         "loop_status", "agent_list",
-        "skill_discover", "skill_describe", "skill_acquire", "skill_status",
+        "skill_discover", "skill_describe", "skill_acquire", "skill_status", "continuity",
     )
 
 

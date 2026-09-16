@@ -151,7 +151,7 @@ def test_empty_stream_content_uses_one_bounded_non_streaming_fallback():
     root = Path(__file__).resolve().parents[1]
     runtime = (root / "lib" / "native_runtime.py").read_text(encoding="utf-8")
     assert 'str(exc) != "LLM provider returned no content"' in runtime
-    assert "output = _call_llm(profile" in runtime
+    assert "output = provider_call(_call_llm, profile" in runtime
 
 
 def test_status_requests_use_the_database_control_plane_not_model_reconstruction():

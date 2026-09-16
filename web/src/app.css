@@ -2934,7 +2934,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   color: var(--brand);
 }
 .cx-auth-entry-actions .cx-auth-register-link { margin-top: 0; }
-.cx-auth-register-link { display: block; margin-top: 14px; color: var(--brand-deep); font-size: 12px; text-align: center; }
+.cx-auth-register-link { display: none; margin-top: 14px; color: var(--brand-deep); font-size: 12px; text-align: center; }
 @media (max-width: 560px) {
   .cx-auth-entry-actions,
   .cx-auth-return-actions { grid-template-columns: 1fr; }
@@ -3286,3 +3286,24 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   .model-governance-panel .widget-selector { grid-template-columns: 1fr; }
 }
 .wallboard-metrics .metric small { display: block; margin-top: 4px; color: var(--muted-text); font-size: .72rem; }
+
+.continuity-workbench { min-width: 0; }
+.portal-continuity { max-width: 1440px; margin: 0 auto; padding: 24px; }
+.portal-continuity > .page-toolbar { flex-wrap: wrap; }
+.continuity-workbench .panel { padding: 24px; min-width: 0; }
+.continuity-workbench h3 { margin-bottom: 20px; }
+.continuity-workbench fieldset { border: 1px solid var(--line); border-radius: 12px; margin: 20px 0; padding: 20px; min-width: 0; }
+.continuity-workbench legend { padding: 0 8px; }
+.continuity-workbench input, .continuity-workbench select, .continuity-workbench textarea { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.continuity-workbench textarea { width: 100%; resize: vertical; }
+.continuity-workbench .workbench-field { grid-template-rows: auto auto; align-content: start; }
+.continuity-workbench .workbench-field > span { white-space: normal; overflow: visible; }
+.continuity-workbench .operation-explainer-form > fieldset { grid-column: 1 / -1; }
+.continuity-workbench .operation-explainer-form > button { align-self: end; justify-self: start; }
+.continuity-workbench input[type="checkbox"] { width: auto; height: auto; }
+.continuity-workbench p, .continuity-workbench li, .continuity-workbench label { overflow-wrap: anywhere; }
+.continuity-body { white-space: pre-wrap; }
+@media (max-width: 780px) {
+  .continuity-workbench .operation-explainer-form { grid-template-columns: minmax(0, 1fr); }
+  .continuity-workbench .panel, .continuity-workbench fieldset { padding: 14px; }
+}

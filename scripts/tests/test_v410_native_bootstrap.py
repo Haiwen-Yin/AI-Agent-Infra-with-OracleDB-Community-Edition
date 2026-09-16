@@ -47,9 +47,14 @@ def test_verify_returns_failure_status_for_failed_checks(monkeypatch, tmp_path, 
     monkeypatch.setattr(engine, "_activate_runtime_config", lambda *_: None)
     monkeypatch.setattr(engine, "_deployment_database_status", lambda *_: {"status": "RETIRED"})
     monkeypatch.setattr(engine, "preflight", lambda *_, **__: {"passed": pre_ok})
-    monkeypatch.setattr(engine, "postflight", lambda *_: {"passed": post_ok})
+    observed_roots = []
+    def verify_package(database, edition, config, terminal, root):
+        observed_roots.append(root)
+        return {"passed": post_ok}
+    monkeypatch.setattr(engine, "postflight", verify_package)
     result = engine.run("verify", database="pg", edition="community", config_path=tmp_path / "config.json", root=tmp_path)
     assert result["status"] == ("VERIFIED" if pre_ok and post_ok else "FAILED")
+    assert observed_roots == [tmp_path]
 
 
 def test_verify_cli_has_nonzero_exit_for_failed_result(monkeypatch):
@@ -139,6 +144,8 @@ def test_baseline_declares_packaged_version_and_terminal():
             terminal = "81_v4_4_13_portal_bilingual_knowledge.sql"
         if version == "4.4.14":
             terminal = "82_v4_4_14_governed_model_capabilities.sql"
+        if version == "4.4.15":
+            terminal = "97_v4_4_15_native_context_sources.sql"
         baseline = deployment_orchestrator.release_baseline(database, root)
         assert baseline["version"] == version
         assert baseline["deployment"] == "bootstrap-deployment-agent"

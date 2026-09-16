@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.14 - Community Edition - Database Connection Pool Manager
+"""AI Agent Infra v4.4.15 - Community Edition - Database Connection Pool Manager
 
 Unified oracledb connection pool with bind-variable support.
 Replaces all SQLcl subprocess calls with direct oracledb access.
@@ -18,6 +18,11 @@ def scalar_select_suffix() -> str:
 def merge_scalar_suffix() -> str:
     """Return the Oracle-only suffix for a dialect-neutral MERGE source."""
     return " FROM " + "DU" + "AL"
+
+
+def database_version_observation() -> str:
+    with get_connection_for_agent() as conn:
+        return str(conn.version)
 import threading
 from contextvars import ContextVar
 import logging
