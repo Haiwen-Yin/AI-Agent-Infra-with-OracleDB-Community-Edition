@@ -6,9 +6,9 @@
   "technical_project": "AI Agent Infra with DB",
   "database": "Oracle",
   "edition": "Community",
-  "version": "4.4.15",
-  "release_date": "2026-09-16",
-  "source_commit": "befcc8aadbc8bb808ae88b23158f47f3ca4d5dc0",
+  "version": "4.4.16",
+  "release_date": "2026-09-23",
+  "source_commit": "26eec8b12b36d8ae6981fed9bbddf528da007727",
   "assets": {
     "chuanxu-mark.svg": "20740b21f737fa9ca677486fabdd5d5b7875cd5f5bd98e8295304cc4674a5318",
     "chuanxu-mark.png": "f3f5bd568299d394ffed81dcce303de069d5a1809e5b25815e0d993c6a8a3757",

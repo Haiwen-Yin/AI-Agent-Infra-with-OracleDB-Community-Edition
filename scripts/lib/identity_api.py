@@ -1299,6 +1299,55 @@ def set_entry_access(
     return entry_access(target_principal_id)
 
 
+def principal_options(actor: str, *, query: str = "", kind: str = "", after: str = "",
+                      channel_id: str = "") -> Dict[str, Any]:
+    """Name-first selection with the same visibility and stable IDs as writes."""
+    if kind not in {"", "HUMAN", "AGENT"}:
+        raise IdentityError("invalid principal type")
+    params: Dict[str, Any] = {"limit": 51}
+    if channel_id:
+        channel = _assert_channel_member(actor, channel_id, "channels.manage_members")
+        visibility = (
+            "EXISTS (SELECT 1 FROM CX_DOMAIN_MEMBERS dm WHERE dm.PRINCIPAL_ID=p.PRINCIPAL_ID "
+            "AND dm.SECURITY_DOMAIN_ID=:domain AND dm.STATUS='ACTIVE' "
+            "AND (dm.VALID_UNTIL IS NULL OR dm.VALID_UNTIL>CURRENT_TIMESTAMP)) "
+            "AND NOT EXISTS (SELECT 1 FROM CX_CHANNEL_MEMBERS cm WHERE cm.PRINCIPAL_ID=p.PRINCIPAL_ID "
+            "AND cm.CHANNEL_ID=:channel AND cm.STATUS='ACTIVE' "
+            "AND (cm.VALID_UNTIL IS NULL OR cm.VALID_UNTIL>CURRENT_TIMESTAMP))"
+        )
+        params.update(domain=channel['security_domain_id'], channel=channel_id)
+        from . import admin_management
+        if admin_management._protected_channel(channel_id):
+            visibility += (" AND (p.PRINCIPAL_TYPE='HUMAN' OR EXISTS (SELECT 1 FROM CX_ADMIN_AGENT_MEMBERS am "
+                           "WHERE am.AGENT_ID=p.PRINCIPAL_ID AND am.GROUP_ID=:admin_group "
+                           "AND am.STATUS='ACTIVE' AND am.VOTING_ENABLED='Y'))")
+            params['admin_group'] = admin_management.ADMIN_GROUP_ID
+    else:
+        human = _principal_visibility_clause(actor) if effective_access(actor, 'users.read').get('decision') == 'ALLOW' else 'p.PRINCIPAL_ID=:principal_id'
+        agent = _agent_visibility_clause(actor) if effective_access(actor, 'agents.read').get('decision') == 'ALLOW' else '1=0'
+        visibility = f"((p.PRINCIPAL_TYPE='HUMAN' AND ({human})) OR (p.PRINCIPAL_TYPE='AGENT' AND ({agent})))"
+    if ':principal_id' in visibility:
+        params['principal_id'] = actor
+    where = "p.STATUS='ACTIVE' AND (" + visibility + ")"
+    if kind:
+        where += ' AND p.PRINCIPAL_TYPE=:kind'
+        params['kind'] = kind
+    if after:
+        where += ' AND p.PRINCIPAL_ID>:after'
+        params['after'] = after[:128]
+    if query.strip():
+        where += (" AND (LOWER(p.DISPLAY_NAME) LIKE :search ESCAPE '!' OR LOWER(p.PRINCIPAL_ID) LIKE :search ESCAPE '!' "
+                  "OR EXISTS (SELECT 1 FROM CX_HUMAN_IDENTITIES hi WHERE hi.PRINCIPAL_ID=p.PRINCIPAL_ID "
+                  "AND hi.STATUS='ACTIVE' AND LOWER(hi.USERNAME) LIKE :search ESCAPE '!'))")
+        params['search'] = '%' + query.strip()[:128].lower().replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%'
+    rows = _required_query(
+        "SELECT p.PRINCIPAL_ID,p.PRINCIPAL_TYPE,p.DISPLAY_NAME,p.STATUS,"
+        "(SELECT MIN(i.USERNAME) FROM CX_HUMAN_IDENTITIES i WHERE i.PRINCIPAL_ID=p.PRINCIPAL_ID "
+        "AND i.IDENTITY_TYPE='LOCAL' AND i.STATUS='ACTIVE') AS USERNAME "
+        "FROM CX_PRINCIPALS p WHERE " + where + " ORDER BY p.PRINCIPAL_ID " + _limit_clause(), params)
+    return {'items': rows[:50], 'next_after': rows[49]['principal_id'] if len(rows) > 50 else ''}
+
+
 def list_users(principal_id: str, limit: int = 100) -> List[Dict[str, Any]]:
     """Return only human identities visible to the authenticated Principal.
 
@@ -3767,6 +3816,7 @@ def _post_channel_message_uncached(principal_id: str, channel_id: str, body: str
     connection.execute("UPDATE CX_CHANNELS SET UPDATED_AT=CURRENT_TIMESTAMP WHERE CHANNEL_ID=:channel_id", {"channel_id": channel_id})
     _audit(principal_id, "CHANNEL_MESSAGE_CREATE", "CHANNEL", channel_id, "ALLOW", "message persisted")
     dispatches: List[Dict[str, Any]] = []
+    dispatch_errors: List[Dict[str, str]] = []
     # Only a human administrator's explicit mention in the protected Channel
     # reaches the native runtime. Replies are AGENT_RESPONSE messages with no
     # mentions, so they cannot recursively invoke an Agent.
@@ -3774,7 +3824,6 @@ def _post_channel_message_uncached(principal_id: str, channel_id: str, body: str
     is_platform_command = str(body or "").strip().lower().startswith("/platform ")
     if is_administration_channel and (normalized_mentions or is_platform_command):
         from . import native_agent_api
-        dispatch_errors: List[Dict[str, str]] = []
         command_targets = [native_agent_api.PLATFORM_ADMIN_AGENT_ID] if is_platform_command else []
         for mentioned_agent_id in sorted(set(normalized_mentions + command_targets)):
             try:
@@ -3794,9 +3843,26 @@ def _post_channel_message_uncached(principal_id: str, channel_id: str, body: str
                 dispatch_errors.append({"agent_id": mentioned_agent_id, "reason": str(exc)[:240]})
                 _audit(principal_id, "CHANNEL_MANAGEMENT_AGENT_DISPATCH", "CHANNEL_MESSAGE", message_id,
                        "DENY", "explicit management Agent dispatch was not queued")
+    elif normalized_mentions and message_type == 'TEXT':
+        from . import business_channel_runtime, native_agent_api
+        sender = _row(connection.execute_query_one(
+            'SELECT PRINCIPAL_TYPE FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:actor', {'actor': principal_id}))
+        if sender and sender.get('principal_type') == 'HUMAN':
+            for subject in normalized_mentions:
+                native = _row(connection.execute_query_one(
+                    'SELECT AGENT_KIND FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:agent', {'agent': subject}))
+                if not native:
+                    continue  # External Agents retain their instance delivery protocol; people are mentions only.
+                try:
+                    dispatches.append(business_channel_runtime.enqueue(
+                        principal_id, channel_id, message_id, subject, normalized_thread_type, thread_id, response_language))
+                except (native_agent_api.NativeAgentError, PermissionError, IdentityError) as exc:
+                    dispatch_errors.append({'agent_id': subject, 'reason': str(exc)[:240]})
+                    _audit(principal_id, 'CHANNEL_BUSINESS_AGENT_DISPATCH', 'CHANNEL_MESSAGE', message_id,
+                           'DENY', 'explicit business Agent dispatch was not queued')
     return {"message_id": message_id, "channel_id": channel_id, "principal_id": principal_id, "body": body,
             "message_type": message_type, "deliveries_enqueued": int(delivered or 0), "agent_dispatches": dispatches,
-            "agent_dispatch_errors": dispatch_errors if is_administration_channel and (normalized_mentions or is_platform_command) else []}
+            "agent_dispatch_errors": dispatch_errors}
 
 
 def _channel_agent_response_message_id(channel_id: str, execution_id: str) -> str:
@@ -3808,6 +3874,9 @@ def begin_channel_agent_response(agent_id: str, channel_id: str, *, execution_id
                                  thread_type: str = "CHANNEL", thread_id: str = "") -> Dict[str, Any]:
     """Create an idempotent, visible placeholder before model streaming starts."""
     _assert_channel_member(agent_id, channel_id, "channels.write")
+    if channel_id != 'CH_PLATFORM_ADMINISTRATION':
+        from . import business_channel_runtime
+        business_channel_runtime.validate_response(agent_id, channel_id, execution_id, thread_type, thread_id)
     if not execution_id:
         raise IdentityError("managed Agent response is invalid")
     message_id = _channel_agent_response_message_id(channel_id, execution_id)
@@ -3849,6 +3918,9 @@ def update_channel_agent_response(agent_id: str, channel_id: str, body: str, *, 
     transitions are auditable while the Channel stays readable under long
     model responses.
     """
+    if channel_id != 'CH_PLATFORM_ADMINISTRATION':
+        from . import business_channel_runtime
+        business_channel_runtime.validate_response(agent_id, channel_id, execution_id)
     if not execution_id or len(body) > 100000:
         raise IdentityError("managed Agent response is invalid")
     from . import content_security
@@ -3984,7 +4056,7 @@ def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, 
         cursor += " AND m.CREATED_AT > :after"
         params["after"] = after
     ordering = " ORDER BY m.CREATED_AT ASC, m.MESSAGE_ID ASC " if after else " ORDER BY m.CREATED_AT DESC, m.MESSAGE_ID DESC "
-    return _required_query(
+    messages = _required_query(
         "SELECT m.MESSAGE_ID, m.CHANNEL_ID, m.THREAD_TYPE, m.THREAD_ID, m.PRINCIPAL_ID, "
         "COALESCE(p.DISPLAY_NAME, m.PRINCIPAL_ID) AS SENDER_DISPLAY_NAME, "
         "p.PRINCIPAL_TYPE AS SENDER_PRINCIPAL_TYPE, p.STATUS AS SENDER_STATUS, "
@@ -4000,6 +4072,10 @@ def list_channel_messages(principal_id: str, channel_id: str, limit: int = 100, 
         + _limit_clause(),
         params,
     )
+    if channel_id != 'CH_PLATFORM_ADMINISTRATION':
+        from . import business_channel_runtime
+        return business_channel_runtime.filter_messages(principal_id, messages)
+    return messages
 
 
 def channel_summary(principal_id: str, channel_id: str) -> Dict[str, Any]:

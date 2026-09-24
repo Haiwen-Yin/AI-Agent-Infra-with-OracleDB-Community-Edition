@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.15 - Knowledge API Tests"""
+"""AI Agent Infra v4.4.16 - Knowledge API Tests"""
 
 import sys
 import os

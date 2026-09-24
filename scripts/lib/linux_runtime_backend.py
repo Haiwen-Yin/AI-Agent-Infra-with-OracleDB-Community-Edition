@@ -35,8 +35,11 @@ def build_seccomp_bpf(denied: Sequence[str] = DENIED_SYSCALLS) -> bytes:
     """Build a default-allow BPF filter with explicit high-risk denials."""
     try:
         library = ctypes.CDLL("libseccomp.so.2")
-    except OSError as exc:
-        raise LinuxRuntimeBackendError("libseccomp.so.2 is unavailable") from exc
+    except OSError:
+        try:
+            library = ctypes.CDLL("/usr/lib64/libseccomp.so.2")
+        except OSError as exc:
+            raise LinuxRuntimeBackendError("libseccomp.so.2 is unavailable") from exc
     library.seccomp_init.argtypes = [ctypes.c_uint32]
     library.seccomp_init.restype = ctypes.c_void_p
     library.seccomp_release.argtypes = [ctypes.c_void_p]
@@ -155,7 +158,7 @@ def select_sandbox_process(
 
 
 def collect_process_evidence(unit: str, *, policy_digest: str, rootfs_digest: str,
-                             egress: Sequence[str]) -> dict[str, Any]:
+                             egress: Sequence[str], workload_pid: int | None = None) -> dict[str, Any]:
     properties = _systemctl_properties(unit)
     pid = int(properties.get("MainPID") or 0)
     if pid <= 0 or not Path(f"/proc/{pid}").is_dir():
@@ -168,6 +171,10 @@ def collect_process_evidence(unit: str, *, policy_digest: str, rootfs_digest: st
         candidates.extend(int(value) for value in (cgroup_root / "cgroup.procs").read_text().split())
     except (OSError, ValueError):
         pass
+    if workload_pid is not None:
+        if workload_pid not in candidates:
+            raise LinuxRuntimeBackendError('model gateway peer is outside the sandbox cgroup')
+        candidates = [workload_pid]
     pid, status, namespaces = select_sandbox_process(candidates, host_namespaces)
     limits = {}
     for name in ("memory.max", "pids.max", "cpu.max"):
@@ -278,13 +285,14 @@ class LinuxRuntimeBackend:
             previous.stop()
         return evidence
 
-    def evidence(self, key: str) -> dict[str, Any]:
+    def evidence(self, key: str, workload_pid: int | None = None) -> dict[str, Any]:
         with self._lock:
             runtime = self._processes.get(key)
         if not runtime:
             raise LinuxRuntimeBackendError("sandbox execution is unavailable")
         return collect_process_evidence(runtime.unit, policy_digest=runtime.policy_digest,
-                                        rootfs_digest=runtime.rootfs_digest, egress=runtime.egress)
+                                        rootfs_digest=runtime.rootfs_digest, egress=runtime.egress,
+                                        workload_pid=workload_pid)
 
     def stop(self, key: str) -> None:
         with self._lock:

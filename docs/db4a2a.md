@@ -1,4 +1,4 @@
-# DB4A2A Database-Mediated Collaboration v4.4.15
+# DB4A2A Database-Mediated Collaboration v4.4.16
 
 DB4A2A is the project's reference-oriented Agent collaboration pattern. It is
 not a replacement for standard A2A. A2A or Agent Protocol carries discovery,

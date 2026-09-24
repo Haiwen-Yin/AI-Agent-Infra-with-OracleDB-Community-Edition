@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.15">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.16">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.15 - Loops</title>
+<title>Chuanxu Oracle Community v4.4.16 - Loops</title>
 <link rel="stylesheet" href="/static/pages/loops.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -254,7 +254,7 @@ function showCreateLoopModal(editId){
   h+='<div class="form-group"><label><span data-zh>评估类型</span><span data-en>Eval Type</span></label><select id="clEvalType"><option value="TEST" data-label-zh="测试" data-label-en="Test">'+escapeHtml(valueLabel('TEST'))+'</option><option value="DIFF" data-label-zh="差异评估" data-label-en="Diff">'+escapeHtml(valueLabel('DIFF'))+'</option><option value="LLM_JUDGE" data-label-zh="模型评判" data-label-en="LLM judge">'+escapeHtml(valueLabel('LLM_JUDGE'))+'</option><option value="MANUAL" data-label-zh="手动评估" data-label-en="Manual">'+escapeHtml(valueLabel('MANUAL'))+'</option><option value="SPEC_VALIDATION" data-label-zh="规格验证" data-label-en="Spec validation">'+escapeHtml(valueLabel('SPEC_VALIDATION'))+'</option></select></div>';
   h+='<div class="form-group"><label><span data-zh>评估配置 (JSON)</span><span data-en>Evaluation Config (JSON)</span></label><textarea id="clEval" rows="4">'+escapeHtml(l?fmtJsonRaw(l.evaluation_config):'')+'</textarea></div>';
   h+='<div class="form-group"><label><span data-zh>触发配置 (JSON, 可选)</span><span data-en>Trigger Config (JSON, optional)</span></label><textarea id="clTrigger" rows="3">'+escapeHtml(l?fmtJsonRaw(l.trigger_config):'')+'</textarea></div>';
-  h+='<div class="form-group"><label><span data-zh>智能体 ID</span><span data-en>Agent ID</span></label><input id="clAgentId" value="'+escapeHtml(l?l.agent_id||'':'')+'"></div>';
+  h+='<div class="form-group"><label><span data-zh>智能体</span><span data-en>Agent</span></label><input id="clAgentId" value="'+escapeHtml(l?l.agent_id||'':'')+'"></div>';
   h+='<div class="form-group"><label><span data-zh>工作区 ID</span><span data-en>Workspace ID</span></label><input id="clWorkspaceId" value="'+escapeHtml(l?l.workspace_id||'':'')+'"></div>';
   h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
   h+='<button type="button" class="btn-primary" onclick="createLoop('+(l?'\''+escapeHtml(l.loop_id)+'\'':'null')+')"><span data-zh>保存</span><span data-en>Save</span></button></div>';

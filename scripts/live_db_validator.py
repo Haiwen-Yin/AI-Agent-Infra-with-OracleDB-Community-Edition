@@ -34,6 +34,13 @@ def _resolve_repo_root() -> Path:
 REPO_ROOT = _resolve_repo_root()
 
 
+def _migration_path(database: str, name: str) -> Path:
+    """Resolve every migration against the same source or package layout."""
+    if (REPO_ROOT / "build-manifest.json").is_file():
+        return REPO_ROOT / "scripts" / "deploy" / name
+    return REPO_ROOT / "adapters" / database / "deploy" / name
+
+
 def _available_databases() -> tuple[str, ...]:
     """Return all source adapters or the single adapter in a generated package."""
     manifest_path = REPO_ROOT / "build-manifest.json"
@@ -2073,7 +2080,7 @@ def _probe_yashandb(config: dict[str, Any], *, enterprise: bool = True) -> Probe
     try:
         result.connected = True
         with conn.cursor() as cursor:
-            cursor.execute("SELECT VERSION FROM V$INSTANCE")
+            cursor.execute("SELECT VERSION_NUMBER FROM V$VERSION")
             result.version = str(_scalar(cursor.fetchone()) or "")[:32]
             names = CORE_TABLES + V401_TABLES + REGISTRATION_TABLES + GOVERNANCE_TABLES + GRAPH_TABLES
             binds = ",".join(f":n{i}" for i in range(len(names)))
@@ -2217,17 +2224,12 @@ def main() -> int:
                 migration_scripts, validator = V431_MIGRATION_SCRIPTS, validate_v431_static_contract
             else:
                 migration_scripts, validator = V43_MIGRATION_SCRIPTS, validate_v43_static_contract
-            scripts = [
-                (REPO_ROOT / "scripts" / "deploy" / name)
-                if (REPO_ROOT / "scripts" / "deploy" / name).is_file()
-                else (REPO_ROOT / "adapters" / database / "deploy" / name)
-                for name in migration_scripts
-            ]
+            scripts = [_migration_path(database, name) for name in migration_scripts]
             if database == "pg" and (requires_v449 or requires_v410) and "51_v4_4_9_identity_boundary_repair.sql" not in migration_scripts:
-                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "51_v4_4_9_identity_boundary_repair.sql")
-                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "53_v4_4_9_pg_runtime_boundary.sql")
+                scripts.append(_migration_path("pg", "51_v4_4_9_identity_boundary_repair.sql"))
+                scripts.append(_migration_path("pg", "53_v4_4_9_pg_runtime_boundary.sql"))
             elif database == "pg" and "49_v4_4_8_security_domain_rls.sql" not in migration_scripts:
-                scripts.append(REPO_ROOT / "adapters" / "pg" / "deploy" / "49_v4_4_8_security_domain_rls.sql")
+                scripts.append(_migration_path("pg", "49_v4_4_8_security_domain_rls.sql"))
             static_contracts[database] = validator(database, scripts)
     # v4.3 replaced the pre-v4.3 execution/registration/governance catalog
     # with the CX control-plane catalog. Keep the legacy checks for older

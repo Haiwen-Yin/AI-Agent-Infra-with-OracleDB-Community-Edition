@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.4.15 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.4.16 Unified Repository Guide
 
-> **v4.4.15** - The unified single-source repository that generates all 6 release
+> **v4.4.16** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -14,7 +14,7 @@
 Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
 deployment contract, not the historical source template filename. The build
 must align its version, adapter and terminal migration with the package:
-v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15 currently ends at 97.
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15 and the application-only v4.4.16 end at 97.
 Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
 Historical scripts remain for
 journal/checksum reproducibility, not as a customer upgrade promise.
@@ -305,7 +305,7 @@ Never hardcode version numbers in source — `build.py` rewrites them.
 - Without flags: rebuilds every edition listed in `build.py:EDITIONS`.
 - `--edition oracle-enterprise`: build only that edition.
 - `--skip-zip`: skip the zip step (faster iteration).
-- Output: `build_output/AI-Agent-Infra-with-<DB>-<Tier>-Edition/` and a sibling
+- Output: `build_output/v<VERSION>/AI-Agent-Infra-with-<DB>-<Tier>-Edition/` and a sibling
   `.zip` per edition.
 
 ### Validate the build
@@ -511,7 +511,7 @@ drop cluster-wide roles merely because one database was retired.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.15`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.4.16`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration
@@ -527,7 +527,7 @@ drop cluster-wide roles merely because one database was retired.
 - Provider-specific reasoning parameters must be supported by that provider;
   do not inject an arbitrary value into every model request.
 - Streaming: only yield `content` tokens, skip `reasoning_content`
-- Non-streaming: fall back to `reasoning_content` if `content` empty
+- Non-streaming: require non-empty `content`; do not expose provider reasoning as a fallback answer.
 
 ### PG Schema Differences
 - Parent RLS does not protect direct leaf-partition queries. Entity partitions

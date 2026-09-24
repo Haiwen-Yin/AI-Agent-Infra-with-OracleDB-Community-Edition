@@ -3303,6 +3303,10 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .continuity-workbench input[type="checkbox"] { width: auto; height: auto; }
 .continuity-workbench p, .continuity-workbench li, .continuity-workbench label { overflow-wrap: anywhere; }
 .continuity-body { white-space: pre-wrap; }
+.principal-picker { display: grid; gap: 8px; min-width: 0; width: 100%; }
+.principal-picker input, .principal-picker select { width: 100%; min-width: 0; max-width: 100%; }
+.principal-picker select { text-overflow: ellipsis; }
+.principal-picker small { white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 780px) {
   .continuity-workbench .operation-explainer-form { grid-template-columns: minmax(0, 1fr); }
   .continuity-workbench .panel, .continuity-workbench fieldset { padding: 14px; }

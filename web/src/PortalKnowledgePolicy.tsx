@@ -60,7 +60,7 @@ export default function PortalKnowledgePolicy({ request, text }: {
           <option value="KNOWLEDGE_FIRST">{text("知识优先", "Knowledge first")}</option>
           <option value="KNOWLEDGE_ONLY">{text("仅知识", "Knowledge only")}</option>
         </select></label>
-        <label className="checkbox-field"><input type="checkbox" checked={mode === "KNOWLEDGE_FIRST" && supplement} disabled={mode === "KNOWLEDGE_ONLY"} onChange={(event) => { setSupplement(event.target.checked); setSaved(false); }} />{text("允许用户选择通用模型补充", "Allow users to select general model supplementation")}</label>
+        <label className="checkbox-field"><input type="checkbox" checked={mode === "KNOWLEDGE_FIRST" && supplement} disabled={mode === "KNOWLEDGE_ONLY"} onChange={(event) => { setSupplement(event.target.checked); setSaved(false); }} />{text("频道与 Portal 未命中知识时自动使用通用模型回答", "Use general model answers automatically when Channels or Portal find no knowledge match")}</label>
         <fieldset><legend>{text("允许接收授权知识的模型配置", "Model profiles permitted to receive authorized knowledge")}</legend>
           {[...profiles, ...disclosure.filter((id) => !known.has(id)).map((id) => ({ profile_id: id, profile_key: id, status: "UNAVAILABLE" }))].map((item) => {
             const id = String(item.profile_id);

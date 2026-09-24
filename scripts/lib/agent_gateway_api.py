@@ -517,7 +517,8 @@ def list_channel_events(principal_id: str, channel_id: str = "", limit: int = 10
         query += " AND msg.MESSAGE_ID < :before"
         params["before"] = before
     query += " ORDER BY msg.CREATED_AT DESC, msg.MESSAGE_ID DESC " + suffix
-    return identity_api._safe_query(query, params)
+    from . import business_channel_runtime
+    return business_channel_runtime.filter_messages(principal_id, identity_api._safe_query(query, params))
 
 
 def add_channel_member(actor_principal_id: str, channel_id: str, member_principal_id: str,
@@ -525,7 +526,10 @@ def add_channel_member(actor_principal_id: str, channel_id: str, member_principa
     try:
         from . import admin_management
         if admin_management._protected_channel(channel_id):
-            admin_management.can_add_protected_member(actor_principal_id, member_principal_id, reason)
+            try:
+                admin_management.can_add_protected_member(actor_principal_id, member_principal_id, reason)
+            except admin_management.ManagementError as exc:
+                raise GatewayError(str(exc)) from exc
             if str(role or "").upper() not in {"REVIEWER", "OPERATOR"}:
                 raise GatewayError("protected Platform Administration Channel role is invalid")
     except ImportError:

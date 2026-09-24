@@ -1,4 +1,4 @@
-# Work continuity operations v4.4.15
+# Work continuity operations v4.4.16
 
 [完整中文说明](continuity-operations_zh.md)
 
@@ -26,7 +26,7 @@ tables. Deploy the release-bound migration chain, including
 deployment verifier checks columns, defaults, constraints, immutable-history
 triggers and native grants. An APPLIED ledger entry alone is insufficient.
 
-The current v4.4.15 deployment terminal is migration 97 on all three databases.
+The current v4.4.16 deployment terminal is migration 97 on all three databases.
 Migrations 95 and 96 add three immutable relations for native executions,
 context input attempts and original Gateway credentials. Keep both SQL files
 and schema manifests. Install them before starting the context-aware Worker.

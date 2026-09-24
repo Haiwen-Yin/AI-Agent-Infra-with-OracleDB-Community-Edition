@@ -144,7 +144,7 @@ def test_baseline_declares_packaged_version_and_terminal():
             terminal = "81_v4_4_13_portal_bilingual_knowledge.sql"
         if version == "4.4.14":
             terminal = "82_v4_4_14_governed_model_capabilities.sql"
-        if version == "4.4.15":
+        if version in {"4.4.15", "4.4.16"}:
             terminal = "97_v4_4_15_native_context_sources.sql"
         baseline = deployment_orchestrator.release_baseline(database, root)
         assert baseline["version"] == version

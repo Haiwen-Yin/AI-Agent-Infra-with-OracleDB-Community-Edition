@@ -66,6 +66,7 @@ def _provider_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _failure_code(exc: Exception) -> str:
     """Persist only bounded local error categories, never remote bodies."""
     if isinstance(exc,PermissionError): return 'AUTHORITY_DENIED'
+    if isinstance(exc,runtime_isolation.IsolationError): return 'RUNTIME_ISOLATION_UNAVAILABLE'
     known={
         'LLM provider URL is invalid':'LLM_URL_INVALID',
         'LLM provider profile is incomplete':'LLM_PROFILE_INCOMPLETE',
@@ -243,16 +244,29 @@ def _finish(execution_id: str, worker_id: str, node_id: str, fencing_token: int,
 def _admit_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
     """Fail closed before model work when the target cannot prove isolation."""
     target = _row(connection.execute_query_one(
-        "SELECT TARGET_ID,TARGET_TYPE,STATUS FROM CX_DEPLOYMENT_TARGETS WHERE TARGET_ID=:id",
+        "SELECT TARGET_ID,TARGET_TYPE,STATUS,CONFIG_JSON FROM CX_DEPLOYMENT_TARGETS WHERE TARGET_ID=:id",
         {"id": execution.get("target_id")},
     ))
     if not target or str(target.get("status") or "").upper() != "ACTIVE":
         raise RuntimeError("Deployment target is unavailable")
     target_type = str(target.get("target_type") or "").upper()
-    adapter = deployment_adapters.reference_adapters().get(target_type)
-    if adapter is None:
-        raise RuntimeError("Deployment target has no verified runtime adapter")
-    observed = adapter.evidence(execution).evidence
+    if target_type == 'LOCAL_LINUX_SANDBOX':
+        from .isolated_channel_runtime import ChannelWorker
+        config = _parse(target.get('config_json'), {})
+        payload = _parse(execution.get('input_json'), {})
+        dispatch = payload.get('channel_dispatch') or {}
+        if dispatch.get('kind') != 'BUSINESS_MENTION':
+            raise PermissionError('isolated worker requires a bound business Channel mention')
+        from . import business_channel_runtime
+        business_channel_runtime.validate(str(execution['agent_id']), dispatch)
+        worker = ChannelWorker(execution, config)
+        execution['_isolated_worker'] = worker
+        observed = worker.start()
+    else:
+        adapter = deployment_adapters.reference_adapters().get(target_type)
+        if adapter is None:
+            raise RuntimeError("Deployment target has no verified runtime adapter")
+        observed = adapter.evidence(execution).evidence
     contract = runtime_isolation.RuntimeIsolationContract(
         isolation_level=str(execution.get("isolation_level") or ""),
         enforcement_mode=str(observed.get("enforcement_mode") or "UNVERIFIED"),
@@ -287,7 +301,10 @@ def _admit_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
 
 def _channel_dispatch(input_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     dispatch = input_payload.get("channel_dispatch") if isinstance(input_payload, dict) else None
-    return dispatch if isinstance(dispatch, dict) and str(dispatch.get("channel_id") or "") == "CH_PLATFORM_ADMINISTRATION" else None
+    return dispatch if isinstance(dispatch, dict) and (
+        str(dispatch.get("channel_id") or "") == "CH_PLATFORM_ADMINISTRATION"
+        or dispatch.get('kind') == 'BUSINESS_MENTION'
+    ) else None
 
 
 def _management_status_markdown(snapshot: Dict[str, Any], language: str = "zh") -> str:
@@ -522,11 +539,17 @@ def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dic
         return
     channel_id = str(dispatch["channel_id"])
     content = str((output or {}).get("content") or "").strip()
+    if not content and failure == 'RUNTIME_ISOLATION_UNAVAILABLE':
+        content = (
+            "当前部署目标不满足该 Agent 模板的隔离要求，尚未调用模型。请为 Agent 配置满足要求且经过验证的独立运行环境。"
+            if str(input_payload.get("response_language") or "en") == "zh" else
+            "The deployment target does not meet this Agent template's isolation requirements. The model was not called. Configure a verified isolated runtime that meets the template requirements."
+        )
     if not content:
         content = (
-            "管理 Agent 未能完成本次请求。请检查 Agent 模型配置和审计记录后重试。"
+            "Agent 未能完成本次请求。请检查 Agent 模型配置和审计记录后重试。"
             if str(input_payload.get("response_language") or "en") == "zh" else
-            "The management Agent could not complete this request. Check the Agent model configuration and the audit record before retrying."
+            "The Agent could not complete this request. Check the Agent model configuration and the audit record before retrying."
         )
     identity_api.post_channel_agent_response(agent_id, channel_id, content, execution_id=execution_id,
                                              thread_type=str(dispatch.get("thread_type") or "CHANNEL"),
@@ -545,13 +568,41 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
     input_payload: Dict[str, Any] = {}
     agent: Optional[Dict[str, Any]] = None
     provider_failed = False
+    provider_completed = False
     def provider_call(function, *args):
-        nonlocal provider_failed
+        nonlocal provider_failed, provider_completed
+        business_dispatch = input_payload.get('channel_dispatch') or {}
+        if business_dispatch.get('kind') == 'BUSINESS_MENTION':
+            from . import business_channel_runtime
+            business_channel_runtime.validate_response(str(execution['agent_id']),
+                str(business_dispatch['channel_id']), execution_id)
         provider_failed = True
-        result = function(*args)
+        isolated = execution.get('_isolated_worker')
+        if isolated:
+            from . import business_channel_runtime
+            def authorize():
+                business_channel_runtime.validate_response(str(execution['agent_id']),
+                    str(input_payload['channel_dispatch']['channel_id']), execution_id)
+                lease = _row(connection.execute_query_one(
+                    "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id "
+                    "AND STATUS='CLAIMED' AND WORKER_ID=:worker AND NODE_ID=:node "
+                    "AND FENCING_TOKEN=:token AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP",
+                    {'id':execution_id,'worker':worker_id,'node':node_id,'token':fencing_token}))
+                if not lease:
+                    raise PermissionError('isolated execution lease revoked')
+            result = isolated.model(args[0], args[1], _call_llm, authorize)
+            if len(args) > 2:
+                args[2](result['content'])
+        else:
+            result = function(*args)
         provider_failed = False
+        provider_completed = True
         return result
     try:
+        # Preserve the durable reply binding even when runtime admission fails,
+        # so an authorized Channel sees a bounded failure instead of silence.
+        input_payload = _parse(execution.get("input_json"), {})
+        agent = {"agent_id": str(execution.get("agent_id") or "")}
         _admit_execution(execution)
         agent = _row(connection.execute_query_one(
             "SELECT AGENT_ID,STATUS,LLM_PROFILE_ID FROM CX_NATIVE_AGENTS WHERE AGENT_ID=:id",
@@ -585,7 +636,9 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                 str(agent.get("agent_id") or ""), channel_id, execution_id=execution_id,
                 thread_type=str(dispatch.get("thread_type") or "CHANNEL"), thread_id=str(dispatch.get("thread_id") or ""),
             )
-            if isinstance(template_knowledge, dict):
+            if dispatch.get('kind') == 'BUSINESS_MENTION' and input_payload.get('knowledge_reply'):
+                output = {'content': input_payload['knowledge_reply'], 'model': 'database-knowledge-policy'}
+            elif isinstance(template_knowledge, dict):
                 output = {"content": _management_template_markdown(template_knowledge), "model": "database-control-plane"}
             elif isinstance(product_overview, dict):
                 output = {"content": _platform_product_markdown(product_overview, response_language), "model": "database-control-plane"}
@@ -620,7 +673,8 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
             if not profile:
                 raise RuntimeError("Agent has no active LLM Provider Profile")
             output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
-        _set_profile_health(str(agent.get("llm_profile_id") or ""), "HEALTHY")
+        if provider_completed:
+            _set_profile_health(str(agent.get("llm_profile_id") or ""), "HEALTHY")
         if not dispatch:
             _write_channel_response(str(agent.get("agent_id") or ""), execution_id, input_payload, output=output)
         _finish(execution_id, worker_id, node_id, fencing_token, "COMPLETED", output=output)
@@ -635,11 +689,15 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         except Exception:
             logger.debug("Unable to update LLM health", exc_info=True)
         try:
-            _write_channel_response(str((agent or {}).get("agent_id") or ""), execution_id, input_payload, failure="runtime execution failed")
+            _write_channel_response(str((agent or {}).get("agent_id") or ""), execution_id, input_payload, failure=failure_code)
         except Exception:
             logger.debug("Unable to write Channel response", exc_info=True)
         _finish(execution_id, worker_id, node_id, fencing_token, "FAILED", failure=failure_code)
         return {"status": "FAILED", "execution_id": execution_id,"failure_code":failure_code}
+    finally:
+        isolated = execution.get('_isolated_worker')
+        if isolated:
+            isolated.close()
 
 
 def get_execution(actor: str, execution_id: str) -> Dict[str, Any]:
@@ -653,6 +711,8 @@ def get_execution(actor: str, execution_id: str) -> Dict[str, Any]:
     ))
     if not row or not identity_api._agent_visible_to(actor, str(row.get("agent_id") or "")):
         raise PermissionError("Execution is unavailable")
+    from . import business_channel_runtime
+    business_channel_runtime.require_result_reader(actor, str(row.get('agent_id') or ''), execution_id)
     if row.get("output_json"):
         row["output"] = _parse(row.pop("output_json"), {})
     return row

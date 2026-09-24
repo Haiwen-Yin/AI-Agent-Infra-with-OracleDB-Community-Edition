@@ -1,4 +1,4 @@
-# 发布压缩包签名 v4.4.15
+# 发布压缩包签名 v4.4.16
 
 升级服务使用运维人员配置的 `CX_RELEASE_SIGNING_PUBLIC_KEY` 验证 Ed25519
 签名。该值是 32 字节公钥的 URL-safe Base64 编码。客户端提交的 `VERIFIED`

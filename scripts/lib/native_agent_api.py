@@ -432,7 +432,8 @@ def _principal_display_name(agent_id: str) -> str:
     return "Managed Agent"
 
 
-def _ensure_principal(tx: Any, agent_id: str) -> None:
+def _ensure_principal(tx: Any, agent_id: str, display_name: str = "") -> None:
+    requested_name = _text(display_name, 256)
     existing = _row(tx.query_one(
         "SELECT PRINCIPAL_ID FROM CX_PRINCIPALS WHERE PRINCIPAL_ID=:id FOR UPDATE",
         {"id": agent_id},
@@ -441,16 +442,23 @@ def _ensure_principal(tx: Any, agent_id: str) -> None:
         tx.execute(
             "INSERT INTO CX_PRINCIPALS(PRINCIPAL_ID,PRINCIPAL_TYPE,DISPLAY_NAME,STATUS,PERMISSION_VERSION) "
             "VALUES (:id,'AGENT',:display_name,'ACTIVE',1)",
-            {"id": agent_id, "display_name": _principal_display_name(agent_id)},
+            {"id": agent_id, "display_name": requested_name or _principal_display_name(agent_id)},
         )
     else:
         # Earlier bootstrap versions did not write a display name. Backfill
         # only blank names so operator-provided names always remain intact.
-        tx.execute(
-            "UPDATE CX_PRINCIPALS SET DISPLAY_NAME=:display_name,UPDATED_AT=CURRENT_TIMESTAMP "
-            "WHERE PRINCIPAL_ID=:id AND (DISPLAY_NAME IS NULL OR TRIM(DISPLAY_NAME)='')",
-            {"id": agent_id, "display_name": _principal_display_name(agent_id)},
-        )
+        if requested_name:
+            tx.execute(
+                "UPDATE CX_PRINCIPALS SET DISPLAY_NAME=:display_name,UPDATED_AT=CURRENT_TIMESTAMP "
+                "WHERE PRINCIPAL_ID=:id",
+                {"id": agent_id, "display_name": requested_name},
+            )
+        else:
+            tx.execute(
+                "UPDATE CX_PRINCIPALS SET DISPLAY_NAME=:display_name,UPDATED_AT=CURRENT_TIMESTAMP "
+                "WHERE PRINCIPAL_ID=:id AND (DISPLAY_NAME IS NULL OR TRIM(DISPLAY_NAME)='')",
+                {"id": agent_id, "display_name": _principal_display_name(agent_id)},
+            )
 
 
 def _ensure_native_agent(tx: Any, agent_id: str, kind: str, template_key: str,
@@ -610,9 +618,9 @@ def list_native_agents(actor: str, limit: int = 100) -> List[Dict[str, Any]]:
         where = " WHERE OWNER_PRINCIPAL_ID=:actor OR AGENT_ID=:actor"
         params["actor"] = actor
     rows = connection.execute_query(
-        "SELECT AGENT_ID,SOURCE,AGENT_KIND,TEMPLATE_ID,OWNER_PRINCIPAL_ID,STATUS,ACTIVATION_STATE,"
-        "LLM_PROFILE_ID,DEPLOYMENT_TARGET_ID,SECURITY_DOMAIN_ID,IS_PROTECTED,CREATED_AT,UPDATED_AT "
-        "FROM CX_NATIVE_AGENTS" + where + " ORDER BY CREATED_AT DESC" + suffix, params,
+        "SELECT a.AGENT_ID,p.DISPLAY_NAME AS AGENT_NAME,p.DISPLAY_NAME AS DISPLAY_NAME,a.SOURCE,a.AGENT_KIND,a.TEMPLATE_ID,a.OWNER_PRINCIPAL_ID,a.STATUS,a.ACTIVATION_STATE,"
+        "a.LLM_PROFILE_ID,a.DEPLOYMENT_TARGET_ID,a.SECURITY_DOMAIN_ID,a.IS_PROTECTED,a.CREATED_AT,a.UPDATED_AT "
+        "FROM CX_NATIVE_AGENTS a LEFT JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=a.AGENT_ID" + where.replace("OWNER_PRINCIPAL_ID", "a.OWNER_PRINCIPAL_ID").replace("AGENT_ID", "a.AGENT_ID") + " ORDER BY a.CREATED_AT DESC" + suffix, params,
     )
     return _rows(rows)
 
@@ -637,9 +645,9 @@ def list_native_agents_cursor(actor: str, *, page_size: int = 20, cursor: str = 
         params["after"] = after
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     rows = connection.execute_query(
-        "SELECT AGENT_ID,SOURCE,AGENT_KIND,TEMPLATE_ID,OWNER_PRINCIPAL_ID,STATUS,ACTIVATION_STATE,"
-        "LLM_PROFILE_ID,DEPLOYMENT_TARGET_ID,SECURITY_DOMAIN_ID,IS_PROTECTED,CREATED_AT,UPDATED_AT "
-        "FROM CX_NATIVE_AGENTS" + where + " ORDER BY AGENT_ID" + _limit(int(context["page_size"]) + 1)[0], params,
+        "SELECT a.AGENT_ID,p.DISPLAY_NAME AS AGENT_NAME,p.DISPLAY_NAME AS DISPLAY_NAME,a.SOURCE,a.AGENT_KIND,a.TEMPLATE_ID,a.OWNER_PRINCIPAL_ID,a.STATUS,a.ACTIVATION_STATE,"
+        "a.LLM_PROFILE_ID,a.DEPLOYMENT_TARGET_ID,a.SECURITY_DOMAIN_ID,a.IS_PROTECTED,a.CREATED_AT,a.UPDATED_AT "
+        "FROM CX_NATIVE_AGENTS a LEFT JOIN CX_PRINCIPALS p ON p.PRINCIPAL_ID=a.AGENT_ID" + where.replace("OWNER_PRINCIPAL_ID", "a.OWNER_PRINCIPAL_ID").replace("AGENT_ID", "a.AGENT_ID") + " ORDER BY a.AGENT_ID" + _limit(int(context["page_size"]) + 1)[0], params,
     )
     values = _rows(rows)
     result = cursor_pagination.page(values, context, lambda item: {"agent_id": str(item["agent_id"])})
@@ -1020,6 +1028,17 @@ def create_request(actor: str, *, agent_name: str, owner_principal_id: str,
     if isolation_level not in ISOLATION_LEVELS:
         raise NativeAgentError("invalid runtime isolation level")
     owner_principal_id = _text(owner_principal_id, 128)
+    # The UI accepts the globally unique local username. Keep accepting a
+    # principal_id for backward compatibility and normalize both forms before
+    # authorization and persistence.
+    resolved_owner = _row(connection.execute_query_one(
+        "SELECT PRINCIPAL_ID FROM CX_HUMAN_IDENTITIES "
+        "WHERE IDENTITY_TYPE='LOCAL' AND STATUS='ACTIVE' "
+        "AND (SUBJECT_KEY=:value OR USERNAME=:value)",
+        {"value": owner_principal_id},
+    ))
+    if resolved_owner:
+        owner_principal_id = str(resolved_owner["principal_id"])
     if owner_principal_id != actor and identity_api.effective_access(
         actor, "agents.enroll.others"
     ).get("decision") != "ALLOW":
@@ -1094,7 +1113,7 @@ def decide_request(actor: str, request_id: str, decision: str, reason: str) -> D
         ))
         if not request or str(request.get("status") or "") != "APPROVAL_PENDING":
             raise NativeAgentConflict("Agent request is not pending approval")
-        if str(request.get("applicant_principal_id") or "") == actor:
+        if _enterprise() and str(request.get("applicant_principal_id") or "") == actor:
             raise PermissionError("applicant cannot approve its own Agent request")
         status = "PROVISIONING" if decision == "APPROVE" else "REJECTED"
         tx.execute(
@@ -1112,7 +1131,7 @@ def decide_request(actor: str, request_id: str, decision: str, reason: str) -> D
             ))
             if not template:
                 raise NativeAgentError("Agent template is unavailable")
-            _ensure_principal(tx, created_agent_id)
+            _ensure_principal(tx, created_agent_id, str(request.get("agent_name") or ""))
             tx.execute(
                 "INSERT INTO CX_NATIVE_AGENTS(AGENT_ID,SOURCE,AGENT_KIND,TEMPLATE_ID,OWNER_PRINCIPAL_ID,STATUS,"
                 "ACTIVATION_STATE,LLM_PROFILE_ID,DEPLOYMENT_TARGET_ID,SECURITY_DOMAIN_ID,IS_PROTECTED,CREATED_BY) VALUES "

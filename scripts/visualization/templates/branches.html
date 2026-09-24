@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.15">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.16">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.15 - Branches</title>
+<title>Chuanxu Oracle Community v4.4.16 - Branches</title>
 <link rel="stylesheet" href="/static/pages/branches.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -277,8 +277,8 @@ function showForkModal(){
   h+='<div class="form-group"><label><span data-zh>源上下文 ID</span><span data-en>Fork Context ID</span></label><input id="fkContextId" name="fork_context_id"></div>';
   h+='<div class="form-group"><label><span data-zh>分支名称 *</span><span data-en>Branch Name *</span></label><input id="fkBranchName" name="branch_name" required></div>';
   h+='<div class="form-group"><label><span data-zh>分支类型</span><span data-en>Branch Type</span></label><select id="fkBranchType" name="branch_type"><option value="EXPLORATION" data-label-zh="探索" data-label-en="Exploration">'+escapeHtml(valueLabel('EXPLORATION'))+'</option><option value="ROLLBACK" data-label-zh="回滚" data-label-en="Rollback">'+escapeHtml(valueLabel('ROLLBACK'))+'</option><option value="HANDOFF" data-label-zh="交接" data-label-en="Handoff">'+escapeHtml(valueLabel('HANDOFF'))+'</option><option value="PARALLEL" data-label-zh="并行" data-label-en="Parallel">'+escapeHtml(valueLabel('PARALLEL'))+'</option></select></div>';
-  h+='<div class="form-group"><label><span data-zh>智能体 ID</span><span data-en>Agent ID</span></label><input id="fkAgentId" name="agent_id"></div>';
-  h+='<div class="form-group"><label><span data-zh>源智能体 ID</span><span data-en>Source Agent ID</span></label><input id="fkSourceAgentId" name="source_agent_id"></div>';
+  h+='<div class="form-group"><label><span data-zh>智能体</span><span data-en>Agent</span></label><input id="fkAgentId" name="agent_id"></div>';
+  h+='<div class="form-group"><label><span data-zh>源智能体</span><span data-en>Source Agent</span></label><input id="fkSourceAgentId" name="source_agent_id"></div>';
   h+='<div class="form-group"><label><span data-zh>目的</span><span data-en>Purpose</span></label><textarea id="fkPurpose" name="purpose" rows="3"></textarea></div>';
   h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
   h+='<button type="button" class="btn-primary" onclick="submitFork()"><span data-zh>创建</span><span data-en>Fork</span></button></div>';
@@ -357,7 +357,7 @@ function showLessonModal(branchId){
   h+='<div class="form-group"><label><span data-zh>教训类型</span><span data-en>Lesson Type</span></label><select id="lsLessonType" name="lesson_type"><option value="MISTAKE" data-label-zh="错误" data-label-en="Mistake">'+escapeHtml(valueLabel('MISTAKE'))+'</option><option value="INSIGHT" data-label-zh="洞察" data-label-en="Insight">'+escapeHtml(valueLabel('INSIGHT'))+'</option><option value="ALTERNATIVE" data-label-zh="替代方案" data-label-en="Alternative">'+escapeHtml(valueLabel('ALTERNATIVE'))+'</option></select></div>';
   h+='<div class="form-group"><label><span data-zh>教训摘要</span><span data-en>Lesson Summary</span></label><input id="lsSummary" name="lesson_summary"></div>';
   h+='<div class="form-group"><label><span data-zh>教训详情</span><span data-en>Lesson Detail</span></label><textarea id="lsDetail" name="lesson_detail" rows="4"></textarea></div>';
-  h+='<div class="form-group"><label><span data-zh>智能体 ID</span><span data-en>Agent ID</span></label><input id="lsAgentId" name="agent_id"></div>';
+  h+='<div class="form-group"><label><span data-zh>智能体</span><span data-en>Agent</span></label><input id="lsAgentId" name="agent_id"></div>';
   h+='<div class="modal-actions"><button type="button" class="btn-secondary" onclick="closeModal()"><span data-zh>取消</span><span data-en>Cancel</span></button>';
   h+='<button type="button" class="btn-primary" onclick="submitLesson(\''+branchId+'\')"><span data-zh>提交</span><span data-en>Submit</span></button></div>';
   h+='</div></div>';

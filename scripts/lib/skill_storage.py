@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.15 - Skill Resource Storage Abstraction Layer"""
+"""AI Agent Infra v4.4.16 - Skill Resource Storage Abstraction Layer"""
 
 import hashlib
 import mimetypes

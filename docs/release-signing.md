@@ -1,4 +1,4 @@
-# Release archive signing v4.4.15
+# Release archive signing v4.4.16
 
 The upgrade service verifies an Ed25519 signature using the operator-provided
 `CX_RELEASE_SIGNING_PUBLIC_KEY` (URL-safe Base64 of the 32-byte public key).

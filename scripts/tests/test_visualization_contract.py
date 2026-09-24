@@ -647,7 +647,7 @@ def test_governance_and_audit_templates_keep_actions_and_event_details_localized
     approvals_css = (TEMPLATES_DIR.parent / "static" / "pages" / "approvals.css").read_text(encoding="utf-8")
     audit_css = (TEMPLATES_DIR.parent / "static" / "pages" / "audit.css").read_text(encoding="utf-8")
     assert 'data-zh>操作</span><span data-en>Actions' in approvals
-    assert 'data-zh>智能体 ID</span><span data-en>Agent ID' in approvals
+    assert 'data-zh>智能体</span><span data-en>Agent' in approvals
     assert 'data-zh>无</span><span data-en>None' in approvals
     assert ".emergency-form{grid-template-columns:" in approvals_css
     assert ".cx-governance-page #requests .cx-toolbar" in approvals_css

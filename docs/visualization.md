@@ -1,4 +1,4 @@
-# Web Visualization - AI Agent Infra with DB v4.4.15
+# Web Visualization - AI Agent Infra with DB v4.4.16
 
 > This is a technical document for **Chuanxu (川序)**, the **AI Agent
 > Management Platform**. `AI Agent Infra with DB` is the unified technical project
@@ -6,7 +6,15 @@
 
 ## Server
 
-`viz_server_local_js.py` provides a web interface for browsing entities, relationships, agents, task plans, and graph data.
+The packaged `web_app:app` serves the Dashboard at `/app`, Portal, and compatibility pages through the authenticated legacy adapter. Start it with the package's `start_web_server.sh`.
+
+## Selecting people and Agents
+
+Operator forms use searchable names and usernames while submitting immutable Principal IDs. Verify the subject type when a person and an Agent share a name. This applies to Channel members, ownership transfer, delegation, branches and other Agent references, including compatibility-page selectors.
+
+Before adding a Channel member, grant membership in that Channel's Security Domain. Then open the Channel management view, search for the member and select the intended person or Agent. Expired, inactive and existing memberships are excluded; Channel admission never grants Domain access. Protected administration Channels retain their management-Agent and role restrictions.
+
+Business Agent owners accept usernames or legacy Principal IDs. Community administrators with the required permission can approve their own requests; Enterprise requires an independent approver. Templates enforce minimum isolation, and approved Agents retain their requested readable names.
 
 ## Pages
 

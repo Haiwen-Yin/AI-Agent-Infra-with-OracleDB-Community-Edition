@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.15">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.16">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.15 - Skills</title>
+<title>Chuanxu Oracle Community v4.4.16 - Skills</title>
 <link rel="stylesheet" href="/static/pages/skills.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -264,7 +264,7 @@ async function downloadResource(skillId){
 }
 
 async function requestAccess(skillId){
-  var agentId=prompt('Agent ID:');if(!agentId)return;
+  var agentId=await window.ChuanxuUI.chooseAgent();if(!agentId)return;
   var sessionId=prompt('Session ID (optional):')||'';
   try{
     var r=await fetch('/api/skill/'+skillId+'/request-access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agentId,session_id:sessionId})});

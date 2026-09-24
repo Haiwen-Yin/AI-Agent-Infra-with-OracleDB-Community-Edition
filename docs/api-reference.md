@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.4.15
+# API Reference - AI Agent Infra with DB v4.4.16
 
 ## Runtime Host Provisioning APIs
 
@@ -1142,7 +1142,7 @@ returns only the authorized current publication. Every v4.4.10 error contains
 A context reference never grants access. The receiver's Principal, Agent
 Instance, organization, Security Domain, and database policies remain active.
 
-## v4.4.13 Candidate Knowledge and Management APIs
+## Knowledge and Management APIs
 
 `GET /api/platform/portal-knowledge-policy` requires `platform.manage` and reads
 the database policy and version. `PUT` requires `mode` (`KNOWLEDGE_FIRST` or
@@ -1157,8 +1157,13 @@ both read matching active Knowledge and the selected profile is approved for
 disclosure, the LLM receives only those authorized sources and returns fresh
 citations (`KNOWLEDGE_GROUNDED`). With no match, `KNOWLEDGE_FIRST` may call the
 model only when supplementation is enabled and labels the answer as general
-model knowledge (`MODEL_SUPPLEMENT`). Without a configured model, matching
+model knowledge (`MODEL_SUPPLEMENT`). Without model disclosure approval, matching
 Knowledge remains available as cited extracts (`KNOWLEDGE_EXTRACTS`).
+
+Portal and Channel views render a separate bilingual source notice for
+`MODEL_SUPPLEMENT`, including verifiable history. Channel response metadata is
+derived from authorized persisted execution input, not message references or
+model text; failed and unverifiable executions receive no success label.
 
 Portal pool selection requires an ACTIVE Agent Principal and effective
 `knowledge.read`; a legacy `AGENT_REGISTRY` alias is not enough. Conversation

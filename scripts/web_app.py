@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.4.15 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.4.16 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -44,7 +44,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.4.15"
+VERSION = "4.4.16"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -2166,6 +2166,10 @@ def require_action_cached(action: str):
 
 def _identity_http_error(exc: Exception, detail: str, *, identity_status: int = 400) -> HTTPException:
     """Map identity failures without leaking database or governance details."""
+    if isinstance(exc, native_agent_api.NativeAgentConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, native_agent_api.NativeAgentError):
+        return HTTPException(status_code=400, detail=str(exc))
     # Governance conflicts are expected, auditable operator outcomes.  They
     # must not be presented as an unavailable identity service, otherwise a
     # rejected second binding looks like an infrastructure failure.
@@ -4487,6 +4491,16 @@ def external_agent_registration_policy_update(
         raise _identity_http_error(exc, "External Agent registration policy update was denied") from exc
 
 
+@app.get("/api/principal-options")
+def principal_options(query: str = "", kind: str = "", after: str = "", channel_id: str = "",
+                      session: Dict[str, Any] = Depends(principal)) -> Dict[str, Any]:
+    try:
+        return identity_api.principal_options(str(session['principal_id']), query=query,
+                                              kind=kind, after=after, channel_id=channel_id)
+    except Exception as exc:
+        raise _identity_http_error(exc, "Principal selection is unavailable") from exc
+
+
 @app.get("/api/agent-provision-requests")
 def agent_provision_requests(
     limit: int = 100,
@@ -6031,8 +6045,10 @@ def channel_member_add(channel_id: str, body: ChannelMemberBody, session: Dict[s
         changed = agent_gateway_api.add_channel_member(
             str(session["principal_id"]), channel_id, body.principal_id, body.member_role, body.reason,
         )
-    except (agent_gateway_api.GatewayError, identity_api.IdentityError, PermissionError) as exc:
-        raise HTTPException(status_code=403, detail="Channel member could not be added") from exc
+    except agent_gateway_api.GatewayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (identity_api.IdentityError, PermissionError) as exc:
+        raise HTTPException(status_code=403, detail="Channel member management is not authorized") from exc
     return {"success": changed, "channel_id": channel_id, "principal_id": body.principal_id, "member_role": body.member_role}
 
 

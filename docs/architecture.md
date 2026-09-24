@@ -1,4 +1,4 @@
-# Architecture - AI Agent Infra with DB v4.4.15
+# Architecture - AI Agent Infra with DB v4.4.16
 
 ## v4.4.10 Model Usage And Executive Visibility Plane
 
@@ -752,9 +752,7 @@ and visualization:
 | PostgreSQL 18 | Apache AGE | AGE/Cypher projection is used where available; relational metadata and runtime operations remain portable. |
 | YashanDB | Native Property Graph projection | Native graph capability is exposed; relational edge operations remain the fallback for supported runtime queries. |
 
-PostgreSQL 19 native Property Graph is intentionally a future adapter target.
-It is not required for the PostgreSQL 18 v4.3.0 release and does not change
-the shared service contract.
+PostgreSQL uses Apache AGE while retaining the shared service contract.
 
 ## Profile Boundary
 

@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.4.15
+# Graph Engineering - AI Agent Infra with DB v4.4.16
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -94,8 +94,7 @@ The same relational runtime contract is implemented on all three databases.
 Native Property Graph projections provide graph traversal and inspection:
 
 - Oracle AI Database 26ai uses native Property Graph and SQL PGQ.
-- PostgreSQL 18 uses Apache AGE; PostgreSQL 19 native Property Graph is a
-  later adapter target.
+- PostgreSQL 18 uses Apache AGE.
 - YashanDB 23.5.4+ uses its native Property Graph projection and relational
   runtime operations where a native query is not available.
 

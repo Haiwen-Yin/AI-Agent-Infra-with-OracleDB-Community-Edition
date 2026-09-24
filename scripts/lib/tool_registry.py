@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.15 - Community Edition - Tool Registry + DAG Chains
+"""AI Agent Infra v4.4.16 - Community Edition - Tool Registry + DAG Chains
 
 OpenAPI import, tool versioning, tool DAG composition, tool invocation.
 Tables: TOOL_REGISTRY, TOOL_CHAINS, TOOL_CHAIN_STEPS

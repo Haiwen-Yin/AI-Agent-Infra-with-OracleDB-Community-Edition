@@ -1,11 +1,48 @@
 # Changelog
 
+## v4.4.16 - 2026-09-22
+
+- Fixed native Agent provisioning to preserve the requested readable name in the Agent principal and inventory while retaining the generated technical ID.
+- Accepted globally unique owner usernames with legacy principal-ID compatibility; Community administrators may approve their own requests, while Enterprise retains separation of duties.
+- Added template-aware isolation controls, actionable provisioning errors, and OCI regression/spec coverage.
+- Added searchable Human/Agent selection for Channel membership and other operator workflows, preserving Domain admission checks and distinguishing identical display names.
+- Fixed v4.4.16 bootstrap-chain selection and verification of unchanged v4.4.15 successor migrations.
+
+
 ## v4.4.15 - 2026-09-14
 
-- Added the database-entity proposal specification for context continuity, Work Contracts, Handoffs, Context Assemblies, candidate review, immutable Revisions, explicit publications, and diagnostics. These new entities are not yet implemented.
-- Restored journaled v4.4.15 migration execution and strict terminal-step/failed-step deployment verification, retaining the reviewed v4.4.14 migration baseline.
-- Combined consecutive leading system messages for model-provider compatibility without promoting user content or bypassing content-security checks.
-- Extended isolated six-edition acceptance to committed dispatch, rollback, native authorization, standalone Graph Runtime, real-model Channel replies and Portal knowledge responses. Full release acceptance remains incomplete.
+- Added migration 97 with seven typed native source snapshot relations. Preserve exact Task/Graph/DB4A2A/security-event projections, original-domain authority and immutable history; normalize capture time across native drivers and verify string defaults and numeric precision.
+- Added a cooperative Linux Skill runtime client with pinned-key installation verification, process-held turn locks, atomic activation, preserved old versions and recovery after uncertain acknowledgements. Server-side activation remains an authenticated Agent attestation.
+
+- Added migrations 95–96 for immutable native execution/context, Worker attempt and original Gateway credential relationships. Recheck both requester and recipient source authority before model dispatch and result reads; uncertain sends cannot be retried automatically.
+- Added shared Dashboard/Portal contextual Agent execution controls and typed Gateway/MCP operations. Corrected nested form placement, continuity field sizing and standalone deployment verification against the selected package version.
+- Added per-revision parallel handoff policies in migration 94, coordinator-preserving acknowledgements, shared Portal/Dashboard controls and checksum-bound recovery after interrupted DDL. Expanded post-registration native history-denial checks to the current migration manifests.
+- Added recipient-authorized signed Skill downloads and independent client verification. Bound acknowledgements to current server trust and transport digest with atomic audit, retained deferred updates in pending inventory and rejected stale activation reversals.
+- Repaired release signing to bind the exact payload manifest without a circular ZIP digest; rejected client-asserted trust, duplicate paths and staged-file tampering. Added operator signing tooling and bilingual guidance.
+- Added migration 93 for immutable dynamic Tool request provenance and atomic queue/audit writes. Fixed Oracle reserved bind names, native JSON numeric digests and nested MCP authentication context.
+- Enabled continuity scopes through public Agent token exchange and rejected unsupported scopes before instance creation. Added fresh HTTP enrollment/activation and native-login acceptance across all six editions.
+- Extended deployment verification to historical execution queue dependencies so terminal migration records cannot mask missing tables or fields.
+
+- Added explicit dynamic MCP exposure controls, filtered independent-Agent discovery, database mutation protection and revocation checks before queuing. Reimport closes exposure. Corrected Tool statistics across all registry groups.
+- Added context assembly and exact publication/revocation forms; preserved full retry payloads after uncertain delivery and wrapped long identifiers on mobile screens.
+
+- Added migration 87 for Handoff evidence, instance bindings and credential-use history, bringing continuity to 44 relational tables. Explicit outcome proposals retain exact result sources and remain pending independent review.
+- Added migration 88 for immutable native execution links, bringing continuity to 45 relational tables. Resource ownership and permissions are rechecked without coupling links to changing Task status.
+- Added Portal continuity with separate session, CSRF and page leases; Work/Handoff historical previews; and four-family candidate editing, independent review and explicit promotion forms. Historical previews never replace the current revision being edited or approved.
+- Fixed web asset resolution when a temporary generated-package compatibility symlink is removed while the service remains running.
+- Added Dashboard Work continuity forms, participant metadata pagination and domain/recipient selection using current workspace authority. Fixed all three adapters' default MCP tool exposure and verified actual stdio calls with separate registration and Gateway credentials.
+- Added migration 86 for 41 continuity entities, native immutable history, current-schema verification and direct Agent SQL denial. Authenticated Gateway routes share resource authorization with session HTTP; typed MCP and CLI clients use instance-bound bearer credentials.
+- Added server-persisted CLI diagnostics and authorized capability discovery, preserving UNOBSERVED for unverified entrypoints and unsent context. Fixed instance lease clock alignment and selected-installation postflight paths.
+- Prevented PostgreSQL Agent registration from reopening continuity control-plane table grants; native protected-table discovery and independent-login regression cover the post-registration boundary.
+- Fixed Portal failed-admission connection leaks, concurrent connection-limit checks, database-timezone-dependent lease expiration, and expired-page takeover. Community login no longer accesses removed LDAP elements.
+- Added the database-entity specification for context continuity, Work Contracts, Handoffs, Context Assemblies, candidate review, immutable Revisions, explicit publications, and unified diagnostics.
+- Kept the v4.4.14 production contract and migration baseline unchanged while defining the next implementation surface for Oracle, PostgreSQL, and YashanDB.
+- Restored journaled v4.4.15 migration execution and strict terminal-step/failed-step deployment verification; aggregate version rows cannot substitute for migration evidence.
+- Combined consecutive leading system messages for model-provider compatibility while preserving user roles, instruction order and content-security checks.
+- Kept Task Step Graph synchronization on the parent Task Plan's Agent identity and preserved structured tool output; restored task terminal synchronization and completion timestamps.
+- Added migration 85: Oracle transactional shadow copying, task-only write fencing, stable-ID HASH partitioning and checkpoint recovery; PostgreSQL deferrable task references and YashanDB stable task references. Six isolated editions passed migration repetition, lifecycle and concurrency tests.
+- Locked parent tasks before step insertion, rejected stale status and preserved PostgreSQL identity IDs. Missing YashanDB native clients now have a distinct sanitized preflight diagnostic.
+- Extended isolated six-edition acceptance to committed dispatch, rollback, native authorization, standalone Graph Runtime, real-model Channel replies and Portal knowledge responses. Context-continuity implementation and full release acceptance remain incomplete.
 
 ## v4.4.14 - 2026-09-13
 

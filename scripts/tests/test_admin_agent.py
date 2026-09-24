@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.4.15 - Admin/Agent Separation Tests
+"""AI Agent Infra v4.4.16 - Admin/Agent Separation Tests
 
 Tests for admin token management, credential distribution,
 agent registration via admin, recovery codes, agent recovery,

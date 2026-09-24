@@ -4,13 +4,15 @@
 
 Work continuity: [English operations guide](docs/continuity-operations.md) · [工作交接与诊断中文操作说明](docs/continuity-operations_zh.md).
 
-> **v4.4.15 · Community Edition · Oracle**
+Knowledge answers: [Channel and Portal boundaries](docs/channel-knowledge.md) · [频道与 Portal 知识问答](docs/channel-knowledge_zh.md).
+
+> **v4.4.16 · Community Edition · Oracle**
 >
 > Database-backed AI Agent infrastructure for Oracle.
 
 ![License](https://img.shields.io/badge/License-Apache_2.0-green)
 
-## v4.4.15 Release Highlights
+## v4.4.16 Release Highlights
 
 The current release establishes a fresh deployment baseline with an optional
 model gateway and an authenticated, read-only executive wallboard. Each LLM
@@ -186,7 +188,7 @@ This Community Edition provides the complete core runtime, including memory and 
 
 ## Graph Engineering and Runtime Profiles
 
-This package uses the `production` profile in v4.4.15. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
+This package uses the `production` profile in v4.4.16. The shared code line provides versioned Graph Definitions, deterministic compilation, durable Runs and Checkpoints, lease/fencing Worker execution, Event Inbox/Outbox, bounded retry and dead-letter delivery, the versioned Node Executor registry, Barriers, Channels, Artifacts, governed intervention, and v4.1 Task/Loop compatibility. The database-specific Property Graph projection is an implementation boundary; relational runtime tables remain the transaction and recovery authority. v4.3.3 adds assurance evidence, selected invariant scans, canonical Definition provenance, dependency locks, optional Ed25519 verification, and an untrusted-Draft import gate. `production` enables the stable core; `graph-preview` enables only Dynamic Graph, while `development` and `experimental-4.2` additionally enable isolated A2A 1.0.1 and OTLP preview mappings. These previews do not grant authority or prove database failover, independent A2A conformance, or OTLP Collector delivery.
 
 ## 1. Package Contents
 
@@ -197,7 +199,7 @@ AI-Agent-Infra-with-OracleDB-Community-Edition/
 ├── start_web_server.sh       # one-shot launcher (invokes wizard on first run)
 ├── SKILL.md                  # project identity reference
 ├── CHANGELOG.md              # full version history (v1.0.0 → current)
-├── RELEASE_NOTES_v4.4.15.md   # release notes for this version
+├── RELEASE_NOTES_v4.4.16.md   # release notes for this version
 ├── LICENSE
 ├── NOTICE
 ├── docs/                     # architecture, api-reference, security, deployment, ...
@@ -343,7 +345,7 @@ Environment variables override `config.json` values (see `config.py`).
 ### Database schema
 
 ```bash
-bash scripts/install_platform.sh initialize --version v4.4.15 --database oracle --edition <community|enterprise> --config config.json
+bash scripts/install_platform.sh initialize --version v4.4.16 --database oracle --edition <community|enterprise> --config config.json
 ```
 
 The interactive command prompts twice for a deployment-specific initial

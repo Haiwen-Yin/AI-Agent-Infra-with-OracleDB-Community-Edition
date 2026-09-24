@@ -1,6 +1,14 @@
-# 川序 v4.4.15 运维与技术说明（中文）
+# 川序 v4.4.16 运维与技术说明（中文）
 
 本文说明当前发行包的部署、迁移、恢复、权限、模型和验收操作。下面的中文步骤可以独立阅读；文末英文资料仅用于补充接口和历史实现参考。工作交接、上下文、候选审核与 Skill 客户端另有[完整中文操作手册](continuity-operations_zh.md)。
+
+## 人员与 Agent 的选择
+
+在频道成员、归属转移、分支、授权等操作中，按名称或用户名搜索并选择主体，无需手工填写随机 ID。人员和 Agent 可以同名，应核对类型；选择器会自动提交对应的不可变 ID。
+
+添加频道成员时，先在“安全域”中将该人员或 Agent 加入频道所属安全域，再到“频道 → 管理 → 选择成员”搜索并添加。候选列表排除失效、过期或已在频道中的成员。频道不会自动授予安全域权限。平台管理频道只允许符合管理要求的主体和角色。
+
+申请业务 Agent 时，负责人可填写现有用户名；审批后保留申请中的可读名称。Community 版允许有权限的管理员处理自己的申请；Enterprise 版要求另一名有权限的管理员审批。模板规定的最低隔离级别由服务端验证。
 
 ## 部署
 
@@ -26,7 +34,7 @@ bash scripts/config_wizard.sh
 首次初始化不需要外部 Agent 或真实模型，由确定性的 Bootstrap Deployment Agent 执行。以下以 PostgreSQL Community 为例；其他版本将两个参数改为对应的 `oracle` / `yashandb` 和 `community` / `enterprise`：
 
 ```bash
-bash scripts/install_platform.sh initialize --version 4.4.15 \
+bash scripts/install_platform.sh initialize --version 4.4.16 \
   --database pg --edition community --config config.json
 bash start_web_server.sh start
 ```
@@ -38,7 +46,7 @@ bash start_web_server.sh start
 启动后核对 `/api/health` 的进程与版本、`/api/ready` 的数据库就绪状态，以及管理页面中的数据库治理配置。健康响应、启动模式为 production、功能配置正常是不同检查，任何单项都不代表完成发布验收。需要再次核验部署时运行：
 
 ```bash
-bash scripts/install_platform.sh verify --version 4.4.15 \
+bash scripts/install_platform.sh verify --version 4.4.16 \
   --database pg --edition community --config config.json
 ```
 

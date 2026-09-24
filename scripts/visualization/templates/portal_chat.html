@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.15">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.4.16">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.4.15 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.4.16 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -178,7 +178,8 @@ function loadHistory(){
     container.innerHTML='';
     if(d.messages&&d.messages.length){
       d.messages.forEach(function(m){
-        appendMessage(m.role,m.content,m.timestamp,m.context_id);
+        var bubble=appendMessage(m.role,m.content,m.timestamp,m.context_id);
+        if(m.role==='agent')renderCitations(bubble,m.citations||[],m.answer_source);
       });
     }else{
       container.innerHTML='<div class="welcome-msg"><h4><span data-zh>开始新对话</span><span data-en>Start a conversation</span></h4><p><span data-zh>输入消息开始与你的 Agent 对话</span><span data-en>Type a message to start chatting with your Agent</span></p></div>';
@@ -297,9 +298,16 @@ async function showKnowledge(item){
 }
 function renderCitations(bubble,items,source){
   if(!bubble)return;
+  bubble.querySelectorAll('.knowledge-citations').forEach(function(node){node.remove();});
   var links=document.createElement('div');links.className='knowledge-citations';
   items.forEach(function(item,index){var button=document.createElement('button');button.type='button';button.textContent='['+(index+1)+'] '+item.title;button.onclick=function(){showKnowledge(item)};links.appendChild(button);});
-  if(source==='MODEL_SUPPLEMENT'){var label=document.createElement('small');label.textContent=document.documentElement.getAttribute('data-lang')==='zh'?'模型常识补充':'General model knowledge';links.appendChild(label);}
+  if(source==='MODEL_SUPPLEMENT'){
+    var label=document.createElement('aside');label.className='answer-source-notice';
+    label.style.cssText='margin-top:12px;padding:10px 12px;border:1px solid var(--border,#8193a6);border-radius:8px;font-size:13px;line-height:1.6';
+    var zh=document.createElement('span');zh.setAttribute('data-zh','');zh.textContent='知识库未命中，本回答由模型根据通用知识生成，不代表知识库中的结论。';
+    var en=document.createElement('span');en.setAttribute('data-en','');en.textContent='No knowledge-base match. This answer uses general model knowledge and is not a conclusion from the knowledge base.';
+    label.appendChild(zh);label.appendChild(en);links.appendChild(label);
+  }
   bubble.appendChild(links);
 }
 

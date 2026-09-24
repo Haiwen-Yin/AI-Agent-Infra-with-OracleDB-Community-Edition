@@ -255,7 +255,77 @@
     valueLabel: valueLabel,
     valueList: valueList
   };
+  // Compatibility pages use the same authorized directory as the Dashboard.
+  function agentSelect(input) {
+    if (input.dataset.agentPicker) return;
+    input.dataset.agentPicker = '1';
+    var wrap = document.createElement('div');
+    var search = document.createElement('input');
+    var select = document.createElement('select');
+    var more = document.createElement('button');
+    var status = document.createElement('small');
+    var after = '', sequence = 0;
+    wrap.style.cssText = 'display:grid;gap:8px;min-width:0';
+    search.type = 'search';
+    search.placeholder = lang === 'zh' ? '搜索 Agent 名称' : 'Search Agent name';
+    search.setAttribute('aria-label', search.placeholder);
+    select.id = input.id; select.name = input.name; select.required = input.required;
+    select.style.cssText = 'width:100%;min-width:0;max-width:100%';
+    select.append(new Option(lang === 'zh' ? '请选择 Agent' : 'Select an Agent', ''));
+    if (input.value) select.append(new Option(input.value, input.value, true, true));
+    more.type = 'button'; more.textContent = lang === 'zh' ? '加载更多' : 'Load more'; more.hidden = true;
+    input.replaceWith(wrap); wrap.append(search, select, more, status);
+    async function load(position) {
+      var request = ++sequence;
+      status.textContent = lang === 'zh' ? '正在加载' : 'Loading';
+      try {
+        var response = await fetch('/api/principal-options?' + new URLSearchParams({kind:'AGENT', query:search.value, after:position || ''}), {credentials:'same-origin'});
+        if (!response.ok) throw new Error();
+        var data = await response.json();
+        if (request !== sequence || !wrap.isConnected) return;
+        var value = select.value, selected = select.selectedOptions[0];
+        if (!position) {
+          select.replaceChildren(new Option(lang === 'zh' ? '请选择 Agent' : 'Select an Agent', ''));
+          if (value) select.append(new Option(selected.textContent, value, true, true));
+        }
+        data.items.forEach(function(row) {
+          if (!Array.from(select.options).some(function(option) { return option.value === row.principal_id; })) {
+            select.append(new Option((row.display_name || row.principal_id) + ' · Agent · ' + row.principal_id, row.principal_id));
+          }
+        });
+        after = data.next_after || ''; more.hidden = !after;
+        status.textContent = data.items.length ? '' : (lang === 'zh' ? '没有匹配的可见 Agent' : 'No matching visible Agents');
+      } catch {
+        if (request === sequence) status.textContent = lang === 'zh' ? '加载失败，请重新搜索' : 'Could not load; search again';
+      }
+    }
+    var timer;
+    search.addEventListener('input', function() { clearTimeout(timer); timer = setTimeout(function() { load(''); }, 200); });
+    more.addEventListener('click', function() { load(after); });
+    load('');
+  }
+  window.ChuanxuUI.chooseAgent = function() {
+    return new Promise(function(resolve) {
+      var dialog = document.createElement('dialog'), form = document.createElement('form');
+      var input = document.createElement('input'), apply = document.createElement('button'), cancel = document.createElement('button');
+      input.name = 'agent_id'; input.required = true;
+      apply.textContent = lang === 'zh' ? '确认选择' : 'Confirm selection';
+      cancel.type = 'button'; cancel.textContent = lang === 'zh' ? '取消' : 'Cancel';
+      function finish(value) { dialog.close(); dialog.remove(); resolve(value); }
+      form.append(input, apply, cancel); dialog.append(form); document.body.append(dialog);
+      agentSelect(input);
+      form.onsubmit = function(event) { event.preventDefault(); finish(form.elements.agent_id.value); };
+      cancel.onclick = function() { finish(null); };
+      dialog.oncancel = function(event) { event.preventDefault(); finish(null); };
+      dialog.showModal();
+    });
+  };
   document.addEventListener("DOMContentLoaded", function () {
+    function enhanceAgentInputs() {
+      document.querySelectorAll('input[name="agent_id"],input[name="source_agent_id"],input#clAgentId').forEach(agentSelect);
+    }
+    enhanceAgentInputs();
+    new MutationObserver(enhanceAgentInputs).observe(document.body, {childList:true, subtree:true});
     window.toggleLang = function () { applyLanguage(lang === "zh" ? "en" : "zh"); };
     window.applyLang = function (next) { applyLanguage(next); };
     document.querySelectorAll(".lang-toggle").forEach(function (button) {
