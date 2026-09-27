@@ -61,7 +61,7 @@ a {
   z-index: 30;
   top: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) auto minmax(320px, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
   gap: 18px;
   width: 100%;
@@ -120,13 +120,16 @@ a {
 }
 .cx-nav-stack {
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
   justify-self: center;
 }
 .cx-nav {
   display: grid;
   grid-template-columns: repeat(11, max-content);
   grid-template-rows: repeat(2, auto);
-  justify-content: center;
+  justify-content: start;
+  overflow-x: auto;
   gap: 0 1px;
   min-width: 0;
 }
@@ -782,11 +785,11 @@ textarea {
 .domain-inline-form .inline-field,
 .channel-create-fields .inline-field,
 .channel-member-form .inline-field {
-  grid-template-rows: 16px 36px minmax(0, 28px);
+  grid-template-rows: minmax(16px, auto) minmax(36px, auto) minmax(28px, auto);
   align-content: start;
 }
 .domain-form .inline-field:has(textarea) {
-  grid-template-rows: 16px minmax(92px, auto) minmax(0, 28px);
+  grid-template-rows: minmax(16px, auto) minmax(92px, auto) minmax(28px, auto);
 }
 .domain-form .inline-field > small,
 .domain-inline-form .inline-field > small,
@@ -2620,17 +2623,18 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .config-field {
   display: grid;
-  grid-template-rows: 16px 36px minmax(22px, auto);
+  /* Composite pickers, wrapped labels and resized textareas must grow the row. */
+  grid-template-rows: minmax(16px, auto) minmax(36px, auto) minmax(22px, auto);
+  align-content: start;
   min-width: 0;
   gap: 3px;
   color: var(--muted);
   font-size: 11px;
 }
 .config-field > span {
-  overflow: hidden;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .config-field > :is(input, select, textarea, button, .checkbox-control, .action-button-row) {
   box-sizing: border-box;
@@ -2655,7 +2659,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   color: var(--ink);
 }
 .config-field.config-multiline {
-  grid-template-rows: 16px 62px minmax(22px, auto);
+  grid-template-rows: minmax(16px, auto) minmax(62px, auto) minmax(22px, auto);
 }
 .config-field > small {
   color: var(--muted);
@@ -2790,7 +2794,8 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .workbench-field {
   display: grid;
-  grid-template-rows: 16px 38px minmax(30px, auto);
+  grid-template-rows: minmax(16px, auto) minmax(38px, auto) minmax(30px, auto);
+  align-content: start;
   min-width: 0;
   gap: 4px;
   align-items: start;
@@ -2798,10 +2803,9 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   font-size: 11px;
 }
 .workbench-field > span {
-  overflow: hidden;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .workbench-field > :is(input, select, button) {
   box-sizing: border-box;
@@ -2934,7 +2938,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   color: var(--brand);
 }
 .cx-auth-entry-actions .cx-auth-register-link { margin-top: 0; }
-.cx-auth-register-link { display: none; margin-top: 14px; color: var(--brand-deep); font-size: 12px; text-align: center; }
+.cx-auth-register-link { display: inline-flex; margin-top: 14px; color: var(--brand-deep); font-size: 12px; text-align: center; }
 @media (max-width: 560px) {
   .cx-auth-entry-actions,
   .cx-auth-return-actions { grid-template-columns: 1fr; }
@@ -2960,7 +2964,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
     grid-template-columns: 200px minmax(410px, 1fr) 280px;
   }
 }
-@media (max-width: 1100px) {
+@media (max-width: 1600px) {
   .cx-header {
     grid-template-columns: 1fr auto;
     gap: 9px 12px;
@@ -2972,7 +2976,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   .cx-nav {
     grid-template-columns: repeat(11, max-content);
     grid-template-rows: repeat(2, auto);
-    justify-content: center;
+    justify-content: start;
   }
 }
 @media (max-width: 780px) {
@@ -3177,6 +3181,9 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   .cx-header {
     padding-inline: 12px;
   }
+  .cx-brand-pillars {
+    display: none;
+  }
   .cx-brand-product {
     display: none;
   }
@@ -3213,6 +3220,12 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   .cx-auth-panel {
     padding: 21px;
   }
+}
+@media (max-width: 360px) {
+  .cx-brand { gap: 6px; }
+  .cx-brand img { width: 30px; height: 30px; }
+  .cx-brand strong { font-size: 18px; letter-spacing: 1px; }
+  .cx-actions { gap: 4px; }
 }
 /* v4.4.10 executive wallboard */
 .wallboard-page { min-height: calc(100vh - 72px); }
@@ -3266,7 +3279,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .model-governance-panel .config-field,
 .model-governance-panel .config-field.config-multiline {
-  grid-template-rows: 16px auto minmax(22px, auto);
+  grid-template-rows: minmax(16px, auto) auto minmax(22px, auto);
 }
 .model-governance-panel .config-field > .inline-field-pair,
 .model-governance-panel .config-field > .widget-selector {

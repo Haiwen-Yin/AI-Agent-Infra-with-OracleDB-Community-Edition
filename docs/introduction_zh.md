@@ -1,12 +1,14 @@
-# 川序：Oracle AI Database 26ai 社区版 v4.4.16 中文介绍
+# 川序：Oracle AI Database 26ai 社区版 v4.5.0 中文介绍
 
-**版本**: v4.4.16
-**日期**: 2026-09-23
+**版本**: v4.5.0
+**日期**: 2026-09-27
 **许可**: Apache License 2.0
 
 [返回 README](../README.md) · [官方网站](https://db4agent.cn)
 
 ## 平台用途
+
+合规状态、配置档案、整改例外及恢复流程见[合规操作说明](compliance-operations_zh.md)。
 
 工作交接、上下文组装和诊断入口请阅读[完整中文操作说明](continuity-operations_zh.md)，其中包含安装校验、Agent 认证、MCP 配置、命令行操作和当前验收边界。
 
@@ -65,7 +67,7 @@ DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.4.16 --database oracle \
+  --version 4.5.0 --database oracle \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status

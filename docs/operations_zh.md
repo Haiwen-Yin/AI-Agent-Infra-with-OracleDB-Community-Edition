@@ -1,4 +1,4 @@
-# 川序 v4.4.16 运维与技术说明（中文）
+# 川序 v4.5.0 运维与技术说明（中文）
 
 本文说明当前发行包的部署、迁移、恢复、权限、模型和验收操作。下面的中文步骤可以独立阅读；文末英文资料仅用于补充接口和历史实现参考。工作交接、上下文、候选审核与 Skill 客户端另有[完整中文操作手册](continuity-operations_zh.md)。
 
@@ -34,7 +34,7 @@ bash scripts/config_wizard.sh
 首次初始化不需要外部 Agent 或真实模型，由确定性的 Bootstrap Deployment Agent 执行。以下以 PostgreSQL Community 为例；其他版本将两个参数改为对应的 `oracle` / `yashandb` 和 `community` / `enterprise`：
 
 ```bash
-bash scripts/install_platform.sh initialize --version 4.4.16 \
+bash scripts/install_platform.sh initialize --version 4.5.0 \
   --database pg --edition community --config config.json
 bash start_web_server.sh start
 ```
@@ -46,7 +46,7 @@ bash start_web_server.sh start
 启动后核对 `/api/health` 的进程与版本、`/api/ready` 的数据库就绪状态，以及管理页面中的数据库治理配置。健康响应、启动模式为 production、功能配置正常是不同检查，任何单项都不代表完成发布验收。需要再次核验部署时运行：
 
 ```bash
-bash scripts/install_platform.sh verify --version 4.4.16 \
+bash scripts/install_platform.sh verify --version 4.5.0 \
   --database pg --edition community --config config.json
 ```
 

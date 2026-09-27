@@ -44,8 +44,14 @@ def run_live_checks(package_root: Path, config_file: Path, database: str) -> Dic
     from lib.config import get_config
     config = get_config().database
     target = str(getattr(config, "dbname", "") or getattr(config, "dsn", "")).rsplit("/", 1)[-1].lower()
-    if target not in {"cxv412com", "cxv412ent", "cxv413com", "cxv413ent", "cxv415com", "cxv415ent"}:
+    if target not in {"cxv412com", "cxv412ent", "cxv413com", "cxv413ent", "cxv415com", "cxv415ent", "cxv450com", "cxv450r2com", "cxv450ent"}:
         raise RuntimeError("Graph live checks require an explicitly isolated release test database")
+    if target.startswith('cxv450'):
+        endpoints = {'oracle': '<DB_HOST>:1521', 'yashandb': '<DB_HOST>:1688'}
+        if database == 'pg':
+            assert config.host == '<DB_HOST>' and int(config.port) == 5433
+        else:
+            assert config.dsn.lower() == endpoints[database] + '/' + target
     from lib import graph_compiler as compiler
     from lib import graph_definition_api as definitions
     from lib import graph_event_api as events
@@ -215,6 +221,48 @@ def run_live_checks(package_root: Path, config_file: Path, database: str) -> Dic
     assert any(item["status"] == "COMMITTED" for item in runtime.list_join_states(run_id))
     assert len(runtime.list_branches(run_id)) >= 2
     checks["branch_join"] = True
+
+    # Only one incoming edge declares the common N-of-M threshold. A branch
+    # without an explicit threshold must not lower it by arriving first.
+    nstart, njoin, nend = ('njoin-' + part + '-' + suffix for part in ('start', 'join', 'end'))
+    branches = ['njoin-branch-' + str(i) + '-' + suffix for i in range(3)]
+    nnodes = [{'node_key': key, 'node_type': 'START' if key == nstart else 'END' if key == nend else 'AGENT'}
+              for key in [nstart, *branches, njoin, nend]]
+    nedges = [{'edge_id': 'njoin-exit-' + suffix, 'source_node_key': njoin, 'target_node_key': nend}]
+    for index, branch in enumerate(branches):
+        nedges.extend([
+            {'edge_id': 'njoin-out-' + str(index) + '-' + suffix, 'source_node_key': nstart,
+             'target_node_key': branch, 'edge_kind': 'FAN_OUT'},
+            {'edge_id': 'njoin-in-' + str(index) + '-' + suffix, 'source_node_key': branch,
+             'target_node_key': njoin, 'edge_kind': 'FAN_IN', 'join_key': 'njoin-key-' + suffix,
+             'config': {'join_strategy': 'N_OF_M', 'reducer': 'APPEND',
+                        **({'required_count': 2} if index == 0 else {})}},
+        ])
+    version_id, plan_id = make_graph(nnodes, nedges)
+    run_id = new_run(version_id, plan_id, 'njoin')
+    nworker = 'njoin-worker-' + suffix
+    advertise(nworker)
+    initial = claim(nworker, run_id, nstart)
+    assert initial
+    worker.complete(initial['lease_token'], {'started': True}, actor)
+    branch_attempts = [claim(nworker, run_id, branch) for branch in branches]
+    assert all(branch_attempts)
+    worker.complete(branch_attempts[1]['lease_token'], {'branch': 1}, actor)
+    assert claim(nworker, run_id, njoin) is None
+    joins = runtime.list_join_states(run_id)
+    assert len(joins) == 1 and int(joins[0]['required_count']) == 2 and joins[0]['status'] == 'WAITING'
+    worker.complete(branch_attempts[0]['lease_token'], {'branch': 0}, actor)
+    ready = claim(nworker, run_id, njoin)
+    assert ready
+    worker.complete(branch_attempts[2]['lease_token'], {'branch': 2}, actor)
+    assert claim(nworker, run_id, njoin) is None
+    worker.complete(ready['lease_token'], {'joined': True}, actor)
+    terminal = claim(nworker, run_id, nend)
+    assert terminal
+    worker.complete(terminal['lease_token'], {'done': True}, actor)
+    assert runtime.get_run(run_id)['status'] == 'SUCCEEDED'
+    assert len(runtime.list_join_states(run_id)) == 1
+    checks['n_of_m_threshold_independent_of_arrival'] = True
 
     # An unauthenticated event is retained; an authenticated matching event
     # resolves the durable wait and makes its Worker claimable.

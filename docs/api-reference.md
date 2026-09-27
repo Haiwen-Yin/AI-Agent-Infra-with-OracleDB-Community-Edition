@@ -1,4 +1,4 @@
-# API Reference - AI Agent Infra with DB v4.4.16
+# API Reference - AI Agent Infra with DB v4.5.0
 
 ## Runtime Host Provisioning APIs
 

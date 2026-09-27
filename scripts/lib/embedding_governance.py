@@ -445,6 +445,12 @@ def probe_profile(actor: str, profile_id: str, *, scope: str = "PLATFORM", timeo
         result["error"] = _text(str(exc), 256)
     probe_id = _id("EP")
     def work(tx: Any) -> Dict[str, Any]:
+        current = _row(tx.query_one(
+            "SELECT VERSION,STATUS FROM CX_EMBEDDING_PROFILES WHERE PROFILE_ID=:id FOR UPDATE",
+            {"id": profile_id},
+        ))
+        if not current or int(current.get("version") or 0) != int(profile.get("version") or 0):
+            raise EmbeddingConflict("Embedding Profile changed during verification; retry the probe")
         tx.execute(
             "INSERT INTO CX_EMBEDDING_PROBES(PROBE_ID,PROFILE_ID,PROBE_SCOPE,STATUS,OBSERVED_DIMENSION,OBSERVED_MODEL,"
             "OBSERVED_FINGERPRINT,RESULT_JSON,ERROR_CODE,CREATED_BY) VALUES (:id,:profile,:scope,:status,:dimension,:model,"
@@ -455,6 +461,17 @@ def probe_profile(actor: str, profile_id: str, *, scope: str = "PLATFORM", timeo
         )
         tx.execute("UPDATE CX_EMBEDDING_PROFILES SET HEALTH_STATE=:health,UPDATED_AT=CURRENT_TIMESTAMP WHERE PROFILE_ID=:id",
                    {"health": status, "id": profile_id})
+        # A recovered provider must restore the same deployed Contract, without
+        # enabling writes or changing bindings. Failed probes invalidate only
+        # Spaces backed by that Profile; inactive contracts stay untouched.
+        if mode != "NONE" and scope in {"PLATFORM", "GATEWAY"} and str(current.get("status") or "") == "ACTIVE":
+            tx.execute(
+                "UPDATE CX_EMBEDDING_SPACES SET VALIDATION_STATE=:state,UPDATED_AT=CURRENT_TIMESTAMP "
+                "WHERE STATUS='ACTIVE' AND CONTRACT_ID IN "
+                "(SELECT CONTRACT_ID FROM CX_EMBEDDING_CONTRACTS WHERE PROFILE_ID=:profile "
+                "AND STATUS='ACTIVE' AND DIMENSION=:dimension)",
+                {"state": status, "profile": profile_id, "dimension": int(profile.get("dimension") or 0)},
+            )
         _audit(tx, actor, "EMBEDDING_PROFILE_PROBE", "EMBEDDING_PROFILE", profile_id,
                "ALLOW" if status != "FAILED" else "DENY", f"{scope} probe: {status}")
         return {"probe_id": probe_id, "status": status, "result": result}

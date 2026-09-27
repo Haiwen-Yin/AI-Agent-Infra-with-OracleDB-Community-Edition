@@ -3,7 +3,7 @@
 Work continuity and diagnostics: [English operations guide](docs/continuity-operations.md) · [Chinese operations guide](docs/continuity-operations_zh.md).
 Signed updates: [download and verification](docs/release-signing.md) · [Chinese download and acknowledgement guide](docs/release-signing_zh.md). Verify the exact archive with a locally pinned key and supply its `received_digest` when acknowledging; retain the existing Skill until a safe point.
 
-> **Version:** 4.4.15 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
+> **Version:** 4.5.0 | **Driver:** oracledb 4.0.1 | **DB:** Oracle AI Database 26ai 23.26.2+
 
 This is the operations guide for the AI Agent Infra with OracleDB release
 package. It covers everything an operator (human or AI Agent) needs to
@@ -179,7 +179,7 @@ After extracting the release zip, you have:
 AI-Agent-Infra-with-OracleDB-{Community,Enterprise}-Edition/
 ├── SKILL.md                        # this file
 ├── CHANGELOG.md                    # full version history
-├── RELEASE_NOTES_v4.4.15.md   # this release's notes
+├── RELEASE_NOTES_v4.5.0.md   # this release's notes
 ├── NOTICE                          # third-party attributions
 ├── LICENSE  /  LICENSE_ENTERPRISE  # edition-specific license
 ├── requirements.txt                # pinned Python deps
@@ -263,7 +263,7 @@ and must pass before using `install_offline.sh`.
 
 ```bash
 # 1. Extract the zip
-unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.4.15.zip
+unzip AI-Agent-Infra-with-OracleDB-Enterprise-Edition-v4.5.0.zip
 cd AI-Agent-Infra-with-OracleDB-Enterprise-Edition
 
 # Select any accessible Python 3.14+ runtime; no vendor-specific path is required.
@@ -383,9 +383,9 @@ Use the checksum-journaled migration runner for every additive release step;
 do not select or reorder individual migration files manually:
 
 ```bash
-"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.4.15 \
+"$PYTHON_BIN" scripts/migration_runner.py --preflight --version 4.5.0 \
   --database oracle --edition <community|enterprise> --oracle-config config.json
-"$PYTHON_BIN" scripts/migration_runner.py --version 4.4.15 \
+"$PYTHON_BIN" scripts/migration_runner.py --version 4.5.0 \
   --database oracle --edition <community|enterprise> --oracle-config config.json \
   --confirm-database-backup
 ```

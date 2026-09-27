@@ -3072,11 +3072,15 @@ def list_bridges(actor_principal_id: str, limit: int = 100) -> List[Dict[str, An
 def enqueue_notification(
     principal_id: str, notification_type: str, level: str, dedupe_key: str,
     payload: Optional[Dict[str, Any]] = None, deadline_at: Any = None,
+    *, tx: Any = None,
 ) -> Dict[str, Any]:
+    """Persist a notice, optionally in its caller's already serialized transaction."""
     normalized = governed_contracts.build_notification(
         principal_id, notification_type, level, dedupe_key, payload, deadline_at=deadline_at,
     )
-    existing = _row(connection.execute_query_one(
+    query_one = tx.query_one if tx is not None else connection.execute_query_one
+    execute = tx.execute if tx is not None else connection.execute
+    existing = _row(query_one(
         "SELECT NOTIFICATION_ID, ACKNOWLEDGED_AT, DEADLINE_AT FROM CX_NOTIFICATIONS "
         "WHERE PRINCIPAL_ID = :principal_id AND DEDUPE_KEY = :dedupe_key",
         {"principal_id": principal_id, "dedupe_key": normalized["dedupe_key"]},
@@ -3086,14 +3090,27 @@ def enqueue_notification(
     notification_id = _id("NT")
     encoded = {"level": normalized["level"], "required_action": normalized["required_action"], **normalized["payload"]}
     database_deadline = _timestamp(deadline_at) if deadline_at else None
-    connection.execute(
-        "INSERT INTO CX_NOTIFICATIONS(NOTIFICATION_ID, PRINCIPAL_ID, NOTIFICATION_TYPE, DEDUPE_KEY, "
-        "PAYLOAD_JSON, NOTIFICATION_LEVEL, DEADLINE_AT) VALUES (:notification_id, :principal_id, :notification_type, "
-        ":dedupe_key, :payload, :notification_level, :deadline_at)",
-        {"notification_id": notification_id, "principal_id": principal_id,
-         "notification_type": normalized["notification_type"], "dedupe_key": normalized["dedupe_key"],
-         "payload": _json(encoded), "notification_level": normalized["level"], "deadline_at": database_deadline},
-    )
+    try:
+        execute(
+            "INSERT INTO CX_NOTIFICATIONS(NOTIFICATION_ID, PRINCIPAL_ID, NOTIFICATION_TYPE, DEDUPE_KEY, "
+            "PAYLOAD_JSON, NOTIFICATION_LEVEL, DEADLINE_AT) VALUES (:notification_id, :principal_id, :notification_type, "
+            ":dedupe_key, :payload, :notification_level, :deadline_at)",
+            {"notification_id": notification_id, "principal_id": principal_id,
+             "notification_type": normalized["notification_type"], "dedupe_key": normalized["dedupe_key"],
+             "payload": _json(encoded), "notification_level": normalized["level"], "deadline_at": database_deadline},
+        )
+    except Exception:
+        if tx is not None:
+            # A PostgreSQL transaction may now be aborted. Its caller owns
+            # rollback; never hide a failed statement or commit partial work.
+            raise
+        winner = _row(connection.execute_query_one(
+            "SELECT NOTIFICATION_ID FROM CX_NOTIFICATIONS WHERE PRINCIPAL_ID=:principal_id AND DEDUPE_KEY=:dedupe_key",
+            {"principal_id": principal_id, "dedupe_key": normalized["dedupe_key"]},
+        ))
+        if not winner:
+            raise
+        return {**normalized, "notification_id": winner["notification_id"], "idempotent": True}
     return {**normalized, "notification_id": notification_id, "idempotent": False}
 
 

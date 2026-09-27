@@ -1017,9 +1017,19 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
             raise ComplianceError("Open compliance finding is required")
         _visible(actor, str(finding["agent_id"]))
         existing = _row(tx.query_one(
-            "SELECT CASE_ID,STATUS FROM CX_COMPLIANCE_REMEDIATION_CASES WHERE FINDING_ID=:finding_id "
+            "SELECT CASE_ID,STATUS,REQUIRED_ACTION,DEADLINE_AT FROM CX_COMPLIANCE_REMEDIATION_CASES WHERE FINDING_ID=:finding_id "
             "AND STATUS IN ('OPEN','ACKNOWLEDGED','REMEDIATING') FOR UPDATE", {"finding_id": finding_id}))
         if existing:
+            # Repair a missing legacy notification from durable case facts,
+            # never from a retry's potentially changed action/deadline.
+            identity_api.enqueue_notification(
+                str(finding["agent_id"]), "COMPLIANCE_REMEDIATION",
+                "ACTION_REQUIRED" if existing.get("deadline_at") is not None else "INFO",
+                "compliance-remediation:" + str(existing["case_id"]),
+                {"case_id": existing["case_id"], "finding_id": finding_id,
+                 "required_action": existing["required_action"]},
+                deadline_at=existing.get("deadline_at"), tx=tx,
+            )
             return {"case_id": existing["case_id"], "agent_id": finding["agent_id"], "status": existing["status"], "idempotent": True}
         schema = {"type": "object", "required": ["evidence"], "additionalProperties": False,
                   "properties": {"evidence": {"type": "object"}, "summary": {"type": "string", "maxLength": 2000}}}
@@ -1030,18 +1040,16 @@ def create_remediation(actor: str, finding_id: str, required_action: str, reason
              "required_action": required_action[:128], "schema": _json(schema), "deadline_at": database_deadline, "actor": actor})
         tx.execute("UPDATE CX_COMPLIANCE_FINDINGS SET STATUS='REMEDIATING',UPDATED_AT=CURRENT_TIMESTAMP WHERE FINDING_ID=:finding_id", {"finding_id": finding_id})
         _audit_tx(tx, actor, "COMPLIANCE_REMEDIATION_CREATE", "COMPLIANCE_FINDING", finding_id, "ALLOW", reason)
-        return {"case_id": case_id, "agent_id": finding["agent_id"], "status": "OPEN", "idempotent": False}
-    result = connection.execute_transaction_callback(work)
-    if not result["idempotent"]:
-        # Notification remains a delivery convenience.  The remediation row is
-        # authoritative, and a retry is safely deduplicated by the existing key.
+        # The durable notice and remediation commit together. A crash after
+        # committing the case must not permanently suppress notification.
         identity_api.enqueue_notification(
-            str(result["agent_id"]), "COMPLIANCE_REMEDIATION", "ACTION_REQUIRED",
-            "compliance-remediation:" + str(result["case_id"]),
-            {"case_id": result["case_id"], "finding_id": finding_id, "required_action": required_action[:128]},
-            deadline_at=effective_deadline,
+            str(finding["agent_id"]), "COMPLIANCE_REMEDIATION", "ACTION_REQUIRED",
+            "compliance-remediation:" + case_id,
+            {"case_id": case_id, "finding_id": finding_id, "required_action": required_action[:128]},
+            deadline_at=effective_deadline, tx=tx,
         )
-    return result
+        return {"case_id": case_id, "agent_id": finding["agent_id"], "status": "OPEN", "idempotent": False}
+    return connection.execute_transaction_callback(work)
 
 
 def respond_remediation(agent_id: str, case_id: str, response: Dict[str, Any]) -> Dict[str, Any]:

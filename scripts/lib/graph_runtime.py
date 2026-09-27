@@ -1314,7 +1314,7 @@ def _activate_downstream_tx(tx, run_id: str, node_run_id: str, checkpoint_id: st
         if join_spec:
             join_key = str(edge.get("join_key") or config.get("join_key") or join_spec.get("join_key"))
             strategy = str(config.get("join_strategy") or join_spec.get("strategy") or "ALL").upper()
-            required = int(config.get("n") or config.get("required_count") or join_spec.get("required_count") or 1)
+            required = int(join_spec.get("required_count") or config.get("n") or config.get("required_count") or 1)
             join_state = _ensure_join_state_tx(
                 tx, run_id, target, join_key, strategy, int(join_spec.get("expected_count") or 1), required,
                 str(edge.get("edge_id") or ""), {"state": state, "edge_id": edge.get("edge_id"), "branch_key": branch_key},

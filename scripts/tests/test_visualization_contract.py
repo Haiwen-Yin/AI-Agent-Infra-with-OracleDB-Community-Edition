@@ -950,12 +950,15 @@ def test_organization_graph_loading_tracks_focus_and_mode_without_duplicate_requ
     assert "loadGraph(id, mode)" not in focus_callback
 
 
-def test_dashboard_navigation_is_centered_against_equal_header_side_columns():
-    css = re.sub(r"\s+", "", _react_css_source())
-    assert "grid-template-columns:minmax(320px,1fr)autominmax(320px,1fr);" in css
-    assert ".cx-nav-stack{min-width:0;justify-self:center" in css
-    assert "@media(max-width:1100px)" in css
-    assert "grid-template-columns:repeat(11,max-content);grid-template-rows:repeat(2,auto);justify-content:center" in css
+def test_dashboard_navigation_retains_accessible_scroll_container():
+    # Geometry is exercised in tools/v450_form_layout_gate.mjs at real viewport
+    # sizes; equal fixed side columns previously passed here despite overlap.
+    css = _react_css_source()
+    navigation = re.search(r"\.cx-nav\s*\{([^}]+)\}", css).group(1)
+    assert re.search(r"overflow-x:\s*auto", navigation)
+    source, is_source = _react_ui_source()
+    if is_source:
+        assert 'aria-label={text("主导航", "Primary navigation")}' in source
 
 
 def test_dashboard_navigation_does_not_repeat_console_label_in_content_header():

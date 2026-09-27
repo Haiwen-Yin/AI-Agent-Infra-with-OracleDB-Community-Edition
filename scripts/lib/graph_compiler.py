@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from . import graph_executor
 
-COMPILER_VERSION = "4.2.1"
+COMPILER_VERSION = "4.5.0"
 GRAPH_SCHEMA_VERSION = "1.0"
 NODE_SIDE_EFFECT_CLASSES = frozenset({
     "NONE", "DB_TRANSACTIONAL", "IDEMPOTENT_EXTERNAL", "NON_IDEMPOTENT",
@@ -172,6 +172,15 @@ def _diag(code: str, message: str, **extra: Any) -> Dict[str, Any]:
     item = {"code": code, "message": message}
     item.update(extra)
     return item
+
+
+def _positive_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return value > 0 and math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
 
 
 def _node_key(node: Dict[str, Any]) -> str:
@@ -503,25 +512,48 @@ def _reachable(start: str, adjacency: Dict[str, List[str]]) -> Set[str]:
 
 
 def _cycle_nodes(adjacency: Dict[str, List[str]]) -> Set[str]:
-    visiting: Set[str] = set()
+    # Iterative Kosaraju traversal finds entire strongly connected components,
+    # including cross edges to already visited nodes, without Python recursion.
     visited: Set[str] = set()
+    order: List[str] = []
+    reverse: Dict[str, List[str]] = defaultdict(list)
+    for source, targets in adjacency.items():
+        for target in targets:
+            reverse[target].append(source)
+    for root in adjacency:
+        if root in visited:
+            continue
+        visited.add(root)
+        stack: List[tuple[str, int]] = [(root, 0)]
+        while stack:
+            node, index = stack[-1]
+            targets = adjacency.get(node, [])
+            if index >= len(targets):
+                stack.pop()
+                order.append(node)
+                continue
+            target = targets[index]
+            stack[-1] = (node, index + 1)
+            if target not in visited:
+                visited.add(target)
+                stack.append((target, 0))
+    assigned: Set[str] = set()
     cycles: Set[str] = set()
-
-    def walk(node: str, path: List[str]) -> None:
-        if node in visiting:
-            if node in path:
-                cycles.update(path[path.index(node):])
-            return
-        if node in visited:
-            return
-        visiting.add(node)
-        for target in adjacency.get(node, []):
-            walk(target, path + [node])
-        visiting.remove(node)
-        visited.add(node)
-
-    for node in adjacency:
-        walk(node, [])
+    for root in reversed(order):
+        if root in assigned:
+            continue
+        component: Set[str] = set()
+        pending = [root]
+        assigned.add(root)
+        while pending:
+            node = pending.pop()
+            component.add(node)
+            for target in reverse.get(node, []):
+                if target not in assigned:
+                    assigned.add(target)
+                    pending.append(target)
+        if len(component) > 1 or root in adjacency.get(root, []):
+            cycles.update(component)
     return cycles
 
 
@@ -621,11 +653,8 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
         if edge["decision_type"] == "EXPRESSION":
             diagnostics.extend(validate_expression_ast(edge["condition"], f"edge.{edge['edge_id']}.condition"))
         if edge["config"].get("timeout_seconds") is not None:
-            try:
-                if float(edge["config"]["timeout_seconds"]) <= 0:
-                    diagnostics.append(_diag("TIMEOUT_INVALID", "timeout_seconds must be positive", edge_id=edge["edge_id"]))
-            except (TypeError, ValueError):
-                diagnostics.append(_diag("TIMEOUT_INVALID", "timeout_seconds must be numeric", edge_id=edge["edge_id"]))
+            if not _positive_number(edge["config"]["timeout_seconds"]):
+                diagnostics.append(_diag("TIMEOUT_INVALID", "timeout_seconds must be a finite positive number", edge_id=edge["edge_id"]))
     for node in nodes:
         node_key = _type_key("NODE", node["node_type"], node["type_version"])
         if node_key not in type_registry:
@@ -636,13 +665,22 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
         if forbidden:
             diagnostics.append(_diag("UNSAFE_NODE_CONFIG", f"node config contains forbidden capability: {forbidden}", node_key=node["node_key"]))
         for budget_key, budget_value in (node.get("budget") or {}).items():
-            if budget_key in HARD_BUDGET_KEYS and (isinstance(budget_value, bool) or not isinstance(budget_value, (int, float)) or not math.isfinite(float(budget_value)) or budget_value <= 0):
+            if budget_key in HARD_BUDGET_KEYS and not _positive_number(budget_value):
                 diagnostics.append(_diag("BUDGET_INVALID", f"{budget_key} must be a positive number", node_key=node["node_key"]))
-        retry = node.get("config", {}).get("retry_policy") or {}
+        retry = node.get("config", {}).get("retry_policy")
+        if retry is None:
+            retry = {}
+        if not isinstance(retry, dict):
+            diagnostics.append(_diag("RETRY_POLICY_INVALID", "retry_policy must be an object", node_key=node["node_key"]))
+            retry = {}
         max_attempts = retry.get("max_attempts", 1)
-        if isinstance(max_attempts, bool) or not isinstance(max_attempts, (int, float)) or int(max_attempts) < 1:
+        retry_count_valid = (not isinstance(max_attempts, bool)
+                             and isinstance(max_attempts, (int, float))
+                             and (isinstance(max_attempts, int) or math.isfinite(max_attempts))
+                             and max_attempts >= 1 and max_attempts == int(max_attempts))
+        if not retry_count_valid:
             diagnostics.append(_diag("RETRY_POLICY_INVALID", "retry_policy.max_attempts must be a positive integer", node_key=node["node_key"]))
-        if node["side_effect_class"] == "NON_IDEMPOTENT" and int(max_attempts or 1) > 1:
+        if retry_count_valid and node["side_effect_class"] == "NON_IDEMPOTENT" and max_attempts > 1:
             if not retry.get("compensation_edge_id") and not retry.get("confirmation_required"):
                 diagnostics.append(_diag(
                     "NON_IDEMPOTENT_RETRY_UNSAFE",
@@ -659,6 +697,7 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
             diagnostics.append(_diag(
                 "EXECUTOR_UNAVAILABLE", str(exc), node_key=node["node_key"],
             ))
+    join_required_counts = {}
     for target, target_edges in incoming_edges.items():
         # A self-loop is a cycle transition, not a second fan-in branch.  It
         # must not force a Join key on an otherwise valid bounded cycle.
@@ -683,9 +722,15 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
             if _type_key("REDUCER", reducer, "1.0") not in type_registry:
                 diagnostics.append(_diag("REDUCER_UNAVAILABLE", f"reducer unavailable: {reducer}", node_key=target))
         strategy = next(iter(strategies), "ALL")
-        required_count = next((edge.get("config", {}).get("required_count") for edge in join_edges if edge.get("config", {}).get("required_count") is not None), None)
-        if required_count is not None and (isinstance(required_count, bool) or not isinstance(required_count, int) or required_count < 1 or required_count > len(join_edges)):
+        counts = [edge["config"][field] for edge in join_edges for field in ("n", "required_count")
+                  if edge["config"].get(field) is not None]
+        valid_counts = all(type(count) is int and 1 <= count <= len(join_edges) for count in counts)
+        required_count = counts[0] if counts and valid_counts else None
+        if not valid_counts:
             diagnostics.append(_diag("JOIN_REQUIRED_COUNT_INVALID", f"join required_count is outside 1..{len(join_edges)}", node_key=target))
+        elif len(set(counts)) > 1:
+            diagnostics.append(_diag("JOIN_REQUIRED_COUNT_CONFLICT", f"fan-in target {target} has conflicting thresholds", node_key=target))
+        join_required_counts[target] = required_count if required_count is not None else 1
         if strategy in {"ALL", "FIRST_SUCCESS"} and required_count is not None and required_count != len(join_edges):
             diagnostics.append(_diag("JOIN_REQUIRED_COUNT_CONFLICT", f"{strategy} join requires all incoming branches", node_key=target))
     for edge in edges:
@@ -704,7 +749,7 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
     cycles = _cycle_nodes(adjacency)
     graph_budget = definition.get("budget") or {}
     for budget_key, budget_value in graph_budget.items():
-        if budget_key in HARD_BUDGET_KEYS and (isinstance(budget_value, bool) or not isinstance(budget_value, (int, float)) or not math.isfinite(float(budget_value)) or budget_value <= 0):
+        if budget_key in HARD_BUDGET_KEYS and not _positive_number(budget_value):
             diagnostics.append(_diag("BUDGET_INVALID", f"{budget_key} must be a positive number", path=f"budget.{budget_key}"))
     for key in sorted(cycles):
         node_budget = node_map.get(key, {}).get("budget") or {}
@@ -751,7 +796,8 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
         "exit_nodes": sorted(ends),
         "cycle_nodes": sorted(cycles),
         "incoming_edges": {
-            key: [edge["edge_id"] for edge in incoming_edges.get(key, [])]
+            key: [edge["edge_id"] for edge in sorted(incoming_edges.get(key, []),
+                  key=lambda item: (item["source_node_key"], item["order_index"], item["edge_id"]))]
             for key in sorted(node_map)
         },
         "join_specs": {
@@ -759,6 +805,7 @@ def compile_definition(definition: Dict[str, Any], *, adapter: Optional[Dict[str
                 "join_key": next(iter({str(edge.get("join_key") or edge.get("config", {}).get("join_key")) for edge in incoming_edges.get(key, []) if edge["source_node_key"] != key}), None),
                 "strategy": next(iter({str(edge.get("config", {}).get("join_strategy") or "ALL").upper() for edge in incoming_edges.get(key, []) if edge["source_node_key"] != key}), "ALL"),
                 "expected_count": len([edge for edge in incoming_edges.get(key, []) if edge["source_node_key"] != key]),
+                "required_count": join_required_counts.get(key, 1),
                 "reducer": next(iter({str(edge.get("config", {}).get("reducer") or "REPLACE").upper() for edge in incoming_edges.get(key, []) if edge["source_node_key"] != key}), "REPLACE"),
             }
             for key in sorted(node_map) if len([edge for edge in incoming_edges.get(key, []) if edge["source_node_key"] != key]) > 1

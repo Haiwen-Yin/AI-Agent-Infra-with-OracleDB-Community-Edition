@@ -8,11 +8,11 @@ import pytest
 from lib import connection,agent_api
 
 
-def test_pg_registration_preserves_continuity_native_denials():
+def test_pg_registration_preserves_continuity_native_denials(monkeypatch):
     if getattr(connection,'DATABASE_DIALECT','')!='postgresql':
         pytest.skip('PostgreSQL registration against a generated isolated edition required')
     from lib.config import get_config
-    if str(get_config().database.dbname).lower() not in {'cxv415com','cxv415ent'}:
+    if str(get_config().database.dbname).lower() not in {'cxv415com','cxv415ent','cxv450com','cxv450ent'}:
         pytest.skip('Continuity registration mutation requires the isolated release database')
     import psycopg2
     from psycopg2 import sql
@@ -28,7 +28,8 @@ def test_pg_registration_preserves_continuity_native_denials():
     assert execution_links.is_file()
     facts.update(json.loads(execution_links.read_text()))
     import migration_runner as runner
-    runner.MIGRATION_VERSION='4.4.15'
+    manifest=json.loads((root/'build-manifest.json').read_text())
+    monkeypatch.setattr(runner,'MIGRATION_VERSION',manifest['version'])
     successors=[facts_path.with_name(name) for name in (
         '93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql',
         '95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql',
