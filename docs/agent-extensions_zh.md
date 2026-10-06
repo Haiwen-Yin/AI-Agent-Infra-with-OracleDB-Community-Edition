@@ -1,4 +1,4 @@
-# Agent 扩展操作说明 — 川序 v4.5.1
+# Agent 扩展操作说明 — 川序 v4.5.2
 
 本说明适用于社区版和企业版。身份、授权、确切版本、来源血缘、尝试、租约和
 审计仍由数据库实体承载。配置集成不产生权限。启动新工作进程前安装并验证到
@@ -57,7 +57,7 @@ MCP 发现不批准执行；再次发现会关闭原批准，复核后重新批�
 
 通过服务管理器运行 `scripts/agent_integration_worker.py`，投递登记遥测并对账
 不确定调用。使用 `scripts/prepare_framework_rootfs.py --rootfs
-/var/lib/chuanxu/framework-v4.5.1` 准备新框架根文件系统，然后配置经验证的
+/var/lib/chuanxu/framework-v4.5.2` 准备新框架根文件系统，然后配置经验证的
 Linux 隔离目标。框架只接收有界消息，数据库仍是执行状态与授权的事实源。
 新版 MCP 协商和 `server/discover`、任意框架运行、真实副作用回放、运行中迁移与
 全局自治仍不开放。

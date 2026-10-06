@@ -1,9 +1,9 @@
 {
-  "version": "4.5.1",
+  "version": "4.5.2",
   "database": "oracle",
   "fresh_install": true,
   "deployment": "bootstrap-deployment-agent",
-  "required_terminal_migration": "100_v4_5_1_framework_rootfs_digest.sql",
+  "required_terminal_migration": "101_v4_5_2_task_continuity.sql",
   "historical_chain": "retained-for-audit",
   "withdrawn_upgrade_sources": [
     "4.4.8"

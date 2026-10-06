@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.5.1 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.5.2 Unified Repository Guide
 
-> **v4.5.1** - The unified single-source repository that generates all 6 release
+> **v4.5.2** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -14,7 +14,7 @@
 Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
 deployment contract, not the historical source template filename. The build
 must align its version, adapter and terminal migration with the package:
-v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15, the application-only v4.4.16 and v4.5.0 end at 97; v4.5.1 adds migrations 98–100.
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15, the application-only v4.4.16 and v4.5.0 end at 97; v4.5.1 adds migrations 98–100; v4.5.2 adds migration 101 for unified A2A/DB4A2A task continuity.
 Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
 Historical scripts remain for
 journal/checksum reproducibility, not as a customer upgrade promise.
@@ -515,7 +515,7 @@ drop cluster-wide roles merely because one database was retired.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.5.1`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.5.2`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

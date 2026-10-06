@@ -1,5 +1,27 @@
 # Changelog
 
+## v4.5.2 - 2026-10-06
+
+- Unify standard A2A and database-mediated DB4A2A admissions on the existing
+  database Task Plan root; opaque protocol identifiers remain available for
+  interoperability while each new admission has one canonical task link.
+- Add durable idempotency, fenced attempt leases, explicit state transitions,
+  unknown-send reconciliation and immutable continuity history.
+- Bind continuity to exact context/source revisions and classify historical
+  DB4A2A dispatches as exact matches or legacy-unmapped records without
+  inventing task identity.
+- Add additive migration 101 for Oracle, PostgreSQL and YashanDB. PostgreSQL
+  retains service-side stable-plan validation because its historical
+  LIST(status)-partitioned Task Plans expose only the composite
+  `(PLAN_ID, STATUS)` key; Oracle and YashanDB retain their existing stable-ID
+  foreign-key constraint.
+- Make v4.5.2 successor-schema validation reuse the already applied v4.4.15
+  continuity contract, so upgrades do not mistake an unchanged historical
+  structure for schema drift.
+- Preserve the existing database scheduler, authorization, graph and audit
+  authorities; continuity records are a relationship and execution ledger,
+  not a second scheduler or in-memory authority store.
+
 ## v4.5.1 - 2026-10-06
 
 - Unify database-authoritative capability checks and exact Provider revision probes; share answer-quality evaluation between Portal and Channels.
@@ -43,7 +65,7 @@
 - Fixed v4.4.16 bootstrap-chain selection and verification of unchanged v4.4.15 successor migrations.
 
 
-## v4.4.15 - 2026-09-14
+## v4.4.15 - 2026-09-16
 
 - Added migration 97 with seven typed native source snapshot relations. Preserve exact Task/Graph/DB4A2A/security-event projections, original-domain authority and immutable history; normalize capture time across native drivers and verify string defaults and numeric precision.
 - Added a cooperative Linux Skill runtime client with pinned-key installation verification, process-held turn locks, atomic activation, preserved old versions and recovery after uncertain acknowledgements. Server-side activation remains an authenticated Agent attestation.

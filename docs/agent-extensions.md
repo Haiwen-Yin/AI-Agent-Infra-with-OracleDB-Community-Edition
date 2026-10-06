@@ -1,4 +1,4 @@
-# Agent extensions — Chuanxu v4.5.1
+# Agent extensions — Chuanxu v4.5.2
 
 This guide applies to both editions. Database entities retain identity,
 authorization, exact revisions, source lineage, attempts, leases and audit facts.
@@ -71,7 +71,7 @@ authorization; DB4A2A remains a separate database dispatch mechanism.
 Start `scripts/agent_integration_worker.py` under the operator's service manager
 to deliver registered telemetry and reconcile uncertain calls. Prepare a new
 framework rootfs with `scripts/prepare_framework_rootfs.py --rootfs
-/var/lib/chuanxu/framework-v4.5.1`, then configure its verified Linux
+/var/lib/chuanxu/framework-v4.5.2`, then configure its verified Linux
 sandbox target. The framework receives bounded messages; platform entities remain
 the source of execution and authorization facts. Generic framework execution,
 live effect replay, live migration and global autonomy remain disabled.

@@ -185,7 +185,7 @@ class MCPSession:
         return result.get("result")
 
     def initialize(self):
-        result = self.rpc("initialize", {"protocolVersion": self.record["protocol_version"], "capabilities": {}, "clientInfo": {"name": "chuanxu", "version": "4.5.1"}})
+        result = self.rpc("initialize", {"protocolVersion": self.record["protocol_version"], "capabilities": {}, "clientInfo": {"name": "chuanxu", "version": "4.5.2"}})
         if not isinstance(result, dict) or result.get("protocolVersion") != self.record["protocol_version"] or "tools" not in result.get("capabilities", {}):
             raise ValueError("Registered MCP version or tools capability is unavailable")
         extra = {"MCP-Protocol-Version": self.record["protocol_version"], **({"Mcp-Session-Id": self.session_id} if self.session_id else {})}

@@ -2,8 +2,9 @@
 from datetime import timezone
 import json
 import time
-from . import connection, identity_api, graph_runtime as runtime, effective_capabilities, agent_gateway_api
+from . import connection, identity_api, graph_runtime as runtime, effective_capabilities, agent_gateway_api, task_continuity
 from . import registered_protocols as protocols, continuity_work as work
+from .continuity_state import ContinuityConflict, ContinuityError
 from .continuity_bindings import _transport
 from .agent_extension_contracts import canonical, digest, bounded_json, identifier, row, safe_key
 from . import cursor_pagination as cursors
@@ -90,6 +91,9 @@ def send(actor, endpoint_id, value):
         prior = row(tx.query_one("SELECT q.*,r.GRAPH_VERSION_ID FROM CX_A2A_REQUESTS q JOIN GRAPH_PROTOCOL_TASKS t ON t.PROTOCOL_TASK_ID=q.PROTOCOL_TASK_ID JOIN GRAPH_RUNS r ON r.RUN_ID=t.RUN_ID WHERE q.ACTOR_ID=:actor AND q.MESSAGE_ID=:message", {"actor": actor, "message": message["messageId"]}))
         if prior:
             _credential(tx, prior)
+            continuity = row(tx.query_one("SELECT CONTINUITY_ID FROM CX_TASK_CONTINUITY_LINKS WHERE LINK_KIND='A2A' AND LINK_ID=:task", {"task": prior["protocol_task_id"]}))
+            if not continuity:
+                raise PermissionError("A2A task is a legacy unbound protocol record; reconcile it before reuse")
             linked = row(tx.query_one("SELECT ENDPOINT_ID,REVISION_NO FROM CX_A2A_TASK_BINDINGS WHERE PROTOCOL_TASK_ID=:task", {"task": prior["protocol_task_id"]}))
             if prior["request_digest"] != request_hash or linked.get("endpoint_id") != endpoint_id or int(linked.get("revision_no") or 0) != int(record["current_revision"]) or prior["graph_version_id"] != bound["graph_version_id"] or prior["security_domain_id"] != record["security_domain_id"]:
                 raise ValueError("A2A Message ID has different content, context or binding")
@@ -100,12 +104,25 @@ def send(actor, endpoint_id, value):
         run_id = runtime.create_run(bound["graph_version_id"], bound["plan_id"], actor,
             {"message": text}, {"max_nodes": 64, "max_retries": 2, "max_external_calls": 0, "max_concurrency": 1, "max_duration_seconds": 60},
             "a2a:" + actor + ":" + message["messageId"], transaction=tx)
+        canonical_task = task_continuity.ensure_task_root(tx, actor, goal="A2A: " + text[:1900])
         tx.execute("INSERT INTO GRAPH_PROTOCOL_TASKS(PROTOCOL_TASK_ID,PROTOCOL_VERSION,RUN_ID,PRINCIPAL_ID,STATUS,CURSOR_SEQ) VALUES(:task,'1.0.1',:run,:actor,'SUBMITTED',0)", {"task": task, "run": run_id, "actor": actor})
         tx.execute("INSERT INTO CX_A2A_REQUESTS(PROTOCOL_TASK_ID,SECURITY_DOMAIN_ID,ACTOR_ID,CONTEXT_ID,MESSAGE_ID,REQUEST_DIGEST) VALUES(:task,:domain,:actor,:context,:message,:digest)", {"task": task, "domain": record["security_domain_id"], "actor": actor, "context": context, "message": message["messageId"], "digest": request_hash})
         tx.execute("INSERT INTO CX_A2A_TASK_BINDINGS(PROTOCOL_TASK_ID,ENDPOINT_ID,REVISION_NO) VALUES(:task,:endpoint,:revision)", {"task": task, "endpoint": endpoint_id, "revision": int(record["current_revision"])})
         if transport:
             tx.execute("INSERT INTO CX_A2A_CREDENTIALS(PROTOCOL_TASK_ID,INSTANCE_ID,TOKEN_DIGEST,FENCING_TOKEN) VALUES(:task,:instance,:token,:fence)", {"task": task, "instance": transport["instance_id"], "token": transport["token_digest"], "fence": int(transport["fencing_token"])})
             _credential(tx, {"protocol_task_id": task, "actor_id": actor, "security_domain_id": record["security_domain_id"]})
+        link = task_continuity.link_protocol_task(
+            tx, actor=actor, security_domain_id=record["security_domain_id"], link_kind="A2A", link_id=task,
+            canonical_task_id=canonical_task, idempotency_key=message["messageId"], request_digest=request_hash,
+            input_digest=request_hash, effect_class="READ_ONLY", authorization_version=int(record["current_revision"]),
+            capability_version=1, status="RUNNING", protocol_version="1.0.1", sdk_version=None,
+            reason="A2A task admission",
+        )
+        task_continuity.bind_context(
+            tx, continuity_id=link["continuity_id"], assembly_id=None, source_revision_id=context,
+            source_digest=request_hash, security_domain_id=record["security_domain_id"],
+            authorization_version=int(record["current_revision"]), summary_policy="MESSAGE_INPUT",
+        )
         identity_api._audit_tx(tx, actor, "A2A_TASK_SUBMITTED", "PROTOCOL_TASK", task, "ALLOW", "Bounded pure Graph task")
         return task
     task = connection.execute_transaction_callback(perform)
@@ -114,7 +131,7 @@ def send(actor, endpoint_id, value):
 
 def _task(tx, actor, endpoint_id, task_id):
     record, bound = authority(tx, actor, endpoint_id)
-    value = row(tx.query_one("SELECT q.*,t.RUN_ID,r.STATUS AS RUN_STATUS,r.GRAPH_VERSION_ID,r.PLAN_DIGEST,r.UPDATED_AT,r.CURRENT_CHECKPOINT_ID,r.INPUT_STATE_JSON FROM CX_A2A_REQUESTS q JOIN GRAPH_PROTOCOL_TASKS t ON t.PROTOCOL_TASK_ID=q.PROTOCOL_TASK_ID JOIN GRAPH_RUNS r ON r.RUN_ID=t.RUN_ID WHERE q.PROTOCOL_TASK_ID=:task AND q.ACTOR_ID=:actor", {"task": task_id, "actor": actor}))
+    value = row(tx.query_one("SELECT q.*,t.RUN_ID,r.STATUS AS RUN_STATUS,r.GRAPH_VERSION_ID,r.PLAN_DIGEST,r.UPDATED_AT,r.CURRENT_CHECKPOINT_ID,r.INPUT_STATE_JSON,c.CONTINUITY_ID,c.STATUS AS CONTINUITY_STATUS FROM CX_A2A_REQUESTS q JOIN CX_A2A_TASK_BINDINGS b0 ON b0.PROTOCOL_TASK_ID=q.PROTOCOL_TASK_ID JOIN GRAPH_PROTOCOL_TASKS t ON t.PROTOCOL_TASK_ID=q.PROTOCOL_TASK_ID JOIN GRAPH_RUNS r ON r.RUN_ID=t.RUN_ID LEFT JOIN CX_TASK_CONTINUITY_LINKS c ON c.LINK_KIND='A2A' AND c.LINK_ID=q.PROTOCOL_TASK_ID WHERE q.PROTOCOL_TASK_ID=:task AND q.ACTOR_ID=:actor", {"task": task_id, "actor": actor}))
     linked = row(tx.query_one("SELECT ENDPOINT_ID,REVISION_NO FROM CX_A2A_TASK_BINDINGS WHERE PROTOCOL_TASK_ID=:task", {"task": task_id}))
     if (not value or value["security_domain_id"] != record["security_domain_id"] or
             linked.get("endpoint_id") != endpoint_id or int(linked.get("revision_no") or 0) != int(record["current_revision"]) or
@@ -156,6 +173,16 @@ def get(actor, endpoint_id, task_id, *, context_id="", include_artifacts=True,
         stamp = value["updated_at"]
         stamp = stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp
         result = {"id": task_id, "contextId": value["context_id"], "status": {"state": STATE_MAP.get(value["run_status"], "TASK_STATE_UNSPECIFIED"), "timestamp": stamp.isoformat().replace("+00:00", "Z")}}
+        if value.get("continuity_id"):
+            result["continuityId"] = value["continuity_id"]
+            target = {"RUNNING": "RUNNING", "WAITING": "WAITING", "SUCCEEDED": "SUCCEEDED", "FAILED": "FAILED", "CANCELLED": "CANCELLED"}.get(str(value.get("run_status") or "").upper())
+            if target and str(value.get("continuity_status") or "") != target:
+                try:
+                    task_continuity._transition(tx, value["continuity_id"], actor, target, "A2A projection observed", digest(result))
+                except (ContinuityConflict, ContinuityError):
+                    # A concurrent worker may have committed a terminal state;
+                    # the authoritative Graph result remains safe to return.
+                    pass
         history = _history(value, history_length)
         if history is not None:
             result["history"] = history
@@ -222,7 +249,7 @@ def list_tasks(actor, endpoint_id, *, context_id="", status="", page_size=50,
 def card(actor, endpoint_id):
     record, bound = connection.execute_transaction_callback(lambda tx: authority(tx, actor, endpoint_id))
     return {"name": record["endpoint_name"], "description": "Authorized bounded pure Graph tasks; reconnectable status streams, no push notifications or task continuation messages.",
-            "version": "4.5.1", "supportedInterfaces": [{"url": record["endpoint_url"], "protocolBinding": "HTTP+JSON", "protocolVersion": "1.0", "tenant": endpoint_id}],
+            "version": "4.5.2", "supportedInterfaces": [{"url": record["endpoint_url"], "protocolBinding": "HTTP+JSON", "protocolVersion": "1.0", "tenant": endpoint_id}],
             "capabilities": {"streaming": True, "pushNotifications": False}, "defaultInputModes": ["text/plain"], "defaultOutputModes": ["text/plain"],
             "securitySchemes": {"gateway": {"httpAuthSecurityScheme": {"scheme": "bearer"}}}, "securityRequirements": [{"schemes": {"gateway": {"list": ["agents.operate"]}}}],
             "skills": [{"id": bound["graph_version_id"], "name": "Published pure Graph", "description": "Independently approved exact Graph version", "tags": ["graph", "read-only"]}]}

@@ -832,6 +832,16 @@ def postflight(database: str, edition: str, config: Dict[str, Any], terminal_mig
                 "Resolve failed migration steps before handoff.", {"count": failed},
             ))
 
+            if terminal_migration == "101_v4_5_2_task_continuity.sql":
+                import migration_runner
+                continuity_complete = migration_runner._step_objects_complete(
+                    cursor, database, _package_deploy_dir(database, root) / terminal_migration,
+                    version=release_version(database, root),
+                )
+                checks.append(_check("TASK_CONTINUITY_STORAGE", "PASS" if continuity_complete else "BLOCKED",
+                    "Unified A2A/DB4A2A task links, fenced attempts and legacy classification verified",
+                    "Complete migration 101 before enabling protocol continuity."))
+                terminal_migration = "100_v4_5_1_framework_rootfs_digest.sql"
             if terminal_migration == "100_v4_5_1_framework_rootfs_digest.sql":
                 import migration_runner
                 rootfs_complete = migration_runner._step_objects_complete(

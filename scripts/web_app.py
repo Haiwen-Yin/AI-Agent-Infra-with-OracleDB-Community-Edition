@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.5.1 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.5.2 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -46,7 +46,7 @@ except ModuleNotFoundError as exc:
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.5.1"
+VERSION = "4.5.2"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():

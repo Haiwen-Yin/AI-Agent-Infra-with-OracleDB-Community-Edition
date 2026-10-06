@@ -220,6 +220,16 @@ V411_MIGRATION_SCRIPTS = V410_MIGRATION_SCRIPTS + (
     "67_v4_4_11_runtime_execution_admission.sql",
     "68_v4_4_11_host_provisioning.sql",
 )
+# v4.5.1 and v4.5.2 are additive successors. Keep the historical chain
+# untouched and expose each successor as a separate, reviewable selector.
+V451_MIGRATION_SCRIPTS = V411_MIGRATION_SCRIPTS + (
+    "98_v4_5_1_agent_extensions.sql",
+    "99_v4_5_1_integration_bindings.sql",
+    "100_v4_5_1_framework_rootfs_digest.sql",
+)
+V452_MIGRATION_SCRIPTS = V451_MIGRATION_SCRIPTS + (
+    "101_v4_5_2_task_continuity.sql",
+)
 ENTERPRISE_ONLY_MIGRATION_SCRIPTS = frozenset({
     "29_v4_3_4_agent_compliance.sql",
     "30_v4_3_4_compliance_hardening.sql",
@@ -272,6 +282,18 @@ V411_RUNTIME_REQUIRED_COLUMNS = {
         "LEASE_ID", "NODE_ID", "AGENT_ID", "INSTANCE_ID", "RUNTIME_UID",
         "RUNTIME_GID", "STATUS", "CREATED_BY", "REASON",
     }),
+}
+V452_TASK_CONTINUITY_TABLES = (
+    "CX_TASK_CONTINUITY_LINKS", "CX_TASK_CONTINUITY_ATTEMPTS", "CX_TASK_CONTINUITY_LEASES",
+    "CX_TASK_CONTINUITY_CONTEXT", "CX_TASK_CONTINUITY_TRANSITIONS", "CX_TASK_CONTINUITY_LEGACY",
+)
+V452_TASK_CONTINUITY_REQUIRED_COLUMNS = {
+    "CX_TASK_CONTINUITY_LINKS": frozenset({"CONTINUITY_ID", "CANONICAL_TASK_ID", "LINK_KIND", "LINK_ID", "ACTOR_ID", "SECURITY_DOMAIN_ID", "AUTHORIZATION_VERSION", "CAPABILITY_VERSION", "EFFECT_CLASS", "IDEMPOTENCY_KEY", "REQUEST_DIGEST", "INPUT_DIGEST", "STATUS", "CREATED_AT", "UPDATED_AT"}),
+    "CX_TASK_CONTINUITY_ATTEMPTS": frozenset({"ATTEMPT_ID", "CONTINUITY_ID", "ATTEMPT_NO", "FENCING_TOKEN", "STATUS", "BUSINESS_KEY", "REQUEST_DIGEST", "LEASE_EXPIRES_AT", "STARTED_AT"}),
+    "CX_TASK_CONTINUITY_LEASES": frozenset({"CONTINUITY_ID", "LEASE_OWNER", "FENCING_TOKEN", "LEASE_EXPIRES_AT", "STATUS", "UPDATED_AT"}),
+    "CX_TASK_CONTINUITY_CONTEXT": frozenset({"CONTINUITY_ID", "SOURCE_REVISION_ID", "SOURCE_DIGEST", "SECURITY_DOMAIN_ID", "AUTHORIZATION_VERSION", "SUMMARY_POLICY", "CREATED_AT"}),
+    "CX_TASK_CONTINUITY_TRANSITIONS": frozenset({"TRANSITION_ID", "CONTINUITY_ID", "TO_STATUS", "ACTOR_ID", "REASON", "REQUEST_DIGEST", "CREATED_AT"}),
+    "CX_TASK_CONTINUITY_LEGACY": frozenset({"DISPATCH_ID", "TASK_ID", "MATCHED_TASK_ID", "CLASSIFICATION", "REASON", "CREATED_AT"}),
 }
 V448_PLATFORM_AGENT_ISOLATION_TABLES = (
     "CX_PLATFORM_COMMANDS", "CX_PLATFORM_COMMAND_EXECUTORS",
@@ -1600,6 +1622,29 @@ def validate_v411_static_contract(
             "passed": bool(base.get("passed")) and bool(control["passed"])}
 
 
+def validate_v452_static_contract(
+    database: str, scripts: Sequence[Path], edition: str = "enterprise",
+) -> dict[str, Any]:
+    """Validate the additive v4.5.2 task-continuity migration contract."""
+    base = validate_v411_static_contract(database, scripts, edition)
+    selected = {path.name: path for path in scripts}
+    migration = selected.get("101_v4_5_2_task_continuity.sql")
+    source = migration.read_text(encoding="utf-8").upper() if migration and migration.is_file() else ""
+    markers = set(V452_TASK_CONTINUITY_TABLES) | {
+        "CANONICAL_TASK_ID", "LINK_KIND", "IDEMPOTENCY_KEY", "FENCING_TOKEN",
+        "LEASE_EXPIRES_AT", "UNOBSERVED", "LEGACY_UNMAPPED", "CX101_",
+    }
+    required_scripts = migration_scripts_for_edition(V452_MIGRATION_SCRIPTS, edition)
+    control = {
+        "scripts_required": list(required_scripts),
+        "scripts_missing": [name for name in required_scripts if name not in selected or not selected[name].is_file()],
+        "contract_markers_missing": sorted(marker for marker in markers if marker not in source),
+    }
+    control["passed"] = not control["scripts_missing"] and not control["contract_markers_missing"]
+    return {"database": database, "v411": base, "v452_task_continuity": control,
+            "passed": bool(base.get("passed")) and bool(control["passed"])}
+
+
 def _pg_runtime_permission_contract(cursor: Any) -> dict[str, Any]:
     """Read actual PostgreSQL grants; absence of the runtime role is a failure."""
     cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ai_agent_runtime')")
@@ -1658,6 +1703,7 @@ def v43_catalog_snapshot(cursor: Any, database: str, *, include_permissions: boo
         + tuple(V442_GRAPH_OPERATIONS_REQUIRED_COLUMNS) + tuple(V443_SECURITY_DOMAIN_REQUIRED_COLUMNS)
         + tuple(V444_AGENT_POOL_REQUIRED_COLUMNS) + tuple(V445_GRAPH_RUN_REQUIRED_COLUMNS)
         + tuple(V446_IDENTITY_PORTAL_GRAPH_REQUIRED_COLUMNS) + tuple(V411_RUNTIME_REQUIRED_COLUMNS)
+        + tuple(V452_TASK_CONTINUITY_REQUIRED_COLUMNS)
     )):
         if database == "pg":
             cursor.execute(
@@ -1747,6 +1793,7 @@ class ProbeResult:
     v446_identity_portal_graph_contract: dict[str, Any] = field(default_factory=dict)
     v410_model_usage_wallboard_contract: dict[str, Any] = field(default_factory=dict)
     v411_runtime_isolation_db4a2a_contract: dict[str, Any] = field(default_factory=dict)
+    v452_task_continuity_contract: dict[str, Any] = field(default_factory=dict)
     error_type: str = ""
 
 
@@ -1772,6 +1819,18 @@ def _capture_v43_catalog(cursor: Any, database: str, result: ProbeResult) -> Non
     result.v411_runtime_isolation_db4a2a_contract["passed"] = not any((
         result.v411_runtime_isolation_db4a2a_contract["tables_missing"],
         result.v411_runtime_isolation_db4a2a_contract["columns_missing"],
+    ))
+    result.v452_task_continuity_contract = {
+        "tables_missing": sorted(set(V452_TASK_CONTINUITY_TABLES) - set(snapshot["tables"])),
+        "columns_missing": {
+            table: sorted(set(required) - set(snapshot["columns"].get(table, set())))
+            for table, required in V452_TASK_CONTINUITY_REQUIRED_COLUMNS.items()
+            if set(required) - set(snapshot["columns"].get(table, set()))
+        },
+    }
+    result.v452_task_continuity_contract["passed"] = not any((
+        result.v452_task_continuity_contract["tables_missing"],
+        result.v452_task_continuity_contract["columns_missing"],
     ))
     result.v431_organization_contract = _capture_v431_organization(cursor, database)
     result.v434_compliance_contract = {
@@ -2180,10 +2239,14 @@ def main() -> int:
     requires_v449 = target_version.startswith("4.4.9")
     requires_v410 = at_least((4, 4, 10))
     requires_v411 = at_least((4, 4, 11))
+    requires_v452 = at_least((4, 5, 2))
     static_contracts: dict[str, dict[str, Any]] = {}
     if requires_v43:
         for database in available_databases:
-            if requires_v411:
+            if requires_v452:
+                migration_scripts = migration_scripts_for_edition(V452_MIGRATION_SCRIPTS, edition)
+                validator = lambda database, scripts: validate_v452_static_contract(database, scripts, edition)
+            elif requires_v411:
                 migration_scripts = migration_scripts_for_edition(V411_MIGRATION_SCRIPTS, edition)
                 validator = lambda database, scripts: validate_v411_static_contract(database, scripts, edition)
             elif requires_v410:
@@ -2292,6 +2355,7 @@ def main() -> int:
                 and (not requires_v446 or result.v446_identity_portal_graph_contract.get("passed") is True)
                 and (not requires_v410 or result.v410_model_usage_wallboard_contract.get("passed") is True)
                 and (not requires_v411 or result.v411_runtime_isolation_db4a2a_contract.get("passed") is True)
+                and (not requires_v452 or result.v452_task_continuity_contract.get("passed") is True)
                 and not result.v43_partial_schema
             ))
             and (not requires_v431 or result.v431_organization_contract.get("passed") is True)

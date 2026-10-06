@@ -1,0 +1,625 @@
+{
+  "CX_TASK_CONTINUITY_ATTEMPTS": {
+    "check_expressions": [
+      "ATTEMPT_NO>0",
+      "FENCING_TOKEN>0",
+      "STATUS IN ('SENDING','SUCCEEDED','FAILED','CANCELLED','UNOBSERVED')"
+    ],
+    "checks": 3,
+    "columns": {
+      "ATTEMPT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ATTEMPT_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "BUSINESS_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(256)"
+      },
+      "COMPLETED_AT": {
+        "default": null,
+        "not_null": false,
+        "type": "TIMESTAMP"
+      },
+      "CONTINUITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "ERROR_CODE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "ERROR_MESSAGE": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(2000)"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "LEASE_EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "STARTED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      }
+    },
+    "immutable_columns": [
+      "ATTEMPT_ID",
+      "CONTINUITY_ID",
+      "ATTEMPT_NO",
+      "FENCING_TOKEN",
+      "BUSINESS_KEY",
+      "REQUEST_DIGEST",
+      "LEASE_EXPIRES_AT",
+      "STARTED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "ATTEMPT_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CONTINUITY_ID"
+        ],
+        "CX_TASK_CONTINUITY_LINKS",
+        [
+          "CONTINUITY_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "CONTINUITY_ID",
+          "ATTEMPT_NO"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX101_561DD5ACFCE73EE2"
+  },
+  "CX_TASK_CONTINUITY_CONTEXT": {
+    "check_expressions": [
+      "AUTHORIZATION_VERSION>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "ASSEMBLY_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "AUTHORIZATION_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "BRANCH_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "CONTINUITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SOURCE_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "SOURCE_REVISION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "SUMMARY_POLICY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      }
+    },
+    "immutable_columns": [
+      "CONTINUITY_ID",
+      "ASSEMBLY_ID",
+      "SOURCE_REVISION_ID",
+      "SOURCE_DIGEST",
+      "BRANCH_ID",
+      "SECURITY_DOMAIN_ID",
+      "AUTHORIZATION_VERSION",
+      "SUMMARY_POLICY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CONTINUITY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CONTINUITY_ID"
+        ],
+        "CX_TASK_CONTINUITY_LINKS",
+        [
+          "CONTINUITY_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "ASSEMBLY_ID"
+        ],
+        "CX_CONTEXT_ASSEMBLIES",
+        [
+          "ASSEMBLY_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX101_406D6A2F8F7E50F8"
+  },
+  "CX_TASK_CONTINUITY_LEASES": {
+    "check_expressions": [
+      "FENCING_TOKEN>0",
+      "STATUS IN ('ACTIVE','EXPIRED','RELEASED')"
+    ],
+    "checks": 2,
+    "columns": {
+      "CONTINUITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "FENCING_TOKEN": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "LEASE_EXPIRES_AT": {
+        "default": null,
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "LEASE_OWNER": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(16)"
+      },
+      "UPDATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      }
+    },
+    "immutable_columns": [
+      "CONTINUITY_ID"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CONTINUITY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CONTINUITY_ID"
+        ],
+        "CX_TASK_CONTINUITY_LINKS",
+        [
+          "CONTINUITY_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX101_A37995782FA86D72"
+  },
+  "CX_TASK_CONTINUITY_LEGACY": {
+    "check_expressions": [
+      "CLASSIFICATION IN ('EXACT_MATCH','LEGACY_UNMAPPED','AMBIGUOUS')"
+    ],
+    "checks": 1,
+    "columns": {
+      "CLASSIFICATION": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "DISPATCH_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "MATCHED_TASK_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(2000)"
+      },
+      "TASK_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(256)"
+      }
+    },
+    "immutable_columns": [
+      "DISPATCH_ID",
+      "TASK_ID",
+      "MATCHED_TASK_ID",
+      "CLASSIFICATION",
+      "REASON",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "DISPATCH_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "MATCHED_TASK_ID"
+        ],
+        "TASK_PLANS",
+        [
+          "PLAN_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX101_655D44620CB0617D"
+  },
+  "CX_TASK_CONTINUITY_LINKS": {
+    "check_expressions": [
+      "LINK_KIND IN ('A2A','DB4A2A','MCP','GRAPH','RUNTIME','DIAGNOSTIC')",
+      "AUTHORIZATION_VERSION>0",
+      "CAPABILITY_VERSION>0",
+      "EFFECT_CLASS IN ('READ_ONLY','REVERSIBLE','CONSEQUENTIAL')",
+      "STATUS IN ('PENDING','RUNNING','WAITING','SUCCEEDED','FAILED','CANCELLED','UNOBSERVED','LEGACY_UNMAPPED')"
+    ],
+    "checks": 5,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "AUTHORIZATION_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "CANONICAL_TASK_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "CAPABILITY_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "CONTEXT_ASSEMBLY_ID": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(128)"
+      },
+      "CONTINUITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EFFECT_CLASS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "INPUT_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "LINK_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(256)"
+      },
+      "LINK_KIND": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "PROTOCOL_VERSION": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "SDK_VERSION": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(64)"
+      },
+      "SECURITY_DOMAIN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "UPDATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      }
+    },
+    "immutable_columns": [
+      "CONTINUITY_ID",
+      "CANONICAL_TASK_ID",
+      "LINK_KIND",
+      "LINK_ID",
+      "ACTOR_ID",
+      "SECURITY_DOMAIN_ID",
+      "AUTHORIZATION_VERSION",
+      "CAPABILITY_VERSION",
+      "EFFECT_CLASS",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "INPUT_DIGEST",
+      "CONTEXT_ASSEMBLY_ID",
+      "PROTOCOL_VERSION",
+      "SDK_VERSION",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "CONTINUITY_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CANONICAL_TASK_ID"
+        ],
+        "TASK_PLANS",
+        [
+          "PLAN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "SECURITY_DOMAIN_ID"
+        ],
+        "CX_SECURITY_DOMAINS",
+        [
+          "SECURITY_DOMAIN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "CONTEXT_ASSEMBLY_ID"
+        ],
+        "CX_CONTEXT_ASSEMBLIES",
+        [
+          "ASSEMBLY_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "LINK_KIND",
+          "LINK_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "U",
+        [
+          "ACTOR_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX101_6CC71269990DEA28"
+  },
+  "CX_TASK_CONTINUITY_TRANSITIONS": {
+    "check_expressions": [
+      "TO_STATUS IN ('PENDING','RUNNING','WAITING','SUCCEEDED','FAILED','CANCELLED','UNOBSERVED','LEGACY_UNMAPPED')"
+    ],
+    "checks": 1,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CONTINUITY_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "FROM_STATUS": {
+        "default": null,
+        "not_null": false,
+        "type": "VARCHAR(24)"
+      },
+      "REASON": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(2000)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "TO_STATUS": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(24)"
+      },
+      "TRANSITION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "TRANSITION_ID",
+      "CONTINUITY_ID",
+      "FROM_STATUS",
+      "TO_STATUS",
+      "ACTOR_ID",
+      "REASON",
+      "REQUEST_DIGEST",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "TRANSITION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "CONTINUITY_ID"
+        ],
+        "CX_TASK_CONTINUITY_LINKS",
+        [
+          "CONTINUITY_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX101_D74EA05E00D7112F"
+  }
+}

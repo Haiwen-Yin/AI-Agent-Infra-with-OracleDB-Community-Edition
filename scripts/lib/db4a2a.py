@@ -30,6 +30,30 @@ def _required(value: Any, label: str) -> str:
     return result
 
 
+def _digest_dispatch(value: Mapping[str, Any]) -> str:
+    """Stable digest for a persisted dispatch projection used in transitions."""
+    encoded = json.dumps({str(key): value[key] for key in sorted(value)}, sort_keys=True,
+                         default=str, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _stable_dispatch_id(sender: str, receiver: str, normalized: Mapping[str, Any], request_digest: str) -> str:
+    """Derive a transport ID that survives a client retry.
+
+    The old implementation generated a random ID before writing the dispatch,
+    so a timeout after commit could create a second Task Plan/link on retry.
+    This key contains only immutable protocol facts; it is not a secret.
+    """
+    payload = {
+        "sender_principal_id": sender,
+        "receiver_agent_id": receiver,
+        "task_id": normalized["task_id"],
+        "request_digest": request_digest,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return "DBA2A_" + hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class ContextReference:
     context_id: str
@@ -223,14 +247,13 @@ def _check_context_sender(tx: Any, actor: str, context: Mapping[str, Any]) -> No
 
 def persist_dispatch(actor: str, receiver_agent_id: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
     """Persist a validated reference dispatch in the database control plane."""
-    from . import connection, identity_api
+    from . import connection, identity_api, task_continuity
 
     if identity_api.effective_access(actor, "agents.operate").get("decision") != "ALLOW":
         raise PermissionError("DB4A2A dispatch permission denied")
     receiver = _required(receiver_agent_id, "receiver Agent")
     if not identity_api._agent_visible_to(actor, receiver):
         raise PermissionError("DB4A2A receiver is outside the delegated scope")
-    dispatch_id = "DBA2A_" + secrets.token_hex(20)
     normalized = {
         "task_id": _required(envelope.get("task_id"), "task id"),
         "context_ref": _required(envelope.get("context_ref"), "context reference"),
@@ -247,13 +270,62 @@ def persist_dispatch(actor: str, receiver_agent_id: str, envelope: Mapping[str, 
         raise DB4A2AError("invalid branch policy")
     if normalized["transport"] not in {"DB_MEDIATED", "A2A_PAYLOAD"}:
         raise DB4A2AError("invalid collaboration transport")
+    if len(normalized["context_ref"]) > 128:
+        raise DB4A2AError("context reference cannot be bound to the continuity source")
+
+    def _domain(tx):
+        # DB4A2A historically carried no security-domain field.  Resolve one
+        # shared active domain for both participants before creating the link;
+        # an unscoped dispatch is never admitted to the unified ledger.
+        rows = tx.query(
+            "SELECT a.SECURITY_DOMAIN_ID FROM CX_DOMAIN_MEMBERS a "
+            "JOIN CX_DOMAIN_MEMBERS b ON b.SECURITY_DOMAIN_ID=a.SECURITY_DOMAIN_ID "
+            "WHERE a.PRINCIPAL_ID=:actor AND b.PRINCIPAL_ID=:receiver "
+            "AND a.STATUS='ACTIVE' AND b.STATUS='ACTIVE' "
+            "AND (a.VALID_UNTIL IS NULL OR a.VALID_UNTIL>CURRENT_TIMESTAMP) "
+            "AND (b.VALID_UNTIL IS NULL OR b.VALID_UNTIL>CURRENT_TIMESTAMP) "
+            "ORDER BY a.SECURITY_DOMAIN_ID", {"actor": actor, "receiver": receiver},
+        )
+        domains = {
+            str(item.get("security_domain_id"))
+            for row in rows
+            for item in ({str(key).lower(): value for key, value in dict(row).items()},)
+            if item.get("security_domain_id")
+        }
+        if not domains:
+            raise PermissionError("DB4A2A participants have no shared active security domain")
+        if len(domains) > 1:
+            raise PermissionError("DB4A2A participants have ambiguous security domains")
+        return next(iter(domains))
+
+    request_digest = hashlib.sha256(json.dumps({
+        "sender_principal_id": actor, "receiver_agent_id": receiver, **normalized,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest()
+    dispatch_id = _stable_dispatch_id(actor, receiver, normalized, request_digest)
     def work(tx: Any) -> None:
+        domain = _domain(tx)
         if normalized["transport"] == "DB_MEDIATED":
             for participant in sorted({actor, receiver}):
                 _lock_reader_policy(tx, participant, normalized["context_ref"])
             context = _check_context(tx, normalized)
             _check_context_reader(receiver, normalized["context_ref"])
             _check_context_sender(tx, actor, context)
+        existing = {str(key).lower(): value for key, value in dict(tx.query_one(
+            "SELECT DISPATCH_ID,TASK_ID,SENDER_PRINCIPAL_ID,RECEIVER_AGENT_ID,CONTEXT_REF,SNAPSHOT_DIGEST,"
+            "EXPECTED_VERSION,SCOPE_REF,SOURCE_BRANCH,BRANCH_POLICY,TRANSPORT,STATUS,CHILD_BRANCH_ID "
+            "FROM CX_DB4A2A_DISPATCHES WHERE DISPATCH_ID=:id FOR UPDATE", {"id": dispatch_id}) or {}).items()}
+        if existing:
+            immutable = {
+                "task_id": existing.get("task_id"), "sender_principal_id": existing.get("sender_principal_id"),
+                "receiver_agent_id": existing.get("receiver_agent_id"), "context_ref": existing.get("context_ref"),
+                "snapshot_digest": existing.get("snapshot_digest"), "expected_version": int(existing.get("expected_version") or 0),
+                "scope_ref": existing.get("scope_ref"), "source_branch": str(existing.get("source_branch") or ""),
+                "branch_policy": existing.get("branch_policy"), "transport": existing.get("transport"),
+            }
+            expected = {**normalized, "sender_principal_id": actor, "receiver_agent_id": receiver}
+            if any(str(immutable.get(key) or "") != str(expected.get(key) or "") for key in immutable if key != "expected_version") or int(immutable["expected_version"]) != int(expected["expected_version"]):
+                raise DB4A2AError("DB4A2A idempotency key belongs to different dispatch facts")
+            return
         tx.execute(
             "INSERT INTO CX_DB4A2A_DISPATCHES(DISPATCH_ID,TASK_ID,SENDER_PRINCIPAL_ID,RECEIVER_AGENT_ID,"
             "CONTEXT_REF,SNAPSHOT_DIGEST,EXPECTED_VERSION,SCOPE_REF,SOURCE_BRANCH,BRANCH_POLICY,TRANSPORT,STATUS) "
@@ -263,6 +335,30 @@ def persist_dispatch(actor: str, receiver_agent_id: str, envelope: Mapping[str, 
              "version": normalized["expected_version"], "scope": normalized["scope_ref"],
              "source": normalized["source_branch"] or None, "policy": normalized["branch_policy"],
              "transport": normalized["transport"]},
+        )
+        # A DB4A2A business task key is not necessarily a TASK_PLANS primary
+        # key.  Reuse the canonical root recorded for an earlier dispatch with
+        # the same business key; otherwise reuse an exact Task Plan match or
+        # create one owned by the receiving Agent.
+        prior_rows = tx.query(
+            "SELECT c.CANONICAL_TASK_ID FROM CX_DB4A2A_DISPATCHES d "
+            "JOIN CX_TASK_CONTINUITY_LINKS c ON c.LINK_KIND='DB4A2A' AND c.LINK_ID=d.DISPATCH_ID "
+            "WHERE d.TASK_ID=:task ORDER BY d.CREATED_AT", {"task": normalized["task_id"]})
+        prior_task = {str(key).lower(): value for key, value in dict(prior_rows[0] if prior_rows else {}).items()}
+        canonical_task = str(prior_task["canonical_task_id"]) if prior_task.get("canonical_task_id") else task_continuity.ensure_task_root(
+            tx, actor, normalized["task_id"], goal="DB4A2A: " + normalized["task_id"],
+            preferred_agent_id=receiver)
+        link = task_continuity.link_protocol_task(
+            tx, actor=actor, security_domain_id=domain, link_kind="DB4A2A", link_id=dispatch_id,
+            canonical_task_id=canonical_task, idempotency_key="DB4A2A:" + request_digest, request_digest=request_digest,
+            input_digest=normalized["snapshot_digest"], effect_class="REVERSIBLE" if normalized["branch_policy"] == "CHILD_BRANCH_WRITE" else "READ_ONLY",
+            status="PENDING", protocol_version="db4a2a/v1", reason="DB4A2A dispatch admission",
+        )
+        task_continuity.bind_context(
+            tx, continuity_id=link["continuity_id"], assembly_id=None,
+            source_revision_id=normalized["context_ref"], source_digest=normalized["snapshot_digest"],
+            security_domain_id=domain, authorization_version=1, branch_id=normalized["source_branch"] or None,
+            summary_policy="EXACT",
         )
         identity_api._audit_tx(tx, actor, "DB4A2A_DISPATCH", "DB4A2A_DISPATCH", dispatch_id,
                                "ALLOW", "reference-oriented Agent task dispatch")
@@ -280,10 +376,12 @@ def list_dispatches(actor: str, limit: int = 100) -> dict[str, Any]:
     dialect = str(getattr(connection, "DATABASE_DIALECT", "")).lower()
     suffix = " FETCH FIRST :limit ROWS ONLY" if dialect in {"oracle", "yashandb", "yashan"} else " LIMIT :limit"
     rows = connection.execute_query(
-        "SELECT DISPATCH_ID,TASK_ID,SENDER_PRINCIPAL_ID,RECEIVER_AGENT_ID,CONTEXT_REF,SNAPSHOT_DIGEST,"
-        "EXPECTED_VERSION,SCOPE_REF,SOURCE_BRANCH,BRANCH_POLICY,TRANSPORT,STATUS,CHILD_BRANCH_ID,CREATED_AT,UPDATED_AT "
-        "FROM CX_DB4A2A_DISPATCHES WHERE SENDER_PRINCIPAL_ID=:actor OR RECEIVER_AGENT_ID=:actor "
-        "ORDER BY CREATED_AT DESC" + suffix,
+        "SELECT d.DISPATCH_ID,d.TASK_ID,d.SENDER_PRINCIPAL_ID,d.RECEIVER_AGENT_ID,d.CONTEXT_REF,d.SNAPSHOT_DIGEST,"
+        "d.EXPECTED_VERSION,d.SCOPE_REF,d.SOURCE_BRANCH,d.BRANCH_POLICY,d.TRANSPORT,d.STATUS,d.CHILD_BRANCH_ID,d.CREATED_AT,d.UPDATED_AT,"
+        "c.CONTINUITY_ID,c.CANONICAL_TASK_ID,c.STATUS AS CONTINUITY_STATUS "
+        "FROM CX_DB4A2A_DISPATCHES d LEFT JOIN CX_TASK_CONTINUITY_LINKS c ON c.LINK_KIND='DB4A2A' AND c.LINK_ID=d.DISPATCH_ID "
+        "WHERE d.SENDER_PRINCIPAL_ID=:actor OR d.RECEIVER_AGENT_ID=:actor "
+        "ORDER BY d.CREATED_AT DESC" + suffix,
         {"actor": actor, "limit": amount},
     )
     items = [{str(key).lower(): value for key, value in dict(row).items()} for row in rows]
@@ -292,7 +390,7 @@ def list_dispatches(actor: str, limit: int = 100) -> dict[str, Any]:
 
 def create_dispatch_branch(actor: str, dispatch_id: str, branch_name: str, purpose: str) -> dict[str, Any]:
     """Lock, verify and fork a reference in one database transaction."""
-    from . import branch_api, connection, identity_api
+    from . import branch_api, connection, identity_api, task_continuity
 
     if identity_api.effective_access(actor, "agents.operate").get("decision") != "ALLOW":
         raise PermissionError("DB4A2A branch permission denied")
@@ -338,6 +436,15 @@ def create_dispatch_branch(actor: str, dispatch_id: str, branch_name: str, purpo
         {"branch": branch_id, "id": dispatch_id, "actor": actor})
         if int(changed or 0) != 1:
             raise DB4A2AError("DB4A2A dispatch changed while branching")
+        continuity = tx.query_one("SELECT CONTINUITY_ID FROM CX_TASK_CONTINUITY_LINKS WHERE LINK_KIND='DB4A2A' AND LINK_ID=:id", {"id": dispatch_id})
+        if continuity:
+            continuity = {str(key).lower(): value for key, value in dict(continuity).items()}
+            continuity_id = continuity.get("continuity_id")
+            # Older databases (and pre-101 records) legitimately have no
+            # unified continuity row; branching must remain backward
+            # compatible and must not treat a dispatch projection row as one.
+            if continuity_id:
+                task_continuity._transition(tx, str(continuity_id), actor, "RUNNING", "DB4A2A child branch admitted", _digest_dispatch(item))
         identity_api._audit_tx(tx, actor, "DB4A2A_BRANCH", "DB4A2A_DISPATCH", dispatch_id,
                                "ALLOW", "verified reference branch")
         return {"dispatch_id": dispatch_id, "branch_id": branch_id,

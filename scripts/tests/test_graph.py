@@ -1,4 +1,4 @@
-"""AI Agent Infra v4.5.1 - Property Graph API Tests"""
+"""AI Agent Infra v4.5.2 - Property Graph API Tests"""
 
 import sys
 import os

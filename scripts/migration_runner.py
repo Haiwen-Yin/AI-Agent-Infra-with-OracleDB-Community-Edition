@@ -55,6 +55,7 @@ from live_db_validator import (
     V449_MIGRATION_SCRIPTS,
     V410_MIGRATION_SCRIPTS,
     V411_MIGRATION_SCRIPTS,
+    V452_MIGRATION_SCRIPTS,
     migration_scripts_for_edition,
     V410_MODEL_TABLES,
     V448_PLATFORM_AGENT_ISOLATION_TABLES,
@@ -80,6 +81,7 @@ from live_db_validator import (
     validate_v444_static_contract,
     validate_v445_static_contract,
     validate_v446_static_contract,
+    validate_v452_static_contract,
 )
 
 
@@ -124,7 +126,7 @@ IDENTITY_PORTAL_GRAPH_MIGRATION_VERSIONS = frozenset({"4.4.6"})
 PLATFORM_AGENT_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.8"})
 RELEASE_SECURITY_REPAIR_MIGRATION_VERSIONS = frozenset({"4.4.9"})
 MODEL_USAGE_WALLBOARD_MIGRATION_VERSIONS = frozenset({"4.4.10"})
-RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15", "4.4.16", "4.5.0", "4.5.1"})
+RUNTIME_ISOLATION_MIGRATION_VERSIONS = frozenset({"4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15", "4.4.16", "4.5.0", "4.5.1", "4.5.2"})
 SUPPORTED_V449_BASELINE_VERSION = "4.4.7"
 WITHDRAWN_SCHEMA_VERSION = "4.4.8"
 JOURNALED_MIGRATION_VERSIONS = (
@@ -666,7 +668,10 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
             )
         elif MIGRATION_VERSION in {"4.4.10"} | RUNTIME_ISOLATION_MIGRATION_VERSIONS:
             deploy_dir = scripts[0].parent if scripts else _deployment_script(database, "55_v4_4_10_model_usage_wallboard.sql").parent
-            release_scripts = V411_MIGRATION_SCRIPTS if MIGRATION_VERSION in RUNTIME_ISOLATION_MIGRATION_VERSIONS else V410_MIGRATION_SCRIPTS
+            if MIGRATION_VERSION == "4.5.2":
+                release_scripts = V452_MIGRATION_SCRIPTS
+            else:
+                release_scripts = V411_MIGRATION_SCRIPTS if MIGRATION_VERSION in RUNTIME_ISOLATION_MIGRATION_VERSIONS else V410_MIGRATION_SCRIPTS
             required_scripts = migration_scripts_for_edition(release_scripts, MIGRATION_EDITION)
             full_scripts = [deploy_dir / name for name in required_scripts]
             if database == "pg":
@@ -678,9 +683,10 @@ def _preflight(conn: Any, database: str, scripts: list[Path], tier: int | None =
                 missing = [str(path.name) for path in full_scripts if not path.is_file()]
                 if missing:
                     raise RuntimeError("v4.4.11 migration contract is incomplete: " + ",".join(missing))
-                v43_static_contract = validate_v411_static_contract(
-                    database, full_scripts, MIGRATION_EDITION
-                )
+                if MIGRATION_VERSION == "4.5.2":
+                    v43_static_contract = validate_v452_static_contract(database, full_scripts, MIGRATION_EDITION)
+                else:
+                    v43_static_contract = validate_v411_static_contract(database, full_scripts, MIGRATION_EDITION)
             else:
                 v43_static_contract = validate_v410_static_contract(
                     database, full_scripts, MIGRATION_EDITION
@@ -1374,6 +1380,16 @@ def _step_objects_complete(cursor: Any, database: str, script: Path, *, version:
     # Resolve it before checking historical successor evidence as well as the
     # ledger; otherwise an existing v4.4.15 handoff shape is replayed/rejected.
     version = MIGRATION_VERSION if version is None else version
+    if script.name == "101_v4_5_2_task_continuity.sql":
+        required = {
+            "CX_TASK_CONTINUITY_LINKS": {"CONTINUITY_ID", "CANONICAL_TASK_ID", "LINK_KIND", "LINK_ID", "ACTOR_ID", "SECURITY_DOMAIN_ID", "AUTHORIZATION_VERSION", "CAPABILITY_VERSION", "EFFECT_CLASS", "IDEMPOTENCY_KEY", "REQUEST_DIGEST", "INPUT_DIGEST", "STATUS", "CREATED_AT", "UPDATED_AT"},
+            "CX_TASK_CONTINUITY_ATTEMPTS": {"ATTEMPT_ID", "CONTINUITY_ID", "ATTEMPT_NO", "FENCING_TOKEN", "STATUS", "BUSINESS_KEY", "REQUEST_DIGEST", "LEASE_EXPIRES_AT", "STARTED_AT"},
+            "CX_TASK_CONTINUITY_LEASES": {"CONTINUITY_ID", "LEASE_OWNER", "FENCING_TOKEN", "LEASE_EXPIRES_AT", "STATUS", "UPDATED_AT"},
+            "CX_TASK_CONTINUITY_CONTEXT": {"CONTINUITY_ID", "SOURCE_REVISION_ID", "SOURCE_DIGEST", "SECURITY_DOMAIN_ID", "AUTHORIZATION_VERSION", "SUMMARY_POLICY", "CREATED_AT"},
+            "CX_TASK_CONTINUITY_TRANSITIONS": {"TRANSITION_ID", "CONTINUITY_ID", "TO_STATUS", "ACTOR_ID", "REASON", "REQUEST_DIGEST", "CREATED_AT"},
+            "CX_TASK_CONTINUITY_LEGACY": {"DISPATCH_ID", "TASK_ID", "MATCHED_TASK_ID", "CLASSIFICATION", "REASON", "CREATED_AT"},
+        }
+        return _schema_columns_complete(cursor, database, {key: frozenset(value) for key, value in required.items()})
     if script.name == "100_v4_5_1_framework_rootfs_digest.sql":
         try:
             if database == "pg":
@@ -1422,9 +1438,9 @@ def _step_objects_complete(cursor: Any, database: str, script: Path, *, version:
                     # never supersedes a present (possibly failed) current row.
                     if applied is None and version == '4.5.1':
                         applied=_step_row(cursor,database,successor,version='4.5.0')
-                    if applied is None and version in {'4.5.0', '4.5.1'}:
+                    if applied is None and version in {'4.5.0', '4.5.1', '4.5.2'}:
                         applied=_step_row(cursor,database,successor,version='4.4.16')
-                    if applied is None and version in {'4.4.16', '4.5.0', '4.5.1'}:
+                    if applied is None and version in {'4.4.16', '4.5.0', '4.5.1', '4.5.2'}:
                         applied=_step_row(cursor,database,successor,version='4.4.15')
                     if applied and applied['status']=='APPLIED' and applied['checksum']==_checksum(successor):
                         overlay=json.loads(successor.with_suffix('.schema.json').read_text())['CX_HANDOFFS']
@@ -2018,7 +2034,8 @@ def release_script_names(version: str, database: str, config_path: Path, edition
     # v4.5.0 starts with the complete reviewed continuity schema. New schema
     # changes must extend this selection rather than mutate historical SQL.
     extension_release = version == "4.5.1"
-    version = {"4.4.16": "4.4.15", "4.5.0": "4.4.15", "4.5.1": "4.4.15"}.get(version, version)
+    continuity_release = version == "4.5.2"
+    version = {"4.4.16": "4.4.15", "4.5.0": "4.4.15", "4.5.1": "4.4.15", "4.5.2": "4.4.15"}.get(version, version)
     selectors = {
         "4.3.7": _v437_script_names,
         "4.4.10": _v410_script_names,
@@ -2072,6 +2089,13 @@ def release_script_names(version: str, database: str, config_path: Path, edition
             "98_v4_5_1_agent_extensions.sql",
             "99_v4_5_1_integration_bindings.sql",
             "100_v4_5_1_framework_rootfs_digest.sql",
+        ])
+    if continuity_release:
+        names.extend([
+            "98_v4_5_1_agent_extensions.sql",
+            "99_v4_5_1_integration_bindings.sql",
+            "100_v4_5_1_framework_rootfs_digest.sql",
+            "101_v4_5_2_task_continuity.sql",
         ])
     return names
 
@@ -2426,7 +2450,7 @@ def _apply_statement_migration(
                             )
                         conn.commit()
                     return result
-            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql','98_v4_5_1_agent_extensions.sql','99_v4_5_1_integration_bindings.sql'} and not _step_objects_complete(cursor, database, script):
+            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql','98_v4_5_1_agent_extensions.sql','99_v4_5_1_integration_bindings.sql','101_v4_5_2_task_continuity.sql'} and not _step_objects_complete(cursor, database, script):
                 result.error_type = 'ContinuitySchemaMismatch'
                 result.ledger_status = 'blocked_structure_drift'
                 _upsert_step_row(cursor, database, script, result.checksum, 'FAILED', result.statements_executed,
@@ -2574,7 +2598,7 @@ def _apply_pg(config: dict[str, Any], script: Path) -> MigrationResult:
             # AGE/DDL blocks and their IF NOT EXISTS guards remain atomic.
             cursor.execute(script.read_text(encoding="utf-8"))
             result.statements_executed = len(statements) or 1
-            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql','98_v4_5_1_agent_extensions.sql','99_v4_5_1_integration_bindings.sql'} and not _step_objects_complete(cursor, 'pg', script):
+            if script.name in {'86_v4_4_15_continuity_entities.sql','87_v4_4_15_continuity_bindings.sql','88_v4_4_15_execution_links.sql','89_v4_4_15_dynamic_mcp_exposure.sql','90_v4_4_15_mcp_native_boundary.sql','91_v4_4_15_mcp_owner_binding.sql','92_v4_4_15_mcp_native_exception.sql','93_v4_4_15_mcp_tool_requests.sql','94_v4_4_15_handoff_policy.sql','95_v4_4_15_runtime_context.sql','96_v4_4_15_runtime_credentials.sql','97_v4_4_15_native_context_sources.sql','98_v4_5_1_agent_extensions.sql','99_v4_5_1_integration_bindings.sql','101_v4_5_2_task_continuity.sql'} and not _step_objects_complete(cursor, 'pg', script):
                 raise RuntimeError('Continuity native structure verification failed')
             if MIGRATION_VERSION in JOURNALED_MIGRATION_VERSIONS:
                 _upsert_step_row(cursor, "pg", script, result.checksum, "APPLIED", result.statements_executed)
@@ -2658,7 +2682,7 @@ def _connect_for_preflight(database: str, config: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", choices=("all", "oracle", "pg", "yashandb"), default="all")
-    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15", "4.4.16", "4.5.0", "4.5.1"), default="4.1.0")
+    parser.add_argument("--version", choices=("4.0.1", "4.1.0", "4.2.0", "4.2.1", "4.3.0", "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7", "4.4.0", "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.8", "4.4.9", "4.4.10", "4.4.11", "4.4.12", "4.4.13", "4.4.14", "4.4.15", "4.4.16", "4.5.0", "4.5.1", "4.5.2"), default="4.1.0")
     parser.add_argument("--edition", choices=("community", "enterprise"), default="community",
                         help="v4.2 scheduler scope; Community excludes Enterprise HA objects")
     parser.add_argument("--oracle-config", type=Path)

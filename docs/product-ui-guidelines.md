@@ -1,4 +1,4 @@
-# Chuanxu Product UI Guidelines v4.5.1
+# Chuanxu Product UI Guidelines v4.5.2
 
 These reusable rules apply to authenticated Dashboard pages in every edition.
 

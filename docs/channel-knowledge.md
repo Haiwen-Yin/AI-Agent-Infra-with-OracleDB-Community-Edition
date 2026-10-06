@@ -1,4 +1,4 @@
-# v4.5.1 Channel and Portal knowledge answers
+# v4.5.2 Channel and Portal knowledge answers
 
 Portal assigns an approved idle local Agent to a signed-in user; external Agent
 enrollment is a separate workflow. Ordinary Channels dispatch explicit mentions

@@ -6,7 +6,7 @@
   "technical_project": "AI Agent Infra with DB",
   "database": "Oracle",
   "edition": "Community",
-  "version": "4.5.1",
+  "version": "4.5.2",
   "release_date": "2026-10-06",
   "source_commit": "26eec8b12b36d8ae6981fed9bbddf528da007727",
   "assets": {
