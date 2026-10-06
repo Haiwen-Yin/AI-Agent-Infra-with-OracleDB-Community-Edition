@@ -84,20 +84,24 @@ def assemble(actor,value,*,transaction=None):
             return dict(_read(tx,actor,existing['assembly_id']),replayed=True)
         available=[]
         if request.work_contract_id:
-            available.append(_work_item(tx,actor,request.security_domain_id,request.work_contract_id))
+            available.append({**_work_item(tx,actor,request.security_domain_id,request.work_contract_id), 'mandatory': True})
         if request.handoff_id:
-            available.append(_handoff_item(tx,actor,request.security_domain_id,request.handoff_id))
+            available.append({**_handoff_item(tx,actor,request.security_domain_id,request.handoff_id), 'mandatory': True})
         for source in request.sources:
             resolved=resolve(tx,actor,request.security_domain_id,source,purpose=request.purpose)
             available.append(dict(_item(source.family.value,source.entity_id,source.revision_id,source.content_digest,
-                                   resolved['text'],request.security_domain_id),publication_id=resolved.get('publication_id')))
+                                   resolved['text'],request.security_domain_id),publication_id=resolved.get('publication_id'), mandatory=False))
         selected=[]
         seen=set()
         used=0
-        for item in available:
+        for item in sorted(available, key=lambda value: (not value.get('mandatory', False), available.index(value))):
             key=(item['family'],item['entity_id'],item['revision_id'])
             cost=item['rendered_tokens']+(2 if selected else 0)
-            if key in seen or len(selected)>=request.entry_limit or used+cost>request.token_budget:
+            if key in seen:
+                continue
+            if item.get('mandatory') and (len(selected) >= request.entry_limit or used + cost > request.token_budget):
+                raise ContinuityConflict('MANDATORY_CONTEXT_EXCEEDS_BUDGET','A mandatory Work or Handoff source does not fit the requested context budget')
+            if len(selected)>=request.entry_limit or used+cost>request.token_budget:
                 continue
             selected.append(item)
             seen.add(key)

@@ -21,7 +21,7 @@ def store(monkeypatch):
       CREATE TABLE CX_CHANNEL_MESSAGES(MESSAGE_ID TEXT,CHANNEL_ID TEXT,PRINCIPAL_ID TEXT,BODY_TEXT TEXT,THREAD_TYPE TEXT,THREAD_ID TEXT,REFERENCE_JSON TEXT,REDACTED_AT TEXT,MESSAGE_TYPE TEXT);
       CREATE TABLE CX_NATIVE_AGENTS(AGENT_ID TEXT,SOURCE TEXT,AGENT_KIND TEXT,IS_PROTECTED TEXT,STATUS TEXT,ACTIVATION_STATE TEXT,LLM_PROFILE_ID TEXT,DEPLOYMENT_TARGET_ID TEXT,TEMPLATE_ID TEXT);
       CREATE TABLE CX_AGENT_TEMPLATES(TEMPLATE_ID TEXT,STATUS TEXT,CONTENT_JSON TEXT);
-      CREATE TABLE CX_RUNTIME_EXECUTIONS(EXECUTION_ID TEXT PRIMARY KEY,AGENT_ID TEXT,TARGET_ID TEXT,ISOLATION_LEVEL TEXT,STATUS TEXT,INPUT_JSON TEXT,CONTEXT_DIGEST TEXT);
+      CREATE TABLE CX_RUNTIME_EXECUTIONS(EXECUTION_ID TEXT PRIMARY KEY,AGENT_ID TEXT,TARGET_ID TEXT,ISOLATION_LEVEL TEXT,STATUS TEXT,INPUT_JSON TEXT,CONTEXT_DIGEST TEXT,CREATED_AT TIMESTAMP,STARTED_AT TIMESTAMP);
       CREATE TABLE CX_PORTAL_KNOWLEDGE_POLICY(POLICY_ID TEXT,MODE TEXT,ALLOW_MODEL_SUPPLEMENT TEXT,DISCLOSURE_PROFILES_JSON TEXT,VERSION INTEGER);
       INSERT INTO CX_PORTAL_KNOWLEDGE_POLICY VALUES ('DEFAULT','KNOWLEDGE_FIRST','Y','["model"]',1);
       INSERT INTO CX_PRINCIPALS VALUES ('human','HUMAN','ACTIVE'),('agent','AGENT','ACTIVE');
@@ -42,6 +42,9 @@ def store(monkeypatch):
     tx = Tx()
     monkeypatch.setattr(business.connection, 'execute_query_one', tx.query_one)
     monkeypatch.setattr(business.connection, 'execute_query', lambda sql, params=None: [dict(row) for row in db.execute(sql, params or {}).fetchall()])
+    # The fixture is SQLite even when the generated suite is selected for the
+    # YashanDB package; keep SQL pagination aligned with the fixture engine.
+    monkeypatch.setattr(business.connection, 'DATABASE_DIALECT', 'sqlite', raising=False)
     monkeypatch.setattr(business.connection, 'execute_transaction_callback', lambda fn: fn(tx))
     monkeypatch.setattr(identity_api, '_require', lambda *_: None)
     monkeypatch.setattr(identity_api, 'effective_access', lambda *_: {'decision': 'DENY'})

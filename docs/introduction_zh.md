@@ -1,7 +1,7 @@
-# 川序：Oracle AI Database 26ai 社区版 v4.5.0 中文介绍
+# 川序：Oracle AI Database 26ai 社区版 v4.5.1 中文介绍
 
-**版本**: v4.5.0
-**日期**: 2026-09-27
+**版本**: v4.5.1
+**日期**: 2026-10-06
 **许可**: Apache License 2.0
 
 [返回 README](../README.md) · [官方网站](https://db4agent.cn)
@@ -16,11 +16,16 @@
 
 技术项目名为 AI Agent Infra with DB。本包只适配 Oracle AI Database 26ai。社区版与企业版从同一仓库生成，实际可用能力取决于发行版、平台开关和主体权限。
 
-## v4.4.15 当前能力说明
+## 当前能力说明
+
+v4.5.1 增加模型能力实测、按需工具/技能目录、来源绑定的上下文预算、执行进度、
+受管图片/文档、离线回放与迁移预检，以及独立受控的 MCP、A2A、OTLP 和固定框架
+集成。完整使用流程、协议版本、审批和限制见 [Agent 扩展中文操作说明](agent-extensions_zh.md)。
+追加迁移链到 99；图的实际副作用回放、运行中迁移、任意框架执行与全局自治仍不开放。
 
 本版本以数据库中的能力矩阵为唯一准入依据，统一管理模型推理、结构化输出、模型工具调用、MCP、A2A 和受控执行。能力状态为 `OFF`（关闭）、`READ_ONLY`（只读）、`PROPOSAL_ONLY`（仅提案）或 `GOVERNED_EXECUTOR`（经治理的执行器），每次变更都需要并发版本和不可变审计记录。MCP 与 A2A 默认关闭；模型生成的写入、策略变更、Agent 控制、外部联系和发布默认只能形成提案，除非当前策略、信任信息和人工审批共同允许。
 
-模型供应商证据采用脱敏、规范化格式，记录模型身份、可见内容、结构化校验、工具调用、用量、延迟、超时、取消、重试和完成状态，不保存隐藏推理内容或完整提示词。直连调用与平台网关可以并存，未被网关观测的直连流量不能被报告为零消耗。完整接口、迁移 82 和验收边界见包内英文技术文档；本节是面向中文读者的能力和限制摘要。
+模型供应商证据采用脱敏、规范化格式，记录模型身份、可见内容、结构化校验、工具调用、用量、延迟、超时、取消、重试和完成状态，不保存隐藏推理内容或完整提示词。直连调用与平台网关可以并存，未被网关观测的直连流量不能被报告为零消耗。各项能力绑定模型配置的确切修订，客户端取消与模型服务确认取消分别记录；具体操作见上述中文说明。
 
 ## 功能与边界
 
@@ -67,7 +72,7 @@ DB4A2A 的委派携带上下文引用、版本、摘要和范围，接收 Agent 
 bash scripts/install_offline.sh
 bash scripts/config_wizard.sh
 bash scripts/install_platform.sh initialize \
-  --version 4.5.0 --database oracle \
+  --version 4.5.1 --database oracle \
   --edition community --config config.json
 bash start_web_server.sh start
 bash start_web_server.sh status

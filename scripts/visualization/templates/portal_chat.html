@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.5.0">
+<html lang="zh-CN" data-lang="zh" data-theme="light" data-cx-db="Oracle" data-cx-tier="Community" data-cx-version="4.5.1">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chuanxu Oracle Community v4.5.0 - Portal Chat</title>
+<title>Chuanxu Oracle Community v4.5.1 - Portal Chat</title>
 <link rel="stylesheet" href="/static/pages/portal_chat.css">
 <script src="/static/chuanxu-prepaint.js"></script>
 <link rel="stylesheet" href="/static/chuanxu.css">
@@ -301,11 +301,11 @@ function renderCitations(bubble,items,source){
   bubble.querySelectorAll('.knowledge-citations').forEach(function(node){node.remove();});
   var links=document.createElement('div');links.className='knowledge-citations';
   items.forEach(function(item,index){var button=document.createElement('button');button.type='button';button.textContent='['+(index+1)+'] '+item.title;button.onclick=function(){showKnowledge(item)};links.appendChild(button);});
-  if(source==='MODEL_SUPPLEMENT'){
+  if(source==='MODEL_SUPPLEMENT'||source==='MIXED_SOURCES'){
     var label=document.createElement('aside');label.className='answer-source-notice';
     label.style.cssText='margin-top:12px;padding:10px 12px;border:1px solid var(--border,#8193a6);border-radius:8px;font-size:13px;line-height:1.6';
-    var zh=document.createElement('span');zh.setAttribute('data-zh','');zh.textContent='知识库未命中，本回答由模型根据通用知识生成，不代表知识库中的结论。';
-    var en=document.createElement('span');en.setAttribute('data-en','');en.textContent='No knowledge-base match. This answer uses general model knowledge and is not a conclusion from the knowledge base.';
+    var zh=document.createElement('span');zh.setAttribute('data-zh','');zh.textContent=source==='MIXED_SOURCES'?'知识仅覆盖部分问题；其余部分由模型根据通用知识生成，请结合分段标注阅读。':'知识库未命中，本回答由模型根据通用知识生成，不代表知识库中的结论。';
+    var en=document.createElement('span');en.setAttribute('data-en','');en.textContent=source==='MIXED_SOURCES'?'Knowledge covers part of the question. Uncovered parts use general model knowledge; read the section labels.':'No knowledge-base match. This answer uses general model knowledge and is not a conclusion from the knowledge base.';
     label.appendChild(zh);label.appendChild(en);links.appendChild(label);
   }
   bubble.appendChild(links);

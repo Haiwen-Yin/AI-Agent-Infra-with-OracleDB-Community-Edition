@@ -117,7 +117,11 @@ def _enterprise() -> bool:
 
 def _limit(limit: int) -> tuple[str, Dict[str, Any]]:
     amount = max(1, min(int(limit), 500))
-    if str(getattr(connection, "DATABASE_DIALECT", "")).lower() in {"pg", "postgresql"}:
+    dialect = str(getattr(connection, "DATABASE_DIALECT", "")).lower()
+    # Keep SQLite/unit harnesses portable while retaining native FETCH syntax
+    # for the two Oracle-compatible production adapters.  An unset dialect is
+    # deliberately treated as LIMIT; production connections always set it.
+    if dialect not in {"oracle", "yashandb", "yashan"}:
         return " LIMIT :limit", {"limit": amount}
     return " FETCH FIRST :limit ROWS ONLY", {"limit": amount}
 
@@ -877,7 +881,7 @@ def upsert_llm_profile(actor: str, profile_key: str, provider_url: str, model_id
 
 
 def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id: str,
-                      api_key: str, *, timeout: int = 20) -> Dict[str, Any]:
+                      api_key: str, *, timeout: int = 20, parameter_values=None) -> Dict[str, Any]:
     """Probe an OpenAI-compatible LLM without persisting or logging its secret."""
     key = _text(profile_key, 128)
     url = _text(provider_url, 512).rstrip("/")
@@ -897,17 +901,26 @@ def probe_llm_profile(actor: str, profile_key: str, provider_url: str, model_id:
             url + "/chat/completions",
             data=json.dumps({
                 "model": model,
-                "messages": [{"role": "user", "content": "health check"}],
-                "max_tokens": 1,
+                "messages": [{"role": "user", "content": "Reply with exactly CX_OK."}],
+                "max_tokens": 1024,
                 "stream": False,
+                **(parameter_values or {}),
             }, ensure_ascii=False).encode("utf-8"),
             headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=max(1, min(int(timeout), 60))) as response:
-            payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise NativeAgentError("LLM provider response is too large")
+            payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict) or not (payload.get("choices") or []):
             raise NativeAgentError("LLM provider returned no completion")
+        choice = payload["choices"][0]
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise NativeAgentError("LLM provider returned no content")
         observed_model = _text(payload.get("model"), 256)
         if not _llm_model_matches(model, observed_model):
             raise NativeAgentError("LLM provider returned a different model")
@@ -948,7 +961,7 @@ def probe_saved_llm_profile(actor: str, profile_id: str, *, timeout: int = 20) -
         raise PermissionError("platform management permission is required")
     key = _text(profile_id, 128)
     row = _row(connection.execute_query_one(
-        "SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS "
+        "SELECT PROFILE_ID,VERSION,PROFILE_KEY,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS "
         "FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id", {"id": key},
     ))
     if not row or str(row.get("status") or "").upper() != "ACTIVE":
@@ -959,20 +972,24 @@ def probe_saved_llm_profile(actor: str, profile_id: str, *, timeout: int = 20) -
         from .connection_crypto import decrypt_section
         secret = str(decrypt_section(cipher).get("api_key") or "")
     try:
+        from .provider_capability_probes import request_parameters
+        verified_parameters = request_parameters(key, row["version"])
         result = probe_llm_profile(
             actor, str(row.get("profile_key") or key), str(row.get("provider_url") or ""),
-            str(row.get("model_id") or ""), secret, timeout=timeout,
+            str(row.get("model_id") or ""), secret, timeout=timeout, parameter_values=verified_parameters,
         )
     except Exception:
         connection.execute(
             "UPDATE CX_LLM_PROVIDER_PROFILES SET HEALTH_STATE='DEGRADED',UPDATED_AT=CURRENT_TIMESTAMP "
-            "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": key},
+            "WHERE PROFILE_ID=:id AND VERSION=:version AND STATUS='ACTIVE'", {"id": key, "version": row["version"]},
         )
         raise
-    connection.execute(
+    changed = connection.execute(
         "UPDATE CX_LLM_PROVIDER_PROFILES SET HEALTH_STATE='HEALTHY',UPDATED_AT=CURRENT_TIMESTAMP "
-        "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": key},
+        "WHERE PROFILE_ID=:id AND VERSION=:version AND STATUS='ACTIVE'", {"id": key, "version": row["version"]},
     )
+    if int(changed or 0) != 1:
+        raise NativeAgentConflict("Provider Profile changed during its health check")
     return {**result, "profile_id": key, "health_state": "HEALTHY"}
 
 
@@ -1443,7 +1460,7 @@ def claim_runtime(worker_id: str, node_id: str, limit: int = 10) -> List[Dict[st
     node = _text(node_id, 128)
     rows = connection.execute_query(
         "SELECT EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,FENCING_TOKEN,INPUT_JSON FROM CX_RUNTIME_EXECUTIONS "
-        "WHERE STATUS='PENDING' OR (STATUS='CLAIMED' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP) "
+        "WHERE STATUS='PENDING' "
         "ORDER BY CREATED_AT" + suffix, params,
     )
     claimed: List[Dict[str, Any]] = []
@@ -1462,3 +1479,40 @@ def claim_runtime(worker_id: str, node_id: str, limit: int = 10) -> List[Dict[st
             row["node_id"] = node
             claimed.append(row)
     return claimed
+
+
+def reconcile_expired_runtime(limit: int = 100) -> int:
+    """Fence an expired native attempt without automatically resending it.
+
+    A provider request may have reached the remote service before the local
+    lease expired.  Such an attempt is therefore durably UNOBSERVED and needs
+    operator review; it must never be silently reclaimed as a new send.
+    """
+    suffix, params = _limit(limit)
+    try:
+        rows = connection.execute_query(
+            "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS "
+            "WHERE STATUS='CLAIMED' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP "
+            "ORDER BY LEASE_EXPIRES_AT" + suffix, params,
+        )
+        changed = 0
+        for item in rows:
+            changed += int(connection.execute(
+                "UPDATE CX_RUNTIME_EXECUTIONS SET STATUS='UNOBSERVED',FAILURE_REASON='LEASE_EXPIRED_UNOBSERVED',"
+                "COMPLETED_AT=CURRENT_TIMESTAMP,UPDATED_AT=CURRENT_TIMESTAMP,FENCING_TOKEN=FENCING_TOKEN+1 "
+                "WHERE EXECUTION_ID=:id AND STATUS='CLAIMED' AND LEASE_EXPIRES_AT<=CURRENT_TIMESTAMP",
+                {"id": _row(item).get("execution_id")},
+            ) or 0)
+        return changed
+    except RuntimeError as exc:
+        # Offline/source tests may intentionally omit a configured adapter;
+        # claim_runtime will still fail closed if it is reached.
+        if "database adapter is required" in str(exc):
+            return 0
+        raise
+    except Exception as exc:
+        # Pre-extension compatibility fixtures may not carry native lease
+        # columns yet; they cannot contain an expired claim to reconcile.
+        if "LEASE_EXPIRES_AT" in str(exc) and "column" in str(exc).lower():
+            return 0
+        raise

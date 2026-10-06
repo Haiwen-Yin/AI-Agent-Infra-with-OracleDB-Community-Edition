@@ -70,13 +70,26 @@ def enforce(content: str, stage: str) -> dict[str, Any]:
     return result
 
 
-def inspect_messages(messages: list[dict[str, Any]]) -> None:
+def inspect_messages(messages: list[dict[str, Any]], *, allow_managed_images: bool = False) -> None:
     if not isinstance(messages, list) or not messages or len(messages) > 100:
         raise ValueError("Model messages must be a bounded nonempty list")
-    if len(json.dumps(messages, ensure_ascii=False).encode()) > MAX_BYTES:
+    if len(json.dumps(messages, ensure_ascii=False).encode()) > (6000000 if allow_managed_images else MAX_BYTES):
         raise ContentDenied({"code": "CONTENT_TOO_LARGE"})
     for message in messages:
         content = message.get("content")
+        if allow_managed_images and isinstance(content, list) and message.get("role") == "user":
+            if not 1 <= len(content) <= 2:
+                raise ContentDenied({"code": "CONTENT_FORMAT_UNSUPPORTED"})
+            for part in content:
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    enforce(part["text"], "USER_INPUT")
+                elif part.get("type") == "image_url":
+                    url = (part.get("image_url") or {}).get("url", "")
+                    if not isinstance(url, str) or not url.startswith("data:image/png;base64,") or len(url) > 5592430:
+                        raise ContentDenied({"code": "CONTENT_FORMAT_UNSUPPORTED"})
+                else:
+                    raise ContentDenied({"code": "CONTENT_FORMAT_UNSUPPORTED"})
+            continue
         if not isinstance(content, str):
             raise ContentDenied({"code": "CONTENT_FORMAT_UNSUPPORTED"})
         role = message.get("role")

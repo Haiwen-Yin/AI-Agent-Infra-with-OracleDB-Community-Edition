@@ -4,6 +4,7 @@ EDITION = 'Community'
 FEATURES = frozenset([])
 PROFILE = 'production'
 GRAPH_ENGINEERING_ENABLED = True
+AGENT_EXTENSIONS_ENABLED = True
 
 def has_feature(name: str) -> bool:
     return name in FEATURES or (name == "graph_engineering" and GRAPH_ENGINEERING_ENABLED)

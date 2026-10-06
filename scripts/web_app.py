@@ -1,4 +1,4 @@
-"""FastAPI/Uvicorn entrypoint for the v4.5.0 Chuanxu Web application.
+"""FastAPI/Uvicorn entrypoint for the v4.5.1 Chuanxu Web application.
 
 The database-backed services are the authoritative implementation.  This
 entrypoint intentionally contains only HTTP concerns and exposes the same
@@ -35,16 +35,18 @@ from pydantic import BaseModel, Field, StrictBool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 try:
+    from lib import effective_capabilities
     from lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 except ModuleNotFoundError as exc:
     # Only a missing top-level package means this is the source tree.  Do not
     # hide missing packaged dependencies by incorrectly falling back to shared.
     if exc.name != "lib":
         raise
+    from shared.lib import effective_capabilities
     from shared.lib import identity_api, external_identity_api, agent_gateway_api, compliance_api, connection, governed_contracts, security_lifecycle, organization_api, security_domain_api, platform_capabilities, native_agent_api, native_runtime, model_usage_api, model_governance_api, model_capability_api, deployment_adapters, runtime_isolation, db4a2a, embedding_governance, admin_management, cursor_pagination, task_plan_api, knowledge_api, memory_lifecycle, skill_api, tool_registry, spec_api, graph_production_profile, platform_agent_pool, host_provisioning, platform_governance_graph as governance_graph_module
 
 
-VERSION = "4.5.0"
+VERSION = "4.5.1"
 logger = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 if not WEB_ROOT.is_dir():
@@ -224,26 +226,17 @@ def _path_capability(path: str) -> Optional[str]:
 
 
 def _graph_operation_capability(path: str) -> Optional[str]:
-    """Map Graph protocol operations to the database-authoritative matrix."""
+    """Use the same operation classification as legacy HTTP and workers."""
     normalized = "/" + str(path or "").lstrip("/")
-    if normalized.startswith("/api/a2a"):
-        return "a2a_gateway"
-    if normalized.startswith("/api/telemetry"):
-        return "otel_export"
-    if normalized.startswith("/api/graph-dynamic") or normalized.endswith("/migrate"):
-        return "graph_dynamic_migration"
-    if normalized.startswith(("/api/graph/", "/api/graphs/", "/api/graph-")) and normalized.endswith("/replay"):
-        return "graph_replay"
-    if normalized.startswith(("/api/graph/", "/api/graphs/", "/api/graph-")) and normalized.endswith("/fork"):
-        return "graph_checkpoint_fork"
-    if normalized.startswith("/api/graph-assurance"):
-        return "graph_slo_readonly"
-    if (normalized.startswith("/api/graph-manifest") or normalized.startswith("/api/graph-compat")
-            or normalized.startswith("/api/graphs/") and normalized.endswith("/import")):
+    if normalized.startswith("/api/graphs/") and normalized.endswith("/import"):
         return "graph_manifest_draft_import"
-    if normalized.startswith(("/api/graphs", "/api/graph-", "/api/graph/")):
-        return "graph_runtime_core"
-    return None
+    if normalized.endswith("/fork"):
+        return "graph_checkpoint_fork"
+    if normalized.endswith("/replay"):
+        return "graph_replay"
+    if normalized.endswith("/migrate"):
+        return "graph_dynamic_migration"
+    return effective_capabilities.graph_operation(path)
 
 
 @app.middleware("http")
@@ -274,10 +267,25 @@ async def enforce_platform_capability(request: Request, call_next):
             controlled = False
             if graph_state == "CONTROLLED":
                 session = _session_from_request(request)
-                if not session:
+                if session:
+                    access = identity_api.effective_access(str(session["principal_id"]), "platform.manage")
+                    controlled = access.get("decision") == "ALLOW"
+                elif graph_capability == "a2a_gateway" and request.url.path.startswith("/api/a2a/"):
+                    # A2A is also a Gateway surface.  A controlled capability
+                    # must admit a current Agent transport before the route
+                    # dependency performs its binding and scope checks; the
+                    # browser-session-only check here used to reject valid
+                    # external Agents with GRAPH_CAPABILITY_CONTROLLED.
+                    authorization = request.headers.get("Authorization", "")
+                    raw_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+                    agent_id = request.headers.get("X-Agent-Id", "").strip()
+                    instance_id = request.headers.get("X-Agent-Instance", "").strip()
+                    if raw_token and agent_id and instance_id:
+                        controlled = bool(agent_gateway_api.authenticate_access_token(
+                            raw_token, agent_id, instance_id, "agents.operate", operation="agents.operate",
+                        ))
+                if not controlled:
                     return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_CONTROLLED", "capability": graph_capability}}, status_code=403)
-                access = identity_api.effective_access(str(session["principal_id"]), "platform.manage")
-                controlled = access.get("decision") == "ALLOW"
             graph_production_profile.require(graph_capability, controlled=controlled)
         except graph_production_profile.ProfileConflict as exc:
             return JSONResponse({"detail": {"code": "GRAPH_CAPABILITY_BLOCKED", "message": str(exc)}}, status_code=409)
@@ -2287,6 +2295,7 @@ def registration_policy() -> Dict[str, Any]:
     try:
         return {
             "context": "SELF",
+            "mode": identity_api.registration_mode(),
             "fields": identity_api.registration_field_policies("SELF"),
             "token_required": identity_api.human_registration_token_required(),
         }
@@ -6287,7 +6296,7 @@ def gateway_token(body: GatewayTokenBody) -> Dict[str, Any]:
     if not credential:
         raise HTTPException(status_code=401, detail="Agent credential is invalid")
     requested = body.scopes or ["channels.read", "channels.write"]
-    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe", "embedding.generate", "database.endpoint", "skills.read", "memory.propose", "knowledge.read", "knowledge.write", "workspaces.read", "workspaces.write", "agents.operate"}
+    allowed = {"channels.read", "channels.write", "barriers.arrive", "actions.propose", "events.read", "compliance.evidence", "compliance.remediation", "embedding.probe", "embedding.generate", "database.endpoint", "skills.read", "tools.read", "memory.propose", "knowledge.read", "knowledge.write", "workspaces.read", "workspaces.write", "agents.operate"}
     if not set(requested) <= allowed:
         raise HTTPException(status_code=403, detail="Requested Agent scope is not allowed")
     if not instance_id:
@@ -6919,6 +6928,13 @@ def portal_continuity_session(request: Request, session: dict = Depends(_portal_
 
 _install_continuity_routes(app, _portal_continuity_action, _schema_owner_context,
                            prefix='/portal/api/continuity')
+
+from lib.agent_extension_http import install as _install_agent_extension_routes
+_install_agent_extension_routes(app, require_action, _schema_owner_context)
+_install_agent_extension_routes(app, _continuity_gateway_action, _schema_owner_context,
+                                prefix='/api/agent-gateway/extensions')
+from lib.a2a_http_routes import install as _install_standard_a2a
+_install_standard_a2a(app, _continuity_gateway_action, _schema_owner_context)
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

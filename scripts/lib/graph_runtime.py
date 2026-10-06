@@ -359,10 +359,12 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
                budget: Optional[Dict[str, Any]] = None,
                idempotency_key: Optional[str] = None, *,
                start_paused: bool = False,
-               admission_evidence: Optional[Dict[str, Any]] = None) -> str:
+               admission_evidence: Optional[Dict[str, Any]] = None,
+               transaction=None) -> str:
     if not graph_version_id or not plan_id or not actor_id:
         raise ValueError("graph_version_id, plan_id, and actor_id are required")
-    version = connection.execute_query_one(
+    query_one = transaction.query_one if transaction is not None else connection.execute_query_one
+    version = query_one(
         "SELECT STATUS, DEFINITION_DIGEST, SCHEMA_VERSION FROM GRAPH_VERSIONS "
         "WHERE GRAPH_VERSION_ID = :graph_version_id",
         {"graph_version_id": graph_version_id},
@@ -370,7 +372,7 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
     if not version or str(version.get("status") or "").upper() not in {"PUBLISHED", "DEPRECATED"}:
         raise ValueError("Graph Run requires a published Graph Version")
     if idempotency_key:
-        existing = connection.execute_query_one(
+        existing = query_one(
             "SELECT RUN_ID FROM GRAPH_RUNS WHERE GRAPH_VERSION_ID = :graph_version_id AND IDEMPOTENCY_KEY = :idempotency_key",
             {"graph_version_id": graph_version_id, "idempotency_key": idempotency_key},
         )
@@ -380,7 +382,7 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
     node_run_id = _id("NR")
     ready_id = _id("READY")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    plan_row = connection.execute_query_one(
+    plan_row = query_one(
         "SELECT GRAPH_VERSION_ID, DEFINITION_DIGEST, PLAN_DIGEST, PLAN_JSON "
         "FROM GRAPH_COMPILE_PLANS WHERE PLAN_ID = :plan_id",
         {"plan_id": plan_id},
@@ -435,11 +437,14 @@ def create_run(graph_version_id: str, plan_id: str, actor_id: str,
         )
 
     try:
-        connection.execute_transaction_callback(_create)
+        if transaction is not None:
+            _create(transaction)
+        else:
+            connection.execute_transaction_callback(_create)
     except Exception as exc:
         # The unique key is the authoritative race barrier.  A concurrent
         # request with the same key returns the already committed Run.
-        if idempotency_key and _is_unique_violation(exc):
+        if transaction is None and idempotency_key and _is_unique_violation(exc):
             existing = connection.execute_query_one(
                 "SELECT RUN_ID FROM GRAPH_RUNS WHERE GRAPH_VERSION_ID = :graph_version_id AND IDEMPOTENCY_KEY = :idempotency_key",
                 {"graph_version_id": graph_version_id, "idempotency_key": idempotency_key},
@@ -1647,8 +1652,9 @@ def reap_expired_leases(limit: int = 100) -> int:
     def _reap(tx):
         attempts = tx.query(
             "SELECT ATTEMPT_ID, NODE_RUN_ID, RUN_ID, FENCING_TOKEN FROM GRAPH_ATTEMPTS "
-            "WHERE STATUS = 'RUNNING' AND LEASE_EXPIRES_AT <= CURRENT_TIMESTAMP "
-            "ORDER BY LEASE_EXPIRES_AT FETCH FIRST :limit ROWS ONLY", {"limit": limit}
+            "WHERE STATUS = 'RUNNING' AND LEASE_EXPIRES_AT <= :lease_now "
+            "ORDER BY LEASE_EXPIRES_AT FETCH FIRST :limit ROWS ONLY",
+            {"limit": limit, "lease_now": datetime.now(timezone.utc).replace(tzinfo=None)}
         )
         count = 0
         for attempt in attempts:
@@ -1656,8 +1662,9 @@ def reap_expired_leases(limit: int = 100) -> int:
                 "UPDATE GRAPH_ATTEMPTS SET STATUS = 'STALE', ERROR_CODE = 'LEASE_EXPIRED', "
                 "ERROR_MESSAGE = 'Worker lease expired; work is eligible for recovery', "
                 "COMPLETED_AT = CURRENT_TIMESTAMP WHERE ATTEMPT_ID = :attempt_id "
-                "AND STATUS = 'RUNNING' AND FENCING_TOKEN = :fencing_token",
-                {"attempt_id": attempt["attempt_id"], "fencing_token": attempt["fencing_token"]},
+                "AND STATUS = 'RUNNING' AND FENCING_TOKEN = :fencing_token AND LEASE_EXPIRES_AT <= :lease_now",
+                {"attempt_id": attempt["attempt_id"], "fencing_token": attempt["fencing_token"],
+                 "lease_now": datetime.now(timezone.utc).replace(tzinfo=None)},
             ) != 1:
                 continue
             tx.execute(
@@ -1680,8 +1687,8 @@ def reap_expired_leases(limit: int = 100) -> int:
             count += 1
         expired_waits = tx.query(
             "SELECT WAIT_ID, RUN_ID, NODE_RUN_ID FROM GRAPH_WAIT_SUBSCRIPTIONS WHERE STATUS = 'WAITING' "
-            "AND DEADLINE_AT IS NOT NULL AND DEADLINE_AT <= CURRENT_TIMESTAMP FETCH FIRST :limit ROWS ONLY",
-            {"limit": limit},
+            "AND DEADLINE_AT IS NOT NULL AND DEADLINE_AT <= :deadline_now FETCH FIRST :limit ROWS ONLY",
+            {"limit": limit, "deadline_now": datetime.now(timezone.utc).replace(tzinfo=None)},
         )
         for wait in expired_waits:
             tx.execute(

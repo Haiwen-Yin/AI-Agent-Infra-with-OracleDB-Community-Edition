@@ -951,10 +951,10 @@ def test_organization_graph_loading_tracks_focus_and_mode_without_duplicate_requ
 
 
 def test_dashboard_navigation_retains_accessible_scroll_container():
-    # Geometry is exercised in tools/v450_form_layout_gate.mjs at real viewport
-    # sizes; equal fixed side columns previously passed here despite overlap.
+    # tools/product_ui_gate.mjs verifies geometry and reachable first links at
+    # real viewport sizes; each balanced navigation row scrolls independently.
     css = _react_css_source()
-    navigation = re.search(r"\.cx-nav\s*\{([^}]+)\}", css).group(1)
+    navigation = re.search(r"\.cx-nav-row\s*\{([^}]+)\}", css).group(1)
     assert re.search(r"overflow-x:\s*auto", navigation)
     source, is_source = _react_ui_source()
     if is_source:

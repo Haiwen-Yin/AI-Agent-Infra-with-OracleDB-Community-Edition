@@ -1,0 +1,406 @@
+{
+  "CX_A2A_GRAPH_BINDINGS": {
+    "check_expressions": [
+      "REVISION_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "APPROVED_BY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENDPOINT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "GRAPH_VERSION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PLAN_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      },
+      "PLAN_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "ENDPOINT_ID",
+      "REVISION_NO",
+      "GRAPH_VERSION_ID",
+      "PLAN_ID",
+      "PLAN_DIGEST",
+      "APPROVED_BY",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "GRAPH_VERSION_ID"
+        ],
+        "GRAPH_VERSIONS",
+        [
+          "GRAPH_VERSION_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PLAN_ID"
+        ],
+        "GRAPH_COMPILE_PLANS",
+        [
+          "PLAN_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "APPROVED_BY"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ENDPOINT_ID",
+          "REVISION_NO"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "ENDPOINT_ID",
+          "REVISION_NO"
+        ],
+        "CX_PROTOCOL_REVISIONS",
+        [
+          "ENDPOINT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_0E60CAC9B73DEEDF"
+  },
+  "CX_A2A_TASK_BINDINGS": {
+    "check_expressions": [
+      "REVISION_NO>0"
+    ],
+    "checks": 1,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "ENDPOINT_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PROTOCOL_TASK_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(256)"
+      },
+      "REVISION_NO": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      }
+    },
+    "immutable_columns": [
+      "PROTOCOL_TASK_ID",
+      "ENDPOINT_ID",
+      "REVISION_NO",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "PROTOCOL_TASK_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "PROTOCOL_TASK_ID"
+        ],
+        "CX_A2A_REQUESTS",
+        [
+          "PROTOCOL_TASK_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "ENDPOINT_ID",
+          "REVISION_NO"
+        ],
+        "CX_PROTOCOL_REVISIONS",
+        [
+          "ENDPOINT_ID",
+          "REVISION_NO"
+        ]
+      ]
+    ],
+    "trigger": "CX86_B332A49154DC1E0A"
+  },
+  "CX_FRAMEWORK_BINDINGS": {
+    "check_expressions": [
+      "PROFILE_VERSION>0",
+      "PERMISSION_VERSION>0"
+    ],
+    "checks": 2,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EXECUTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PERMISSION_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "PROFILE_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "PROFILE_VERSION": {
+        "default": null,
+        "not_null": true,
+        "type": "INTEGER"
+      },
+      "TARGET_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "EXECUTION_ID",
+      "PROFILE_ID",
+      "PROFILE_VERSION",
+      "PERMISSION_VERSION",
+      "TARGET_ID",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "EXECUTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "EXECUTION_ID"
+        ],
+        "CX_FRAMEWORK_EXECUTIONS",
+        [
+          "EXECUTION_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "PROFILE_ID"
+        ],
+        "CX_LLM_PROVIDER_PROFILES",
+        [
+          "PROFILE_ID"
+        ]
+      ],
+      [
+        "R",
+        [
+          "TARGET_ID"
+        ],
+        "CX_DEPLOYMENT_TARGETS",
+        [
+          "TARGET_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_3F66C001C03B2F94"
+  },
+  "CX_FRAMEWORK_REQUESTS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "ACTOR_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "EXECUTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "IDEMPOTENCY_KEY": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "REQUEST_DIGEST": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(64)"
+      }
+    },
+    "immutable_columns": [
+      "ACTOR_ID",
+      "IDEMPOTENCY_KEY",
+      "REQUEST_DIGEST",
+      "EXECUTION_ID",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "R",
+        [
+          "ACTOR_ID"
+        ],
+        "CX_PRINCIPALS",
+        [
+          "PRINCIPAL_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "EXECUTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "EXECUTION_ID"
+        ],
+        "CX_FRAMEWORK_EXECUTIONS",
+        [
+          "EXECUTION_ID"
+        ]
+      ],
+      [
+        "P",
+        [
+          "ACTOR_ID",
+          "IDEMPOTENCY_KEY"
+        ],
+        "",
+        []
+      ]
+    ],
+    "trigger": "CX86_282D121D9D703964"
+  },
+  "CX_RUNTIME_DERIVATIONS": {
+    "check_expressions": [],
+    "checks": 0,
+    "columns": {
+      "CREATED_AT": {
+        "default": "CURRENT_TIMESTAMP",
+        "not_null": true,
+        "type": "TIMESTAMP"
+      },
+      "DERIVATION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      },
+      "EXECUTION_ID": {
+        "default": null,
+        "not_null": true,
+        "type": "VARCHAR(128)"
+      }
+    },
+    "immutable_columns": [
+      "EXECUTION_ID",
+      "DERIVATION_ID",
+      "CREATED_AT"
+    ],
+    "keys": [
+      [
+        "P",
+        [
+          "EXECUTION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "EXECUTION_ID"
+        ],
+        "CX_RUNTIME_CONTEXT_BINDINGS",
+        [
+          "EXECUTION_ID"
+        ]
+      ],
+      [
+        "U",
+        [
+          "DERIVATION_ID"
+        ],
+        "",
+        []
+      ],
+      [
+        "R",
+        [
+          "DERIVATION_ID"
+        ],
+        "CX_CONTEXT_DERIVATIONS",
+        [
+          "DERIVATION_ID"
+        ]
+      ]
+    ],
+    "trigger": "CX86_53053C2194B4C494"
+  }
+}

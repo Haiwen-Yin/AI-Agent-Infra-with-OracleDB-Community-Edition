@@ -1,6 +1,6 @@
-# AGENTS.md - AI Agent Infra with DB v4.5.0 Unified Repository Guide
+# AGENTS.md - AI Agent Infra with DB v4.5.1 Unified Repository Guide
 
-> **v4.5.0** - The unified single-source repository that generates all 6 release
+> **v4.5.1** - The unified single-source repository that generates all 6 release
 > editions (Oracle/PG/YashanDB × Community/Enterprise) via `build.py`.
 
 > This is the technical guide for **Chuanxu (川序)**, the **AI Agent
@@ -14,7 +14,7 @@
 Use the generated package's sole `scripts/deploy/baseline_v*.json` as the
 deployment contract, not the historical source template filename. The build
 must align its version, adapter and terminal migration with the package:
-v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15 and the application-only v4.4.16 end at 97.
+v4.4.10 ends at 65; v4.4.11 ends at 68; v4.4.12 ends at 78; v4.4.13 ends at 81; v4.4.14 ends at 82; v4.4.15, the application-only v4.4.16 and v4.5.0 end at 97; v4.5.1 adds migrations 98–100.
 Oracle/YashanDB include context-read migration 69; PG goes from 68 to 70.
 Historical scripts remain for
 journal/checksum reproducibility, not as a customer upgrade promise.
@@ -274,7 +274,11 @@ defined by the database-authoritative Graph capability matrix, not by profile
 labels: Graph Runtime core and authorized inspection are Production; manifest
 draft import, read-only SLO views, and checkpoint fork are `CONTROLLED`; replay,
 Dynamic Graph migration, framework-adapter execution, A2A, and OTLP are
-`DISABLED`. No capability label changes database, API, Skill, Tool, model, or
+`DISABLED` by default. Registered MCP/A2A, metadata-only OTLP and the pinned
+LangGraph adapter have governed, operation-specific entry points; offline replay
+and migration preflight use authorized inspection without enabling live effects.
+See [Agent extensions](agent-extensions.md) for the current contracts.
+No capability label changes database, API, Skill, Tool, model, or
 export authorization boundaries.
 Inspect the current database capability matrix before exposing a controlled
 operation. DB4A2A is a database-mediated dispatch mechanism, not proof of
@@ -491,7 +495,7 @@ drop cluster-wide roles merely because one database was retired.
 6. **No `NVL()`** -> Use `COALESCE()`
 7. **`RETURNING col INTO :ret_id`** -> Keep in SQL. Oracle/YashanDB use it natively. PG adapter strips it.
 8. **Named binds `:param`** -> Use in SQL. PG `_convert_params` converts to `%s`.
-9. **Portable bind names** -> Never use Oracle-reserved `:audit`, `:by`, `:user`, `:grant`, `:level`, `:mode` or `:uid`. Use descriptive names such as `:audit_id`, `:decision_actor`, `:os_user`, `:grant_id`, `:isolation_level`, `:enforcement_mode` and `:runtime_uid`. The shared static guard and read-only Oracle bind preparation gate prevent recurrence.
+9. **Portable bind names** -> Never use Oracle-reserved `:audit`, `:by`, `:user`, `:grant`, `:level`, `:mode`, `:uid` or `:resource`. Use descriptive names such as `:audit_id`, `:decision_actor`, `:os_user`, `:grant_id`, `:isolation_level`, `:enforcement_mode`, `:runtime_uid` and `:resource_id`. The shared static guard and read-only Oracle bind preparation gate prevent recurrence.
 10. **Exact bind dictionaries** -> Oracle and YashanDB reject unused parameter names. For update-then-insert helpers, bind each statement's own placeholders; do not pass insert-only IDs to the update. Verify both branches against the native drivers.
 
 ### JavaScript Type Safety
@@ -511,7 +515,7 @@ drop cluster-wide roles merely because one database was retired.
 
 ### Template Version Injection
 - build.py MUST handle `v3.10.2<` and `v3.10.2"` patterns (no trailing space)
-- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.5.0`
+- HTML placeholders: `{{EDITION_LABEL}}`, `{{DB_DISPLAY}}`, `4.5.1`
 - Login badge: `{DB} {Edition} Edition v{VERSION}` (Admin), `{DB} {Edition} v{VERSION}` (Portal)
 
 ### LLM Configuration

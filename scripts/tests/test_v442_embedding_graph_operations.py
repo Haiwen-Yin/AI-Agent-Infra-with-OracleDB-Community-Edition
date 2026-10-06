@@ -123,7 +123,7 @@ def test_llm_draft_probe_is_ephemeral_and_dashboard_requires_it_before_save():
     app = (root / "web_app.py").read_text(encoding="utf-8")
     ui = (root / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
     probe = api_source.split("def probe_llm_profile", 1)[1].split("def _policy_row", 1)[0]
-    assert '"max_tokens": 1' in probe
+    assert "LLM provider returned no content" in probe
     assert "LLM_PROFILE_DRAFT_PROBE" in probe
     assert "API_KEY_CIPHER" not in probe
     assert '@app.post("/api/llm-provider-profiles/probe-draft")' in app
@@ -341,7 +341,8 @@ def test_v442_form_labels_and_multiline_fields_are_stable_and_external_agent_for
     assert "placeholder=" not in forms
     assert '.config-field > span {' in css
     assert '.config-field.config-multiline {' in css
-    assert 'grid-template-rows: 16px 62px minmax(22px, auto)' in css
+    # Compound selector geometry is verified in the browser layout gates;
+    # a fixed middle-row height prevented fields from containing their content.
     assert '.config-field > textarea {' in css
 
 

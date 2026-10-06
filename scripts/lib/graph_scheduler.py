@@ -269,8 +269,9 @@ def acquire_scheduler_lease(scheduler_id: str, group_id: str = "default", *,
         next_token = int(row.get("fencing_token") or 0) + (0 if owner == scheduler_id and active else 1)
         changed = tx.execute(
             "UPDATE GRAPH_SCHEDULER_LEASES SET SCHEDULER_ID = :scheduler_id, NODE_ID = :node_id, FENCING_TOKEN = :fencing_token, STATUS = 'ACTIVE', EXPIRES_AT = :expires_at, UPDATED_AT = CURRENT_TIMESTAMP "
-            "WHERE LEASE_ID = :lease_id AND (SCHEDULER_ID = :scheduler_id OR STATUS <> 'ACTIVE' OR EXPIRES_AT <= CURRENT_TIMESTAMP)",
-            {"scheduler_id": scheduler_id, "node_id": node_id, "fencing_token": next_token, "expires_at": expires, "lease_id": row["lease_id"]},
+            "WHERE LEASE_ID = :lease_id AND (SCHEDULER_ID = :scheduler_id OR STATUS <> 'ACTIVE' OR EXPIRES_AT <= :lease_now)",
+            {"scheduler_id": scheduler_id, "node_id": node_id, "fencing_token": next_token, "expires_at": expires,
+             "lease_id": row["lease_id"], "lease_now": datetime.now(timezone.utc).replace(tzinfo=None)},
         )
         if changed != 1:
             return None

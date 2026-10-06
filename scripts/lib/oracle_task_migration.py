@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from contextlib import contextmanager
 
 SOURCE = "TASK_STEPS"
@@ -270,6 +271,19 @@ class TaskMigration:
         return {"count": count, "sha256": digest.hexdigest()}
 
     def verify_copy(self):
+        for attempt in range(5):
+            try:
+                return self._verify_copy_snapshot()
+            except Exception as exc:
+                # A newly created Oracle table can momentarily reject a
+                # read-only snapshot with ORA-01466. Roll back that snapshot
+                # and retry the entire comparison, never individual reads.
+                # All other errors and persistent DDL changes still fail.
+                if "ORA-01466" not in str(exc) or attempt == 4:
+                    raise
+                time.sleep(0.3)
+
+    def _verify_copy_snapshot(self):
         self.conn.commit()
         self.execute("SET TRANSACTION READ ONLY")
         try:

@@ -662,6 +662,10 @@ def import_version(document: Dict[str, Any], actor_id: str, *, target_graph_id: 
     """
     if not isinstance(document, dict):
         raise ValueError("Graph import document must be an object")
+    from .edition_features import AGENT_EXTENSIONS_ENABLED
+    if AGENT_EXTENSIONS_ENABLED:
+        from .graph_inspection import manifest_preview
+        manifest_preview(actor_id, document, target_graph_id)
     if document.get("format") != GRAPH_EXPORT_FORMAT:
         raise ValueError("unsupported Graph import format")
     if str(document.get("format_version")) != GRAPH_EXPORT_VERSION:

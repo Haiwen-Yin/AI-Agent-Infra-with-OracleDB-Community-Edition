@@ -146,6 +146,8 @@ def test_baseline_declares_packaged_version_and_terminal():
             terminal = "82_v4_4_14_governed_model_capabilities.sql"
         if version in {"4.4.15", "4.4.16", "4.5.0"}:
             terminal = "97_v4_4_15_native_context_sources.sql"
+        if version == "4.5.1":
+            terminal = "100_v4_5_1_framework_rootfs_digest.sql"
         baseline = deployment_orchestrator.release_baseline(database, root)
         assert baseline["version"] == version
         assert baseline["deployment"] == "bootstrap-deployment-agent"

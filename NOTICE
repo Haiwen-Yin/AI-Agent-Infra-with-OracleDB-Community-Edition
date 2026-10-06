@@ -40,6 +40,8 @@ notable packages include:
 - requests, urllib3 — HTTP client (Apache 2.0 / MIT)
 - PyYAML — YAML parser (MIT)
 - jsonschema, jsonschema-specifications — schema validation (MIT)
+- Pillow — bounded raster image validation (HPND)
+- pypdf — bounded PDF text extraction (BSD-3-Clause)
 
 These packages are redistributed unmodified; their upstream LICENSE files
 take precedence over this NOTICE for the corresponding code.

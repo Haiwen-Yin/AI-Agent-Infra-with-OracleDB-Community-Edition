@@ -27,8 +27,13 @@ def test_empty_and_budget_exclusions_are_real_empty_context(context_db):
     empty=assembly.assemble('owner',assembly_request())
     assert empty['item_count']==0
     assert assembly.read_assembly('owner',empty['assembly_id'])['text']==''
-    small=assembly.assemble('owner',dict(assembly_request(wid,token_budget=1),idempotency_key='small'))
-    assert small['item_count']==0
+    # Work and Handoff sources are mandatory continuity inputs in v4.5.1.
+    # A budget that cannot represent one must fail explicitly and leave no
+    # prepared assembly or input-use receipt behind.
+    with pytest.raises(ContinuityConflict) as caught:
+        assembly.assemble('owner',dict(assembly_request(wid,token_budget=1),idempotency_key='small'))
+    assert caught.value.code == 'MANDATORY_CONTEXT_EXCEEDS_BUDGET'
+    assert db.execute('SELECT COUNT(*) FROM CX_CONTEXT_ASSEMBLIES').fetchone()[0]==1
     assert db.execute('SELECT COUNT(*) FROM CX_CONTEXT_INPUT_USES').fetchone()[0]==0
     assert db.execute('SELECT COUNT(*) FROM CX_WORK_CONTRACTS').fetchone()[0]==1
 

@@ -300,12 +300,14 @@ def forward(actor: str, provider_profile_id: str, messages: List[Dict[str, Any]]
     context = _forward_context(actor, gateway_token, provider_profile_id, agent_id); actor = context["actor"]
     if not isinstance(messages, list) or not messages or len(messages) > 100:
         raise ModelUsageError("messages must contain between 1 and 100 items")
-    profile = _row(connection.execute_query_one("SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,API_KEY_CIPHER FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": provider_profile_id}))
+    profile = _row(connection.execute_query_one("SELECT PROFILE_ID,VERSION,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,API_KEY_CIPHER FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": provider_profile_id}))
     if not profile: raise ModelUsageError("LLM provider profile is unavailable")
     request_id = _id("LMR"); started = time.monotonic(); input_digest = _digest(messages)
     replay = _idempotent_replay(actor, idempotency_key, input_digest)
     if replay is not None:
         return replay
+    from .provider_capability_probes import apply_parameters
+    payload = json.dumps(apply_parameters(profile, {"model": profile.get("model_id"), "messages": messages, "stream": bool(stream), "stream_options": {"include_usage": True} if stream else None}), ensure_ascii=False).encode()
     _reserve_idempotency(actor, idempotency_key, input_digest)
     connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'AUTHORIZED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or request_id, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
     try:
@@ -314,7 +316,6 @@ def forward(actor: str, provider_profile_id: str, messages: List[Dict[str, Any]]
         connection.execute("UPDATE CX_MODEL_REQUESTS SET STATUS='QUOTA_REJECTED',ERROR_CATEGORY='QUOTA_EXCEEDED',COMPLETED_AT=CURRENT_TIMESTAMP WHERE REQUEST_ID=:id", {"id": request_id})
         raise
     provider_url = str(profile.get("provider_url") or "").rstrip("/") + "/chat/completions"
-    payload = json.dumps({"model": profile.get("model_id"), "messages": messages, "stream": bool(stream), "stream_options": {"include_usage": True} if stream else None}, ensure_ascii=False).encode()
     headers = {"Content-Type": "application/json"}
     cipher = str(profile.get("api_key_cipher") or "")
     if cipher:
@@ -348,9 +349,11 @@ def stream_forward(actor: str, provider_profile_id: str, messages: List[Dict[str
     context = _forward_context(actor, gateway_token, provider_profile_id, agent_id); actor = context["actor"]
     if not isinstance(messages, list) or not messages or len(messages) > 100:
         raise ModelUsageError("messages must contain between 1 and 100 items")
-    profile = _row(connection.execute_query_one("SELECT PROFILE_ID,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,API_KEY_CIPHER FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": provider_profile_id}))
+    profile = _row(connection.execute_query_one("SELECT PROFILE_ID,VERSION,PROFILE_KEY,PROVIDER_URL,MODEL_ID,STATUS,API_KEY_CIPHER FROM CX_LLM_PROVIDER_PROFILES WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": provider_profile_id}))
     if not profile: raise ModelUsageError("LLM provider profile is unavailable")
     request_id, started, input_digest = _id("LMR"), time.monotonic(), _digest(messages)
+    from .provider_capability_probes import apply_parameters
+    payload = json.dumps(apply_parameters(profile, {"model": profile.get("model_id"), "messages": messages, "stream": True, "stream_options": {"include_usage": True}}), ensure_ascii=False).encode()
     _reserve_idempotency(actor, idempotency_key, input_digest)
     connection.execute("INSERT INTO CX_MODEL_REQUESTS(REQUEST_ID,ACTOR_PRINCIPAL_ID,AGENT_ID,PROFILE_ID,MODEL_ID,STATUS,IDEMPOTENCY_KEY,INPUT_DIGEST,CORRELATION_ID,CREDENTIAL_ID) VALUES(:id,:actor,:agent,:profile,:model,'DISPATCHED',:key,:digest,:correlation,:credential)", {"id": request_id, "actor": actor, "agent": agent_id or None, "profile": provider_profile_id, "model": profile.get("model_id"), "key": idempotency_key[:160] or request_id, "digest": input_digest, "correlation": correlation_id[:128] or request_id, "credential": context["credential_id"] or None})
     try:
@@ -358,7 +361,6 @@ def stream_forward(actor: str, provider_profile_id: str, messages: List[Dict[str
     except model_governance_api.QuotaExceeded:
         connection.execute("UPDATE CX_MODEL_REQUESTS SET STATUS='QUOTA_REJECTED',ERROR_CATEGORY='QUOTA_EXCEEDED',COMPLETED_AT=CURRENT_TIMESTAMP WHERE REQUEST_ID=:id", {"id": request_id})
         raise
-    payload = json.dumps({"model": profile.get("model_id"), "messages": messages, "stream": True, "stream_options": {"include_usage": True}}, ensure_ascii=False).encode()
     headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     cipher = str(profile.get("api_key_cipher") or "")
     if cipher:

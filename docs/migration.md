@@ -1,6 +1,6 @@
-# Migration Guide - AI Agent Infra with DB v4.5.0
+# Migration Guide - AI Agent Infra with DB v4.5.1
 
-## Current v4.5.0 Contract
+## Current v4.5.1 Contract
 
 Select the sole `scripts/deploy/baseline_v*.json` shipped in the current
 package. The terminal migration is 97 on Oracle, PostgreSQL and YashanDB;

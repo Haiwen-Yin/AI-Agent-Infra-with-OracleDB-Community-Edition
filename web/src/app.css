@@ -66,7 +66,7 @@ a {
   gap: 18px;
   width: 100%;
   margin: 0 auto;
-  padding: 4px max(28px, calc((100vw - 1680px) / 2 + 28px));
+  padding: 6px clamp(16px, 2vw, 28px);
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   box-shadow: 0 5px 18px rgba(22, 42, 48, 0.08);
@@ -89,6 +89,13 @@ a {
   font-size: 23px;
   letter-spacing: 2px;
   line-height: 1.1;
+}
+.cx-brand img.cx-brand-wordmark,
+.cx-auth-mark img.cx-brand-wordmark {
+  display: block;
+  width: 55px;
+  height: 32px;
+  object-fit: contain;
 }
 .cx-brand small {
   display: block;
@@ -126,16 +133,24 @@ a {
 }
 .cx-nav {
   display: grid;
-  grid-template-columns: repeat(11, max-content);
-  grid-template-rows: repeat(2, auto);
-  justify-content: start;
-  overflow-x: auto;
-  gap: 0 1px;
+  grid-template-rows: repeat(2, minmax(0, auto));
+  justify-items: center;
+  gap: 1px;
   min-width: 0;
+}
+.cx-nav-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  justify-content: safe center;
+  gap: 1px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .cx-nav a {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 5px;
   min-width: 0;
   justify-content: center;
@@ -762,6 +777,7 @@ textarea {
 }
 .inline-field {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 4px;
   color: var(--muted);
@@ -1584,6 +1600,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .channel-list .cursor-pager {
   justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 5px;
   margin: 8px 0;
   font-size: 10px;
@@ -1778,6 +1795,8 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .record-details pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .record-raw { margin-top: 16px; }
 .catalog-dialog { width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.principal-dialog { width: min(680px, calc(100vw - 32px)); background: var(--surface-strong); }
+.principal-dialog > form { min-width: 0; }
 .tool-import-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
 .tool-import-layout > .info-panel { min-width: 0; margin: 0 0 14px; }
 .tool-import-layout > .info-panel:last-child { margin-bottom: 0; }
@@ -2148,7 +2167,25 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .channel-thread-form {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  align-items: start;
 }
+.channel-thread-form .inline-field { align-self: start; }
+.channel-thread-form .inline-field > select { height: 36px; }
+.channel-management-section + .channel-management-section {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.channel-management-section h3 { margin: 0 0 10px; font-size: 14px; color: var(--ink); }
+.channel-member-add {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-soft);
+}
+.channel-member-add h4 { margin: 0 0 8px; font-size: 13px; color: var(--ink); }
+.channel-member-add .cx-form-hint { margin: 0; }
 .channel-create-form .inline-field,
 .channel-member-form .inline-field,
 .channel-thread-form .inline-field { align-self: stretch; }
@@ -2217,6 +2254,14 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .detail-drawer form {
   min-width: 0;
   max-width: 100%;
+}
+.detail-drawer .configuration-form {
+  /* Detail drawers can be narrow on phones and embedded desktop layouts.  The
+     global form grid has a 190px column floor, which made the knowledge
+     policy form wider than the drawer at the 390px viewport.  Let the drawer
+     choose as many useful columns as fit while keeping each field shrinkable.
+     This also keeps composite principal pickers inside the panel. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
 }
 .detail-drawer :is(input, select, textarea) {
   min-width: 0;
@@ -2953,18 +2998,13 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 @media (max-width: 1280px) {
   .cx-header {
-    grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
     padding-inline: 18px;
-  }
-  .cx-nav {
-    grid-template-columns: repeat(11, max-content);
-    grid-template-rows: repeat(2, auto);
   }
   .organization-workspace {
     grid-template-columns: 200px minmax(410px, 1fr) 280px;
   }
 }
-@media (max-width: 1600px) {
+@media (max-width: 1100px) {
   .cx-header {
     grid-template-columns: 1fr auto;
     gap: 9px 12px;
@@ -2974,8 +3014,6 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
     grid-row: 2;
   }
   .cx-nav {
-    grid-template-columns: repeat(11, max-content);
-    grid-template-rows: repeat(2, auto);
     justify-content: start;
   }
 }
@@ -2999,12 +3037,10 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
   }
   .cx-nav {
     width: 100%;
-    grid-template-columns: repeat(11, max-content);
-    grid-template-rows: repeat(2, auto);
     justify-content: start;
-    overflow-x: auto;
     padding-bottom: 2px;
   }
+  .cx-nav-row { justify-content: start; }
   .cx-main {
     padding: 8px 15px 48px;
   }
@@ -3197,8 +3233,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
     font-size: 8px;
   }
   .cx-nav {
-    grid-template-columns: repeat(13, max-content);
-    grid-template-rows: repeat(2, auto);
+    gap: 2px 4px;
   }
   .cx-main {
     padding-inline: 11px;
@@ -3279,7 +3314,7 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 }
 .model-governance-panel .config-field,
 .model-governance-panel .config-field.config-multiline {
-  grid-template-rows: minmax(16px, auto) auto minmax(22px, auto);
+  grid-template-rows: 16px auto minmax(22px, auto);
 }
 .model-governance-panel .config-field > .inline-field-pair,
 .model-governance-panel .config-field > .widget-selector {
@@ -3316,10 +3351,39 @@ form:has(input[name="roles"][value="ADMIN_AGENT"]) {
 .continuity-workbench input[type="checkbox"] { width: auto; height: auto; }
 .continuity-workbench p, .continuity-workbench li, .continuity-workbench label { overflow-wrap: anywhere; }
 .continuity-body { white-space: pre-wrap; }
-.principal-picker { display: grid; gap: 8px; min-width: 0; width: 100%; }
-.principal-picker input, .principal-picker select { width: 100%; min-width: 0; max-width: 100%; }
-.principal-picker select { text-overflow: ellipsis; }
-.principal-picker small { white-space: normal; overflow-wrap: anywhere; }
+/* Principal identities need a readable row rather than a narrow scalar field. */
+:is(.config-field, .inline-field, .workbench-field):has(.principal-picker) { grid-column: 1 / -1; }
+.inline-field-pair:has(> .principal-picker) { grid-template-columns: minmax(0, 120px) minmax(0, 1fr); align-items: start; }
+.principal-picker { position: relative; z-index: 1; display: grid; gap: 6px; min-width: 0; width: 100%; max-width: 680px; font-weight: 400; }
+.principal-picker.is-open,
+.principal-picker:focus-within { z-index: 40; }
+.principal-picker-search { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-strong); color: var(--muted); }
+.principal-picker-search:focus-within { border-color: var(--brand); outline: 2px solid color-mix(in srgb, var(--brand) 18%, transparent); outline-offset: 1px; }
+.principal-picker-search > svg { flex: 0 0 auto; }
+.principal-picker .principal-picker-search input { flex: 1 1 0; width: 0; min-width: 0; height: 34px; min-height: 34px; padding: 0; border: 0; outline: 0; border-radius: 0; background: transparent; color: var(--ink); box-shadow: none; font-size: 12px; }
+.principal-picker .principal-picker-toggle { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.principal-picker-selection { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.principal-picker-chip { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line)); border-radius: 4px; background: color-mix(in srgb, var(--brand) 7%, var(--surface)); color: var(--brand-deep); font-size: 11px; }
+.principal-picker-chip > svg { flex: 0 0 auto; }
+.principal-picker-chip > span { min-width: 0; overflow-wrap: anywhere; }
+.principal-picker .principal-picker-chip button { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 22px; width: 22px; min-height: 22px; height: 22px; padding: 0; border: 0; background: transparent; color: inherit; }
+.principal-picker-results { position: absolute; z-index: 100; top: calc(100% + 6px); right: 0; left: 0; display: grid; gap: 6px; box-sizing: border-box; min-width: 0; max-width: min(680px, calc(100vw - 32px)); max-height: min(390px, calc(100vh - 32px)); overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-strong); box-shadow: var(--shadow-lg, var(--shadow)); }
+.principal-picker-options { display: flex; flex-direction: column; gap: 3px; max-height: min(320px, 50vh); overflow-y: auto; min-width: 0; }
+.principal-picker .principal-picker-option { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 48px; height: auto; padding: 9px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink); text-align: left; white-space: normal; }
+.principal-picker-option > svg { flex: 0 0 auto; color: var(--brand-deep); }
+.principal-picker-option > span { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.principal-picker-option b { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.principal-picker .principal-picker-option small { display: block; font-size: 11px; line-height: 1.45; }
+.principal-picker .principal-picker-option:hover,
+.principal-picker .principal-picker-option.active,
+.principal-picker .principal-picker-option[aria-selected="true"] { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); background: var(--surface-soft); }
+.principal-picker small { white-space: normal; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; font-weight: 400; }
+.principal-picker-feedback { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; color: var(--danger); font-size: 11px; }
+.principal-picker-more { justify-self: start; }
+@media (max-width: 600px) {
+  .principal-dialog { padding: 14px; }
+  .inline-field-pair:has(> .principal-picker) { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 780px) {
   .continuity-workbench .operation-explainer-form { grid-template-columns: minmax(0, 1fr); }
   .continuity-workbench .panel, .continuity-workbench fieldset { padding: 14px; }

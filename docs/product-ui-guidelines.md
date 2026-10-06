@@ -1,4 +1,4 @@
-# Chuanxu Product UI Guidelines v4.5.0
+# Chuanxu Product UI Guidelines v4.5.1
 
 These reusable rules apply to authenticated Dashboard pages in every edition.
 
@@ -94,6 +94,27 @@ mobile layouts. Screenshots and bounding-box assertions verify headings,
 actions, and metric cards. Website and presentation screenshots are captured
 from the final package of the current release after loading completes; old
 versions, loading placeholders, errors, and overlaps are rejected.
+
+## Header, Channel management and Principal selection
+
+- Divide authorized navigation destinations into two ordered rows whose counts
+  differ by at most one. Keep both rows in the middle header column on desktop;
+  on narrow viewports, allow each row to scroll horizontally with its first link
+  reachable. Verify 2560×1600 at 100% and representative scaled CSS widths.
+- Display the running package version. Release captures verify backend version
+  and served frontend asset digests against that exact package.
+- Use the original Chinese vector wordmark with a contrasting dark variant.
+- Separate discussion threads, current members and member addition. Align short
+  selects to the top instead of stretching them beside compound controls.
+- Reuse the accessible name/username Principal combobox, retaining existing
+  governed candidate endpoints. Support keyboard selection, paging, same-name
+  differentiation, selected chips, removal and retry. Load only on expansion.
+- Render candidate results as a bounded overlay anchored to the picker. Opening,
+  paging or refreshing the list must not move subsequent form fields; keep the
+  result list internally scrollable and preserve row height for long identities.
+- Submit exact selected IDs; query text cannot satisfy a mandatory selection.
+  Cancel stale searches and clear changed scopes. Preserve user selections during
+  asynchronous member-list refreshes; reset explicitly after a successful form.
 
 ## Governed record details
 

@@ -1,4 +1,4 @@
-"""A2A 1.0.1 preview mapping over the durable Graph Runtime.
+"""Database-governed A2A 1.0.1 mapping over the durable Graph Runtime.
 
 This is a protocol adapter, not an execution engine.  A2A task lifecycle is
 persisted as a mapping to one Graph Run and always uses current platform
@@ -11,11 +11,10 @@ import json
 import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import connection, graph_runtime, profile_api
+from . import connection, graph_runtime, effective_capabilities
 
 
 PROTOCOL_VERSION = "1.0.1"
-PREVIEW_PROFILES = frozenset({"development", "experimental-4.2"})
 
 
 def _id() -> str:
@@ -23,12 +22,12 @@ def _id() -> str:
 
 
 def enabled() -> bool:
-    return profile_api.current_profile() in PREVIEW_PROFILES
+    return (effective_capabilities.graph_available("a2a_gateway") and
+            effective_capabilities.model_capability_api.state("a2a_exchange") != "OFF")
 
 
-def require_enabled() -> None:
-    if not enabled():
-        raise PermissionError("A2A gateway is disabled by the active runtime profile")
+def require_enabled(principal_id: str) -> None:
+    effective_capabilities.require(principal_id, graph="a2a_gateway", model="a2a_exchange")
 
 
 def negotiate(versions: Iterable[str]) -> str:
@@ -88,7 +87,7 @@ def agent_card(agent: Dict[str, Any], *, authenticated: bool = False,
 def create_task(graph_version_id: str, plan_id: str, principal_id: str, *,
                 input_state: Optional[Dict[str, Any]] = None, budget: Optional[Dict[str, Any]] = None,
                 idempotency_key: Optional[str] = None) -> Dict[str, Any]:
-    require_enabled()
+    require_enabled(principal_id)
     if not str(principal_id or "").strip():
         raise ValueError("A2A principal is required")
     task_id = str(idempotency_key or _id())[:256]
@@ -104,7 +103,7 @@ def create_task(graph_version_id: str, plan_id: str, principal_id: str, *,
 
 
 def get_task(task_id: str, principal_id: str) -> Optional[Dict[str, Any]]:
-    require_enabled()
+    require_enabled(principal_id)
     row = connection.execute_query_one(
         "SELECT t.PROTOCOL_TASK_ID, t.RUN_ID, t.PRINCIPAL_ID, t.STATUS, t.CURSOR_SEQ, r.STATUS AS RUN_STATUS, r.UPDATED_AT "
         "FROM GRAPH_PROTOCOL_TASKS t JOIN GRAPH_RUNS r ON r.RUN_ID = t.RUN_ID "
@@ -120,7 +119,7 @@ def get_task(task_id: str, principal_id: str) -> Optional[Dict[str, Any]]:
 
 
 def cancel_task(task_id: str, principal_id: str, reason: str) -> bool:
-    require_enabled()
+    require_enabled(principal_id)
     task = get_task(task_id, principal_id)
     if not task:
         return False

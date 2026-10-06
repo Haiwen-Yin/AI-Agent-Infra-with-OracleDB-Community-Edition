@@ -832,6 +832,36 @@ def postflight(database: str, edition: str, config: Dict[str, Any], terminal_mig
                 "Resolve failed migration steps before handoff.", {"count": failed},
             ))
 
+            if terminal_migration == "100_v4_5_1_framework_rootfs_digest.sql":
+                import migration_runner
+                rootfs_complete = migration_runner._step_objects_complete(
+                    cursor, database, _package_deploy_dir(database, root) / terminal_migration,
+                    version=release_version(database, root),
+                )
+                checks.append(_check("FRAMEWORK_ROOTFS_DIGEST", "PASS" if rootfs_complete else "BLOCKED",
+                    "Framework isolation evidence accepts algorithm-qualified rootfs digests",
+                    "Complete migration 100 before enabling framework execution."))
+                terminal_migration = "99_v4_5_1_integration_bindings.sql"
+            if terminal_migration == "99_v4_5_1_integration_bindings.sql":
+                import migration_runner
+                binding_complete = migration_runner._step_objects_complete(cursor, database,
+                    _package_deploy_dir(database, root) / terminal_migration, version=release_version(database, root))
+                checks.append(_check("AGENT_INTEGRATION_BINDINGS", "PASS" if binding_complete else "BLOCKED",
+                    "Protocol, framework and derived-context bindings verified", "Complete migration 99 before enabling integrations."))
+                terminal_migration = "98_v4_5_1_agent_extensions.sql"
+            if terminal_migration == "98_v4_5_1_agent_extensions.sql":
+                import migration_runner
+                extension_complete = migration_runner._step_objects_complete(
+                    cursor, database, _package_deploy_dir(database, root) / terminal_migration,
+                    version=release_version(database, root),
+                )
+                checks.append(_check("AGENT_EXTENSION_STORAGE", "PASS" if extension_complete else "BLOCKED",
+                    "Agent extension relations, immutable history and native denials verified",
+                    "Complete migration 98 before enabling Agent extensions."))
+                # Migration 98 is additive: all predecessor runtime structures
+                # below are still required and retain their historical checks.
+                terminal_migration = "97_v4_4_15_native_context_sources.sql"
+
             if terminal_migration in {"85_v4_4_15_task_stable_identity.sql", "86_v4_4_15_continuity_entities.sql", "87_v4_4_15_continuity_bindings.sql", "88_v4_4_15_execution_links.sql", "89_v4_4_15_dynamic_mcp_exposure.sql", "90_v4_4_15_mcp_native_boundary.sql", "91_v4_4_15_mcp_owner_binding.sql","92_v4_4_15_mcp_native_exception.sql","93_v4_4_15_mcp_tool_requests.sql","94_v4_4_15_handoff_policy.sql","95_v4_4_15_runtime_context.sql","96_v4_4_15_runtime_credentials.sql","97_v4_4_15_native_context_sources.sql"}:
                 import migration_runner
                 queue_complete = migration_runner._execution_queue_complete(cursor, database)
@@ -1158,6 +1188,7 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
                 "postflight": verified, "deployment": durable}
     resuming = mode == "RESUME"
     resume_from_handoff = False
+    prior = {}
     if resuming:
         prior = journal.load()
         if (str(prior.get("database") or "") != database or str(prior.get("edition") or "") != edition
@@ -1173,9 +1204,16 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     )
     plan = manifest(database, edition, root)
     plan_digest = _digest([{"key": action.key, "digest": action.digest, "authority": action.authority} for action in plan])
+    if resuming and prior.get("plan_digest") != plan_digest:
+        raise DeploymentError("deployment plan changed; the previous journal cannot authorize resume")
+    completed_actions = dict(prior.get("completed_actions") or {})
+    planned_actions = {action.key: action.digest for action in plan}
+    if any(planned_actions.get(key) != checksum for key, checksum in completed_actions.items()):
+        raise DeploymentError("completed deployment action does not match the current plan")
     state = {"run_id": journal.run_id, "mode": mode, "database": database, "edition": edition,
              "target_version": target_version, "terminal_migration": terminal_migration,
-             "plan_digest": plan_digest, "updated_at": _now()}
+             "plan_digest": plan_digest, "completed_actions": completed_actions,
+             "initial_preflight": prior.get("initial_preflight"), "updated_at": _now()}
     journal_digest = journal.save(state)
     first = preflight(
         database, config,
@@ -1187,6 +1225,8 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
         state["preflight"] = first
         journal.save(state)
         return {"run_id": journal.run_id, "status": state["status"], "preflight": first}
+    if mode == "INITIALIZE" and not resuming:
+        state["initial_preflight"] = first
     if mode == "INITIALIZE":
         initialization_boundary = str(prior.get("initialization_boundary") or "") if resuming else "VERIFIED_EMPTY_TARGET"
         recovery = _recovery_boundary(mode, False, initialization_boundary)
@@ -1202,15 +1242,22 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     if mode == "INITIALIZE":
         if not resume_from_handoff:
             for action in plan:
+                if completed_actions.get(action.key) == action.digest:
+                    continue
                 state["current_step"] = action.key
                 journal_digest = journal.save(state)
                 _execute_action(database, config, action, root)
+                completed_actions[action.key] = action.digest
+                state["completed_actions"] = completed_actions
+                journal_digest = journal.save(state)
             if bootstrap_admin_password:
                 _set_bootstrap_admin(database, config, bootstrap_admin_password, admin_hash)
             elif not (resuming and _bootstrap_admin_configured(database, config)):
                 raise DeploymentError("initial administrator password is required")
         elif not _bootstrap_admin_configured(database, config):
             raise DeploymentError("initial administrator setup is incomplete; resume with --admin-password-file")
+    state["current_step"] = "MIGRATIONS"
+    journal_digest = journal.save(state)
     migrations = _migration_apply(target_version, database, edition, config_path, config, root)
     # A resumed/idempotent migration run may return already-applied entries in
     # ledger order rather than the manifest order.  The terminal contract is
@@ -1266,5 +1313,6 @@ def run(mode: str, *, database: str, edition: str, config_path: Path,
     except Exception as exc:
         raise DeploymentError("deployment completed but configuration encryption failed") from exc
     return {"run_id": journal.run_id, "status": "RETIRED", "version": target_version,
-            "preflight": first, "migrations": migrations, "initial_admin": admin,
+            "preflight": state.get("initial_preflight") or first, "resume_preflight": first if resuming else None,
+            "migrations": migrations, "initial_admin": admin,
             "native_agents": native, "readiness": readiness}

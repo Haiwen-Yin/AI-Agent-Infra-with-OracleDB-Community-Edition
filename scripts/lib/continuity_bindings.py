@@ -11,7 +11,15 @@ def authenticated_transport(context):
     try:
         yield
     finally:
-        _transport.reset(token)
+        # Streaming responses may enter the generator in one AnyIO worker
+        # context and close it in another.  ContextVar tokens are scoped to
+        # their creating context, so reset can raise ValueError there.  Clear
+        # the current worker context on that boundary to avoid leaking the
+        # authenticated transport into a later request.
+        try:
+            _transport.reset(token)
+        except ValueError:
+            _transport.set(None)
 
 
 def schema_statements(dialect):

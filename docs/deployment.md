@@ -1,4 +1,4 @@
-# Deployment Guide - AI Agent Infra with DB v4.5.0
+# Deployment Guide - AI Agent Infra with DB v4.5.1
 
 ## Startup Mode And Database Governance
 
@@ -30,7 +30,7 @@ this project; other distributions require the packaged gate on their exact
 image and patch level.
 
 Use the selected package's sole `scripts/deploy/baseline_v*.json` as the
-current new-install contract. v4.5.0 ends at migration 97 across all three
+current new-install contract. v4.5.1 ends at migration 99 across all three
 databases; v4.4.14 ended at 82. The runner verifies the exact ordered chain.
 Historically, v4.4.10 added optional model forwarding, usage/cost accounting,
 per-profile routing and the read-only wallboard through migration 65. Its
@@ -211,7 +211,7 @@ source scripts/python_runtime.sh
 export PYTHON_BIN="$(cx_resolve_python)"
 cx_prepare_python_environment "$PYTHON_BIN"
 "$PYTHON_BIN" scripts/migration_runner.py --preflight \
-  --version 4.5.0 --database <oracle|pg|yashandb> \
+  --version 4.5.1 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --<adapter>-config config.json
 ```
 
@@ -242,7 +242,7 @@ an Argon2id hash is stored.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.5.0 --database <oracle|pg|yashandb> \
+  --version 4.5.1 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json
 ```
 
@@ -260,7 +260,7 @@ another verified Python 3.14 environment.
 
 ```bash
 bash scripts/install_platform.sh initialize \
-  --version 4.5.0 --database <oracle|pg|yashandb> \
+  --version 4.5.1 --database <oracle|pg|yashandb> \
   --edition <community|enterprise> --config config.json \
   --admin-password-file /run/secrets/chuanxu-initial-admin
 ```
@@ -411,7 +411,7 @@ The verifier checks wheel metadata, Python/platform compatibility, glibc 2.34+
 host baseline, and RECORD integrity before install.
 
 For upgrades, preserve the stable core and apply the complete additive chain
-through `migration_runner.py --version 4.5.0`. The current `production`
+through `migration_runner.py --version 4.5.1`. The current `production`
 profile retains the stable Graph Runtime and keeps interoperability extensions
 such as A2A and OpenTelemetry independently bounded. The validated local recovery boundary covers replacement
 runtime processes using database leases, fencing, Runs, and Checkpoints; it
@@ -1020,7 +1020,7 @@ Agent instead of an external Skill runtime:
 
 ```bash
 bash scripts/install_platform.sh initialize --database <oracle|pg|yashandb> \
-  --edition <community|enterprise> --version 4.5.0 --config config.json
+  --edition <community|enterprise> --version 4.5.1 --config config.json
 ```
 
 The command verifies a strictly empty target, records a database-managed

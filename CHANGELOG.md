@@ -1,7 +1,41 @@
 # Changelog
 
-## v4.4.16 - 2026-09-22
+## v4.5.1 - 2026-10-06
 
+- Unify database-authoritative capability checks and exact Provider revision probes; share answer-quality evaluation between Portal and Channels.
+- Add authorized metadata-first Tool/Skill discovery, source-bound context budgets, durable progress and cancellation diagnostics.
+- Complete bounded graph draft import, paginated SLO inspection, checkpoint forks, offline integrity replay and migration preflight.
+- Add registered MCP discovery and approved read-only calls, durable metadata-only OTLP delivery, bounded standard A2A tasks and a pinned isolated LangGraph adapter.
+- Add managed image/document inputs and explicitly requested read-only diagnostics; preserve live replay, live migration and global autonomy restrictions.
+- Improve desktop navigation, channel form sections, searchable Principal selection, responsive Knowledge details, bilingual status labels and the original Chuanxu wordmark.
+- Widen Principal dialogs and form selection rows; preserve candidate content height while scrolling so long names, usernames and immutable IDs wrap without overlap.
+- Render Principal candidates in an anchored, bounded overlay so opening, paging or refreshing the list does not reflow following form fields; retain keyboard, pagination and exact-ID behavior.
+- Add migrations 98–100 without changing previously applied migration digests; migration 100 widens framework rootfs evidence for algorithm-qualified digests; maintain independent Oracle, PostgreSQL and YashanDB COM/ENT packages.
+- Resolve the active upgrade version before verifying historical successor migrations, preserving existing handoff structures while rejecting failed or mismatched newer evidence.
+
+## v4.5.0 - 2026-09-27
+
+- Let compound Agent selectors, wrapped labels and expanded textareas determine form height; prevent overlap in containment, external access grants, Channel/Domain membership and Branch forms.
+- Keep the desktop navigation clear of the brand and session controls, using a separate navigation row at constrained widths.
+- Commit Compliance Controller evaluation and job completion atomically under the persisted lease and fencing token; PostgreSQL completion uses wall-clock time so a lease expiring during the transaction cannot commit posture changes.
+- Add owner/token-checked Controller lease renewal, reconcile concurrent scheduling through durable job identity, and commit remediation, audit and notification together with safe repair of missing legacy notices.
+- Reject malformed Graph retry policies with diagnostics; replace recursive cycle detection with iterative strongly connected components to handle deep graphs and identify every cycle member.
+- Compile one validated Join threshold independent of arrival order, normalize incoming-edge ordering for reproducible plan digests, and reject non-finite timeout/budget values. Existing persisted plans retain their recorded execution contracts.
+- Block release approval for unresolved historical contracts or missing, failed, skipped, stale or aggregate-only acceptance evidence.
+- Recover Embedding Space validation after a successful provider probe without changing write policy or bindings; reject stale results after a Profile version change and audit the transition.
+- Align effective capability checks with database-owned state and authorization, retaining controlled and disabled capability boundaries.
+- Reconcile specification indexes and historical changes, and support isolated target dates and manifest outputs during build and release validation.
+- Refresh bilingual product captures and website, customer presentation and business-plan materials.
+- Preserve the migration chain through 97 and the published v4.4.16 baseline; local acceptance uses isolated Oracle/PostgreSQL/YashanDB Community and Enterprise targets. OCI is excluded.
+
+## v4.4.16 - 2026-09-23
+
+- Require all retained query terms in authorized source titles/content, enforce English word boundaries, escape literal underscores and reject oversized term sets without truncation; summary-only candidates do not suppress model supplementation.
+- Preserve complete Chinese retrieval subjects after removing common question wrappers; shared fragments such as “公司” no longer match unrelated Knowledge for “甲骨文公司”.
+- Added separate bilingual general-model source notices in Portal and Channels, including authorized historical replies; Channel provenance comes from persisted executions rather than caller or model claims.
+- Fixed English conversational filler causing unrelated Knowledge matches, retaining knowledge-first policy, model-disclosure controls and failure handling.
+- Added explicit, audited repair of missing Principal identities for idle local Portal Agents without reclaiming occupied Agents or reactivating disabled identities.
+- Connected ordinary Channel Business Agent mentions to isolated managed execution and governed Knowledge retrieval with current reader, policy and source revalidation.
 - Fixed native Agent provisioning to preserve the requested readable name in the Agent principal and inventory while retaining the generated technical ID.
 - Accepted globally unique owner usernames with legacy principal-ID compatibility; Community administrators may approve their own requests, while Enterprise retains separation of duties.
 - Added template-aware isolation controls, actionable provisioning errors, and OCI regression/spec coverage.
@@ -46,15 +80,16 @@
 
 ## v4.4.14 - 2026-09-13
 
-- Added migration 82 and equivalent database-authoritative model capability controls across Oracle, PostgreSQL, and YashanDB.
-- Added secret-free provider evidence normalization and fail-closed structured-output/tool-call decisions.
-- Verified all six generated editions against isolated real databases and retained MCP/A2A execution as disabled by default.
+- Added migration 82 and a database-authoritative model, MCP, A2A, and governed-execution capability registry for Oracle, PostgreSQL, and YashanDB.
+- Added normalized provider evidence for structured output, tool calls, usage, timeout, cancellation, retry, and finish state without exposing hidden reasoning content.
+- Kept external capabilities fail-closed by default and required trusted source/schema/domain/resource metadata plus Human approval for high-impact governed execution.
+- Verified the migration on three existing baselines and six isolated Community/Enterprise targets, including idempotent replay and live Portal/LLM/Agent/Knowledge gates.
 
 ## v4.4.13 - 2026-09-08
 
 - Added governed bilingual Portal Knowledge retrieval, Human/Agent authorization intersection, citations, and explicit no-model/no-match behavior.
-- Added protected Channel mention dispatch, Admin/Compliance Agent management commands, Skill/Tool administration, and content-security checks.
-- Added migrations 80-81 for six bilingual product-Knowledge topics.
+- Added platform Admin/Compliance Agent management commands, protected Channel mention dispatch, Skill/Tool administration, and content-security checks.
+- Added migrations 80-81 for six bilingual product-Knowledge topics and completed cross-database Portal, Agent, and recovery verification.
 
 ## v4.4.12 - 2026-09-06
 
@@ -64,18 +99,22 @@
 
 ## v4.4.11 - 2026-08-31
 
-- Added evidence-bound Runtime isolation admission and drift detection.
-- Added DB4A2A reference dispatch, snapshot consistency, and child-Branch provenance.
-- Added migration 66 and authenticated APIs across Oracle, PostgreSQL, and YashanDB.
-- Kept reference adapters explicitly unverified and retained closed Graph interoperability boundaries.
+- Added verifiable Runtime isolation contracts and DB4A2A database-mediated collaboration.
+- Added migration 66 for all three database adapters and corresponding API/test contracts.
 
 ## v4.4.10 - 2026-08-27
 
 - Validates all three Enterprise editions from dedicated zero-object targets:
-  Oracle and YashanDB PDBs plus a PostgreSQL database reach migration 65,
-  native management-Agent bootstrap, scoped Knowledge, and `verify`.
-- Adds bounded PostgreSQL AGE and Agent-role prerequisites and closes trusted
-  actual-owner policies on forced-RLS tables without granting SUPERUSER.
+  a new Oracle PDB, PostgreSQL database, and YashanDB PDB each reach migration
+  65, native management-Agent bootstrap, scoped Knowledge migration, and
+  standalone postflight verification.
+- Adds a consolidated PostgreSQL DBA prerequisite and blocking preflight for
+  bounded Apache AGE access, graph namespace creation, per-Agent role creation,
+  and `ADMIN OPTION` on the shared NOLOGIN runtime role.
+- Removes the hidden PostgreSQL superuser-owner dependency: migration 50 seeds
+  only after installing a trusted actual-owner policy, and migration 65 closes
+  that policy over every forced-RLS table before native handoff while retaining
+  Agent-specific RLS.
 
 - Completes the real external-Agent full-capability gate on Oracle,
   PostgreSQL, and YashanDB Enterprise, including Memory Candidate submission,
@@ -96,52 +135,68 @@
   and blocking preflight contract, preventing migration 22 from failing after
   partial schema creation with `ORA-01031`.
 
+- Fixed generated-package migration preflight to use the current
+  `~/.ai-agent-infra/master.key` resolver instead of directly requiring the
+  retired `~/.oracle-infra/master.key` path.
+- Fixed withdrawn-schema detection so an applied v4.4.10 fresh-baseline ledger
+  is not rejected solely because a retained table also existed in v4.4.8;
+  explicit v4.4.8 ledger evidence remains blocked.
+
 - Closes organization application governance end to end: submission creates a
   unique unified approval item; self-decision is denied; approval atomically
   publishes facts, closure, typed history, subtree authority invalidation and
   audit; rejection atomically terminates both records. Migration 60 carries the
   portable database contract.
+- Completes the single-administrator organization workflow with low-risk direct
+  publication, auditable request withdrawal, actionable separation messages,
+  and a reasoned break-glass self-decision reserved for the database-protected
+  bootstrap `admin` with dedicated audit evidence.
+- Recovers historical orphaned organization submissions through author-only
+  audited withdrawal and clarifies child-organization creation with a new
+  change-set action and separate child/parent fields.
 - Makes unified STEP approval apply its paused-plan effect in the same
   transaction and makes confirmed platform Action Cards recoverable after an
   interrupted command handoff.
 - Blocks Oracle initialization unless the active Oracle Home proves that
-  Partitioning is enabled. The Oracle fresh baseline no longer compiles against
-  a not-yet-created table, calls an unavailable configuration function, or
-  creates a duplicate index; foundational execution stops at the first genuine
-  SQL failure instead of continuing into dependent ORA errors.
-- Keeps Oracle/YashanDB anonymous blocks with local functions or procedures
-  intact through their slash terminator so lifecycle migrations cannot be
-  truncated at an inner `END;`.
-- Passes a real Oracle Enterprise empty-schema initialization through terminal
-  migration 59, native Agent postflight, `RETIRED`, and `verify`; first-line
-  local procedure declarations are no longer split from their outer block.
-- Removes pre-grant `DBMS_CRYPTO` dependency from Oracle Memory adoption,
-  removes active-migration `AIADMIN` hard-coding, validates the complete Deep
-  Data Security owner privilege set, and creates the administrative Data Role
-  idempotently.
-- Uses exact Oracle bind sets for isolation-inventory and deployment-state
-  writes while preserving both derived shape and inheritance semantics.
-- Removes the client-side backup-manifest requirement from verified empty-target
-  initialization. The bootstrap records a database-managed, no-pre-existing-data
-  recovery boundary. Existing-target upgrades explain the database-managed
-  recovery boundary and require interactive `UPGRADE` confirmation, or
-  `--confirm-database-backup` for automation; the journal explicitly records
-  that backup state is not client-verifiable.
-- Adds explicit listen-address and Web-port prompts to the first-run wizard,
-  validates the port range, persists the resolved binding, and reports it at
-  completion without exposing secrets.
-- Always displays the LLM model ID in the first-run wizard and rejects partial
-  LLM configuration where only the API URL or only the model ID is supplied.
-  A bounded one-Token probe must verify the returned model identity before the
-  wizard persists configured LLM values. Stable aliases may resolve to the same
-  model basename with a bounded numeric/date version suffix, while arbitrary
-  suffixes remain rejected.
-- Repairs executive-wallboard runtime integrity by using one coherent Agent
-  identity across ownership, registry, Session, Task Plan, and Loop facts.
-- Runtime-source failures now produce degraded partial responses with
-  unavailable values instead of indistinguishable current-looking zeros.
-- Organization-scoped Agent aggregates follow active primary Human ownership
-  and organization closure.
+  Partitioning is enabled, removes three fresh-baseline SQL errors found during
+  an Oracle AI Database 26ai deployment, and stops foundational execution at
+  the first non-idempotent error instead of producing cascaded ORA output.
+- Preserves multi-line Oracle/YashanDB anonymous blocks containing local
+  functions and procedures until their SQL*Plus slash terminator, preventing
+  governance-lifecycle migrations from being split at an inner `END;`.
+- Completes real Oracle Enterprise fresh-install validation through migration
+  59, native Agent postflight, `RETIRED`, and `verify`. The runner now preserves
+  first-line local subprogram declarations, uses grant-independent SHA-256 for
+  Memory adoption, and removes hard-coded `AIADMIN` references from the active
+  security-boundary migration.
+- Makes Oracle Enterprise preflight verify the complete Deep Data Security
+  owner privilege set, creates `admin_data_role` idempotently, and treats an
+  absent legacy `AGENT_API` role as an already-revoked boundary only within the
+  bounded revoke operation.
+- Fixes strict Oracle bind failures in isolation-inventory seeding and final
+  deployment-state updates; derived shape and inheritance are retained in one
+  normalized inventory field.
+- Removes client-side backup manifests from initialization and upgrade.
+  Initialization remains restricted to a verified empty target; an existing-
+  target upgrade requires interactive `UPGRADE` confirmation, or
+  `--confirm-database-backup` for automation, and journals the database-managed,
+  not-client-verifiable recovery boundary.
+- Makes the first-run LLM model ID explicit and always visible; optional LLM
+  setup now requires API URL and model ID to be configured as a pair and pass a
+  bounded one-Token model-identity probe before persistence. The probe accepts
+  constrained numeric/date alias resolution without accepting arbitrary model
+  suffixes.
+- Repairs executive-wallboard runtime integrity by seeding one coherent Agent
+  population across Principal ownership, organization, registry, Session, Task
+  Plan, and Loop records on all three supported databases.
+- Distinguishes a successfully queried empty runtime from a failed runtime
+  source: failures now return degraded freshness, `partial=true`, bounded source
+  status, and unavailable values instead of current-looking zeros.
+- Resolves organization-scoped wallboard Agents through their active primary
+  Human owners and organization closure, matching the organization governance
+  model without creating invalid Agent-as-person memberships.
+- Strengthens v4.4.10 full-flow and benchmark gates with non-zero representative
+  data and `busy <= online <= total` invariants.
 - Makes v4.4.10 the fresh-deployment baseline. Historical migrations remain
   for checksum, ordering, reproducibility, and audit, not as a customer
   in-place upgrade promise; v4.4.8 remains withdrawn.
@@ -192,11 +247,6 @@
   and terminal-stream browser gates.
 - Restores or reinitializes all validation targets from approved pre-v4.4.8
   baselines and retains publication as an evidence-consistency decision.
-- Fixes in-place management Channel streaming updates so intermediate content
-  remains visible instead of appearing only with the terminal response.
-- Expands platform command help/results, adds verified deterministic product
-  overview responses, and clarifies titled compliance posture/enforcement
-  combinations in the Enterprise overview.
 
 ## v4.4.8 - 2026-08-18 (withdrawn)
 
@@ -261,12 +311,12 @@
 
 ## v4.4.5 - 2026-08-15
 
-- Preserved Dashboard child-view state through bounded URL deep links across
-  refresh, re-login, direct navigation, and browser history without exposing
-  credentials, tokens, message bodies, or model secrets.
+- Preserved Dashboard child-view state in bounded URL deep links across refresh,
+  re-login, direct navigation, and browser history without placing secrets or
+  message bodies in URLs.
 - Added immutable Graph Run admission contracts for Definition and Plan
-  digests, compatibility, State schema, and budget schema versions. Plans from
-  another Graph Version or with a mismatched digest fail closed.
+  digests, compatibility, State schema, and budget schema versions. A Plan
+  from another Graph Version or with a mismatched digest fails closed.
 - Governed Agent Card projection by explicit platform Skill grants; protocol
   metadata remains descriptive and cannot grant authority.
 - Paused forks before the first Worker claim when replay could reach a
@@ -277,99 +327,133 @@
 
 ## v4.4.4 - 2026-08-14
 
-- Added governed Portal Agent Pool LLM policy and Portal-side profile
-  switching among administrator-allowlisted healthy profiles.
-- Added typed Platform Administration commands and foundational managed-node,
-  shared-storage, external-endpoint, and native-template contracts.
-- Added additive migrations for Oracle, PostgreSQL, and YashanDB.
-- Moved Agent Pool and cloud-environment controls to a dedicated Dashboard
-  configuration page and added audited managed-node/shared-storage bindings
-  for Admin Agent runtime directories.
-- Completed Agent Pool Host onboarding with bounded reachability verification,
-  one-time bootstrap receipt, dedicated runtime-storage binding, administrator
-  activation, and authenticated heartbeat. Raw bootstrap tokens, SSH
-  passwords, database keys, and private keys are never persisted.
-- Moved Agent Pool Configuration under Platform Operations after Admin Agent
-  admission. MaaS, SaaS, and virtualization stay explicit deployment-adapter
-  boundaries.
+- Completed the Agent Pool host-node lifecycle: bounded reachability
+  verification, one-time bootstrap receipt, dedicated runtime-storage binding,
+  administrator activation, and authenticated heartbeat. The bootstrap token
+  is displayed once and only its digest is stored.
+- Moved Agent Pool Configuration to Platform Operations immediately after
+  Admin Agent admission. MaaS, SaaS, and virtualization remain explicit
+  deployment-adapter integration boundaries.
+
+- Added administrator-governed Portal Agent Pool LLM defaults and allowlists,
+  with a Portal selector restricted to healthy approved profiles.
+- Added typed Platform Administration Channel commands, read result cards,
+  governed mutation proposals, expiry, and audit records.
+- Added managed-node inventory and shared-storage profiles for Admin,
+  Compliance, and Agent Pool cloud demonstration nodes. SSH passwords are
+  never persisted.
+- Added external-Agent database endpoint metadata and five native Agent
+  templates for code, Office, and presentation work.
+- Added additive v4.4.4 migrations for all three supported databases.
 
 ## v4.4.3 - 2026-08-13
 
-- Unified Dashboard inventory paging above and below each cursor-backed list.
-  Authorized totals are returned for task, Memory, Skill, Knowledge, and Spec
-  inventories so the page indicator does not show an unknown total.
-- Added governed Security Domain inventory, accountable ownership, explicit
-  Human/Agent membership, lifecycle records, and audited bindings for Channels
-  and legacy collaboration groups.
-- Added reviewed conversion drafts: legacy collaboration-group Agents remain
-  candidates until individually confirmed; no sharing policy or historic group
-  membership is converted into authorization.
-- Revalidated active Domain membership for Channel discovery, reads, writes,
-  threads and Gateway membership admission. Revoked or expired access fails
-  closed while retained evidence remains governed.
+- Unified Dashboard inventory paging: task, Memory Library, Skill, Knowledge,
+  Spec, Agent, Channel, user, monitoring, approval, audit, and compliance
+  inventories now share synchronized controls above and below each list.
+  Cursor-backed endpoints return authorized totals so page indicators never
+  report an unknown total.
+- Added governed Security Domain administration, responsible-owner records,
+  explicit Human and Agent membership, lifecycle evidence, and discoverable
+  Channel and legacy collaboration-group binding records.
+- Added a controlled collaboration-group conversion draft. Existing group
+  Agents are candidates only; each membership must be reviewed explicitly
+  before an atomic Domain creation and single active group binding.
+- Revalidated current Security Domain membership on Channel admission, history
+  reads, messages, threads, gateway delivery, and membership changes. A
+  Channel, prompt, message, workspace, Skill, Tool, or group relationship
+  cannot grant Domain authority.
+- Added the additive v4.4.3 migration and release contracts for Oracle AI
+  Database 26ai, PostgreSQL 18 with Apache AGE, and YashanDB 23.5.4.
 
 ## v4.4.2 - 2026-08-13
 
-- Added verified Embedding test-and-activate with automatic dimension discovery and database-authoritative Contract, default Space, Binding, and migration maintenance.
-- Enforced encrypted API-key storage, platform normalization, Graph Production Profile capability gates, and authenticated Knowledge inventory visibility.
-- Corrected configuration forms, empty business inputs, single-line cursor pagination, and bilingual protected configuration views.
+- Replaced manual platform-wide Embedding assembly with a verified test-and-activate workflow that derives vector dimensions and automatically maintains the Contract, default Space, Binding, and governed migration state.
+- Enforced encrypted API-key storage and the platform-wide normalization rule; automated Embedding results are read-only in the standard Dashboard workflow.
+- Added the capability-level Graph Production Profile boundary and repaired authenticated Knowledge inventory queries across all adapters.
+- Completed form invariants for empty business inputs, external-registration state loading, single-line pagination, and localized protected configuration views.
+- Added audited Channel pinning: pinned Channels are prioritized while both
+  pinned and ordinary groups remain ordered by their latest persisted activity.
 
 ## v4.4.1 - 2026-08-12
 
-- Added the protected Platform Administration Channel, separate Admin Agent
-  enrollment paths, distinct weighted quorum, Leader lease/term/fencing, and
-  explicit high-availability readiness.
-- Added independent Dashboard/Portal idle and absolute session policies,
-  bounded opaque cursors for all high-frequency inventories, verified upgrade
-  protocol, safe-point Skill distribution, and ordered containment acknowledgements.
-- Kept NFS, object storage, unified storage, and infrastructure termination as
-  explicit customer adapter contracts rather than in-core claims.
+- Added the protected Platform Administration Channel, separated Admin Agent
+  enrollment paths, weighted count-and-weight quorum, Leader lease, term, and
+  fencing evidence.
+- Added independent Dashboard and Portal idle/absolute session policies,
+  opaque server-side pagination, staged verified upgrade protocol, safe-point
+  Skill distribution, and ordered Agent containment evidence.
+- Kept infrastructure termination and NFS/object/unified storage explicitly
+  adapter-bound; the platform does not claim remote process termination.
 
 ## v4.4.0 - 2026-08-11
 
-- Added database-native governed SDD revisions, immutable baselines,
-  structured clauses, task graphs, leases, reviews, evidence and amendments.
-- Added OpenSpec source snapshots and normalized import interoperability;
-  execution continues from the Chuanxu database after handoff.
-- Added governed software delivery roles, isolated task resources, SCM
-  credential references and digest-bound independent evidence.
-- Added the Specifications and Delivery Workbench and six-edition v4.4.0
-  migration and validation gates.
+- Added the native database-backed SDD control plane with structured
+  requirements, scenarios, acceptance criteria, tasks, reviews, evidence,
+  revisions, immutable approved baselines, amendments and source snapshots.
+- Added OpenSpec import/export interoperability. OpenSpec CLI and local
+  Markdown are optional after execution-baseline handoff and never control
+  task, code, test, review or release state.
+- Added governed SDD Graph compilation, risk-driven checkpoints, local/global
+  pause, resource leases, isolated execution boundaries and independent
+  evidence requirements.
+- Added the Software Delivery Profile, hardened delivery roles, local Git and
+  GitHub SCM adapter boundary, credential references, protected-branch rules
+  and digest-bound artifacts.
+- Added the Specifications and Delivery Workbench while retaining compatible
+  legacy SPEC API reads and non-destructive retirement.
+- Added additive v4.4.0 migrations and static/live validation contracts for
+  Oracle AI Database 26ai, PostgreSQL 18 with Apache AGE, and YashanDB 23.5.4.
 
 ## v4.3.7 - 2026-08-10
 
-- Added the local Bootstrap Deployment Agent, prepared-target preflight,
-  encrypted owner-only journal, durable deployment evidence, and retirement
-  handoff to platform-native management Agents.
-- Added governed Embedding Profiles, immutable Contracts, Spaces, bindings,
-  platform/Agent probes, `LEGACY_DEFAULT` isolation, and all five supported
-  execution modes.
-- Added the protected Deployment & Models dashboard and a bounded,
-  lease-protected local Embedding Worker for asynchronous ingestion and
-  re-embedding outside HTTP request handling.
+- Added a package-local Bootstrap Deployment Agent for checksum-bound,
+  resumable initialization, upgrade, status, verification, evidence capture,
+  and native management-Agent handoff without an external Agent, Skill runtime,
+  `psql`, or LLM-derived execution authority.
+- Added database-authoritative Embedding Profiles, immutable Contracts,
+  Spaces, bindings, probes, legacy-space isolation, and five execution modes:
+  `PLATFORM_MANAGED`, `ENTERPRISE_DIRECT`, `ENTERPRISE_PROXY`,
+  `PRECOMPUTED_IMPORT`, and `NONE`.
+- Added protected Dashboard deployment/model administration, Agent-side
+  compatibility evidence for enterprise-direct use, and a bounded
+  lease-protected managed Embedding Worker outside the Dashboard request path.
+- Added a first-party PostgreSQL 18 Python deployer that handles package SQL,
+  dollar-quoted routines and `COPY` data without requiring `psql` or `pg_cron`.
 
 ## v4.3.6 - 2026-08-07
 
-- Added platform-native Agent bootstrap and separated Platform Admin and
-  Enterprise Compliance Admin identities from the human `admin` account.
-- Added encrypted LLM Provider Profiles, governed business Agent requests and
-  approvals, built-in sensitive-domain templates, runtime isolation levels,
-  lease-fenced local execution, and customer deployment adapter contracts.
-- Added the database-authoritative external Agent registration policy with
-  `DISABLED`, `APPROVAL_ONLY`, and `ENABLED` states while preserving existing
-  Skill-first registrations.
+- Added database-authoritative platform-native Agent bootstrap. Platform Admin
+  Agent is created by the software without requiring an external Agent;
+  Enterprise editions additionally provision the governed Compliance Admin
+  Agent while keeping both identities separate from the human `admin` user.
+- Added LLM Provider Profiles with encrypted API-key envelopes, built-in and
+  sensitive-domain Agent templates, activation prerequisites, and a reference
+  local Runtime Worker with lease-fenced execution records.
+- Added governed business Agent requests, separation-of-duties approval,
+  restricted identity provisioning, runtime isolation levels, and deployment
+  target/adapter contracts for customer-specific infrastructure integration.
+- Added `external_agent_registration` policy control with disabled,
+  approval-only, and enabled states. It controls only new external
+  Skill-first enrollment and does not alter existing or platform-created Agents.
+- Added additive v4.3.6 migration contracts for Oracle AI Database 26ai,
+  PostgreSQL 18, and YashanDB 23.5.4 across Community and Enterprise editions.
 
 ## v4.3.5 - 2026-08-05
 
-- Added a database-authoritative Platform Capability Configuration page with
-  protected mandatory capabilities, dependency checks, required reasons,
-  optimistic concurrency, immutable history, and audited transactions.
-- Added request-level backend enforcement so hiding a Dashboard page cannot
-  bypass a disabled capability. Community packages cannot enable Enterprise
-  capabilities through the runtime registry.
-- Optimized capability page-state loading to one authoritative database read.
-- Removed admin Skill tokens from cross-Admin acquisition URLs and hardened
-  Oracle End User identifier validation before dynamic DDL.
+- Added database-authoritative Platform Capability Configuration for selecting
+  the enabled product surface per installation. Mandatory identity,
+  authorization, security, audit-writing, Agent, user, and configuration
+  boundaries remain protected.
+- Added dependency-aware capability switches, optimistic concurrency,
+  reason-required changes, immutable history, and transactionally coupled
+  security audit records across Oracle AI Database 26ai, PostgreSQL 18, and
+  YashanDB 23.5.4.
+- Added backend enforcement for disabled capabilities and a bilingual
+  protected Dashboard configuration page. Package capabilities remain bounded
+  by the Community/Enterprise build boundary.
+- Hardened cross-Admin Skill acquisition so the admin token is sent in a
+  request header, and rejected unsafe Oracle End User identifiers before DDL.
 
 ## v4.3.4 - 2026-08-04
 
@@ -382,35 +466,30 @@
 - Corrected identity and Gateway expiry clock handling for databases using
   local naive `TIMESTAMP` values, and aligned Gateway Client Secret lookup
   with the registration credential digest contract.
-- Fixed Portal human-session authorization after Agent-context requests by
-  enforcing Schema Owner identity checks, guaranteed Oracle connection return,
-  and bounded connection-pool waiting during short request bursts.
 
 ## v4.3.3 - 2026-08-03
 
-- Hardened the database-authoritative Graph Runtime with additive assurance
-  evidence, bounded test-only failpoints, invariant scans, and local Agent
-  Runtime recovery records.
+- Added Graph Runtime assurance evidence, bounded test-only failpoints, and
+  selected invariant scans around database-authoritative Graph recovery.
 - Added canonical Graph Definition supply-chain envelopes with dependency
-  locks, Ed25519 verification, import scanning, provenance, and untrusted
-  Draft publication gates.
+  locks, Ed25519 verification, import scanning, provenance, and untrusted Draft
+  publication gates.
 - Added disabled-by-default Dynamic Graph, A2A 1.0.1, and OpenTelemetry GenAI
-  preview boundaries. They project existing governed Graph facts and do not
-  introduce a second authorization or execution engine.
-- Local Agent Runtime recovery is not database HA. This release does not claim
-  database-cluster failover, database RPO/RTO, independent A2A conformance, or
-  real OTLP Collector delivery.
+  preview boundaries. They reuse existing authorization and Graph Runtime
+  authority rather than adding a second execution engine.
+- Local Agent Runtime recovery evidence is distinct from database HA: this
+  release does not claim database-cluster failover, RPO/RTO,
+  independent A2A conformance, or real OTLP Collector delivery.
 
 ## v4.3.2 - 2026-08-01
 
-- Added database-authoritative versioned Memory Families, immutable Versions,
-  current pointers, representations, relationships, snapshots, candidates,
-  reviews, jobs, usage events, and projection outbox facts across all three
-  adapters.
-- Made normal Memory deletion a reasoned logical-unavailability transition;
-  physical erasure remains a separate compliance workflow.
-- Added the Dashboard Memory lifecycle workspace and bounded current-version
-  Library/Chain, Consolidation Workbench, and Policies and Jobs views.
+- Added governed, versioned Memory Families, immutable Versions, current-version
+  compatibility, representations, typed relations, snapshots, candidates,
+  reviews, durable jobs, usage evidence, and bounded relationship traversal.
+- Replaced routine destructive memory deletion with reasoned logical
+  unavailability while retaining authorized lineage and audit evidence.
+- Added the independent, checksum-preserving memory digest-alignment migration
+  so legacy installations can adopt SHA-256 without rewriting step 23 history.
 
 ## v4.3.1 - 2026-07-31
 
@@ -418,6 +497,9 @@
   memberships and reporting, organization versions/history, semantic change
   sets, directory staging, closure-backed authorization, and the Organization
   Dashboard workspace across all database adapters and editions.
+- Added reasoned Portal-only or Portal-and-App admission in User Management,
+  enforced at login and per request, and protected the bootstrap `admin`
+  Principal's App admission and `SYSTEM_ADMIN` assignment from removal.
 
 All notable changes to the AI Agent Infra unified repository are documented in
 this file. Each released edition (Oracle/PG/YashanDB × Community/Enterprise)
@@ -433,39 +515,26 @@ technical project name.
 
 ## [4.3.0] - 2026-07-29
 
-See `RELEASE_NOTES_v4.3.0.md` for the integrated release contract. The former
-v4.2.1 Graph closure is an internal milestone consumed by this release and is
-not published as a separate edition or archive.
+See `shared/RELEASE_NOTES_v4.3.0.md` for the integrated release contract. The
+internal v4.2.1 Graph closure is included in v4.3.0 and is not a separate
+public archive.
 
-### Identity, enrollment, and controlled collaboration
-
-- Added database-backed Human and Agent Principals, Sessions, CSRF, Argon2id
-  password handling, registration approval, organizations, Security Domains,
-  delegated roles, scopes, permission versions, and fail-closed access checks.
-- Added one-time user-sponsored Enrollment Tokens that bind Agent owner,
-  sponsor, runtime, environment, domain, risk tier, quota, and credential
-  metadata without storing reusable plaintext secrets.
-- Added Channel, mixed human/Agent messages, Action Cards, Barrier arrivals,
-  participant snapshots, and node-scoped Agent Gateway instance fencing.
-- Added local-node restart recovery that never revokes another Dashboard node's
-  active Agent instances.
-
-### Graph integration and packaging
-
-- Integrated the internal Graph Executor, durable runtime, event delivery,
-  evidence, retry, fencing, and v4.1 Task/Loop compatibility work into the
-  shared v4.3.0 source line.
-- Added the configurable Graph maturity boundary: the v4.3.0 production
-  profile is the current production recommendation after the complete live
-  evidence gate passed; Graph preview controls require explicit enablement.
-- Builds contain only `RELEASE_NOTES_v4.3.0.md`, with six edition-specific
-  license and feature boundaries checked by the release gate.
-- Offline dependency packaging now accepts multiple platform wheels for one
-  pinned version. `cryptography==49.0.0` is documented with a source-built
-  `manylinux_2_28` RHEL 8 wheel alongside the upstream `manylinux_2_34` wheel;
-  the installer and verifier select the compatible artifact. `verify_deps.py`
-  also walks mandatory wheel metadata recursively, including platform markers,
-  so an incomplete transitive wheelhouse fails closed.
+- Added database-backed Human and Agent Principals, registration approval,
+  permissions, scopes, one-time Agent Enrollment Tokens, Channels, Barriers,
+  and node-isolated Agent Gateway recovery.
+- Integrated Graph Engineering runtime, durable execution, event delivery,
+  evidence, retry, fencing, and v4.1 compatibility into one shared code line.
+- v4.3.0 Production Profile is the current production recommendation. The
+  v4.1.x line remains available as the compatibility baseline and receives
+  only critical security or data-loss fixes.
+- Added multi-platform offline wheel selection. `cryptography==49.0.0` may
+  ship with a source-built `manylinux_2_28` RHEL 8 wheel alongside the
+  upstream `manylinux_2_34` wheel for newer systems.
+- Added release-time wheel integrity checks for METADATA identity,
+  Requires-Python, platform tags, and dist-info/RECORD hashes; the default
+  build now fails closed when the offline dependency closure is incomplete.
+- Documented the PostgreSQL Schema Owner prerequisites for provisioning
+  independent Business Agent LOGIN roles without widening runtime privileges.
 - Fixed PostgreSQL Graph traversal predicates for legacy text edge endpoints:
   numeric entity IDs and historical values such as `PG_AGENT_001` now share a
   text comparison boundary, so invalid numeric casts cannot abort Graph
@@ -482,125 +551,105 @@ not published as a separate edition or archive.
 - Fixed unrestricted user-list and Principal-visibility queries on Oracle and
   YashanDB by omitting bind values that are absent after `ALL`-scope SQL
   simplification.
-
-## [4.2.0] - 2026-07-25
-
-See `RELEASE_NOTES_v4.2.0.md` for the current Experimental Graph Engineering
-release contract.
-
-### Experimental Graph Engineering
-
-- Added versioned Graph Definitions, deterministic compilation, durable Runs,
-  Node Runs, Attempts, Transitions, Checkpoints, Artifacts, and evaluations.
-- Added leased and fenced Worker execution, authenticated Event Inbox/Outbox,
-  compatibility wrappers for v4.1 Task/Loop workflows, and governed runtime
-  intervention with immutable evidence.
-- Added five additive core Graph migrations for Oracle AI Database 26ai,
-  PostgreSQL 18 with Apache AGE, and YashanDB 23.5.4+ native Property Graph
-  projection; Enterprise adds a separate scheduler HA overlay.
-- Added governed manual, API, schedule, database, external, and internal Graph
-  trigger registration and idempotent Event Inbox delivery.
-- Kept v4.1.x as an independently buildable Stable line; the latest validated
-  v4.2.x baseline may graduate to the next Stable release when Graph contracts
-  stabilize.
-
-### Release packaging
-
-- v4.2.0 is built with the `experimental-4.2` profile and dated 2026-07-25.
-- Each archive contains only `RELEASE_NOTES_v4.2.0.md`.
-
-## [4.1.0] - 2026-07-24
-
-See `RELEASE_NOTES_v4.1.0.md` for the current release contract.
-
-### Enterprise governance
-
-- Added registered-Agent admission with stable identity, credential digest,
-  heartbeat, lifecycle status, expiry, and administrator import.
-- Added Enterprise resource catalog, policy decisions, bounded grants,
-  multi-party approvals, separation of duties, emergency controls, retention,
-  legal hold, masking, integrity evidence, and scoped export.
-- Added three-database v4.1.0 governance migrations and capability evidence.
-
-### Product UI
-
-- Applied the Chuanxu brand system to all 17 product templates.
-- Added local light-first Chinese defaults, persisted language/theme preferences,
-  local logo and line-icon assets, and offline UI resources.
-- Unified the Enterprise Approval/Audit navigation labels, language controls,
-  feature divider, and row-detail interaction. Expandable Dashboard lists now
-  explain the row interaction, while Audit uses the full row instead of a
-  redundant detail column.
-- Moved the management-platform identity into the sidebar brand, normalized
-  footer geometry, unified graph-label contrast, and added bilingual filter
-  chips for Agent status, graph type, approval status, audit level, and task
-  status. Approval empty states now follow the selected status, and Audit
-  documents the exact legal-hold scope behavior.
-- Localized dynamic status, action, decision, audit, resource, emergency, and
-  Skill enum values without changing their stored/API representations. Chinese
-  navigation now consistently labels Skills as `技能`, while raw audit evidence
-  and identifiers remain unchanged.
-- Extended display-only enum localization to Agents, Workspaces, Specs,
-  Branches, Collaboration, and Loops, including detail badges and Branch/Loop
-  form choices. Language switching refreshes rendered values without changing
-  API payloads or stored state.
-- Unified the Enterprise Approval/Audit sidebar footer geometry with every
-  other Dashboard page, including language, logout, and countdown spacing.
-- Community packages physically exclude Enterprise governance modules, routes,
-  templates, tests, documentation overlays, and SQL overlays.
-
-### Release packaging
-
-- Builds contain only the current release notes file.
-- Version, database, edition, and license labels are generated from package
-  metadata and the v4.1.0 release date is 2026-07-24.
+- Changed Dashboard page navigation to SPA history transitions and a persistent
+  header containing the slogan, theme/language controls, logout, and the real
+  database Session countdown; added animated global and local loading states.
+- Restored Knowledge, Memory, and Graph Explorer network visualization,
+  operational Agent Monitor data and metrics, and the principal Skill, Branch,
+  and Loop administration actions in the React application.
+- Fixed administrator-wide Agent and Barrier visibility while retaining scoped
+  access for non-administrators, and removed large-value `DISTINCT` queries
+  that failed on Oracle and YashanDB.
+- Fixed FastAPI compatibility Session-cookie port selection for PostgreSQL and
+  YashanDB editions and added generated-asset Dashboard regression coverage.
+- Added list/Graph view switching for Knowledge and Memory, deterministic
+  per-Branch detail graphs, focused Graph Explorer subviews, existing Skill
+  resource and metadata controls, and complete Loop run controls in the React
+  Dashboard.
+- Renamed the Graph data surface to entity relationships, retained returned
+  edge endpoints, covered every persisted entity type, and added node and
+  relationship filters with edge counts.
+- Added Channel creation and `SYSTEM_ADMIN` all-Channel inventory while keeping
+  private thread participation explicit; restored legacy collaboration-group
+  data as a separate compatibility view.
+- Split Channel chat from Channel administration and localized browser file
+  selection plus remaining visible Chinese-mode technical labels.
+- Fixed approval and audit adapter field mappings, animated database loading,
+  and click-outside/Escape detail dismissal.
+- Fixed approval creation against early YashanDB databases that retain the
+  required legacy `APPROVAL_TYPE` column.
+- Changed Web Session expiry to a five-minute sliding inactivity lease and
+  made existing legacy `ADMIN` adoption idempotently assign `SYSTEM_ADMIN`.
 
 ## [4.0.1] - 2026-07-22
 
-See `RELEASE_NOTES_v4.0.1.md` for the complete release contract. This version
-adds fail-closed per-Agent database identities, AES-256-GCM configuration
-envelopes, durable side-effect jobs, lossless Skill packages, strict edition
-allowlists, three-database migrations, and executable release evidence.
+### Security And Identity
 
-Configuration encryption now covers database credentials, LLM and routing API
-keys, and `security.secret_key`. Runtime `config.json` and master-key files are
-enforced as owner-only (`0600`), including already-encrypted configurations;
-verification output never prints the session-signing secret.
+- Added versioned AES-256-GCM configuration envelopes, authenticated metadata,
+  explicit legacy migration, key rotation, and restrictive master-key files.
+- Extended encrypted-at-rest configuration to `security.secret_key`, enforced
+  owner-only (`0600`) runtime config permissions on every startup, and masked
+  signing secrets in verification output.
+- Added centralized HTTP session, role, and route authorization. Unknown API
+  routes require authentication; administrative and side-effect routes enforce
+  stronger policies.
+- Business Agents now fail closed with independent database identities: Oracle
+  End Users, PostgreSQL LOGIN roles with RLS identity, and YashanDB users.
+  Schema-owner credential fallback is prohibited.
 
-### Fixed
+### Runtime
 
-- Web dashboards now render the release version instead of stale v3.10.2 labels.
-- Frontend countdowns, backend sessions, and cookies use the configured
-  five-minute default timeout consistently on every protected page.
-- Audit no longer loads Bootstrap into the Dashboard. Its native tabs,
-  responsive statistics grid, typography, and overall scale now match the
-  other Dashboard pages across all three Enterprise editions.
-- Dashboard sidebars use one compact navigation spacing contract, with
-  visualization regression tests covering version, timeout, and layout.
-- Monitor performance metrics use each database's deployed session columns,
-  include sample counts, preserve numeric zeroes, and label absent samples.
-- Portal now assigns Agents from the actual POOL state, reuses a user's active
-  assignment, and returns released Agents to the pool.
-- Portal Markdown rendering now uses a bundled GFM parser and HTML sanitizer
-  for history, non-streaming replies, and streaming replies.
-- Portal session identities are normalized across databases. Exit waits for
-  confirmed release, while Web startup reclaims only Agents persisted with
-  the current Admin node ID and leaves other nodes unchanged.
-- Concurrent Admin nodes claim Pool Agents through conditional status updates.
-- PostgreSQL numeric Workspace IDs are normalized at every Portal history
-  operation, including switch, rename, and delete.
-- PostgreSQL shared APIs now honor BIGINT identity IDs, deployed Spec/Session/
-  Workspace columns, interval arithmetic, and polymorphic graph edge IDs.
-- YashanDB now reuses pooled connections correctly and recovers the same
-  deterministic independent database user created during registration.
-- Cross-database tests now validate integer and string ID contracts without
-  string-only operations, use unique Skill names, and remain repeatable after
-  an interrupted run.
-- Final post-migration evidence records 141 passing tests in each generated
-  package plus explicit passing live contracts for all three databases.
-- Pool lifecycle tests now use an isolated capability tag and return their
-  claimed test Agent in a `finally` block, preventing shared demo pools from
-  being exhausted by release regression.
+- Added durable execution jobs, attempts, leases, retries, cancellation,
+  approval decisions, bounded command execution, audit rows, and outbound URL
+  validation across redirects and DNS results.
+- Skill ZIP ingestion now preserves complete `SKILL.md` content and nested
+  resources, rejects unsafe archives, stores immutable package/file hashes,
+  exposes HTTP and MCP acquisition, and materializes verified read-only trees.
+- Completed shared Graph API behavior and removed database-specific SQL from
+  shared runtime paths covered by the compatibility gate.
+- Added persisted Portal node ownership. Exit returns the current Agent to the
+  Pool, startup reclaims only the current Admin node's assignments, and
+  concurrent Admin nodes cannot claim the same Pool Agent.
+
+### Packaging And Release
+
+- Community packages physically exclude five Enterprise feature groups;
+  Enterprise manifests include approvals, audit, LDAP, Skill Token, and
+  orchestrator modules under BSL-1.1.
+- Added three-database migration ledger, capability probes, an 18-target
+  edition/mode matrix, reproducible archives, secret scanning, and executable
+  release evidence.
+- Added a reproducible `cl100k_base` prompt-input benchmark. Its result compares
+  full-file context with SQLite FTS5 Top-K retrieval and does not claim latency
+  or answer-quality improvement.
+- Release-package tests now exclude source-only harnesses and execute without
+  depending on the unified `shared/` or `adapters/` source directories.
+- Completed live regression of all six generated packages against Oracle,
+  PostgreSQL, and YashanDB, including cross-database ID and SQL dialect paths.
+- Final post-migration regression ran 141 passing tests in each of the six
+  packages; the three conditionally skipped live contracts were then supplied
+  explicit encrypted configs and passed once per database.
+- Corrected generated Skill/introduction release metadata and website metrics,
+  made `RELEASE_DATE` authoritative, and isolated pool lifecycle tests so they
+  always return their own claimed Agent.
+
+### Web Console
+
+- Standardized compact sidebar spacing across every Dashboard page.
+- Removed Bootstrap globals from Audit and replaced them with native tabs,
+  responsive statistics, and table layout at the shared Dashboard scale.
+- Corrected PostgreSQL Monitor session-duration calculations and added metric
+  sample counts with explicit no-sample rendering.
+- Corrected the React Monitor overview to render nested Agent, Session, Task,
+  and stalled-Agent metrics from all database adapters, and added a dedicated
+  controlled experimental-profile view. Performance metrics and the Agent
+  inventory remain exclusive to the runtime overview.
+- Removed the duplicate compatibility theme control from React pages and
+  renamed the user-facing Barrier concept to Collaboration gate while keeping
+  API and persistence identifiers compatible.
+- Moved the three product pillars into the header brand lockup, restored the
+  React database-loader animation, and removed Workspace-list N+1 detail
+  loading through a backward-compatible summary mode.
 
 ## [4.0.0] - 2026-07-19
 
@@ -675,263 +724,3 @@ spec-driven validator that gates releases on the OpenSpec contracts.
   `/api/admin/crypto/rotate`, `/api/approvals`, `/api/audit`.
 - **Database drivers**: Oracle uses `oracledb>=4.0.1`, PG uses
   `psycopg2-binary>=2.9`, YashanDB uses `yaspy>=1.2.1`.
-
-## [3.10.2] - 2026-07-17
-
-### Summary
-YashanDB adaptation — full support for YashanDB 23.5+ with the yaspy driver,
-expanding the edition matrix to 6 (2 Oracle + 2 PG + 2 YashanDB). 670 tests
-pass across all editions.
-
-### Added
-- **YashanDB adapter** — `adapters/yashandb/` (connection.py, config_db.py,
-  agent_api.py, deploy_yashandb.py) with yaspy 1.2.1 driver.
-- **YashanDB schema** — `1_schema.sql` adapted (no reference partitioning, no
-  JSON_OBJECT, no inline FK, no LOCAL index) for YashanDB compatibility.
-- **`install_yaspy.sh`** — installs yaspy `.so` + client libs and recreates
-  `.so` / `.so.MAJOR` symlinks under `~/.yashandb/client/lib/`.
-- **`vendor/yaspy/`** — bundled yaspy driver + YashanDB client libraries
-  (deduplicated: only `*.so.MAJOR.MINOR.PATCH` shipped, symlinks recreated at
-  install time).
-- YashanDB connection.py converts yaspy VECTOR `array.array` returns to string
-  to avoid GC-time segfaults.
-
-## [3.10.2] - 2026-07-16
-
-### Summary
-Enterprise encryption enhancement — per-Agent independent crypto keys (DB
-storage + admin_token distribution), config.json auto-encryption on startup
-(database + LLM + model_routing), key rotation API, encrypt_config.py CLI
-tool, Portal Markdown rendering. 544/544 tests pass.
-
-### Added
-- **Per-Agent crypto keys** — each agent gets an independent encryption key
-  stored in DB and distributed via admin_token.
-- **config.json auto-encryption** — on startup, sensitive fields (database
-  password, LLM api_key, model_routing credentials) are encrypted in place
-  using PBKDF2-derived keys.
-- **Key rotation API** — `/api/admin/crypto/rotate` for Enterprise editions.
-- **`encrypt_config.py`** — CLI tool to manually encrypt/decrypt config.json.
-- **Portal Markdown rendering** — portal chat now renders Markdown responses.
-
-## [3.10.1] - 2026-07-14
-
-### Summary
-Offline deployment — vendor/ directory with 30 pre-downloaded cp314 wheels,
-install_offline.sh for air-gapped installation, verify_deps.py for integrity
-check. Pure-Python deploy_oracle.py replaces SQLcl (125 MB + Java) with a
-state-machine SQL parser handling PROMPT/DEFINE/&&// syntax. Zero external
-runtime dependencies.
-
-### Added
-- **`vendor/` directory** — 30 pre-downloaded cp314 wheels for air-gapped
-  installation.
-- **`install_offline.sh`** — installs all wheels into the active Python.
-- **`verify_deps.py`** — verifies wheel integrity and Python version.
-- **`deploy_oracle.py`** — pure-Python SQL deployment script replacing SQLcl;
-  state-machine parser handles PROMPT, DEFINE, &&, //, BEGIN/END blocks.
-
-## [3.10.0] - 2026-07-09
-
-### Summary
-Universal Property Graph — 30+ graph functions across 8 domains: knowledge
-causal (CAUSES/CONTRADICTS), agent collaboration (group-scoped TRUSTS), task
-orchestration (FEEDS_INTO/PRODUCED_ARTIFACT), skill dependency, approval
-propagation (BLOCKS with cascade reject), data flow (DERIVED_FROM_DATA),
-memory evolution (PROMOTED_TO/MERGED_INTO), loop iteration
-(BUILDS_ON/INFORMS/CORRECTS). 23 new edge types. Dynamic trust via
-SYSTEM_CONFIG.
-
-### Added
-- **30+ graph functions** in 8 domains with 23 new edge types.
-- **Dynamic trust configuration** via SYSTEM_CONFIG table.
-- **Cascade approval rejection** via BLOCKS edge propagation.
-
-## [3.9.0] - 2026-07-05
-
-### Summary
-Ecosystem connectivity — MCP Server (10 tools, stdio + SSE), SSE streaming
-output, Human-in-the-Loop approval (step/loop/tool), Agent Protocol
-compatibility, multi-model routing.
-
-### Added
-- **MCP Server** — 10 tools exposed via stdio and SSE transports.
-- **SSE streaming** — real-time token streaming for portal chat.
-- **Human-in-the-Loop approval** — step/loop/tool level approval gates.
-- **Agent Protocol compatibility** — `/ap/v1/agent/tasks` endpoint.
-- **Multi-model routing** — per-task model selection via model_routing config.
-
-## [3.8.0] - 2026-07-02
-
-### Summary
-Multi-Agent integration testing — 5-phase deployment, 15/15 functional tests
-passed. Oracle: LOOP_MANAGER, DB_CRYPTO, schema prefix fixes. PG:
-_convert_params rewrite, policy double-ON, authenticate v_salt fixes. ENT:
-LOOP_AUDIT, audit routing.
-
-### Fixed
-- Oracle LOOP_MANAGER package body compilation.
-- Oracle DB_CRYPTO package integration with config encryption.
-- Oracle schema prefix collision in ENT deployments.
-- PG `_convert_params` rewrite for RETURNING INTO clause handling.
-- PG policy double-ON trigger for RLS + audit.
-- PG authenticate v_salt verification logic.
-- ENT LOOP_AUDIT routing and audit trail completeness.
-
-## [3.7.5] - 2026-06-28
-
-### Summary
-Bug fixes: orchestrator, event_bus security, message_api DELETED status, ENT
-missing Data Grants. PG: connection.py rewrite, 10 modules Oracle-to-PG
-migration.
-
-### Fixed
-- Orchestrator deadlock on concurrent task assignment.
-- event_bus security check bypass via crafted payload.
-- message_api DELETED status not propagating to collab_api.
-- ENT missing Data Grants policy on knowledge_entities table.
-- PG connection.py rewrite for connection pooling stability.
-- 10 modules migrated from Oracle-specific syntax to cross-DB compatible SQL.
-
-## [3.7.4] - 2026-06-26
-
-### Summary
-6 expansions: Agent Communication Protocol, Multi-Agent Orchestration (DAG),
-Event-Driven, Advanced Memory, Observability, Tool Ecosystem.
-
-### Added
-- **Agent Communication Protocol** — inter-agent messaging with typed channels.
-- **Multi-Agent Orchestration (DAG)** — dependency graph for multi-agent tasks.
-- **Event-Driven** — event_bus with pub/sub and dead letter queue.
-- **Advanced Memory** — episodic + semantic + procedural memory types.
-- **Observability** — OpenTelemetry-compatible tracing and metrics.
-- **Tool Ecosystem** — tool registry with versioning and access control.
-
-## [3.7.3] - 2026-06-23
-
-### Summary
-Deployment fixes: schema FK ordering, DEFINE SCHEMA_OWNER, config priority,
-embedding model prompt.
-
-### Fixed
-- Schema foreign key creation ordering for clean-slate deployment.
-- DEFINE SCHEMA_OWNER directive not resolving on PG.
-- Config priority: config.json now overrides environment variables correctly.
-- Embedding model prompt template for bge-m3.
-
-## [3.7.2] - 2026-06-19
-
-### Summary
-Documentation consistency: corrected function counts, job schedules, partition
-counts, PG terminology, evaluation types.
-
-### Fixed
-- Function count discrepancies across docs (126 Oracle / 103 PG / 109 YashanDB).
-- Job schedule descriptions (DBMS_SCHEDULER vs pg_cron).
-- Partition count inconsistencies in deployment guide.
-- PG terminology ("schema" vs "database" vs "tablespace").
-- Evaluation type enumeration (THRESHOLD/SPEC_VALIDATION/AGGREGATE/HUMAN/LLM_JUDGE/CUMULATIVE).
-
-## [3.7.1] - 2026-06-19
-
-### Summary
-Loop Engineering collaborative integration: Spec-Driven Loop, Task-Loop
-Binding, Collaborative Loop. SPEC_VALIDATION & AGGREGATE evaluation types.
-
-### Added
-- **Spec-Driven Loop** — loops driven by spec validation results.
-- **Task-Loop Binding** — loops bound to tasks via task_id FK.
-- **Collaborative Loop** — multi-agent loops with role-based iteration.
-- **SPEC_VALIDATION evaluation type** — evaluates against spec contracts.
-- **AGGREGATE evaluation type** — aggregates multi-agent evaluation results.
-
-## [3.7.0] - 2026-06-18
-
-### Summary
-Loop Engineering (4th gen AI methodology): 4 loop tables, LOOP_MANAGER package,
-4 evaluation types, lifecycle hooks. ENT: LOOP_AUDIT.
-
-### Added
-- **4 loop tables** — LOOPS, LOOP_ITERATIONS, LOOP_RESULTS, LOOP_FEEDBACK.
-- **LOOP_MANAGER package** — PL/SQL package for loop lifecycle management.
-- **4 evaluation types** — THRESHOLD, HUMAN, LLM_JUDGE, CUMULATIVE.
-- **Lifecycle hooks** — pre/post iteration hooks for custom logic.
-- **ENT LOOP_AUDIT** — audit trail for loop decisions and iterations.
-
-## [3.6.2] - 2026-06-18
-
-### Summary
-Portal chat fix, 15 PG bug fixes. ENT: audit trail, LDAP auth, skill tokens,
-compliance logs.
-
-### Fixed
-- Portal chat SSE streaming buffer issue.
-- 15 PG-specific bugs (connection pooling, type coercion, RLS policy).
-### Added
-- **ENT Audit trail** — immutable audit log for all data modifications.
-- **ENT LDAP auth** — bind DN + bind password with connection pooling.
-- **ENT Skill tokens** — time-limited tokens for skill invocation.
-- **ENT Compliance logs** — structured logs for regulatory compliance.
-
-## [3.6.1] - 2026-06-16
-
-### Summary
-PG Community & Enterprise Editions initial release, full feature parity with
-Oracle.
-
-### Added
-- **PG adapter** — connection.py, config_db.py with psycopg2 2.9 driver.
-- **PG schema** — 1_schema.sql with RLS policies replacing Data Grants.
-- **Full feature parity** with Oracle edition (knowledge, graph, memory, loops).
-
-## [3.6.0] - 2026-06-13
-
-### Summary
-Admin/Agent separation, Recovery Codes, Private Skill, row-level isolation fix.
-
-### Added
-- **Admin/Agent role separation** — distinct permission sets and UI.
-- **Recovery Codes** — 10 one-time codes for admin account recovery.
-- **Private Skill** — skills with `is_private=true` visible only to creator.
-### Fixed
-- Row-level isolation bypass via collab_api cross-agent query.
-
-## [3.4.0] - 2026-06-11
-
-### Summary
-Deep Data Security, Row-Level Isolation (Data Grants / RLS), MAC, zero-trust
-architecture.
-
-### Added
-- **Data Grants (Oracle)** — row-level security via DBMS_DATA_GRANTS.
-- **RLS (PG)** — row-level security via pg_rowsecurity.
-- **Mandatory Access Control (MAC)** — security classification labels.
-- **Zero-trust architecture** — every request verified, no implicit trust.
-
-## [3.1.0] - 2026-06-02
-
-### Summary
-Full rewrite, dual-edition strategy, database-native encryption.
-
-### Added
-- **Dual-edition strategy** — Community (Apache 2.0) vs Enterprise (BSL 1.1).
-- **Database-native encryption** — DBMS_CRYPTO for column-level encryption.
-- **Full rewrite** — modular architecture with clear separation of concerns.
-
-## [2.0.0] - 2026-05-15
-
-### Summary
-Unified architecture rewrite, oracledb driver.
-
-### Added
-- **oracledb driver** — migration from cx_Oracle to python-oracledb thin mode.
-- **Unified architecture** — consolidated modules into cohesive service layer.
-
-## [1.0.0] - 2026-05-09
-
-### Summary
-Initial release: knowledge base & property graph.
-
-### Added
-- **Knowledge base** — document ingestion, chunking, embedding, vector search.
-- **Property graph** — entities, relationships, graph traversal queries.

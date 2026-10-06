@@ -14,12 +14,14 @@ import socket
 import urllib.error
 import urllib.request
 import time
+from contextvars import ContextVar
 from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
 from . import connection, deployment_adapters, identity_api, native_agent_api, runtime_isolation, content_security
 
 logger = logging.getLogger(__name__)
+_model_observer = ContextVar("native_model_observer", default=None)
 
 
 def _row(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -43,7 +45,7 @@ def _llm_profile(profile_id: str) -> Optional[Dict[str, Any]]:
     if not profile_id:
         return None
     return _row(connection.execute_query_one(
-        "SELECT PROFILE_ID,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS FROM CX_LLM_PROVIDER_PROFILES "
+        "SELECT PROFILE_ID,VERSION,PROVIDER_URL,MODEL_ID,API_KEY_CIPHER,STATUS FROM CX_LLM_PROVIDER_PROFILES "
         "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'", {"id": profile_id},
     ))
 
@@ -88,9 +90,9 @@ def _failure_code(exc: Exception) -> str:
     return code
 
 
-def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], *, managed_input: bool = False) -> Dict[str, Any]:
     """Call an OpenAI-compatible endpoint without logging prompt or secrets."""
-    content_security.inspect_messages(messages)
+    content_security.inspect_messages(messages, allow_managed_images=managed_input)
     messages = _provider_messages(messages)
     provider_url = str(profile.get("provider_url") or "").strip().rstrip("/")
     parsed = urlsplit(provider_url)
@@ -107,7 +109,8 @@ def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[s
         secret = str(decrypt_section(cipher).get("api_key") or "")
         if secret:
             headers["Authorization"] = "Bearer " + secret
-    payload = json.dumps({"model": model, "messages": messages, "stream": False},
+    from .provider_capability_probes import apply_parameters
+    payload = json.dumps(apply_parameters(profile, {"model": model, "messages": messages, "stream": False}),
                          ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
@@ -119,6 +122,8 @@ def _call_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]]) -> Dict[s
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise RuntimeError("LLM provider request failed") from exc
     choices = result.get("choices") or []
+    if not native_agent_api._llm_model_matches(model, result.get("model")):
+        raise RuntimeError("LLM provider returned a different model")
     message = (choices[0] or {}).get("message") if choices else {}
     content = str((message or {}).get("content") or "")
     if not content:
@@ -146,7 +151,8 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
         secret = str(decrypt_section(cipher).get("api_key") or "")
         if secret:
             headers["Authorization"] = "Bearer " + secret
-    payload = json.dumps({"model": model, "messages": messages, "stream": True}, ensure_ascii=False).encode("utf-8")
+    from .provider_capability_probes import apply_parameters
+    payload = json.dumps(apply_parameters(profile, {"model": model, "messages": messages, "stream": True}), ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(provider_url + "/chat/completions", data=payload, headers=headers, method="POST")
     content = ""
     pending = ""
@@ -163,6 +169,9 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                     break
                 try:
                     payload_item = json.loads(item)
+                    observed_model = payload_item.get("model")
+                    if observed_model and not native_agent_api._llm_model_matches(model, observed_model):
+                        raise RuntimeError("LLM provider returned a different model")
                     choices = payload_item.get("choices") or []
                     delta = (choices[0] or {}).get("delta") if choices else {}
                     if choices and (choices[0] or {}).get("finish_reason") == "stop":
@@ -172,6 +181,8 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
                     continue
                 if not piece:
                     continue
+                if not content and _model_observer.get():
+                    _model_observer.get()(time.monotonic())
                 content += piece
                 pending += piece
                 if len(content.encode("utf-8")) > 100000:
@@ -192,11 +203,11 @@ def _stream_llm(profile: Dict[str, Any], messages: List[Dict[str, Any]], on_delt
     return {"content": content, "model": model}
 
 
-def _set_profile_health(profile_id: str, state: str) -> None:
+def _set_profile_health(profile_id: str, state: str, expected_version: Optional[int] = None) -> None:
     connection.execute(
         "UPDATE CX_LLM_PROVIDER_PROFILES SET HEALTH_STATE=:state,UPDATED_AT=CURRENT_TIMESTAMP "
-        "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'",
-        {"state": state[:32], "id": profile_id},
+        "WHERE PROFILE_ID=:id AND STATUS='ACTIVE'" + (" AND VERSION=:version" if expected_version is not None else ""),
+        {"state": state[:32], "id": profile_id, **({"version": expected_version} if expected_version is not None else {})},
     )
 
 
@@ -228,15 +239,24 @@ def enqueue(actor: str, agent_id: str, messages: List[Dict[str, Any]], reason: s
 
 def _finish(execution_id: str, worker_id: str, node_id: str, fencing_token: int,
             status: str, output: Optional[Dict[str, Any]] = None,
-            failure: str = "") -> None:
-    changed = connection.execute(
+            failure: str = "", observation: Optional[Dict[str, Any]] = None,
+            completion_hook=None) -> None:
+    sql = (
         "UPDATE CX_RUNTIME_EXECUTIONS SET STATUS=:status,OUTPUT_JSON=:output,FAILURE_REASON=:failure,"
         "COMPLETED_AT=CURRENT_TIMESTAMP,UPDATED_AT=CURRENT_TIMESTAMP WHERE EXECUTION_ID=:id "
-        "AND WORKER_ID=:worker AND NODE_ID=:node AND FENCING_TOKEN=:token AND STATUS='CLAIMED'",
-        {"status": status, "output": native_agent_api._json(output) if output is not None else None,
+        "AND WORKER_ID=:worker AND NODE_ID=:node AND FENCING_TOKEN=:token AND STATUS='CLAIMED' "
+        "AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP")
+    params = {"status": status, "output": native_agent_api._json(output) if output is not None else None,
          "failure": failure[:2000] or None, "id": execution_id, "worker": worker_id,
-         "node": node_id, "token": fencing_token},
-    )
+         "node": node_id, "token": fencing_token}
+    def complete(tx):
+        if completion_hook is not None:
+            completion_hook(tx)
+        changed = tx.execute(sql, params)
+        if changed and not tx.query_one("SELECT EXECUTION_ID FROM CX_EXECUTION_OBSERVATIONS WHERE EXECUTION_ID=:execution", {"execution": execution_id}):
+            tx.execute("INSERT INTO CX_EXECUTION_OBSERVATIONS(EXECUTION_ID,FENCING_TOKEN,QUEUE_MS,PROVIDER_LATENCY_MS,FIRST_TOKEN_MS,CANCELLATION_STATE,FINISH_CODE) VALUES(:execution,:fence,:queue_ms,:provider_ms,:first_ms,'NOT_REQUESTED',:code)", {"execution": execution_id, "fence": fencing_token, "queue_ms": observation.get("queue_ms"), "provider_ms": observation.get("provider_ms"), "first_ms": observation.get("first_ms"), "code": failure[:128] or status})
+        return changed
+    changed = connection.execute_transaction_callback(complete) if observation is not None else connection.execute(sql, params)
     if changed != 1 and status == "COMPLETED":
         raise PermissionError("Runtime execution authority was revoked")
 
@@ -251,17 +271,39 @@ def _admit_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("Deployment target is unavailable")
     target_type = str(target.get("target_type") or "").upper()
     if target_type == 'LOCAL_LINUX_SANDBOX':
-        from .isolated_channel_runtime import ChannelWorker
-        config = _parse(target.get('config_json'), {})
         payload = _parse(execution.get('input_json'), {})
-        dispatch = payload.get('channel_dispatch') or {}
-        if dispatch.get('kind') != 'BUSINESS_MENTION':
-            raise PermissionError('isolated worker requires a bound business Channel mention')
-        from . import business_channel_runtime
-        business_channel_runtime.validate(str(execution['agent_id']), dispatch)
-        worker = ChannelWorker(execution, config)
-        execution['_isolated_worker'] = worker
-        observed = worker.start()
+        if isinstance(payload.get('framework_dispatch'), dict):
+            config = _parse(target.get('config_json'), {})
+            config['rootfs'] = config.get('framework_rootfs')
+            # Bind the database authority and immutable framework identity
+            # before starting an untrusted worker.  Starting first would let a
+            # stale/revoked execution consume CPU or reach the broker before
+            # the profile, permission, target, or rootfs checks run.
+            from . import framework_execution
+            binding = framework_execution.binding(str(execution.get('execution_id') or ''))
+            if not binding:
+                raise PermissionError('framework execution binding is unavailable')
+            # The worker is constructed only after this authoritative
+            # transaction has validated the current profile, permission,
+            # target, input binding, and immutable rootfs.
+            def _validate_framework(tx):
+                return framework_execution.validate(tx, execution, binding, verify_image=True)
+            config = connection.execute_transaction_callback(_validate_framework)
+            from .isolated_framework_runtime import FrameworkWorker
+            worker = FrameworkWorker(execution, config)
+            execution['_isolated_worker'] = worker
+            observed = worker.start()
+        else:
+            from .isolated_channel_runtime import ChannelWorker
+            config = _parse(target.get('config_json'), {})
+            dispatch = payload.get('channel_dispatch') or {}
+            if dispatch.get('kind') != 'BUSINESS_MENTION':
+                raise PermissionError('isolated worker requires a bound business Channel mention')
+            from . import business_channel_runtime
+            business_channel_runtime.validate(str(execution['agent_id']), dispatch)
+            worker = ChannelWorker(execution, config)
+            execution['_isolated_worker'] = worker
+            observed = worker.start()
     else:
         adapter = deployment_adapters.reference_adapters().get(target_type)
         if adapter is None:
@@ -559,6 +601,7 @@ def _write_channel_response(agent_id: str, execution_id: str, input_payload: Dic
 def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
     worker_id = worker_id or local_worker_id()
     node_id = node_id or native_agent_api._text(socket.gethostname(), 128)
+    native_agent_api.reconcile_expired_runtime(limit=100)
     claimed = native_agent_api.claim_runtime(worker_id, node_id, limit=1)
     if not claimed:
         return {"status": "IDLE", "worker_id": worker_id}
@@ -567,34 +610,69 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
     fencing_token = int(execution.get("fencing_token") or 0)
     input_payload: Dict[str, Any] = {}
     agent: Optional[Dict[str, Any]] = None
+    profile: Optional[Dict[str, Any]] = None
     provider_failed = False
     provider_completed = False
+    from .edition_features import AGENT_EXTENSIONS_ENABLED
+    observation = {} if AGENT_EXTENSIONS_ENABLED else None
+    if observation is not None:
+        try:
+            stamps = _row(connection.execute_query_one("SELECT CREATED_AT,STARTED_AT FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:execution", {"execution": execution_id})) or {}
+            if stamps.get("started_at") and stamps.get("created_at"):
+                observation["queue_ms"] = max(0, round((stamps["started_at"] - stamps["created_at"]).total_seconds() * 1000))
+        except Exception:
+            # Metrics are diagnostic metadata; they must never turn a valid
+            # leased execution into an untracked provider send.
+            observation["queue_ms"] = None
     def provider_call(function, *args):
         nonlocal provider_failed, provider_completed
+        if not connection.execute_query_one(
+                "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id "
+                "AND STATUS='CLAIMED' AND WORKER_ID=:worker AND NODE_ID=:node "
+                "AND FENCING_TOKEN=:token AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP",
+                {'id': execution_id, 'worker': worker_id, 'node': node_id, 'token': fencing_token}):
+            raise PermissionError('Runtime execution lease revoked')
         business_dispatch = input_payload.get('channel_dispatch') or {}
+        framework_dispatch = input_payload.get('framework_dispatch') or {}
         if business_dispatch.get('kind') == 'BUSINESS_MENTION':
             from . import business_channel_runtime
             business_channel_runtime.validate_response(str(execution['agent_id']),
                 str(business_dispatch['channel_id']), execution_id)
         provider_failed = True
+        provider_started = time.monotonic()
+        observer = _model_observer.set(lambda received: observation.setdefault("first_ms", max(0, round((received - provider_started) * 1000))) if observation is not None else None)
         isolated = execution.get('_isolated_worker')
-        if isolated:
-            from . import business_channel_runtime
-            def authorize():
-                business_channel_runtime.validate_response(str(execution['agent_id']),
-                    str(input_payload['channel_dispatch']['channel_id']), execution_id)
-                lease = _row(connection.execute_query_one(
-                    "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id "
-                    "AND STATUS='CLAIMED' AND WORKER_ID=:worker AND NODE_ID=:node "
-                    "AND FENCING_TOKEN=:token AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP",
-                    {'id':execution_id,'worker':worker_id,'node':node_id,'token':fencing_token}))
-                if not lease:
-                    raise PermissionError('isolated execution lease revoked')
-            result = isolated.model(args[0], args[1], _call_llm, authorize)
-            if len(args) > 2:
-                args[2](result['content'])
-        else:
-            result = function(*args)
+        try:
+            if isolated:
+                def authorize():
+                    if business_dispatch.get('kind') == 'BUSINESS_MENTION':
+                        from . import business_channel_runtime
+                        business_channel_runtime.validate_response(str(execution['agent_id']),
+                            str(input_payload['channel_dispatch']['channel_id']), execution_id)
+                    elif framework_dispatch:
+                        from . import framework_execution
+                        binding = framework_execution.binding(execution_id)
+                        if not binding:
+                            raise PermissionError('framework execution binding is unavailable')
+                        connection.execute_transaction_callback(
+                            lambda tx: framework_execution.validate(tx, execution, binding)
+                        )
+                    lease = _row(connection.execute_query_one(
+                        "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id "
+                        "AND STATUS='CLAIMED' AND WORKER_ID=:worker AND NODE_ID=:node "
+                        "AND FENCING_TOKEN=:token AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP",
+                        {'id':execution_id,'worker':worker_id,'node':node_id,'token':fencing_token}))
+                    if not lease:
+                        raise PermissionError('isolated execution lease revoked')
+                result = isolated.model(args[0], args[1], _call_llm, authorize)
+                if len(args) > 2:
+                    args[2](result['content'])
+            else:
+                result = function(*args)
+        finally:
+            _model_observer.reset(observer)
+            if observation is not None:
+                observation["provider_ms"] = max(0, round((time.monotonic() - provider_started) * 1000))
         provider_failed = False
         provider_completed = True
         return result
@@ -630,6 +708,8 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
             if not profile:
                 raise RuntimeError('Agent has no active LLM Provider Profile')
             output=continuity_runtime.execute(execution,context_binding,lambda inputs:provider_call(_call_llm,profile,inputs))
+        elif isinstance(input_payload.get('framework_dispatch'), dict):
+            output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
         elif dispatch:
             channel_id = str(dispatch["channel_id"])
             identity_api.begin_channel_agent_response(
@@ -665,6 +745,11 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                     if str(exc) != "LLM provider returned no content":
                         raise
                     output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
+            if not connection.execute_query_one(
+                    "SELECT EXECUTION_ID FROM CX_RUNTIME_EXECUTIONS WHERE EXECUTION_ID=:id AND STATUS='CLAIMED' "
+                    "AND WORKER_ID=:worker AND NODE_ID=:node AND FENCING_TOKEN=:token AND LEASE_EXPIRES_AT>CURRENT_TIMESTAMP",
+                    {'id': execution_id, 'worker': worker_id, 'node': node_id, 'token': fencing_token}):
+                raise PermissionError('Runtime execution lease revoked before response publication')
             identity_api.update_channel_agent_response(
                 str(agent.get("agent_id") or ""), channel_id, str(output.get("content") or ""),
                 execution_id=execution_id, completed=True,
@@ -674,10 +759,14 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
                 raise RuntimeError("Agent has no active LLM Provider Profile")
             output = provider_call(_call_llm, profile, messages if isinstance(messages, list) else [])
         if provider_completed:
-            _set_profile_health(str(agent.get("llm_profile_id") or ""), "HEALTHY")
+            _set_profile_health(str(agent.get("llm_profile_id") or ""), "HEALTHY", int(profile.get("version") or 1))
         if not dispatch:
             _write_channel_response(str(agent.get("agent_id") or ""), execution_id, input_payload, output=output)
-        _finish(execution_id, worker_id, node_id, fencing_token, "COMPLETED", output=output)
+        completion_hook = None
+        if isinstance(input_payload.get('framework_dispatch'), dict):
+            from . import framework_execution
+            completion_hook = lambda tx: framework_execution.complete(tx, execution, output)
+        _finish(execution_id, worker_id, node_id, fencing_token, "COMPLETED", output=output, observation=observation, completion_hook=completion_hook)
         return {"status": "COMPLETED", "execution_id": execution_id}
     except Exception as exc:
         logger.info("Native execution failed: %s", type(exc).__name__)
@@ -685,14 +774,14 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
         logger.info("Native execution failure code: %s",failure_code)
         try:
             if provider_failed:
-                _set_profile_health(str((agent or {}).get("llm_profile_id") or ""), "DEGRADED")
+                _set_profile_health(str((agent or {}).get("llm_profile_id") or ""), "DEGRADED", int((profile or {}).get("version") or 1))
         except Exception:
             logger.debug("Unable to update LLM health", exc_info=True)
         try:
             _write_channel_response(str((agent or {}).get("agent_id") or ""), execution_id, input_payload, failure=failure_code)
         except Exception:
             logger.debug("Unable to write Channel response", exc_info=True)
-        _finish(execution_id, worker_id, node_id, fencing_token, "FAILED", failure=failure_code)
+        _finish(execution_id, worker_id, node_id, fencing_token, "FAILED", failure=failure_code, observation=observation)
         return {"status": "FAILED", "execution_id": execution_id,"failure_code":failure_code}
     finally:
         isolated = execution.get('_isolated_worker')
@@ -700,12 +789,12 @@ def execute_one(worker_id: str = "", node_id: str = "") -> Dict[str, Any]:
             isolated.close()
 
 
-def get_execution(actor: str, execution_id: str) -> Dict[str, Any]:
+def get_execution(actor: str, execution_id: str, *, transaction=None) -> Dict[str, Any]:
     from . import continuity_runtime
     if continuity_runtime.binding(execution_id):
-        return continuity_runtime.read_execution(actor,execution_id)
+        return continuity_runtime.read_execution(actor,execution_id,transaction=transaction)
     row = _row(connection.execute_query_one(
-        "SELECT EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,WORKER_ID,NODE_ID,OUTPUT_JSON,"
+        "SELECT EXECUTION_ID,AGENT_ID,TARGET_ID,ISOLATION_LEVEL,STATUS,WORKER_ID,NODE_ID,INPUT_JSON,OUTPUT_JSON,"
         "FAILURE_REASON,STARTED_AT,COMPLETED_AT,CREATED_AT,UPDATED_AT FROM CX_RUNTIME_EXECUTIONS "
         "WHERE EXECUTION_ID=:id", {"id": execution_id},
     ))
@@ -713,6 +802,9 @@ def get_execution(actor: str, execution_id: str) -> Dict[str, Any]:
         raise PermissionError("Execution is unavailable")
     from . import business_channel_runtime
     business_channel_runtime.require_result_reader(actor, str(row.get('agent_id') or ''), execution_id)
+    from . import framework_execution
+    framework_execution.require_reader(actor, row, tx=transaction)
+    row.pop("input_json", None)
     if row.get("output_json"):
         row["output"] = _parse(row.pop("output_json"), {})
     return row

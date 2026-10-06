@@ -56,7 +56,7 @@ def test_credential_split_across_chunks_releases_nothing(monkeypatch):
         def __exit__(self, *_): return False
         def __iter__(self):
             for piece in ["Safe introduction. ", "-----BEGIN ", "PRIVATE", " KEY-----"]:
-                yield ("data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}) + "\n").encode()
+                yield ("data: " + json.dumps({"model": "test", "choices": [{"delta": {"content": piece}}]}) + "\n").encode()
             yield b"data: [DONE]\n"
     monkeypatch.setattr(native_runtime.urllib.request, "urlopen", lambda *_a, **_k: Response())
     delivered = []

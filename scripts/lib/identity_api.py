@@ -149,10 +149,10 @@ def _dialect() -> str:
 
 
 def _limit_clause(bind_name: str = "limit") -> str:
-    """Return a row limiter supported by the selected database adapter."""
+    """Return a row limiter with a separating space for SQL concatenation."""
     if _dialect() in {"postgresql", "pg"}:
-        return "LIMIT :" + bind_name
-    return "FETCH FIRST :" + bind_name + " ROWS ONLY"
+        return " LIMIT :" + bind_name
+    return " FETCH FIRST :" + bind_name + " ROWS ONLY"
 
 
 def _id(prefix: str) -> str:
@@ -2586,10 +2586,14 @@ def _agent_visible_to(actor_principal_id: str, agent_id: str) -> bool:
     """Check an Agent relationship or organization scope server-side."""
     if effective_access(actor_principal_id, "agents.read.all")["decision"] == "ALLOW":
         return True
+    visibility = _agent_visibility_clause(actor_principal_id)
+    params = {"agent_id": agent_id}
+    if ":principal_id" in visibility:
+        params["principal_id"] = actor_principal_id
     row = _row(connection.execute_query_one(
         "SELECT 1 FROM CX_PRINCIPALS p WHERE p.PRINCIPAL_ID = :agent_id "
-        "AND p.PRINCIPAL_TYPE = 'AGENT' AND " + _agent_visibility_clause(actor_principal_id),
-        {"agent_id": agent_id, "principal_id": actor_principal_id},
+        "AND p.PRINCIPAL_TYPE = 'AGENT' AND " + visibility,
+        params,
     ))
     return bool(row)
 

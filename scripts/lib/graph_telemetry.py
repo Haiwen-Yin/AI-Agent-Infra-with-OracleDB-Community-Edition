@@ -7,21 +7,20 @@ import json
 import uuid
 from typing import Any, Dict, Iterable, Optional
 
-from . import connection, profile_api
+from . import connection, effective_capabilities
 
 
 MAPPING_VERSION = "otel-genai-preview-2026-08-03"
-PREVIEW_PROFILES = frozenset({"development", "experimental-4.2"})
 SENSITIVE = frozenset({"prompt", "completion", "output", "state", "secret", "credential", "token", "password", "artifact", "memory"})
 
 
 def enabled() -> bool:
-    return profile_api.current_profile() in PREVIEW_PROFILES
+    return effective_capabilities.graph_available("otel_export")
 
 
 def require_enabled() -> None:
     if not enabled():
-        raise PermissionError("OTLP export is disabled by the active runtime profile")
+        raise PermissionError("OTLP export is disabled by the current database capability")
 
 
 def redact_metadata(value: Any) -> Any:

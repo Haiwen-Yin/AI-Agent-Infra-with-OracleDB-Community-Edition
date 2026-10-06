@@ -13,7 +13,8 @@ def test_sql_uses_portable_bind_names():
             text=node.value
             if text.lstrip().startswith('(?') or not re.search(r'\b(SELECT|INSERT|UPDATE|DELETE|VALUES|SET|WHERE|JOIN)\b',text,re.I):
                 continue
-            banned=set(re.findall(r'(?<!:):([a-zA-Z][a-zA-Z0-9_]*)',text)) & {'audit','by','user','grant','level','mode','uid'}
+            sql=re.sub(r"'(?:''|[^'])*'", "''", text)
+            banned=set(re.findall(r'(?<!:):([a-zA-Z][a-zA-Z0-9_]*)',sql)) & {'audit','by','user','grant','level','mode','uid','resource','size'}
             if banned:
                 failures.append((path.name,node.lineno,sorted(banned)))
     assert not failures, 'Oracle ORA-01745 bind names: '+repr(failures)

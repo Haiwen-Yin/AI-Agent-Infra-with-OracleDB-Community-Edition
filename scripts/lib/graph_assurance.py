@@ -136,13 +136,17 @@ def invariant_scan() -> Dict[str, Any]:
         "orphan_ready_nodes": "SELECT COUNT(*) AS COUNT FROM GRAPH_READY_NODES rn LEFT JOIN GRAPH_NODE_RUNS nr ON nr.NODE_RUN_ID = rn.NODE_RUN_ID WHERE nr.NODE_RUN_ID IS NULL",
         "duplicate_transitions": "SELECT COUNT(*) AS COUNT FROM (SELECT ATTEMPT_ID FROM GRAPH_TRANSITIONS WHERE ATTEMPT_ID IS NOT NULL GROUP BY ATTEMPT_ID HAVING COUNT(*) > 1) duplicates",
         "conflicting_current_attempts": "SELECT COUNT(*) AS COUNT FROM (SELECT NODE_RUN_ID FROM GRAPH_ATTEMPTS WHERE STATUS = 'RUNNING' GROUP BY NODE_RUN_ID HAVING COUNT(*) > 1) duplicates",
-        "stale_active_leases": "SELECT COUNT(*) AS COUNT FROM GRAPH_ATTEMPTS WHERE STATUS = 'RUNNING' AND LEASE_EXPIRES_AT <= CURRENT_TIMESTAMP",
+        "stale_active_leases": "SELECT COUNT(*) AS COUNT FROM GRAPH_ATTEMPTS WHERE STATUS = 'RUNNING' AND LEASE_EXPIRES_AT <= :lease_now",
         "missing_output_checkpoints": "SELECT COUNT(*) AS COUNT FROM GRAPH_NODE_RUNS nr LEFT JOIN GRAPH_CHECKPOINTS cp ON cp.CHECKPOINT_ID = nr.OUTPUT_CHECKPOINT_ID WHERE nr.STATUS = 'SUCCEEDED' AND (nr.OUTPUT_CHECKPOINT_ID IS NULL OR cp.CHECKPOINT_ID IS NULL)",
         "terminal_run_active_nodes": "SELECT COUNT(*) AS COUNT FROM GRAPH_RUNS r JOIN GRAPH_NODE_RUNS nr ON nr.RUN_ID = r.RUN_ID WHERE r.STATUS IN ('SUCCEEDED','FAILED','CANCELLED') AND nr.STATUS IN ('READY','RUNNING','WAITING')",
     }
     findings: Dict[str, int] = {}
     for name, sql in checks.items():
-        row = connection.execute_query_one(sql) or {}
+        if name == "stale_active_leases":
+            from datetime import datetime, timezone
+            row = connection.execute_query_one(sql, {"lease_now": datetime.now(timezone.utc).replace(tzinfo=None)}) or {}
+        else:
+            row = connection.execute_query_one(sql) or {}
         findings[name] = int(dict(row).get("count") or dict(row).get("COUNT") or 0)
     return {"healthy": not any(findings.values()), "findings": findings}
 

@@ -13,11 +13,16 @@ from . import deployment_adapters as adapters, runtime_isolation
 from .isolated_channel_worker import receive, send
 
 
-def verify_rootfs(rootfs):
+def verify_rootfs(rootfs, *, worker_name='isolated_channel_worker.py'):
+    if worker_name not in {'isolated_channel_worker.py', 'isolated_framework_worker.py'}:
+        raise ValueError('unsupported packaged worker')
     root = Path(rootfs)
     if not root.is_absolute() or root.is_symlink() or root == Path('/'):
         raise ValueError('invalid sandbox rootfs')
     manifest = root / '.cx-rootfs-manifest.sha256'
+    manifest_info = manifest.lstat()
+    if not stat.S_ISREG(manifest_info.st_mode) or manifest_info.st_uid != 0 or manifest_info.st_mode & 0o022:
+        raise PermissionError('sandbox manifest must be immutable')
     for directory in [root, *root.parents]:
         info = directory.stat()
         if info.st_uid != 0 or info.st_mode & 0o022:
@@ -25,6 +30,9 @@ def verify_rootfs(rootfs):
     entries = {}
     for line in manifest.read_text().splitlines():
         digest, relative = line.split('  ', 1)
+        relative = relative.lstrip('/')
+        if not relative or relative in entries or len(digest) != 64:
+            raise PermissionError('invalid rootfs manifest entry')
         path = root / relative.lstrip('/')
         if not path.resolve().is_relative_to(root.resolve()) or path.is_symlink():
             raise PermissionError('invalid rootfs manifest path')
@@ -34,13 +42,26 @@ def verify_rootfs(rootfs):
         if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise PermissionError('rootfs digest mismatch')
         entries[relative.lstrip('/')] = digest
-    worker = Path(__file__).with_name('isolated_channel_worker.py')
-    if entries.get('opt/isolated_channel_worker.py') != hashlib.sha256(worker.read_bytes()).hexdigest():
+    inventory = set()
+    for path in root.rglob('*'):
+        info = path.lstat()
+        if path.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
+            raise PermissionError('sandbox contains a mutable or linked path')
+        if stat.S_ISREG(info.st_mode) and path != manifest:
+            inventory.add(str(path.relative_to(root)))
+    if inventory != set(entries):
+        raise PermissionError('sandbox inventory differs from its manifest')
+    worker = Path(__file__).with_name(worker_name)
+    if entries.get('opt/' + worker_name) != hashlib.sha256(worker.read_bytes()).hexdigest():
         raise PermissionError('sandbox Agent worker differs from the current package')
     return 'sha256:' + hashlib.sha256(manifest.read_bytes()).hexdigest()
 
 
 class ChannelWorker:
+    worker_name = 'isolated_channel_worker.py'
+    python_executable = '/usr/bin/python3'
+    memory_bytes = 256 * 1024 * 1024
+    pids = 32
     def __init__(self, execution, config):
         self.execution = execution
         self.config = config
@@ -53,7 +74,7 @@ class ChannelWorker:
 
     def start(self):
         rootfs = str(self.config.get('rootfs') or '')
-        self.rootfs_digest = verify_rootfs(rootfs)
+        self.rootfs_digest = verify_rootfs(rootfs, worker_name=self.worker_name)
         uid, gid = int(self.config['uid']), int(self.config['gid'])
         if uid < 1 or gid < 1 or self.config.get('egress'):
             raise PermissionError('sandbox requires non-root identity and no direct network')
@@ -63,18 +84,24 @@ class ChannelWorker:
         if info.st_uid != 0 or info.st_mode & 0o022 or base.is_symlink():
             raise PermissionError('unsafe execution directory')
         self.workspace = Path(tempfile.mkdtemp(prefix='run-', dir=base))
+        # systemd starts bubblewrap as the requested non-root user.  A bind
+        # mount keeps the host ownership, so the root-owned directory created
+        # by mkdtemp is not traversable by that user.  Make this private
+        # workspace and its broker endpoint owned by the sandbox UID/GID.
+        # The root-owned 0711 parent still prevents sibling discovery.
         os.chown(self.workspace, uid, gid)
         self.listener = socket.socket(socket.AF_UNIX)
         self.listener.settimeout(15)
-        self.listener.bind(str(self.workspace / 'broker.sock'))
-        os.chmod(self.workspace / 'broker.sock', 0o600)
-        os.chown(self.workspace / 'broker.sock', uid, gid)
+        broker_path = self.workspace / 'broker.sock'
+        self.listener.bind(str(broker_path))
+        os.chown(broker_path, uid, gid)
+        os.chmod(broker_path, 0o600)
         self.listener.listen(1)
         spec = adapters.LinuxSandboxSpec(
             agent_id=str(self.execution['agent_id']), instance_id=str(self.execution['execution_id']) + '-' + str(self.execution.get('fencing_token', 0)),
-            command=('/usr/bin/python3', '-I', '-B', '/opt/isolated_channel_worker.py'),
+            command=(self.python_executable, '-I', '-B', '/opt/' + self.worker_name),
             uid=uid, gid=gid, rootfs=rootfs, workdir=str(self.workspace),
-            memory_bytes=256 * 1024 * 1024, cpu_seconds=180, pids=32, cpu_quota_percent=100,
+            memory_bytes=self.memory_bytes, cpu_seconds=180, pids=self.pids, cpu_quota_percent=100,
         )
         self.run = {**self.execution, 'execution_id': spec.instance_id, 'sandbox_spec': spec}
         try:
@@ -84,7 +111,7 @@ class ChannelWorker:
             self.client, _ = self.listener.accept()
             self.client.settimeout(180)
             self.peer_pid, peer_uid, peer_gid = struct.unpack('3i', self.client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-            if (peer_uid, peer_gid) != (uid, gid) or receive(self.client).get('op') != 'ready':
+            if (peer_uid, peer_gid) != (uid, gid) or not self._ready(receive(self.client)):
                 raise PermissionError('sandbox worker identity mismatch')
             return self.evidence()
         except BaseException:
@@ -97,11 +124,19 @@ class ChannelWorker:
         if evidence.get('verified') is not True or evidence.get('pid') != self.peer_pid:
             raise runtime_isolation.IsolationError('model gateway peer is not the verified Agent worker')
         limits = evidence.get('cgroup_limits') or {}
-        if limits.get('memory.max') != str(256 * 1024 * 1024) or limits.get('pids.max') != '32' or limits.get('cpu.max') != '100000 100000':
+        if limits.get('memory.max') != str(self.memory_bytes) or limits.get('pids.max') != str(self.pids) or limits.get('cpu.max') != '100000 100000':
             raise runtime_isolation.IsolationError('Agent worker resource limits changed')
-        evidence.update(workload='isolated_channel_worker.py', model_gateway='one-bound-call-no-credentials',
+        evidence.update(workload=self.worker_name, model_gateway='one-bound-call-no-credentials',
                         max_isolation_level='DEDICATED_CONTAINER', rootfs_digest=self.rootfs_digest)
         return evidence
+
+    def _ready(self, message):
+        return message.get('op') == 'ready'
+
+    def _reply(self, reply, binding, content):
+        if reply != {'op': 'result', 'binding': binding, 'content': content.strip()}:
+            raise PermissionError('sandbox result binding mismatch')
+        return reply['content']
 
     def model(self, profile, messages, call, authorize):
         if self.used:
@@ -121,10 +156,10 @@ class ChannelWorker:
         authorize()
         send(self.client, {'content': str(result.get('content') or '')})
         reply = receive(self.client)
-        if reply != {'op': 'result', 'binding': binding, 'content': str(result.get('content') or '').strip()}:
-            raise PermissionError('sandbox result binding mismatch')
+        content = self._reply(reply, binding, str(result.get('content') or ''))
         self.evidence()
-        return {**result, 'content': reply['content']}
+        authorize()
+        return {**result, 'content': content}
 
     def close(self):
         if self.client:

@@ -1,4 +1,4 @@
-# Graph Engineering - AI Agent Infra with DB v4.5.0
+# Graph Engineering - AI Agent Infra with DB v4.5.1
 
 > Integrated contract guide for Chuanxu (川序), the AI Agent Management
 > Platform.
@@ -21,9 +21,17 @@ within the v4.3.x maturity cycle. Capacity baselines, failure-injection/restore 
 Enterprise multi-Scheduler HA, and complete evaluator migration remain
 evidence-gated follow-up work and are not implied by an unverified build.
 
-## v4.4.10 Current Research Boundary
+## Current operations
 
-The Production Profile currently exposes Graph Runtime core and authorized
+The current release adds bounded draft import, authorized paginated SLO views,
+checkpoint forks, offline integrity replay and migration preflight. Registered
+MCP/A2A, metadata-only OTLP and pinned LangGraph execution use independent
+capability and authorization checks. See [Agent extensions](agent-extensions.md)
+and [the Chinese guide](agent-extensions_zh.md) for versions and operational steps.
+
+## Historical v4.4.10 Research Boundary
+
+The v4.4.10 Production Profile exposed Graph Runtime core and authorized
 inspection. The database capability matrix reports manifest draft import, SLO
 read-only views, and checkpoint fork as `CONTROLLED`; replay, Dynamic Graph
 migration, framework adapter execution, A2A, and OTLP remain `DISABLED` unless

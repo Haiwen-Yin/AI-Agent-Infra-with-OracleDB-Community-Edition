@@ -12,11 +12,10 @@ import json
 import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
-from . import connection, graph_compiler, graph_definition_api, profile_api
+from . import connection, graph_compiler, graph_definition_api, effective_capabilities
 
 
 OPERATIONS = frozenset({"ADD_NODE", "REMOVE_NODE", "REPLACE_NODE", "ADD_EDGE", "REMOVE_EDGE", "REPLACE_EDGE", "SET_BUDGET", "STATE_MAP"})
-PREVIEW_PROFILES = frozenset({"graph-preview", "development", "experimental-4.2"})
 
 
 def _id() -> str:
@@ -27,9 +26,8 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
-def require_preview() -> None:
-    if profile_api.current_profile() not in PREVIEW_PROFILES:
-        raise PermissionError("Dynamic Graph is disabled outside the graph-preview capability")
+def require_preview(actor_id: str) -> None:
+    effective_capabilities.require(actor_id, graph="graph_manifest_draft_import", impact="WRITE")
 
 
 def normalize_operations(operations: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -165,7 +163,7 @@ def _child_topology(target: Dict[str, Any]) -> tuple[List[Dict[str, Any]], List[
 
 def create_draft(source_version_id: str, operations: Iterable[Dict[str, Any]], actor_id: str, reason: str,
                  *, run_id: str = "", checkpoint_id: str = "", expected_version: str = "") -> Dict[str, Any]:
-    require_preview()
+    require_preview(actor_id)
     if not str(actor_id or "").strip() or not str(reason or "").strip():
         raise ValueError("dynamic proposal actor and reason are required")
     source = graph_definition_api.get_version(source_version_id, include_topology=True)

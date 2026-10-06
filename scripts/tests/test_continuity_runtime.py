@@ -22,10 +22,14 @@ def runtime_db(context_db,monkeypatch):
         CREATE TABLE CX_RUNTIME_EXECUTIONS(EXECUTION_ID TEXT PRIMARY KEY,AGENT_ID TEXT,TARGET_ID TEXT,
           ISOLATION_LEVEL TEXT,STATUS TEXT,INPUT_JSON TEXT,CONTEXT_DIGEST TEXT,WORKER_ID TEXT,NODE_ID TEXT,
           FENCING_TOKEN INTEGER DEFAULT 0,LEASE_EXPIRES_AT TIMESTAMP,OUTPUT_JSON TEXT,FAILURE_REASON TEXT,
-          COMPLETED_AT TIMESTAMP,UPDATED_AT TIMESTAMP);
+          COMPLETED_AT TIMESTAMP,UPDATED_AT TIMESTAMP,CREATED_AT TIMESTAMP,STARTED_AT TIMESTAMP);
     ''')
     for sql in runtime.schema_statements('pg'): db.execute(sql)
     for sql in runtime.credential_schema_statements('pg'): db.execute(sql)
+    from lib.agent_extension_schema import TABLES
+    db.execute("CREATE TABLE CX_EXECUTION_OBSERVATIONS(" + TABLES["CX_EXECUTION_OBSERVATIONS"]["definition"] + ")")
+    from lib.agent_integration_bindings import TABLES as BINDINGS
+    db.execute("CREATE TABLE CX_RUNTIME_DERIVATIONS(" + BINDINGS["CX_RUNTIME_DERIVATIONS"]["definition"] + ")")
     db.commit()
     monkeypatch.setattr(runtime.identity_api,'_agent_visible_to',lambda actor,agent:actor=='owner' and agent=='agent')
     def query(sql,params):
